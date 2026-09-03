@@ -20,10 +20,12 @@ $verFile = Join-Path $gateDir 'verify.json'
 $head = (git rev-parse HEAD | Out-String).Trim()
 
 $koraki = @(
-    @{ ime = 'testi';     ukaz = 'npm test' },
-    @{ ime = 'lint';      ukaz = 'npm run lint' },
-    @{ ime = 'typecheck'; ukaz = 'npm run typecheck' },
-    @{ ime = 'build';     ukaz = 'npm run build' }
+    @{ ime = 'mobile-lint';      ukaz = 'npm --prefix apps/mobile run lint' },
+    @{ ime = 'mobile-typecheck'; ukaz = 'npm --prefix apps/mobile run typecheck' },
+    @{ ime = 'mobile-test';      ukaz = 'npm --prefix apps/mobile test -- --watchAll=false' },
+    @{ ime = 'server-lint';      ukaz = 'ruff check apps/server' },
+    @{ ime = 'server-typecheck'; ukaz = 'mypy apps/server' },
+    @{ ime = 'server-test';      ukaz = 'pytest apps/server' }
 )
 
 $izidi = @()
