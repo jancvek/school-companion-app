@@ -1,0 +1,46 @@
+{
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git switch:*)",
+      "Bash(git add:*)",
+      "Bash(git pull --ff-only)",
+      "Read(./**)",
+      "Edit(./src/**)",
+      "Edit(./tests/**)",
+      "Edit(./docs/**)"
+    ],
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(git rebase:*)",
+      "Bash(git reset:*)",
+      "Bash(git clean:*)",
+      "Edit(./.claude/**)",
+      "Write(./.claude/**)",
+      "Edit(./scripts/**)",
+      "Write(./scripts/**)",
+      "Edit(./.git/**)",
+      "Read(./.env)",
+      "Read(./.env.*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "& \"$env:CLAUDE_PROJECT_DIR\\.claude\\hooks\\git-guard.ps1\""
+          }
+        ]
+      }
+    ]
+  }
+}

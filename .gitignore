@@ -1,0 +1,7 @@
+.env
+.env.*
+.claude/settings.local.json
+node_modules/
+dist/
+build/
+__pycache__/
