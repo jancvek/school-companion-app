@@ -29,18 +29,23 @@
       "Read(./.env.*)"
     ]
   },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash|PowerShell",
-        "hooks": [
-          {
-            "type": "command",
-            "shell": "powershell",
-            "command": "& \"$env:CLAUDE_PROJECT_DIR\\.claude\\hooks\\git-guard.ps1\""
-          }
-        ]
-      }
-    ]
-  }
+	"hooks": {
+	  "PreToolUse": [
+		{
+		  "matcher": "Bash|PowerShell",
+		  "hooks": [
+			{
+			  "type": "command",
+			  "command": "powershell.exe",
+			  "args": [
+				"-NoProfile",
+				"-ExecutionPolicy", "Bypass",
+				"-File",
+				"${CLAUDE_PROJECT_DIR}/.claude/hooks/git-guard.ps1"
+			  ]
+			}
+		  ]
+		}
+	  ]
+	}
 }
