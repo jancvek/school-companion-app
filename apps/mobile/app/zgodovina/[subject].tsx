@@ -87,7 +87,11 @@ export default function HistoryForSubjectScreen() {
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
           <View style={styles.card}>
-            <Image source={{ uri: item.file_uri }} style={styles.thumbnail} />
+            <Image
+              testID="posnetek"
+              source={{ uri: item.file_uri }}
+              style={styles.thumbnail}
+            />
             <Text style={styles.takenAt}>{formatTakenAt(item.taken_at)}</Text>
           </View>
         )}

@@ -13,10 +13,14 @@ jest.mock('expo-crypto', () => ({
 jest.mock('@/photos/store', () => ({
   __esModule: true,
   savePhoto: jest.fn(),
+  discardPhoto: jest.fn(),
 }));
 
 const crypto = jest.requireMock('expo-crypto') as { randomUUID: jest.Mock };
-const store = jest.requireMock('@/photos/store') as { savePhoto: jest.Mock };
+const store = jest.requireMock('@/photos/store') as {
+  savePhoto: jest.Mock;
+  discardPhoto: jest.Mock;
+};
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -111,6 +115,25 @@ describe('shranjevanje posnetka', () => {
       saveCapture(db, { subject: 'MAT', takenAt: CAS_POSNETKA, sourceUri: IZVIRNIK }),
     ).rejects.toThrow('Na napravi ni prostora');
 
+    await expect(listBySubject(db, 'MAT')).resolves.toEqual([]);
+    expect(store.discardPhoto).not.toHaveBeenCalled();
+  });
+
+  it('ob padcu vstavljanja pobriše datoteko, da ne ostane sirota', async () => {
+    const vstavljanje = jest
+      .spyOn(db, 'runAsync')
+      .mockRejectedValue(new Error('baza je zaklenjena'));
+
+    await expect(
+      saveCapture(db, { subject: 'MAT', takenAt: CAS_POSNETKA, sourceUri: IZVIRNIK }),
+    ).rejects.toThrow('baza je zaklenjena');
+
+    expect(store.discardPhoto).toHaveBeenCalledTimes(1);
+    expect(store.discardPhoto).toHaveBeenCalledWith(
+      expect.stringMatching(/^file:\/\/\/documents\/photos\/.+\.jpg$/),
+    );
+
+    vstavljanje.mockRestore();
     await expect(listBySubject(db, 'MAT')).resolves.toEqual([]);
   });
 });

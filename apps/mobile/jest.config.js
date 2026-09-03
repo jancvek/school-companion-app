@@ -8,8 +8,9 @@ module.exports = {
   // Samo `*.test.ts(x)`, da pomožne datoteke v `__tests__` niso videti kot
   // testi brez testov.
   testMatch: ['<rootDir>/__tests__/**/*.test.ts?(x)'],
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
   },
-  collectCoverageFrom: ['src/**/*.{ts,tsx}'],
+  collectCoverageFrom: ['src/**/*.{ts,tsx}', 'app/**/*.tsx'],
 };

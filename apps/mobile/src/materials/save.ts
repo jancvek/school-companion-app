@@ -1,7 +1,7 @@
 import * as Crypto from 'expo-crypto';
 
 import { insertMaterial, type MaterialsDatabase } from '../db/materials';
-import { savePhoto } from '../photos/store';
+import { discardPhoto, savePhoto } from '../photos/store';
 import type { Material } from '../types';
 
 export type SaveCaptureInput = {
@@ -18,6 +18,9 @@ export type SaveCaptureInput = {
  *
  * Vrstni red ni naključen. Če pisanje datoteke pade (poln pomnilnik), vrstice
  * ni — nikoli ne ostane zapis brez slike. Obratni vrstni red bi puščal sirote.
+ *
+ * V obratni smeri (datoteka je zapisana, vstavljanje pade) datoteko pobrišemo,
+ * da na disku ne ostane slika, ki je nič ne kaže.
  */
 export async function saveCapture(
   db: MaterialsDatabase,
@@ -35,7 +38,12 @@ export async function saveCapture(
     sync_status: 'pending',
   };
 
-  await insertMaterial(db, material);
+  try {
+    await insertMaterial(db, material);
+  } catch (napaka) {
+    discardPhoto(fileUri);
+    throw napaka;
+  }
 
   return material;
 }

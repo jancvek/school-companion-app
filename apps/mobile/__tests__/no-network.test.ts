@@ -11,11 +11,18 @@ const KOREN = join(__dirname, '..');
 const MAPE = ['app', 'src'];
 
 const PREPOVEDANI_VZORCI: { ime: string; vzorec: RegExp }[] = [
+  // Klici
   { ime: 'fetch(', vzorec: /\bfetch\s*\(/ },
   { ime: 'XMLHttpRequest', vzorec: /\bXMLHttpRequest\b/ },
   { ime: 'axios', vzorec: /\baxios\b/ },
   { ime: 'new WebSocket', vzorec: /\bnew\s+WebSocket\b/ },
   { ime: 'EventSource', vzorec: /\bnew\s+EventSource\b/ },
+  // Uvozi — klic bi šel mimo zgornjih vzorcev, če bi bil preimenovan.
+  { ime: "uvoz 'expo/fetch'", vzorec: /from\s+['"]expo\/fetch['"]/ },
+  { ime: "uvoz 'expo-network'", vzorec: /from\s+['"]expo-network['"]/ },
+  { ime: "uvoz 'expo-updates'", vzorec: /from\s+['"]expo-updates['"]/ },
+  { ime: 'uvoz nalaganja datotek', vzorec: /\b(UploadTask|DownloadTask|downloadFileAsync)\b/ },
+  { ime: 'naslov http(s)', vzorec: /['"`]https?:\/\// },
 ];
 
 function vseDatoteke(mapa: string): string[] {

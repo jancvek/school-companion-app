@@ -47,3 +47,17 @@ export async function savePhoto(sourceUri: string, fileName: string): Promise<st
 
   return target.uri;
 }
+
+/**
+ * Pobriše sliko, za katero se je izkazalo, da vrstice v bazi ne bo.
+ * Napake namenoma požre — brisanje je pospravljanje za drugo napako in je ne
+ * sme prekriti.
+ */
+export function discardPhoto(fileUri: string): void {
+  try {
+    const file = new File(fileUri);
+    if (file.exists) file.delete();
+  } catch {
+    // Sirota na disku je manjše zlo kot napaka, ki povozi prvotno.
+  }
+}

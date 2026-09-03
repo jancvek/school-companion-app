@@ -29,9 +29,13 @@ export default function CaptureScreen() {
   const [session, dispatch] = useReducer(captureReducer, initialCaptureState);
   const [busy, setBusy] = useState(false);
   const cameraRef = useRef<CameraView>(null);
+  // `busy` samo zatemni gumbe. Zaporo drži referenca, ker se stanje posodobi
+  // šele ob naslednjem izrisu — dva hitra dotika bi sicer oba videla `false`.
+  const zaklep = useRef(false);
 
   const takePicture = useCallback(async () => {
-    if (busy) return;
+    if (zaklep.current) return;
+    zaklep.current = true;
     setBusy(true);
     try {
       const picture = await cameraRef.current?.takePictureAsync();
@@ -46,12 +50,14 @@ export default function CaptureScreen() {
     } catch (error) {
       Alert.alert('Fotografiranje ni uspelo', opisNapake(error));
     } finally {
+      zaklep.current = false;
       setBusy(false);
     }
-  }, [busy]);
+  }, []);
 
   const save = useCallback(async () => {
-    if (busy || !session.photo || !subject) return;
+    if (zaklep.current || !session.photo || !subject) return;
+    zaklep.current = true;
     setBusy(true);
     try {
       await saveCapture(asMaterialsDatabase(database), {
@@ -59,15 +65,19 @@ export default function CaptureScreen() {
         takenAt: session.photo.takenAt,
         sourceUri: session.photo.uri,
       });
+      // Zaklep namenoma ostane zaprt: ta posnetek je shranjen. Zaslon se
+      // odjavlja, dokler ne odide, pa noben nadaljnji dotik ne sme shraniti
+      // drugič.
       router.dismissAll();
       Alert.alert('Shranjeno', `Posnetek za ${subject.label} je shranjen.`);
     } catch (error) {
-      // Predogled ostane odprt, da posnetek ni izgubljen.
-      Alert.alert('Shranjevanje ni uspelo', opisNapake(error));
-    } finally {
+      // Predogled ostane odprt, da posnetek ni izgubljen, in poskus je mogoč
+      // znova.
+      zaklep.current = false;
       setBusy(false);
+      Alert.alert('Shranjevanje ni uspelo', opisShranjevalneNapake(error));
     }
-  }, [busy, database, router, session.photo, subject]);
+  }, [database, router, session.photo, subject]);
 
   if (!subject) {
     return (
@@ -138,8 +148,12 @@ export default function CaptureScreen() {
 }
 
 function opisNapake(error: unknown): string {
-  const podrobnost = error instanceof Error ? error.message : String(error);
-  return `${podrobnost}\n\nPreveri, ali ima telefon dovolj prostora.`;
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Nasvet o prostoru sodi samo k shranjevanju, ne k vsaki napaki. */
+function opisShranjevalneNapake(error: unknown): string {
+  return `Posnetek ni bil shranjen in ostane v predogledu.\n\nPreveri, ali ima telefon dovolj prostora.\n\nPodrobnost: ${opisNapake(error)}`;
 }
 
 type ActionProps = {
