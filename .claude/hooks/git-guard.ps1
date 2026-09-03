@@ -50,7 +50,9 @@ if ($n -match '(?i)\.claude[\\/](hooks|settings\.json|agents)') {
     Deny 'Spreminjanje ograje ali nastavitev ni dovoljeno. Predlagaj spremembo meni.'
 }
 if ($n -match '(?i)[\\/]?scripts[\\/]verify\.ps1') {
-    Deny 'Skripta verify.ps1 se ne spreminja. Če je narobe, mi povej.'
+    if ($n -notmatch '(?i)^\s*(pwsh|powershell(\.exe)?)\s+(-\w+\s+)*-File\s+\.?[\\/]?scripts[\\/]verify\.ps1\s*$') {
+        Deny 'Skripta verify.ps1 se ne spreminja. Če je narobe, mi povej.'
+    }
 }
 
 # ============================================================
