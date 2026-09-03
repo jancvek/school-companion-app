@@ -81,7 +81,7 @@ obdelavo). Načrt shem je v `docs/verzije/v1.md`.
 | `expo-crypto` | UUID, generiran na telefonu | V1-R01 |
 | `react-native`, `react`, `react-dom` | osnova | V1-R01 |
 | `expo-constants`, `expo-linking`, `react-native-safe-area-context`, `react-native-screens`, `react-native-gesture-handler`, `react-native-reanimated`, `react-native-worklets` | `peerDependencies` paketa `expo-router`; koda jih ne uvaža neposredno | V1-R01 |
-| razvojno: `jest`, `jest-expo`, `@testing-library/react-native`, `react-test-renderer`, `eslint`, `eslint-config-expo`, `typescript`, `babel-preset-expo` | preverbe | V1-R01 |
+| razvojno: `jest`, `jest-expo`, `@testing-library/react-native`, `react-test-renderer`, `eslint`, `eslint-config-expo`, `typescript`, `babel-preset-expo`, `@types/node`, `@types/jest`, `@types/react` | preverbe | V1-R01 |
 
 ## Kako se poganja in testira
 

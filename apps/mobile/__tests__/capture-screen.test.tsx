@@ -3,73 +3,20 @@ import { Alert, Linking } from 'react-native';
 
 import CaptureScreen from '../app/slikaj/[subject]';
 
-jest.mock('expo-router', () => {
-  const stanje = {
-    params: { subject: 'MAT' } as Record<string, string>,
-    router: { push: jest.fn(), back: jest.fn(), dismissAll: jest.fn() },
-  };
-  return {
-    __esModule: true,
-    Stack: { Screen: () => null },
-    useRouter: () => stanje.router,
-    useLocalSearchParams: () => stanje.params,
-    stanje,
-  };
-});
+import { dovoljenje, type CameraMockState, type RouterMockState } from './screen-mocks';
 
-jest.mock('expo-camera', () => {
-  const React = require('react');
-  const { View } = require('react-native');
-  const stanje = {
-    permission: null as unknown,
-    requestPermission: jest.fn(),
-    takePictureAsync: jest.fn(),
-  };
-  const CameraView = React.forwardRef((props: object, ref: unknown) => {
-    React.useImperativeHandle(ref, () => ({
-      takePictureAsync: (...args: unknown[]) => stanje.takePictureAsync(...args),
-    }));
-    return React.createElement(View, { ...props, testID: 'kamera' });
-  });
-  CameraView.displayName = 'CameraView';
-  return {
-    __esModule: true,
-    CameraView,
-    useCameraPermissions: () => [stanje.permission, stanje.requestPermission],
-    stanje,
-  };
-});
-
-jest.mock('expo-sqlite', () => {
-  const stanje = { db: {} as unknown };
-  return { __esModule: true, useSQLiteContext: () => stanje.db, stanje };
-});
+jest.mock('expo-router', () => require('./screen-mocks').expoRouterMock());
+jest.mock('expo-camera', () => require('./screen-mocks').expoCameraMock());
+jest.mock('expo-sqlite', () => require('./screen-mocks').expoSqliteMock());
 
 jest.mock('@/materials/save', () => ({
   __esModule: true,
   saveCapture: jest.fn(),
 }));
 
-const usmerjevalnik = jest.requireMock('expo-router') as {
-  stanje: {
-    params: Record<string, string>;
-    router: { push: jest.Mock; back: jest.Mock; dismissAll: jest.Mock };
-  };
-};
-const kamera = jest.requireMock('expo-camera') as {
-  stanje: { permission: unknown; requestPermission: jest.Mock; takePictureAsync: jest.Mock };
-};
+const usmerjevalnik = jest.requireMock('expo-router') as { stanje: RouterMockState };
+const kamera = jest.requireMock('expo-camera') as { stanje: CameraMockState };
 const shranjevanje = jest.requireMock('@/materials/save') as { saveCapture: jest.Mock };
-
-function dovoljenje(overrides: Partial<{ granted: boolean; canAskAgain: boolean }> = {}) {
-  return {
-    granted: true,
-    canAskAgain: true,
-    status: 'granted',
-    expires: 'never',
-    ...overrides,
-  };
-}
 
 /** Posname sliko in počaka na predogled. */
 async function fotografiraj() {

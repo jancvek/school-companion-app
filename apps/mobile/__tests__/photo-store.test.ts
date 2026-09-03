@@ -2,6 +2,7 @@ import {
   PHOTO_JPEG_QUALITY,
   PHOTO_MAX_WIDTH,
   compressPhoto,
+  discardPhoto,
   savePhoto,
 } from '@/photos/store';
 
@@ -21,6 +22,8 @@ jest.mock('expo-image-manipulator', () => {
 jest.mock('expo-file-system', () => {
   const create = jest.fn();
   const move = jest.fn();
+  const izbrisi = jest.fn();
+  const obstaja = jest.fn();
   const toUri = (parts: unknown[]) =>
     parts
       .map((part) => (typeof part === 'string' ? part : (part as { uri: string }).uri))
@@ -41,8 +44,14 @@ jest.mock('expo-file-system', () => {
     constructor(...parts: unknown[]) {
       this.uri = toUri(parts);
     }
+    get exists(): boolean {
+      return obstaja(this.uri);
+    }
     move(target: { uri: string }) {
       return move(this.uri, target.uri);
+    }
+    delete() {
+      izbrisi(this.uri);
     }
   }
 
@@ -51,7 +60,7 @@ jest.mock('expo-file-system', () => {
     Directory,
     File,
     Paths: { document: { uri: 'file:///documents' } },
-    spies: { create, move },
+    spies: { create, move, izbrisi, obstaja },
   };
 });
 
@@ -61,7 +70,7 @@ const manipulator = jest.requireMock('expo-image-manipulator') as {
   spies: { manipulate: Spy; resize: Spy; renderAsync: Spy; saveAsync: Spy };
 };
 const fileSystem = jest.requireMock('expo-file-system') as {
-  spies: { create: Spy; move: Spy };
+  spies: { create: Spy; move: Spy; izbrisi: Spy; obstaja: Spy };
 };
 
 const IZVIRNIK = 'file:///cache/Camera/original.jpg';
@@ -76,6 +85,7 @@ beforeEach(() => {
   manipulator.spies.manipulate.mockReturnValue({ resize: manipulator.spies.resize });
 
   fileSystem.spies.move.mockResolvedValue(undefined);
+  fileSystem.spies.obstaja.mockReturnValue(true);
 });
 
 describe('stiskanje slike', () => {
@@ -112,5 +122,40 @@ describe('shranjevanje slike', () => {
     fileSystem.spies.move.mockRejectedValue(new Error('Na napravi ni prostora'));
 
     await expect(savePhoto(IZVIRNIK, 'abc.jpg')).rejects.toThrow('Na napravi ni prostora');
+  });
+});
+
+describe('brisanje slike brez vrstice', () => {
+  const SIROTA = 'file:///documents/photos/sirota.jpg';
+
+  it('pobriše datoteko, če obstaja', () => {
+    discardPhoto(SIROTA);
+
+    expect(fileSystem.spies.izbrisi).toHaveBeenCalledWith(SIROTA);
+  });
+
+  it('ne briše datoteke, ki je ni', () => {
+    fileSystem.spies.obstaja.mockReturnValue(false);
+
+    discardPhoto(SIROTA);
+
+    expect(fileSystem.spies.izbrisi).not.toHaveBeenCalled();
+  });
+
+  it('požre napako brisanja, da ne povozi prvotne', () => {
+    fileSystem.spies.izbrisi.mockImplementation(() => {
+      throw new Error('datoteka je zaklenjena');
+    });
+
+    expect(() => discardPhoto(SIROTA)).not.toThrow();
+  });
+
+  it('požre tudi napako pri preverjanju obstoja', () => {
+    fileSystem.spies.obstaja.mockImplementation(() => {
+      throw new Error('ni dostopa');
+    });
+
+    expect(() => discardPhoto(SIROTA)).not.toThrow();
+    expect(fileSystem.spies.izbrisi).not.toHaveBeenCalled();
   });
 });

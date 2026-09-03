@@ -49,6 +49,21 @@ describe('tabela materials', () => {
     expect(vrstice.map((v) => v.id)).toEqual(['najnovejsi', 'srednji', 'najstarejsi']);
   });
 
+  it('razvršča s poizvedbo, ne z indeksom', async () => {
+    // Brez indeksa SQLite bere po rowid, torej po vrstnem redu vstavljanja.
+    // Če iz `listBySubject` izgine `ORDER BY taken_at DESC`, ta test pade —
+    // prejšnji ne bi, ker ga reši načrt poizvedbe po indeksu.
+    await db.execAsync('DROP INDEX materials_subject_taken_at');
+
+    await insertMaterial(db, material({ id: 'srednji', taken_at: '2026-09-02T08:00:00.000Z' }));
+    await insertMaterial(db, material({ id: 'najstarejsi', taken_at: '2026-09-01T08:00:00.000Z' }));
+    await insertMaterial(db, material({ id: 'najnovejsi', taken_at: '2026-09-03T08:00:00.000Z' }));
+
+    const vrstice = await listBySubject(db, 'MAT');
+
+    expect(vrstice.map((v) => v.id)).toEqual(['najnovejsi', 'srednji', 'najstarejsi']);
+  });
+
   it('vrne samo zapise izbranega predmeta', async () => {
     await insertMaterial(db, material({ id: 'mat-1', subject: 'MAT' }));
     await insertMaterial(db, material({ id: 'slj-1', subject: 'SLJ' }));

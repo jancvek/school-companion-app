@@ -5,29 +5,12 @@ import { createMaterialsTable, insertMaterial } from '@/db/materials';
 import type { Material } from '@/types';
 
 import { createTestDatabase } from './test-database';
+import type { RouterMockState } from './screen-mocks';
 
-jest.mock('expo-router', () => {
-  const stanje = {
-    params: { subject: 'GUM' } as Record<string, string>,
-    router: { push: jest.fn(), back: jest.fn(), dismissAll: jest.fn() },
-  };
-  return {
-    __esModule: true,
-    Stack: { Screen: () => null },
-    useRouter: () => stanje.router,
-    useLocalSearchParams: () => stanje.params,
-    stanje,
-  };
-});
+jest.mock('expo-router', () => require('./screen-mocks').expoRouterMock());
+jest.mock('expo-sqlite', () => require('./screen-mocks').expoSqliteMock());
 
-jest.mock('expo-sqlite', () => {
-  const stanje = { db: {} as unknown };
-  return { __esModule: true, useSQLiteContext: () => stanje.db, stanje };
-});
-
-const usmerjevalnik = jest.requireMock('expo-router') as {
-  stanje: { params: Record<string, string> };
-};
+const usmerjevalnik = jest.requireMock('expo-router') as { stanje: RouterMockState };
 const sqlite = jest.requireMock('expo-sqlite') as { stanje: { db: unknown } };
 
 function material(overrides: Partial<Material> = {}): Material {
