@@ -9,6 +9,9 @@ dist/
 web-build/
 expo-env.d.ts
 
+# testi
+coverage/
+
 # Native
 .kotlin/
 *.orig.*
