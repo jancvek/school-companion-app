@@ -54,9 +54,13 @@ def prevzemi_material(
     # Preverba pred pisanjem, ne po njem. Če bi datoteko zapisali najprej, bi
     # ponovni prenos istega `id` povozil sliko, ki je na strežniku že bila —
     # vrstica bi ostala prva, vsebina pa bi bila druga.
-    if repozitorij.obstaja(identifikator):
+    obstojeci = repozitorij.poisci(identifikator)
+    if obstojeci is not None:
         response.status_code = 200
-        return MaterialPrevzet(id=identifikator, status=STATUS_NOV, created=False)
+        # Status beremo iz zapisa in ga ne vpišemo na trdo: v V1-R02 je vedno
+        # `new`, v V1-R03 pa bo obdelan zapis že `ready` ali `failed` in
+        # odgovor s trdo vpisanim `new` bi lagal.
+        return MaterialPrevzet(id=identifikator, status=obstojeci.status, created=False)
 
     pot = shrani_sliko(nastavitve.images_dir, identifikator, file.file)
 

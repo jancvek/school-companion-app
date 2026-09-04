@@ -302,3 +302,29 @@ class TestZivost:
 
         assert odgovor.status_code == 200
         assert odgovor.json() == {"status": "ok"}
+
+
+class TestOdgovorOdrazaZapis:
+    """Idempotentni odgovor mora povedati stanje zapisa, ne domneve."""
+
+    def test_status_se_bere_iz_zapisa_ne_vpise_na_trdo(
+        self, odjemalec: TestClient, motor: Engine
+    ) -> None:
+        odjemalec.post(
+            "/materials", data=polja(), files=datoteka(), headers={"X-API-Key": KLJUC}
+        )
+
+        # V1-R03 bo zapis premaknila naprej; odgovor na ponoven prenos mora
+        # takrat povedati resnično stanje, ne „new".
+        with Session(motor) as seja:
+            zapis = seja.get(Material, UUID_ENA)
+            assert zapis is not None
+            zapis.status = "ready"
+            seja.commit()
+
+        odgovor = odjemalec.post(
+            "/materials", data=polja(), files=datoteka(), headers={"X-API-Key": KLJUC}
+        )
+
+        assert odgovor.status_code == 200
+        assert odgovor.json() == {"id": UUID_ENA, "status": "ready", "created": False}

@@ -23,11 +23,15 @@ API_KEY_NAJMANJ_ZNAKOV = 16
 class Settings(BaseSettings):
     """Nastavitve ene instance strežnika."""
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
+    # Nastavitve pridejo **samo** iz okolja, ne iz `.env`.
+    #
+    # V Docker Compose jih poda `environment:`; datoteko `apps/server/.env`
+    # prebere Compose sam, da razreši `${API_KEY}` in podobno. Branje `.env`
+    # še tu ne bi dodalo ničesar, prineslo pa bi odvisnost od trenutne delovne
+    # mape — `env_file` je relativen nanjo, ne na paket. Isti ukaz bi se torej
+    # obnašal različno glede na to, od kod je pognan; to velja za strežnik in
+    # za teste.
+    model_config = SettingsConfigDict(extra="ignore")
 
     #: Statični ključ, ki ga telefon pošlje v glavi `X-API-Key`.
     #: Prekratek ali prazen ključ je napaka ob zagonu, ne šele ob prvi zahtevi.

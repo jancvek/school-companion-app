@@ -1,10 +1,11 @@
-import { render, waitFor } from '@testing-library/react-native';
+import { act, render, waitFor } from '@testing-library/react-native';
 import { AppState, Text, type AppStateStatus } from 'react-native';
 
 import { insertMaterial } from '@/db/materials';
 import { migriraj } from '@/db/migrations';
 import { SyncProvider } from '@/sync/use-sync';
 import type { Izid } from '@/sync/upload';
+import { INTERVAL_MS } from '@/sync/worker';
 import type { Material } from '@/types';
 
 import { createTestDatabase } from './test-database';
@@ -88,7 +89,7 @@ it('če aplikacija ob vpetju ni v ospredju, ne prenaša', async () => {
   expect(prenesiEno).not.toHaveBeenCalled();
 });
 
-it('ob odhodu v ozadje se ustavi, ob vrnitvi spet zažene', async () => {
+it('ob vrnitvi v ospredje spet zažene', async () => {
   (AppState as { currentState: string }).currentState = 'background';
   await insertMaterial(db, material('a'));
   const prenesiEno = jest.fn(async () => USPEH);
@@ -98,16 +99,52 @@ it('ob odhodu v ozadje se ustavi, ob vrnitvi spet zažene', async () => {
   expect(prenesiEno).not.toHaveBeenCalled();
 
   sporociStanje('active');
+
   await waitFor(() => expect(prenesiEno).toHaveBeenCalledTimes(1));
+});
 
-  // Po prenosu ni več ničesar v vrsti; nov zapis in odhod v ozadje.
-  await insertMaterial(db, material('b'));
-  sporociStanje('background');
-  await new Promise(process.nextTick);
-  expect(prenesiEno).toHaveBeenCalledTimes(1);
+/** Počaka, da se dokonča cikel workerja; ta je veriga več mikroopravil. */
+async function pocakajNaCikel(): Promise<void> {
+  await act(async () => {
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+  });
+}
 
-  sporociStanje('active');
-  await waitFor(() => expect(prenesiEno).toHaveBeenCalledTimes(2));
+it('ob odhodu v ozadje se ustavi in ne prenaša naprej', async () => {
+  // Lažne ure so tu bistvo testa, ne pripomoček. Brez premika časa bi bila
+  // trditev prazna: razporejeni časovnik je 30-sekundni, v testu z resničnimi
+  // urami nikoli ne poči, zato bi test ostal zelen tudi, če se worker ob
+  // odhodu v ozadje sploh ne bi ustavil.
+  jest.useFakeTimers();
+  try {
+    (AppState as { currentState: string }).currentState = 'active';
+    await insertMaterial(db, material('a'));
+    const prenesiEno = jest.fn(async () => USPEH);
+
+    await izrisi(prenesiEno);
+    await pocakajNaCikel();
+    expect(prenesiEno).toHaveBeenCalledTimes(1);
+
+    // Nov zapis v vrsti, aplikacija pa gre v ozadje.
+    await insertMaterial(db, material('b'));
+    sporociStanje('background');
+
+    await act(async () => {
+      jest.advanceTimersByTime(INTERVAL_MS * 3);
+    });
+    await pocakajNaCikel();
+
+    // Brez `ustavi()` bi razporejeni časovnik tu počil in `b` bi šel na
+    // strežnik, medtem ko je aplikacija v ozadju.
+    expect(prenesiEno).toHaveBeenCalledTimes(1);
+
+    sporociStanje('active');
+    await pocakajNaCikel();
+
+    expect(prenesiEno).toHaveBeenCalledTimes(2);
+  } finally {
+    jest.useRealTimers();
+  }
 });
 
 it('brez nastavitev se worker ne prijavi na AppState', async () => {
