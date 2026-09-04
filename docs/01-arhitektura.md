@@ -38,6 +38,7 @@ običajnim orodjem (`npm`/`package.json` v `apps/mobile`,
 | `src/materials/` | shranjevanje posnetka: najprej datoteka, nato vrstica |
 | `src/capture/` | stanje zaslona s kamero (kamera ↔ predogled) |
 | `src/ui/` | skupni gradniki in barve |
+| `src/types.ts` | tip `Material` (ena vrstica tabele `materials`) |
 | `__tests__/` | enotski in komponentni testi |
 
 Dostop do baze teče skozi tanek vmesnik `MaterialsDatabase`

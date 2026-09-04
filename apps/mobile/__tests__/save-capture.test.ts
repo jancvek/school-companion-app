@@ -95,7 +95,7 @@ describe('shranjevanje posnetka', () => {
     });
 
     const spy = jest.spyOn(db, 'runAsync');
-    spy.mockImplementation(async (...args) => {
+    spy.mockImplementation(async () => {
       expect(datotekaZapisana).toBe(true);
       vrsticaVstavljena = true;
       return undefined;
