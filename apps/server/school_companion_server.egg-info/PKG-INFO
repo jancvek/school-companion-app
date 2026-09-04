@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: school-companion-server
+Version: 1.0.0
+Summary: Sprejem fotografij ucne snovi s telefona (V1-R02).
+Requires-Python: >=3.12
+Requires-Dist: fastapi
+Requires-Dist: uvicorn[standard]
+Requires-Dist: python-multipart
+Requires-Dist: sqlalchemy
+Requires-Dist: psycopg[binary]
+Requires-Dist: alembic
+Requires-Dist: pydantic-settings
+Provides-Extra: dev
+Requires-Dist: ruff; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: httpx; extra == "dev"
