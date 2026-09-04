@@ -84,5 +84,9 @@ def prevzemi_material(
         # Sem pridemo samo ob tekmovanju dveh hkratnih zahtev z istim `id`.
         # Datoteka na disku je veljavna slika tega zapisa, zato ostane.
         response.status_code = 200
+        # Status beremo iz zapisa, ki je zmagal, iz istega razloga kot zgoraj.
+        zmagovalec = repozitorij.poisci(identifikator)
+        status = zmagovalec.status if zmagovalec is not None else STATUS_NOV
+        return MaterialPrevzet(id=identifikator, status=status, created=False)
 
-    return MaterialPrevzet(id=identifikator, status=STATUS_NOV, created=nastal)
+    return MaterialPrevzet(id=identifikator, status=material.status, created=True)

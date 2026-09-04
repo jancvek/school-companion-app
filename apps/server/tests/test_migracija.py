@@ -32,7 +32,13 @@ def alembic_nastavitve(database_url: str) -> Config:
 
 
 @pytest.fixture
-def baza(tmp_path: Path) -> str:
+def baza(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    # `DATABASE_URL` gre stran, čeprav ima izrecna nastavitev v `env.py` že
+    # prednost. Ta test dela `downgrade base`; če bi se kdaj povezal na živo
+    # bazo, bi v njej spustil tabelo `materials`. Dve ograji sta tu poceni,
+    # posledica ene same napake pa ni.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
     # Datoteka in ne `:memory:`: Alembic si odpre svojo povezavo, baza v
     # pomnilniku pa z njo ne bi bila ista.
     return f"sqlite:///{tmp_path / 'test.db'}"
@@ -87,10 +93,36 @@ def test_migracija_se_da_razveljaviti(baza: str) -> None:
     config = alembic_nastavitve(baza)
     command.upgrade(config, "head")
 
-    command.downgrade(config, "base")
-
     motor = create_engine(baza)
     try:
+        # Najprej se prepričamo, da je migracija res tekla **nad to** bazo.
+        # Brez tega bi bila zaključna trditev izpolnjena tudi, če bi Alembic
+        # delal nad neko drugo bazo, ta pa bi bila ves čas prazna — in test bi
+        # bil zelen prav takrat, ko bi bilo najbolj narobe.
+        assert "materials" in inspect(motor).get_table_names()
+
+        command.downgrade(config, "base")
+
         assert "materials" not in inspect(motor).get_table_names()
     finally:
         motor.dispose()
+
+
+def test_izrecna_nastavitev_ima_prednost_pred_okoljem(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regresija: `DATABASE_URL` ne sme preusmeriti migracije drugam.
+
+    Če bi okolje premagalo izrecno nastavitev, bi `pytest` v lupini z
+    izvoženim `DATABASE_URL` migriral živo bazo — in `downgrade base` bi v njej
+    spustil tabelo `materials`.
+    """
+    ciljna = tmp_path / "ciljna.db"
+    tuja = tmp_path / "tuja.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tuja}")
+
+    command.upgrade(alembic_nastavitve(f"sqlite:///{ciljna}"), "head")
+
+    assert ciljna.exists()
+    # Tuje baze se migracija ne sme niti dotakniti.
+    assert not tuja.exists()

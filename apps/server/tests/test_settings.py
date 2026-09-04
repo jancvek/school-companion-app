@@ -52,8 +52,15 @@ def test_nastavitve_ne_berejo_datoteke_env(
         Settings()  # type: ignore[call-arg]
 
 
-def test_privzetki_ne_zahtevajo_okolja() -> None:
-    """Ključ je edino polje brez privzetka; ostalo mora imeti smiselno vrednost."""
+def test_privzetki_ne_zahtevajo_okolja(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ključ je edino polje brez privzetka; ostalo mora imeti smiselno vrednost.
+
+    Spremenljivke se izbrišejo, sicer bi bil ta test — ki naj neodvisnost od
+    okolja prav dokazuje — sam odvisen od tega, kaj je v lupini izvoženo.
+    """
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("IMAGES_DIR", raising=False)
+
     nastavitve = Settings(api_key=VELJAVEN)
 
     assert nastavitve.database_url.startswith("postgresql+psycopg://")

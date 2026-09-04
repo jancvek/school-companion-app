@@ -2,6 +2,12 @@
 
 Povezavo bere iz `DATABASE_URL`, ne iz `alembic.ini` — geslo v repozitoriju
 nima kaj iskati.
+
+**Izrecna nastavitev klicatelja ima prednost pred okoljem.** Obratni vrstni
+red je nevaren, ne le nepriročen: testi migracije si nastavijo svojo začasno
+bazo, spremenljivka okolja pa bi jih preusmerila na živo. Test, ki dela
+`downgrade base`, bi tako spustil tabelo `materials` v pravi bazi — in bi ob
+tem ostal zelen, ker bi trditev preverjal na svoji, prazni bazi.
 """
 
 import os
@@ -17,9 +23,13 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-database_url = os.environ.get("DATABASE_URL")
-if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+# `alembic.ini` `sqlalchemy.url` namenoma nima, zato je ob običajnem zagonu
+# (`alembic upgrade head` v vsebniku) tu prazno in obvelja okolje. Kadar pa je
+# url že nastavljen — ker ga je klicatelj podal — se okolja niti ne dotaknemo.
+if not config.get_main_option("sqlalchemy.url", None):
+    database_url = os.environ.get("DATABASE_URL")
+    if database_url:
+        config.set_main_option("sqlalchemy.url", database_url)
 
 target_metadata = Base.metadata
 
