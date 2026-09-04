@@ -6,8 +6,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /srv
 
-# Najprej odvisnosti, da se plast s pip namestitvijo ne gradi ob vsaki
-# spremembi kode.
+# `pip install .` gradi paket, zato mora biti `app/` na mestu že pred njim —
+# plast z odvisnostmi se posledično zgradi znova ob vsaki spremembi kode.
+# Ločevanje odvisnosti od kode bi zahtevalo podvojen seznam odvisnosti; ob
+# tem obsegu se ne izplača.
 COPY pyproject.toml ./
 COPY app ./app
 RUN pip install --no-cache-dir .

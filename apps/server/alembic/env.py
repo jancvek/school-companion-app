@@ -28,8 +28,15 @@ if config.config_file_name is not None:
 # url že nastavljen — ker ga je klicatelj podal — se okolja niti ne dotaknemo.
 if not config.get_main_option("sqlalchemy.url", None):
     database_url = os.environ.get("DATABASE_URL")
-    if database_url:
-        config.set_main_option("sqlalchemy.url", database_url)
+    if not database_url:
+        # Brez tega bi Alembic padel z golim `KeyError: 'url'` iz notranjosti
+        # SQLAlchemy, kar operaterju ne pove, katera spremenljivka manjka.
+        raise RuntimeError(
+            "Manjka spremenljivka okolja DATABASE_URL. "
+            "V Docker Compose jo poda servis `api`; pri ročnem zagonu jo izvozi sam "
+            "(glej apps/server/okolje.primer)."
+        )
+    config.set_main_option("sqlalchemy.url", database_url)
 
 target_metadata = Base.metadata
 

@@ -3,6 +3,7 @@
 Pokrivajo tabelo „Strežnik" iz `docs/plan/V1-R02.md`.
 """
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
+from app.db import MaterialsRepository
 from app.models import Material
 from app.storage import ZACASNA_PODMAPA
 from tests.conftest import KLJUC
@@ -321,6 +323,57 @@ class TestOdgovorOdrazaZapis:
             assert zapis is not None
             zapis.status = "ready"
             seja.commit()
+
+        odgovor = odjemalec.post(
+            "/materials", data=polja(), files=datoteka(), headers={"X-API-Key": KLJUC}
+        )
+
+        assert odgovor.status_code == 200
+        assert odgovor.json() == {"id": UUID_ENA, "status": "ready", "created": False}
+
+    def test_ob_tekmovanju_odgovor_ne_trdi_da_je_zapis_nastal(
+        self,
+        odjemalec: TestClient,
+        motor: Engine,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Veja, v katero pridemo samo ob dveh hkratnih zahtevah z istim `id`.
+
+        Do nje se skozi HTTP ne da priti brez pravega tekmovanja, zato je
+        `vstavi_ce_ga_ni` podtaknjen. Brez tega testa bi veja lahko trdila
+        `created=True` in status `new`, pa tega nihče ne bi opazil.
+        """
+        with Session(motor) as seja:
+            seja.add(
+                Material(
+                    id=UUID_ENA,
+                    subject="MAT",
+                    taken_at=datetime(2026, 9, 4, 7, 30, tzinfo=UTC),
+                    image_path="/data/images/ze-tu.jpg",
+                    status="ready",
+                    received_at=datetime(2026, 9, 4, 8, 0, tzinfo=UTC),
+                )
+            )
+            seja.commit()
+
+        # Tako izgleda tekmovanje: prva preverba zapisa še ne vidi, vstavljanje
+        # ga ne ustvari (zmagal je nekdo drug), druga poizvedba pa najde
+        # zmagovalca.
+        pravi_poisci = MaterialsRepository.poisci
+        stevec = {"klicev": 0}
+
+        def poisci_z_zamikom(
+            self: MaterialsRepository, material_id: str
+        ) -> Material | None:
+            stevec["klicev"] += 1
+            if stevec["klicev"] == 1:
+                return None
+            return pravi_poisci(self, material_id)
+
+        monkeypatch.setattr("app.db.MaterialsRepository.poisci", poisci_z_zamikom)
+        monkeypatch.setattr(
+            "app.db.MaterialsRepository.vstavi_ce_ga_ni", lambda *_args, **_kwargs: False
+        )
 
         odgovor = odjemalec.post(
             "/materials", data=polja(), files=datoteka(), headers={"X-API-Key": KLJUC}
