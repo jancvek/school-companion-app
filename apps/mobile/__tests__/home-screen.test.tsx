@@ -4,7 +4,8 @@ import HomeScreen from '../app/index';
 import PickSubjectForCaptureScreen from '../app/slikaj/index';
 import PickSubjectForHistoryScreen from '../app/zgodovina/index';
 import { SUBJECTS } from '@/constants/subjects';
-import type { RouterMockState } from './screen-mocks';
+import { theme } from '@/ui/theme';
+import { odmikSpodaj, TEST_INSETS, type RouterMockState } from './screen-mocks';
 
 jest.mock('expo-router', () => require('./screen-mocks').expoRouterMock());
 jest.mock('react-native-safe-area-context', () => require('./screen-mocks').safeAreaMock());
@@ -75,5 +76,15 @@ describe('izbira predmeta', () => {
     await render(<PickSubjectForHistoryScreen />);
 
     expect(screen.getByText('GUM — Glasbena umetnost')).toBeTruthy();
+  });
+
+  it('zadnji predmet ne obtiči pod sistemsko navigacijsko vrstico', async () => {
+    await render(<PickSubjectForCaptureScreen />);
+
+    const seznam = screen.getByTestId('seznam-predmetov');
+
+    expect(odmikSpodaj(seznam.props.contentContainerStyle)).toBe(
+      theme.spacing + TEST_INSETS.bottom,
+    );
   });
 });

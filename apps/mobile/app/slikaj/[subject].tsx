@@ -39,11 +39,12 @@ export default function CaptureScreen() {
   const cameraRef = useRef<CameraView>(null);
   // `busy` samo zatemni gumbe. Zaporo drži referenca, ker se stanje posodobi
   // šele ob naslednjem izrisu — dva hitra dotika bi sicer oba videla `false`.
+  //
+  // Sprostitev v `finally` teče v isti mikroopravili kot posodobitve stanja,
+  // React pa izris potrdi, preden se sploh začne naslednje makroopravilo. Dotik
+  // je makroopravilo, zato med sprostitvijo zapore in izrisom kamere ni okna,
+  // v katerega bi lahko padel. Druge zapore zato ni.
   const zaklep = useRef(false);
-  // Druga zapora: en posnetek da natanko eno vrstico. Ker po shranjevanju
-  // ostanemo na zaslonu, sama `zaklep` ne zadošča — med njeno sprostitvijo in
-  // naslednjim izrisom bi star sklic še vedno videl isti posnetek.
-  const zeShranjen = useRef<string | null>(null);
   const casovnik = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -83,7 +84,6 @@ export default function CaptureScreen() {
   const save = useCallback(async () => {
     const photo = session.photo;
     if (zaklep.current || !photo || !subject) return;
-    if (zeShranjen.current === photo.uri) return;
 
     zaklep.current = true;
     setBusy(true);
@@ -96,7 +96,6 @@ export default function CaptureScreen() {
 
       // ADR-003: ostanemo na kameri istega predmeta, da je mogoče zaporedno
       // posneti več strani iste snovi. Potrditev zato ne sme biti modalna.
-      zeShranjen.current = photo.uri;
       setShranjenih((n) => n + 1);
       pokaziPotrditev();
       dispatch({ type: 'retake' });

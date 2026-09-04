@@ -5,7 +5,8 @@ import { createMaterialsTable, insertMaterial } from '@/db/materials';
 import type { Material } from '@/types';
 
 import { createTestDatabase } from './test-database';
-import type { RouterMockState } from './screen-mocks';
+import { theme } from '@/ui/theme';
+import { odmikSpodaj, TEST_INSETS, type RouterMockState } from './screen-mocks';
 
 jest.mock('expo-router', () => require('./screen-mocks').expoRouterMock());
 jest.mock('expo-sqlite', () => require('./screen-mocks').expoSqliteMock());
@@ -73,6 +74,18 @@ describe('zgodovina predmeta', () => {
     const slike = await screen.findAllByTestId('posnetek');
     expect(slike).toHaveLength(1);
     expect(slike[0].props.source.uri).toBe('file:///documents/photos/mat-1.jpg');
+  });
+
+  it('zadnji posnetek ne obtiči pod sistemsko navigacijsko vrstico', async () => {
+    await insertMaterial(db, material({ id: 'mat-1' }));
+
+    await render(<HistoryForSubjectScreen />);
+
+    const seznam = await screen.findByTestId('seznam-posnetkov');
+
+    expect(odmikSpodaj(seznam.props.contentContainerStyle)).toBe(
+      theme.spacing + TEST_INSETS.bottom,
+    );
   });
 
   it('pri neznanem predmetu ne poskuša brati baze', async () => {

@@ -59,8 +59,18 @@ prihranimo. Namesto tega:
 - **Kaj to oteži:**
   - Zapora proti dvojnemu dotiku se mora po uspešnem shranjevanju **spet
     odpreti**. V1-R01 jo je namenoma pustila zaprto, ker je zaslon takrat
-    odšel. Varno je, ker po vrnitvi na kamero ni več posnetka in shranjevanje
-    odpade takoj — a mora biti pokrito s testom.
+    odšel. Da se po sprostitvi res ne da shraniti drugič, pokrivata testa
+    „po neuspehu je mogoče poskusiti znova" in „vsak posnetek da svojo
+    vrstico".
+
+    Dodana je bila še druga zapora, ključena na pot posnetka, za okno med
+    sprostitvijo `zaklep` in ponovnim izrisom. **Odstranjena je bila znova:**
+    sprostitev teče v isti mikroopravili kot posodobitve stanja, React izris
+    potrdi pred naslednjim makroopravilom, dotik pa je makroopravilo — okna
+    torej ni. Noben test je ni mogel podreti (pregled je to potrdil z
+    mutacijo), hkrati pa je vnašala pravo napako: če bi kamera kdaj vrnila
+    isto pot, bi drugi *Shrani* tiho ne naredil nič. Netestljiva obramba, ki
+    doda svoj način odpovedi, je slabša od nič.
   - Brez modalne potrditve je večja nevarnost, da uporabnica ne opazi
     neuspeha. Zato števec, ne samo napis.
   - Dva obstoječa testa, ki trdita, da se pokliče `dismissAll()`, se

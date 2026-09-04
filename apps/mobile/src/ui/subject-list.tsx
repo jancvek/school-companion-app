@@ -14,6 +14,7 @@ export function SubjectList({ onSelect }: Props) {
 
   return (
     <FlatList
+      testID="seznam-predmetov"
       data={SUBJECTS}
       keyExtractor={(subject) => subject.value}
       // Zadnji predmet bi sicer obtičal pod sistemsko navigacijsko vrstico.

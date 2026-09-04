@@ -3,8 +3,11 @@ import { Alert, Linking } from 'react-native';
 
 import CaptureScreen from '../app/slikaj/[subject]';
 
+import { theme } from '@/ui/theme';
+
 import {
   dovoljenje,
+  odmikSpodaj,
   TEST_INSETS,
   type CameraMockState,
   type RouterMockState,
@@ -239,31 +242,20 @@ describe('shranjevanje', () => {
 });
 
 describe('varno območje', () => {
+  // Točna vrednost, ne „vsaj toliko" — sicer bi test prepustil tudi trdo
+  // vpisano konstanto, ki z odmiki nima nič.
+  const PRICAKOVAN = theme.spacing + TEST_INSETS.bottom;
+
   it('gumbi imajo odmik za sistemsko navigacijsko vrstico', async () => {
     await render(<CaptureScreen />);
 
-    const akcije = screen.getByTestId('akcije');
-    const odmik = odmikSpodaj(akcije.props.style);
-
-    expect(odmik).toBeGreaterThanOrEqual(TEST_INSETS.bottom);
+    expect(odmikSpodaj(screen.getByTestId('akcije').props.style)).toBe(PRICAKOVAN);
   });
 
   it('odmik ostane tudi v predogledu', async () => {
     await render(<CaptureScreen />);
     await fotografiraj();
 
-    const odmik = odmikSpodaj(screen.getByTestId('akcije').props.style);
-
-    expect(odmik).toBeGreaterThanOrEqual(TEST_INSETS.bottom);
+    expect(odmikSpodaj(screen.getByTestId('akcije').props.style)).toBe(PRICAKOVAN);
   });
 });
-
-/** Sešteje `paddingBottom` iz slogov, ki jih React Native poda kot polje. */
-function odmikSpodaj(style: unknown): number {
-  const kosi = Array.isArray(style) ? style.flat(Infinity) : [style];
-  for (const kos of kosi.reverse()) {
-    const vrednost = (kos as { paddingBottom?: number } | null)?.paddingBottom;
-    if (typeof vrednost === 'number') return vrednost;
-  }
-  return 0;
-}

@@ -84,6 +84,7 @@ export default function HistoryForSubjectScreen() {
     <>
       <Stack.Screen options={{ title: subject.value }} />
       <FlatList
+        testID="seznam-posnetkov"
         data={materials}
         keyExtractor={(material) => material.id}
         // Zadnji posnetek bi sicer obtičal pod sistemsko navigacijsko vrstico.

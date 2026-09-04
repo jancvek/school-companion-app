@@ -77,6 +77,19 @@ export function safeAreaMock() {
   };
 }
 
+/**
+ * Zadnji `paddingBottom` iz sloga. React Native sloge podaja kot gnezdena
+ * polja, zato jih je treba najprej sploščiti.
+ */
+export function odmikSpodaj(style: unknown): number {
+  const kosi = Array.isArray(style) ? style.flat(Infinity) : [style];
+  for (const kos of [...kosi].reverse()) {
+    const vrednost = (kos as { paddingBottom?: number } | null)?.paddingBottom;
+    if (typeof vrednost === 'number') return vrednost;
+  }
+  return 0;
+}
+
 /** Privzeto dovoljenje za kamero; `overrides` obrne, kar test potrebuje. */
 export function dovoljenje(
   overrides: Partial<{ granted: boolean; canAskAgain: boolean }> = {},
