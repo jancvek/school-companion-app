@@ -3,11 +3,17 @@ import { Alert, Linking } from 'react-native';
 
 import CaptureScreen from '../app/slikaj/[subject]';
 
-import { dovoljenje, type CameraMockState, type RouterMockState } from './screen-mocks';
+import {
+  dovoljenje,
+  TEST_INSETS,
+  type CameraMockState,
+  type RouterMockState,
+} from './screen-mocks';
 
 jest.mock('expo-router', () => require('./screen-mocks').expoRouterMock());
 jest.mock('expo-camera', () => require('./screen-mocks').expoCameraMock());
 jest.mock('expo-sqlite', () => require('./screen-mocks').expoSqliteMock());
+jest.mock('react-native-safe-area-context', () => require('./screen-mocks').safeAreaMock());
 
 jest.mock('@/materials/save', () => ({
   __esModule: true,
@@ -130,7 +136,7 @@ describe('predogled', () => {
 });
 
 describe('shranjevanje', () => {
-  it('shrani s kodo predmeta in časom posnetka, nato vrne na domačo stran', async () => {
+  it('shrani s kodo predmeta in časom posnetka', async () => {
     await render(<CaptureScreen />);
 
     await fotografiraj();
@@ -143,26 +149,61 @@ describe('shranjevanje', () => {
     expect(vhod.sourceUri).toBe('file:///cache/posnetek.jpg');
     expect(vhod.takenAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
 
-    expect(usmerjevalnik.stanje.router.dismissAll).toHaveBeenCalledTimes(1);
-    expect(alert).toHaveBeenCalledWith('Shranjeno', expect.stringContaining('MAT'));
+    // ADR-003: ne gremo več na domačo stran in ne odpiramo modalnega okna.
+    expect(usmerjevalnik.stanje.router.dismissAll).not.toHaveBeenCalled();
+    expect(alert).not.toHaveBeenCalled();
   });
 
-  it('po uspešnem shranjevanju nadaljnji dotiki ne shranijo znova', async () => {
+  it('po shranjevanju vrne kamero istega predmeta, pripravljeno na naslednjo stran', async () => {
     await render(<CaptureScreen />);
-    await fotografiraj();
 
-    const shrani = screen.getByText('Shrani');
-    await fireEvent.press(shrani);
+    await fotografiraj();
+    await fireEvent.press(screen.getByText('Shrani'));
+
+    await waitFor(() => expect(screen.getByTestId('kamera')).toBeTruthy());
+
+    expect(screen.getByText('Fotografiraj')).toBeTruthy();
+    expect(screen.queryByText('Shrani')).toBeNull();
+    expect(screen.queryByText('Ponovi')).toBeNull();
+  });
+
+  it('potrdi z napisom in šteje shranjene v tej seji', async () => {
+    await render(<CaptureScreen />);
+
+    await fotografiraj();
+    await fireEvent.press(screen.getByText('Shrani'));
+
+    await waitFor(() => expect(screen.getByText('Shranjeno')).toBeTruthy());
+    expect(screen.getByText('V tej seji: 1')).toBeTruthy();
+
+    kamera.stanje.takePictureAsync.mockResolvedValue({ uri: 'file:///cache/druga.jpg' });
+    await fotografiraj();
+    await fireEvent.press(screen.getByText('Shrani'));
+
+    await waitFor(() => expect(screen.getByText('V tej seji: 2')).toBeTruthy());
+    expect(shranjevanje.saveCapture).toHaveBeenCalledTimes(2);
+  });
+
+  it('vsak posnetek da svojo vrstico, z lastnim časom in potjo', async () => {
+    await render(<CaptureScreen />);
+
+    await fotografiraj();
+    await fireEvent.press(screen.getByText('Shrani'));
     await waitFor(() => expect(shranjevanje.saveCapture).toHaveBeenCalledTimes(1));
 
-    await fireEvent.press(shrani);
-    await fireEvent.press(shrani);
+    kamera.stanje.takePictureAsync.mockResolvedValue({ uri: 'file:///cache/druga.jpg' });
+    await fotografiraj();
+    await fireEvent.press(screen.getByText('Shrani'));
+    await waitFor(() => expect(shranjevanje.saveCapture).toHaveBeenCalledTimes(2));
 
-    expect(shranjevanje.saveCapture).toHaveBeenCalledTimes(1);
-    expect(usmerjevalnik.stanje.router.dismissAll).toHaveBeenCalledTimes(1);
+    const [, prvi] = shranjevanje.saveCapture.mock.calls[0];
+    const [, drugi] = shranjevanje.saveCapture.mock.calls[1];
+    expect(prvi.sourceUri).toBe('file:///cache/posnetek.jpg');
+    expect(drugi.sourceUri).toBe('file:///cache/druga.jpg');
+    expect(drugi.subject).toBe('MAT');
   });
 
-  it('ob napaki obdrži predogled in pove, kaj se je zgodilo', async () => {
+  it('ob napaki obdrži predogled, ne šteje in ne potrdi', async () => {
     shranjevanje.saveCapture.mockRejectedValue(new Error('Na napravi ni prostora'));
 
     await render(<CaptureScreen />);
@@ -176,7 +217,53 @@ describe('shranjevanje', () => {
       'Shranjevanje ni uspelo',
       expect.stringContaining('Na napravi ni prostora'),
     );
-    expect(usmerjevalnik.stanje.router.dismissAll).not.toHaveBeenCalled();
     expect(screen.getByText('Shrani')).toBeTruthy();
+    expect(screen.queryByText('Shranjeno')).toBeNull();
+    expect(screen.queryByText('V tej seji: 1')).toBeNull();
+  });
+
+  it('po neuspehu je mogoče poskusiti znova', async () => {
+    shranjevanje.saveCapture.mockRejectedValueOnce(new Error('Na napravi ni prostora'));
+
+    await render(<CaptureScreen />);
+
+    await fotografiraj();
+    await fireEvent.press(screen.getByText('Shrani'));
+    await waitFor(() => expect(alert).toHaveBeenCalled());
+
+    await fireEvent.press(screen.getByText('Shrani'));
+
+    await waitFor(() => expect(screen.getByText('V tej seji: 1')).toBeTruthy());
+    expect(shranjevanje.saveCapture).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('varno območje', () => {
+  it('gumbi imajo odmik za sistemsko navigacijsko vrstico', async () => {
+    await render(<CaptureScreen />);
+
+    const akcije = screen.getByTestId('akcije');
+    const odmik = odmikSpodaj(akcije.props.style);
+
+    expect(odmik).toBeGreaterThanOrEqual(TEST_INSETS.bottom);
+  });
+
+  it('odmik ostane tudi v predogledu', async () => {
+    await render(<CaptureScreen />);
+    await fotografiraj();
+
+    const odmik = odmikSpodaj(screen.getByTestId('akcije').props.style);
+
+    expect(odmik).toBeGreaterThanOrEqual(TEST_INSETS.bottom);
+  });
+});
+
+/** Sešteje `paddingBottom` iz slogov, ki jih React Native poda kot polje. */
+function odmikSpodaj(style: unknown): number {
+  const kosi = Array.isArray(style) ? style.flat(Infinity) : [style];
+  for (const kos of kosi.reverse()) {
+    const vrednost = (kos as { paddingBottom?: number } | null)?.paddingBottom;
+    if (typeof vrednost === 'number') return vrednost;
+  }
+  return 0;
+}

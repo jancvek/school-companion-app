@@ -62,6 +62,21 @@ export function expoSqliteMock() {
   return { __esModule: true, useSQLiteContext: () => stanje.db, stanje };
 }
 
+/**
+ * Odmiki varnega območja. Namenoma niso ničle — mock, ki ga prinaša
+ * `react-native-safe-area-context`, jih vrne 0, s čimer test ne bi ločil
+ * pravilnega odmika od manjkajočega.
+ */
+export const TEST_INSETS = { top: 24, bottom: 48, left: 0, right: 0 };
+
+export function safeAreaMock() {
+  return {
+    __esModule: true,
+    useSafeAreaInsets: () => TEST_INSETS,
+    SafeAreaProvider: ({ children }: { children: unknown }) => children,
+  };
+}
+
 /** Privzeto dovoljenje za kamero; `overrides` obrne, kar test potrebuje. */
 export function dovoljenje(
   overrides: Partial<{ granted: boolean; canAskAgain: boolean }> = {},

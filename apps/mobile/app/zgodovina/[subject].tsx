@@ -2,6 +2,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Image, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { findSubject } from '@/constants/subjects';
 import { listBySubject } from '@/db/materials';
@@ -12,6 +13,7 @@ import { theme } from '@/ui/theme';
 export default function HistoryForSubjectScreen() {
   const router = useRouter();
   const database = useSQLiteContext();
+  const insets = useSafeAreaInsets();
   const { subject: subjectParam } = useLocalSearchParams<{ subject: string }>();
   const subject = findSubject(subjectParam);
 
@@ -84,7 +86,8 @@ export default function HistoryForSubjectScreen() {
       <FlatList
         data={materials}
         keyExtractor={(material) => material.id}
-        contentContainerStyle={styles.list}
+        // Zadnji posnetek bi sicer obtičal pod sistemsko navigacijsko vrstico.
+        contentContainerStyle={[styles.list, { paddingBottom: theme.spacing + insets.bottom }]}
         renderItem={({ item }) => (
           <View style={styles.card}>
             <Image

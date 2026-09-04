@@ -7,6 +7,7 @@ import { SUBJECTS } from '@/constants/subjects';
 import type { RouterMockState } from './screen-mocks';
 
 jest.mock('expo-router', () => require('./screen-mocks').expoRouterMock());
+jest.mock('react-native-safe-area-context', () => require('./screen-mocks').safeAreaMock());
 
 const usmerjevalnik = jest.requireMock('expo-router') as { stanje: RouterMockState };
 

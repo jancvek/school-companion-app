@@ -16,6 +16,7 @@ import { dovoljenje, type CameraMockState, type RouterMockState } from './screen
 jest.mock('expo-router', () => require('./screen-mocks').expoRouterMock());
 jest.mock('expo-camera', () => require('./screen-mocks').expoCameraMock());
 jest.mock('expo-sqlite', () => require('./screen-mocks').expoSqliteMock());
+jest.mock('react-native-safe-area-context', () => require('./screen-mocks').safeAreaMock());
 
 jest.mock('@/materials/save', () => ({
   __esModule: true,
@@ -31,6 +32,10 @@ let napake: jest.SpyInstance;
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // Prekrivajoča se act(...) klica pustita upodabljalnik v stanju, iz katerega
+  // se komponenta ne odklopi čisto — časovnik napisa „Shranjeno" bi zato ostal
+  // odprt in jest ne bi končal. Z lažnimi urami pravega časovnika sploh ni.
+  jest.useFakeTimers();
   // React se pritoži nad prekrivajočima se act(...) klicema. Prav ta prekritje
   // je bistvo tega testa, zato utišamo natanko to sporočilo — vsa ostala
   // ostanejo vidna.
@@ -47,6 +52,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  jest.clearAllTimers();
+  jest.useRealTimers();
   alert.mockRestore();
   napake.mockRestore();
 });
@@ -62,8 +69,9 @@ it('dva dotika na Shrani v istem tiku shranita samo enkrat', async () => {
   const drugi = fireEvent.press(shrani);
   await Promise.all([prvi, drugi]);
 
-  await waitFor(() => expect(usmerjevalnik.stanje.router.dismissAll).toHaveBeenCalled());
+  // ADR-003: zaslon ostane odprt, zato se konec shranjevanja vidi po števcu.
+  await waitFor(() => expect(screen.getByText('V tej seji: 1')).toBeTruthy());
 
   expect(shranjevanje.saveCapture).toHaveBeenCalledTimes(1);
-  expect(usmerjevalnik.stanje.router.dismissAll).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText('V tej seji: 2')).toBeNull();
 });

@@ -1,4 +1,5 @@
 import { FlatList, Pressable, StyleSheet, Text } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SUBJECTS, type Subject } from '@/constants/subjects';
 import { theme } from '@/ui/theme';
@@ -9,11 +10,14 @@ type Props = {
 
 /** Seznam vseh predmetov. Uporabljata ga obe poti — slikanje in zgodovina. */
 export function SubjectList({ onSelect }: Props) {
+  const insets = useSafeAreaInsets();
+
   return (
     <FlatList
       data={SUBJECTS}
       keyExtractor={(subject) => subject.value}
-      contentContainerStyle={styles.list}
+      // Zadnji predmet bi sicer obtičal pod sistemsko navigacijsko vrstico.
+      contentContainerStyle={[styles.list, { paddingBottom: theme.spacing + insets.bottom }]}
       renderItem={({ item }) => (
         <Pressable
           accessibilityRole="button"
