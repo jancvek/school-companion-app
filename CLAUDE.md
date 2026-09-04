@@ -207,6 +207,35 @@ Branch: feat/...
 
 Nato **končaj obrat.** Jaz pregledam in preizkusim.
 
+### Faza 9b — Sprejem 🛑
+
+Zdaj preizkusim sam. Kar najdem, ne gre samodejno ne v to zahtevo ne v novo —
+najprej ga uvrstiva. Ločnica ni velikost, ampak **ali obstoječi dogovor kršiš
+ali ga širiš**:
+
+| Izid | Kaj to pomeni | Kam gre |
+|---|---|---|
+| **Napaka** | Dostavljeno se ne ujema s kriterijem sprejemljivosti ali z merilom dokončanosti. Nič novega ne zahtevam. | Nazaj na fazo 5, **ista veja, ista zahteva.** Nova postavka ne nastane. |
+| **Sprememba zahteve** | Novo vedenje ali vedenje, ki nasprotuje kriteriju oz. sprejeti odločitvi. | Odločim jaz — glej spodaj. |
+| **Sprejeto** | Nič od zgornjega. | Faza 10. |
+
+Preizkus uvrstitve: **pripombo poskusi preslikati nazaj na kriterij, zapisano
+predpostavko ali odločitev.** Če se da — napaka. Če se ne da — sprememba.
+Če nisi prepričan, vprašaj mene; ne uvrsti sam v svojo korist.
+
+**Sprememba zahteve pred sprejemom** sme v tekočo zahtevo, ker obseg do
+sprejema ni zaklenjen — vendar samo tako, da se popravi izhodišče, ne samo
+koda. Tiho dodana koda je razraščanje obsega. Zaporedje:
+
+1. `docs/odlocitve/ADR-xxx.md` — kaj se spreminja, zakaj, katero prejšnjo
+   odločitev razveljavlja.
+2. `docs/verzije/vN.md` — popravljen ali dodan kriterij sprejemljivosti.
+3. Status zahteve nazaj na `V delu`.
+4. Faze 5–9 znova, vključno z novim pregledom in novim verify.
+
+**Po sprejemu** (zahteva je mergeana) pogajanja ni več: sprememba je nova
+zahteva `VN-Rxx`.
+
 ### Faza 10 — Merge (samo na moj izrecni ukaz)
 
 Gate odprem jaz, zunaj repozitorija. Ko rečem "merge":
@@ -218,6 +247,34 @@ git merge --no-ff feat/... -m "Merge VN-Rxx"
 
 Če je zgodovina veje razdrobljena, mi prej predlagaj squash.
 Ko so vse zahteve verzije `Zaključeno` in merge-ane, predlagaj tag `vN.0.0`.
+
+---
+
+## 1b. Merilo dokončanosti
+
+Velja za **vsako** zahtevo in se v kriterijih posameznih zahtev ne ponavlja.
+Kriteriji v `docs/verzije/vN.md` povedo, *kaj* mora zahteva znati; ta seznam
+pove, *kdaj* je karkoli od tega sploh dokončano. Kršitev tega seznama je
+napaka po fazi 9b, ne nova zahteva.
+
+- **Varno območje.** Vsak zaslon z vsebino ali gumbi ob robu upošteva sistemske
+  odmike (na Androidu je edge-to-edge privzet). Preverjeno na napravi, ne le v
+  testu.
+- **Jezik vmesnika je slovenščina.** Sporočila o napakah povedo, kaj naj
+  uporabnica naredi, in ne kažejo surovega besedila sistemske napake kot
+  edine vsebine.
+- **Brez omrežja v verziji 1**, dokler zahteva tega izrecno ne uvede.
+- **Zeleno:** `lint`, `typecheck`, testi — in verify, vezan na trenutni HEAD.
+- **Testi kaj dokazujejo.** Test, ki ostane zelen ob pokvarjeni implementaciji,
+  ne šteje. Ob dvomu mutiraj kodo in preveri, da test pade.
+- **Ponovljivost.** Zbirka je zelena tudi ob hladnem predpomnilniku in na
+  svežem klonu, ne samo na tvojem stroju.
+- **Brez ostankov generatorjev.** Kar je pustil `create-*` in se ne uporablja,
+  gre ven.
+- **Delovni imenik je čist** in vse je commitano na veji zahteve.
+
+Seznam raste iz izkušenj: ko se kaj pokaže kot ponavljajoča se napaka, sodi
+sem, ne v kriterije ene zahteve.
 
 ---
 
@@ -235,6 +292,11 @@ Ko so vse zahteve verzije `Zaključeno` in merge-ane, predlagaj tag `vN.0.0`.
 6. Nobenih skrivnosti v repozitoriju. `.env` je v `.gitignore`.
 
 ## 3. Zamik med planom in kodo
+
+**Plan se za nazaj nikoli ne prepisuje.** `docs/plan/VN-Rxx.md` je zapis, kaj
+je bilo takrat dogovorjeno, in prav v tem je njegova vrednost. Kar ga
+preglasi, gre v `docs/odlocitve/ADR-xxx.md`, ki pove, katero odločitev
+razveljavlja. Plan ostane, kakršen je bil.
 
 Če je od faze 4 minilo več dni in se je `main` medtem premaknil, plana ne
 popravljaj. Povej mi, koliko je `main` naprej (`git log --oneline HEAD..main`),
