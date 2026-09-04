@@ -41,6 +41,11 @@ običajnim orodjem (`npm`/`package.json` v `apps/mobile`,
 | `src/types.ts` | tip `Material` (ena vrstica tabele `materials`) |
 | `__tests__/` | enotski in komponentni testi |
 
+Android riše *edge-to-edge* (privzeto od Expo SDK 54), zato vsak zaslon z
+vsebino ali gumbi ob spodnjem robu prišteje `useSafeAreaInsets().bottom` —
+sicer konča pod sistemsko navigacijsko vrstico. `SafeAreaProvider` postavi
+`expo-router` sam, zato ga v `app/_layout.tsx` ni.
+
 Dostop do baze teče skozi tanek vmesnik `MaterialsDatabase`
 (`src/db/materials.ts`), ki ga funkcije dobijo kot argument. `expo-sqlite` se
 pojavi samo v `src/db/open.ts` in v korenski postavitvi, zato je poslovna
