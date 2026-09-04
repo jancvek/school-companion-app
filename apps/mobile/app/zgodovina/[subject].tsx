@@ -54,7 +54,11 @@ export default function HistoryForSubjectScreen() {
       <View style={styles.centered}>
         <Stack.Screen options={{ title: subject.value }} />
         <Text style={styles.emptyTitle}>Zgodovine ni bilo mogoče prebrati</Text>
-        <Text style={styles.emptyBody}>{error}</Text>
+        <Text style={styles.emptyBody}>
+          Vrni se in poskusi znova. Če se ponovi, zapri in znova odpri
+          aplikacijo — shranjeni posnetki ostanejo na telefonu.
+        </Text>
+        <Text style={styles.emptyDetail}>Podrobnost: {error}</Text>
       </View>
     );
   }
@@ -155,6 +159,12 @@ const styles = StyleSheet.create({
   emptyBody: {
     color: theme.textMuted,
     fontSize: 16,
+    textAlign: 'center',
+  },
+  emptyDetail: {
+    color: theme.textMuted,
+    fontSize: 13,
+    opacity: 0.7,
     textAlign: 'center',
   },
 });

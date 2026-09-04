@@ -64,13 +64,26 @@ prihranimo. Namesto tega:
     vrstico".
 
     Dodana je bila še druga zapora, ključena na pot posnetka, za okno med
-    sprostitvijo `zaklep` in ponovnim izrisom. **Odstranjena je bila znova:**
-    sprostitev teče v isti mikroopravili kot posodobitve stanja, React izris
-    potrdi pred naslednjim makroopravilom, dotik pa je makroopravilo — okna
-    torej ni. Noben test je ni mogel podreti (pregled je to potrdil z
-    mutacijo), hkrati pa je vnašala pravo napako: če bi kamera kdaj vrnila
-    isto pot, bi drugi *Shrani* tiho ne naredil nič. Netestljiva obramba, ki
-    doda svoj način odpovedi, je slabša od nič.
+    sprostitvijo `zaklep` in ponovnim izrisom. **Odstranjena je bila znova**,
+    ker tega okna ni:
+
+    1. Med shranjevanjem je izrisan `busy = true`, `Pressable` pa `onPress` ob
+       `disabled` sploh ne pokliče.
+    2. Ob uspehu tečejo posodobitve stanja in sprostitev zapore v enem samem
+       sinhronem zaporedju (med njimi ni `await`), zato jih React združi v en
+       izris. Izrisanega stanja s hkrati `busy === false` in posnetkom v
+       predogledu po uspešnem shranjevanju ni.
+
+    Prvotna utemeljitev v tem zapisu je trdila, da „React izris potrdi pred
+    naslednjim makroopravilom". **To je bilo napačno** — Reactov razvrščevalnik
+    v React Native uporablja `setImmediate` oz. `MessageChannel`, kar je samo
+    makroopravilo. Sklep je bil pravilen, pot do njega ne; popravljeno, ker bi
+    se nanjo kdo oprl.
+
+    Noben test zapore ni mogel podreti (pregled je to potrdil z mutacijo),
+    hkrati pa je vnašala pravo napako: če bi kamera kdaj vrnila isto pot, bi
+    drugi *Shrani* tiho ne naredil nič. Netestljiva obramba, ki doda svoj
+    način odpovedi, je slabša od nič.
   - Brez modalne potrditve je večja nevarnost, da uporabnica ne opazi
     neuspeha. Zato števec, ne samo napis.
   - Dva obstoječa testa, ki trdita, da se pokliče `dismissAll()`, se

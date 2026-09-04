@@ -41,6 +41,14 @@ običajnim orodjem (`npm`/`package.json` v `apps/mobile`,
 | `src/types.ts` | tip `Material` (ena vrstica tabele `materials`) |
 | `__tests__/` | enotski in komponentni testi |
 
+**React Compiler je izklopljen.** Expo predloga ga vklopi
+(`experiments.reactCompiler`), vendar ga `jest` ne uporablja — zastavica pride
+iz Babelovega `caller`, ki ga testni prevod ne nastavi, in je z nastavitvijo
+preseta ni mogoče vsiliti. Testi bi torej preverjali drugače preveden kod, kot
+se namesti na telefon. Ker aplikacija ni zahtevna in je varnostna mreža tega
+projekta prav v testih, je skladnost pomembnejša od memoizacije. Če ga bomo
+kdaj vklopili, mora zraven priti način, da isto velja tudi v testih.
+
 Android riše *edge-to-edge* (privzeto od Expo SDK 54), zato vsak zaslon z
 vsebino ali gumbi ob spodnjem robu prišteje `useSafeAreaInsets().bottom` —
 sicer konča pod sistemsko navigacijsko vrstico. `SafeAreaProvider` postavi

@@ -67,7 +67,14 @@ export function expoSqliteMock() {
  * `react-native-safe-area-context`, jih vrne 0, s čimer test ne bi ločil
  * pravilnega odmika od manjkajočega.
  */
-export const TEST_INSETS = { top: 24, bottom: 48, left: 0, right: 0 };
+export const TEST_INSETS = {
+  top: 24,
+  // Naključno ob vsakem zagonu: tako pade tudi trdo vpisana konstanta, ki bi
+  // se slučajno ujela s stalno vrednostjo.
+  bottom: 40 + Math.floor(Math.random() * 20),
+  left: 0,
+  right: 0,
+};
 
 export function safeAreaMock() {
   return {

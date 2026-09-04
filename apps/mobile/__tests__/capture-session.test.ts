@@ -1,7 +1,6 @@
 import {
   captureReducer,
   initialCaptureState,
-  isPreviewing,
   type CaptureState,
 } from '@/capture/session';
 
@@ -11,13 +10,12 @@ const DRUGI = { uri: 'file:///cache/Camera/drugi.jpg', takenAt: '2026-09-03T14:3
 describe('stanje zaslona s kamero', () => {
   it('se začne pri kameri, brez posnetka', () => {
     expect(initialCaptureState.photo).toBeNull();
-    expect(isPreviewing(initialCaptureState)).toBe(false);
   });
 
   it('po posnetku pokaže predogled s potjo in časom posnetka', () => {
     const stanje = captureReducer(initialCaptureState, { type: 'captured', photo: POSNETEK });
 
-    expect(isPreviewing(stanje)).toBe(true);
+    expect(stanje.photo).not.toBeNull();
     expect(stanje.photo).toEqual(POSNETEK);
   });
 
@@ -29,8 +27,8 @@ describe('stanje zaslona s kamero', () => {
 
     const poPonovi = captureReducer(predogled, { type: 'retake' });
 
+    expect(predogled.photo).toEqual(POSNETEK);
     expect(poPonovi.photo).toBeNull();
-    expect(isPreviewing(poPonovi)).toBe(false);
   });
 
   it('„Ponovi" je mogoče uporabiti neomejeno', () => {

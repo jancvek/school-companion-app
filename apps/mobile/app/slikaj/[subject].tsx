@@ -37,13 +37,20 @@ export default function CaptureScreen() {
   const [potrditev, setPotrditev] = useState(false);
 
   const cameraRef = useRef<CameraView>(null);
-  // `busy` samo zatemni gumbe. Zaporo drži referenca, ker se stanje posodobi
-  // šele ob naslednjem izrisu — dva hitra dotika bi sicer oba videla `false`.
+  // Zaporo drži referenca, ker se stanje posodobi šele ob naslednjem izrisu —
+  // dva dotika v istem tiku bi sicer oba videla `false`.
   //
-  // Sprostitev v `finally` teče v isti mikroopravili kot posodobitve stanja,
-  // React pa izris potrdi, preden se sploh začne naslednje makroopravilo. Dotik
-  // je makroopravilo, zato med sprostitvijo zapore in izrisom kamere ni okna,
-  // v katerega bi lahko padel. Druge zapore zato ni.
+  // Zakaj en posnetek ne more dati dveh vrstic, čeprav se zapora po uspehu
+  // spet sprosti — obrambi sta dve in nobena ni „izris pride prej":
+  //   1. Med shranjevanjem je izrisan `busy = true`, `Pressable` pa `onPress`
+  //      ob `disabled` sploh ne pokliče.
+  //   2. Ob uspehu tečejo `setShranjenih`, `pokaziPotrditev`,
+  //      `dispatch(retake)` in `setBusy(false)` v enem samem sinhronem
+  //      zaporedju (med njimi ni `await`), zato jih React združi v en izris.
+  //      Izrisanega stanja s hkrati `busy === false` in posnetkom v predogledu
+  //      po uspešnem shranjevanju torej ni.
+  // Če kdo doda `await` pred `finally` ali odstrani `disabled={busy}`, to
+  // sklepanje pade.
   const zaklep = useRef(false);
   const casovnik = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -74,7 +81,7 @@ export default function CaptureScreen() {
         photo: { uri: picture.uri, takenAt: new Date().toISOString() },
       });
     } catch (error) {
-      Alert.alert('Fotografiranje ni uspelo', opisNapake(error));
+      Alert.alert('Fotografiranje ni uspelo', opisKamerineNapake(error));
     } finally {
       zaklep.current = false;
       setBusy(false);
@@ -197,6 +204,11 @@ export default function CaptureScreen() {
 
 function opisNapake(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Surovo sporočilo kamere je v angleščini in samo zase ne pove ničesar. */
+function opisKamerineNapake(error: unknown): string {
+  return `Poskusi še enkrat. Če se ponovi, zapri in znova odpri aplikacijo.\n\nPodrobnost: ${opisNapake(error)}`;
 }
 
 /** Nasvet o prostoru sodi samo k shranjevanju, ne k vsaki napaki. */

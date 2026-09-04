@@ -92,6 +92,22 @@ describe('dovoljenje za kamero', () => {
   });
 });
 
+describe('napaka kamere', () => {
+  it('pove, kaj naj uporabnica naredi, ne le surove napake', async () => {
+    kamera.stanje.takePictureAsync.mockRejectedValue(new Error('Camera unavailable'));
+
+    await render(<CaptureScreen />);
+    await fireEvent.press(screen.getByText('Fotografiraj'));
+
+    await waitFor(() => expect(alert).toHaveBeenCalled());
+
+    const [naslov, telo] = alert.mock.calls[0];
+    expect(naslov).toBe('Fotografiranje ni uspelo');
+    expect(telo).toMatch(/Poskusi še enkrat/);
+    expect(telo).toMatch(/Camera unavailable/);
+  });
+});
+
 describe('neznan predmet', () => {
   it('pove, da predmet ni na seznamu, in ne odpre kamere', async () => {
     usmerjevalnik.stanje.params = { subject: 'XXX' };

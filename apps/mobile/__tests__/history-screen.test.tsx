@@ -105,6 +105,9 @@ describe('zgodovina predmeta', () => {
     await render(<HistoryForSubjectScreen />);
 
     expect(await screen.findByText('Zgodovine ni bilo mogoče prebrati')).toBeTruthy();
-    expect(screen.getByText('baza je zaklenjena')).toBeTruthy();
+    // Merilo dokončanosti: sporočilo mora povedati, kaj naj uporabnica naredi,
+    // ne le surove napake.
+    expect(screen.getByText(/Vrni se in poskusi znova/)).toBeTruthy();
+    expect(screen.getByText(/baza je zaklenjena/)).toBeTruthy();
   });
 });

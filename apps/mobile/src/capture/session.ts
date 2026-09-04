@@ -35,7 +35,3 @@ export function captureReducer(
       return state;
   }
 }
-
-export function isPreviewing(state: CaptureState): boolean {
-  return state.photo !== null;
-}
