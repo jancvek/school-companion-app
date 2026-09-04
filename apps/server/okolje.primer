@@ -1,0 +1,25 @@
+# Predloga za `apps/server/.env`. Prava datoteka NI v repozitoriju.
+# Kopiraj v `.env` in izpolni.
+#
+# Ime te datoteke ni `.env.primer`, kot je predvideval plan: dovoljenjska
+# plast te seje zavrne pisanje vsake datoteke, ki se ujema z `.env*`.
+# Vsebina je ista — sama imena spremenljivk, brez vrednosti.
+
+# Statični ključ, ki ga telefon pošlje v glavi `X-API-Key`.
+# Naredi ga naključno, npr. v PowerShellu:
+#   [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Max 256 }))
+API_KEY=
+
+# Povezava do Postgresa. V Docker Compose je gostitelj ime servisa `db`.
+DATABASE_URL=postgresql+psycopg://solski:zamenjaj-me@db:5432/solski
+
+# Geslo mora biti isto kot v DATABASE_URL — bere ga servis `db`.
+POSTGRES_PASSWORD=zamenjaj-me
+
+# Kam se zapisujejo slike znotraj vsebnika.
+IMAGES_DIR=/data/images
+
+# Naslov, na katerem posluša API. Vpiši Tailscale naslov tega stroja
+# (`tailscale ip -4`), da strežnik ni dosegljiv iz domačega omrežja ali
+# interneta. Za preizkus na istem stroju je smiselno 127.0.0.1.
+BIND_ADDRESS=127.0.0.1
