@@ -10,7 +10,9 @@ jo bo V1-R03 iskal kot celo.
 """
 
 import contextlib
+import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Protocol
 
@@ -43,11 +45,17 @@ def shrani_sliko(images_dir: Path, material_id: str, vir: BereBajte) -> Path:
     zacasna_mapa = images_dir / ZACASNA_PODMAPA
     zacasna_mapa.mkdir(parents=True, exist_ok=True)
 
-    zacasna = zacasna_mapa / f"{material_id}.jpg"
+    # Enolično ime, ne `<id>.jpg`: dve hkratni zahtevi z istim `id` bi sicer
+    # pisali v isto začasno datoteko in končna slika bi bila mešanica obeh.
+    # Prav temu se `.tmp/` izogiba, zato tu ne sme biti trkov.
+    rocica, ime = tempfile.mkstemp(prefix=f"{material_id}-", suffix=".jpg", dir=zacasna_mapa)
+    zacasna = Path(ime)
     koncna = koncna_pot(images_dir, material_id)
 
     try:
-        with zacasna.open("wb") as cilj:
+        # Pišemo skozi deskriptor, ki ga je vrnil `mkstemp`, in ga s tem tudi
+        # zapremo. Na Windows preimenovanje datoteke z odprto ročico odpove.
+        with os.fdopen(rocica, "wb") as cilj:
             shutil.copyfileobj(vir, cilj)
         # `Path.replace` je na istem datotečnem sistemu atomaren in prepiše
         # obstoječo datoteko brez vmesnega stanja, ko cilja ne bi bilo.

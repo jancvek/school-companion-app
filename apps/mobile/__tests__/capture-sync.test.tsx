@@ -1,9 +1,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { Alert } from 'react-native';
+import { Alert, AppState } from 'react-native';
 
 import CaptureScreen from '../app/slikaj/[subject]';
+import { insertMaterial } from '@/db/materials';
 import { migriraj } from '@/db/migrations';
 import { SyncProvider } from '@/sync/use-sync';
+import type { Material } from '@/types';
 
 import { createTestDatabase } from './test-database';
 import { dovoljenje, type CameraMockState, type RouterMockState } from './screen-mocks';
@@ -15,8 +17,16 @@ import { dovoljenje, type CameraMockState, type RouterMockState } from './screen
  * bi zaporedno slikanje pri nedosegljivem strežniku obtičalo do poteka
  * časovne omejitve, kar je natanko tisto, čemur se ADR-003 izogiba.
  *
- * Test to dokaže tako, da prenos **nikoli ne konča**. Če bi ga koda čakala,
- * napisa „Shranjeno" ne bi bilo nikoli in test bi potekel.
+ * Test to dokaže tako, da prenos nikoli ne konča. Da je dokaz resničen, morata
+ * biti izpolnjena dva pogoja, ki ju je prva različica tega testa spregledala:
+ *
+ *  1. `saveCapture` mora v bazo **res** vstaviti vrstico, sicer je čakalna
+ *     vrsta prazna in prenos se sploh ne začne;
+ *  2. `AppState.currentState` mora biti `active`, sicer se razporejevalnik ne
+ *     zažene in `sprozi()` se konča takoj.
+ *
+ * Zato vsak test tu preveri tudi `expect(prenesiEno).toHaveBeenCalled()` — brez
+ * tega bi ostal zelen tudi ob implementaciji, ki na prenos čaka.
  */
 
 jest.mock('expo-router', () => require('./screen-mocks').expoRouterMock());
@@ -37,19 +47,49 @@ const NASTAVITVE = { baseUrl: 'http://sto.ts.net:8000', apiKey: 'kljuc' };
 
 let db: ReturnType<typeof createTestDatabase>;
 let alert: jest.SpyInstance;
+let prvotnoStanjeAplikacije: string;
+
+function material(id: string): Material {
+  return {
+    id,
+    subject: 'MAT',
+    taken_at: '2026-09-01T10:00:00.000Z',
+    file_uri: `file:///documents/photos/${id}.jpg`,
+    sync_status: 'pending',
+    sync_attempts: 0,
+    last_attempt_at: null,
+    sync_error: null,
+  };
+}
 
 beforeEach(async () => {
   jest.clearAllMocks();
   db = createTestDatabase();
   await migriraj(db);
+
   usmerjevalnik.stanje.params = { subject: 'MAT' };
   kamera.stanje.permission = dovoljenje();
   kamera.stanje.takePictureAsync.mockResolvedValue({ uri: 'file:///cache/posnetek.jpg' });
-  shranjevanje.saveCapture.mockResolvedValue({ id: 'x' });
+
+  // Shranjevanje mora dejansko zapisati vrstico, sicer je čakalna vrsta prazna
+  // in prenos se nikoli ne začne — test bi bil brez vsebine.
+  let zaporedna = 0;
+  shranjevanje.saveCapture.mockImplementation(async () => {
+    zaporedna += 1;
+    const zapis = material(`posnetek-${zaporedna}`);
+    await insertMaterial(db, zapis);
+    return zapis;
+  });
+
+  // V jest okolju aplikacija ni „active", zato se worker sicer ne bi zagnal.
+  prvotnoStanjeAplikacije = AppState.currentState;
+  (AppState as { currentState: string }).currentState = 'active';
+
   alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
 });
 
 afterEach(() => {
+  (AppState as { currentState: string }).currentState = prvotnoStanjeAplikacije;
   db.close();
   alert.mockRestore();
 });
@@ -70,6 +110,10 @@ it('shranjevanje se konča takoj, tudi če prenos nikoli ne odgovori', async () 
   await waitFor(() => expect(screen.getByText('Shranjeno')).toBeTruthy());
   expect(screen.getByText('V tej seji: 1')).toBeTruthy();
   expect(alert).not.toHaveBeenCalled();
+
+  // Brez tega bi test ostal zelen tudi, če prenosa sploh ne bi bilo — in
+  // trditev „na prenos se ne čaka" ne bi dokazoval.
+  await waitFor(() => expect(prenesiEno).toHaveBeenCalled());
 });
 
 it('po shranjevanju se vrne na kamero, pripravljeno na naslednjo stran', async () => {
@@ -87,6 +131,30 @@ it('po shranjevanju se vrne na kamero, pripravljeno na naslednjo stran', async (
   // Zapora se mora sprostiti, sicer bi bilo zaporedno slikanje mrtvo.
   await waitFor(() => expect(screen.getByText('Fotografiraj')).toBeTruthy());
   expect(screen.queryByText('Shrani')).toBeNull();
+  await waitFor(() => expect(prenesiEno).toHaveBeenCalled());
+});
+
+it('med visečim prenosom je mogoče posneti in shraniti naslednjo stran', async () => {
+  const prenesiEno = jest.fn(() => new Promise<never>(() => {}));
+
+  await render(
+    <SyncProvider db={db} nastavitve={NASTAVITVE} prenesiEno={prenesiEno}>
+      <CaptureScreen />
+    </SyncProvider>,
+  );
+
+  await fireEvent.press(screen.getByText('Fotografiraj'));
+  await fireEvent.press(await screen.findByText('Shrani'));
+  await waitFor(() => expect(prenesiEno).toHaveBeenCalled());
+
+  await fireEvent.press(screen.getByText('Fotografiraj'));
+  await fireEvent.press(await screen.findByText('Shrani'));
+
+  // Resnični vzorec iz ADR-003: več strani iste snovi zapored, medtem ko
+  // strežnik molči.
+  await waitFor(() => expect(screen.getByText('V tej seji: 2')).toBeTruthy());
+  expect(shranjevanje.saveCapture).toHaveBeenCalledTimes(2);
+  expect(alert).not.toHaveBeenCalled();
 });
 
 it('brez nastavljenega prenosa shranjevanje deluje kot v V1-R01', async () => {
@@ -119,6 +187,7 @@ it('napaka prenosa ne pokvari shranjevanja', async () => {
   await fireEvent.press(await screen.findByText('Shrani'));
 
   await waitFor(() => expect(screen.getByText('Shranjeno')).toBeTruthy());
+  await waitFor(() => expect(prenesiEno).toHaveBeenCalled());
   // Napaka prenosa ni napaka shranjevanja — uporabnice ne sme motiti.
   expect(alert).not.toHaveBeenCalled();
 });

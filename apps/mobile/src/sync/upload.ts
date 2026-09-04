@@ -33,8 +33,19 @@ export type NaloziDatoteko = (
   moznosti: {
     headers: Record<string, string>;
     parameters: Record<string, string>;
+    signal: AbortSignal;
   },
 ) => Promise<{ status: number }>;
+
+/**
+ * Koliko časa čakamo na en prenos, preden ga štejemo za neuspelega.
+ *
+ * Brez te meje viseča povezava trajno ubije workerja: `prenesiCakajoce` se ne
+ * konča, zapora `tece` ostane postavljena in nov cikel se ne razporedi nikoli
+ * več — do ponovnega zagona aplikacije. Zapis bi obtičal, čeprav zahteva
+ * pravi, da „ostane pending in se poskus ponovi kasneje".
+ */
+export const CASOVNA_OMEJITEV_MS = 60_000;
 
 /**
  * Kode, ki so 4xx, a pomenijo „poskusi kasneje", ne „ne bo šlo".
@@ -95,31 +106,67 @@ const privzetoNalozi: NaloziDatoteko = async (fileUri, url, moznosti) => {
     mimeType: 'image/jpeg',
     headers: moznosti.headers,
     parameters: moznosti.parameters,
+    signal: moznosti.signal,
   });
   return { status: odgovor.status };
 };
 
+/** Oznaka, po kateri ločimo potek časa od pravega odgovora. */
+const POTEKLO = Symbol('poteklo');
+
 /**
- * Prenese en zapis. Nikoli ne vrže — vsaka pot se konča z izidom, ker je od
- * njega odvisno, kaj se zapiše v bazo.
+ * Prenese en zapis.
+ *
+ * **Vedno se konča** — z izidom, nikoli z izjemo in nikoli z visečo obljubo.
+ * Na to se zanaša `worker.ts`: cikel, ki se ne konča, pusti zaporo postavljeno
+ * in worker je do ponovnega zagona aplikacije mrtev.
+ *
+ * Časovna omejitev je izpeljana dvojno. `signal` prekine nativni prenos, da za
+ * sabo ne pušča odprte povezave; `Promise.race` pa poskrbi, da se ta funkcija
+ * konča tudi, če nalagalec signala ne bi upošteval.
  */
 export async function prenesi(
   material: Material,
   nastavitve: ServerConfig,
   nalozi: NaloziDatoteko = privzetoNalozi,
+  casovnaOmejitevMs: number = CASOVNA_OMEJITEV_MS,
 ): Promise<Izid> {
+  const nadzor = new AbortController();
+  let ura: ReturnType<typeof setTimeout> | undefined;
+
+  const potek = new Promise<typeof POTEKLO>((resolve) => {
+    ura = setTimeout(() => {
+      nadzor.abort();
+      resolve(POTEKLO);
+    }, casovnaOmejitevMs);
+  });
+
   try {
-    const { status } = await nalozi(material.file_uri, `${nastavitve.baseUrl}/materials`, {
-      headers: { 'X-API-Key': nastavitve.apiKey },
-      parameters: {
-        id: material.id,
-        subject: material.subject,
-        taken_at: material.taken_at,
-      },
-    });
-    return razvrstiStatus(status);
+    const odgovor = await Promise.race([
+      nalozi(material.file_uri, `${nastavitve.baseUrl}/materials`, {
+        headers: { 'X-API-Key': nastavitve.apiKey },
+        parameters: {
+          id: material.id,
+          subject: material.subject,
+          taken_at: material.taken_at,
+        },
+        signal: nadzor.signal,
+      }),
+      potek,
+    ]);
+
+    if (odgovor === POTEKLO) {
+      return {
+        vrsta: 'pending',
+        razlog: 'Strežnik se ni odzval pravočasno. Poskusim znova čez nekaj časa.',
+      };
+    }
+
+    return razvrstiStatus(odgovor.status);
   } catch (napaka) {
     // Ni odgovora, torej ni sodbe strežnika o vsebini. Zapis ostane v vrsti.
     return { vrsta: 'pending', razlog: opisIzjeme(napaka) };
+  } finally {
+    if (ura !== undefined) clearTimeout(ura);
   }
 }

@@ -117,7 +117,9 @@ export default function HistoryForSubjectScreen() {
           onPress={() => void naPoskusiZnova()}
           style={({ pressed }) => [styles.retry, pressed && styles.retryPressed]}
         >
-          <Text style={styles.retryLabel}>Poskusi znova prenesti</Text>
+          {/* Napis pove „vse", ker `retryFailed` vrne v vrsto neuspele zapise
+              vseh predmetov, ne le tega, na katerem gumb stoji. */}
+          <Text style={styles.retryLabel}>Poskusi znova prenesti vse neuspele</Text>
         </Pressable>
       ) : null}
       <FlatList

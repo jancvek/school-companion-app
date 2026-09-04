@@ -42,3 +42,11 @@ def test_ne_ascii_kljuc_vrne_false_in_ne_vrze_izjeme(ponujeni: str) -> None:
 def test_ne_ascii_kljuc_se_lahko_tudi_ujema() -> None:
     """Primerjava bajtov ne sme pokvariti ključa, ki je sam ne-ASCII."""
     assert kljuc_se_ujema("ključ-š-č-ž", "ključ-š-č-ž") is True
+
+
+def test_prazen_pricakovani_kljuc_ne_odpre_streznika() -> None:
+    # `secrets.compare_digest(b"", b"")` vrne True. Brez izrecne obrambe bi
+    # prazen API_KEY pomenil strežnik, odprt vsakomur, ki pošlje prazno glavo.
+    assert kljuc_se_ujema("", "") is False
+    assert kljuc_se_ujema(None, "") is False
+    assert kljuc_se_ujema("karkoli", "") is False

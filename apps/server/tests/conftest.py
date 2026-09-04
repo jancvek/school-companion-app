@@ -20,7 +20,7 @@ from app.models import Base
 from app.settings import Settings
 
 #: Ključ, ki v testih velja za pravega.
-KLJUC = "kljuc-za-teste"
+KLJUC = "kljuc-za-teste-dovolj-dolg"
 
 
 @pytest.fixture

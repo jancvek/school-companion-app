@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import HistoryForSubjectScreen from '../app/zgodovina/[subject]';
 import { insertMaterial } from '@/db/materials';
 import { migriraj } from '@/db/migrations';
+import { SyncProvider } from '@/sync/use-sync';
 import type { Material } from '@/types';
 
 import { createTestDatabase } from './test-database';
@@ -152,5 +153,48 @@ describe('stanje prenosa v zgodovini', () => {
     await render(<HistoryForSubjectScreen />);
 
     expect(await screen.findByTestId('poskusi-znova')).toBeTruthy();
+  });
+});
+
+describe('gumb „Poskusi znova"', () => {
+  it('vrne neuspel zapis v vrsto in počisti napako', async () => {
+    await insertMaterial(
+      db,
+      material({ id: 'a', sync_status: 'failed', sync_error: 'strežnik je zavrnil ključ' }),
+    );
+    const prenesiEno = jest.fn(() => new Promise<never>(() => {}));
+
+    await render(
+      <SyncProvider db={db} nastavitve={null} prenesiEno={prenesiEno}>
+        <HistoryForSubjectScreen />
+      </SyncProvider>,
+    );
+
+    await fireEvent.press(await screen.findByTestId('poskusi-znova'));
+
+    await waitFor(async () => {
+      const [vrstica] = await db.getAllAsync<Material>(
+        'SELECT * FROM materials WHERE id = ?',
+        ['a'],
+      );
+      expect(vrstica.sync_status).toBe('pending');
+      expect(vrstica.sync_error).toBeNull();
+    });
+  });
+
+  it('po dotiku gumba seznam pokaže novo stanje in gumb izgine', async () => {
+    await insertMaterial(db, material({ id: 'a', sync_status: 'failed' }));
+
+    await render(
+      <SyncProvider db={db} nastavitve={null}>
+        <HistoryForSubjectScreen />
+      </SyncProvider>,
+    );
+
+    await fireEvent.press(await screen.findByTestId('poskusi-znova'));
+
+    // Brez osvežitve seznama bi gumb izgledal, kot da ni naredil ničesar.
+    expect(await screen.findByTestId('stanje-prenosa-pending')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByTestId('poskusi-znova')).toBeNull());
   });
 });

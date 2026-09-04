@@ -35,6 +35,13 @@ export type Povzetek = {
   neuspeli: number;
 };
 
+/**
+ * En prenos.
+ *
+ * **Mora se vedno končati.** Cikel, ki se ne konča, pusti zaporo `tece`
+ * postavljeno in worker je do ponovnega zagona aplikacije mrtev. Za to jamči
+ * `prenesi` s časovno omejitvijo (`upload.ts`).
+ */
 export type PrenesiEno = (material: Material) => Promise<Izid>;
 
 /**

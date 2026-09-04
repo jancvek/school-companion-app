@@ -80,6 +80,7 @@ describe('en prenos', () => {
           subject: 'MAT',
           taken_at: '2026-09-01T10:00:00.000Z',
         },
+        signal: expect.any(AbortSignal),
       },
     );
   });
@@ -119,5 +120,46 @@ describe('en prenos', () => {
     await expect(prenesi(material(), NASTAVITVE, nalozi)).resolves.toMatchObject({
       vrsta: 'pending',
     });
+  });
+});
+
+describe('časovna omejitev prenosa', () => {
+  it('viseč prenos se konča kot pending, ne kot viseča obljuba', async () => {
+    // Brez tega bi cikel workerja obtičal, zapora `tece` bi ostala postavljena
+    // in worker bi bil mrtev do ponovnega zagona aplikacije.
+    const nalozi: NaloziDatoteko = () => new Promise(() => {});
+
+    const izid = await prenesi(material(), NASTAVITVE, nalozi, 30);
+
+    expect(izid.vrsta).toBe('pending');
+    if (izid.vrsta !== 'synced') {
+      expect(izid.razlog).toMatch(/ni odzval pravočasno/i);
+    }
+  });
+
+  it('ob poteku časa prekine tudi nativni prenos', async () => {
+    let signal: AbortSignal | undefined;
+    const nalozi: NaloziDatoteko = (_uri, _url, moznosti) => {
+      signal = moznosti.signal;
+      return new Promise(() => {});
+    };
+
+    await prenesi(material(), NASTAVITVE, nalozi, 30);
+
+    // Sicer bi za sabo puščali odprte povezave.
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it('pravočasen odgovor ni prekinjen', async () => {
+    let signal: AbortSignal | undefined;
+    const nalozi: NaloziDatoteko = async (_uri, _url, moznosti) => {
+      signal = moznosti.signal;
+      return { status: 201 };
+    };
+
+    const izid = await prenesi(material(), NASTAVITVE, nalozi, 10_000);
+
+    expect(izid.vrsta).toBe('synced');
+    expect(signal?.aborted).toBe(false);
   });
 });

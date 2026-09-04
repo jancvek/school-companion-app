@@ -5,8 +5,6 @@ tako testi tečejo nad SQLite v pomnilniku, produkcija pa nad Postgresom, in
 oboje skozi isto kodo.
 """
 
-from collections.abc import Iterator
-
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -61,9 +59,3 @@ class MaterialsRepository:
             return False
 
         return True
-
-
-def seja_za_zahtevo(tovarna: sessionmaker[Session]) -> Iterator[Session]:
-    """Ena seja na zahtevo; zapre se tudi, če je zahteva padla."""
-    with tovarna() as seja:
-        yield seja

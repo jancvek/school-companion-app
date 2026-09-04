@@ -28,8 +28,13 @@ def kljuc_se_ujema(ponujeni: str | None, pricakovani: str) -> bool:
     `compare_digest` nad nizom zahteva same znake ASCII in ob drugačnem vnosu
     vrže `TypeError`, zato primerjamo bajte — ključ iz glave je poljuben vnos
     od zunaj in ne sme sesuti strežnika.
+
+    Prazen pričakovani ključ ne velja nikoli. `compare_digest(b"", b"")` sicer
+    vrne `True`, kar bi pomenilo strežnik, odprt vsakomur, ki pošlje prazno
+    glavo. `Settings` tak ključ zavrne že ob zagonu; ta vrstica je druga
+    ograja, za primer, ko bi kdo plast nastavitev obšel.
     """
-    if ponujeni is None:
+    if ponujeni is None or not pricakovani:
         return False
     return secrets.compare_digest(ponujeni.encode("utf-8"), pricakovani.encode("utf-8"))
 
