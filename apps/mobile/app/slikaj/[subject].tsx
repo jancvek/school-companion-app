@@ -18,6 +18,7 @@ import { captureReducer, initialCaptureState } from '@/capture/session';
 import { findSubject } from '@/constants/subjects';
 import { asMaterialsDatabase } from '@/db/open';
 import { saveCapture } from '@/materials/save';
+import { useSync } from '@/sync/use-sync';
 import { theme } from '@/ui/theme';
 
 /** Kako dolgo se vidi napis „Shranjeno", preden sam ugasne. */
@@ -30,6 +31,7 @@ export default function CaptureScreen() {
   const { subject: subjectParam } = useLocalSearchParams<{ subject: string }>();
   const subject = findSubject(subjectParam);
 
+  const { sprozi } = useSync();
   const [permission, requestPermission] = useCameraPermissions();
   const [session, dispatch] = useReducer(captureReducer, initialCaptureState);
   const [busy, setBusy] = useState(false);
@@ -106,6 +108,12 @@ export default function CaptureScreen() {
       setShranjenih((n) => n + 1);
       pokaziPotrditev();
       dispatch({ type: 'retake' });
+
+      // Prenos se samo sproži — nanj se **ne čaka**. Če bi ga počakali, bi
+      // zaporedno slikanje pri nedosegljivem strežniku obtičalo do poteka
+      // časovne omejitve, kar bi podrlo ADR-003. Klic je sinhron in ne vrže,
+      // zato sklepanje o eni sami skupini izrisov iz ADR-003 še vedno drži.
+      sprozi();
     } catch (error) {
       // Predogled ostane odprt, da posnetek ni izgubljen, in poskus je mogoč
       // znova.
@@ -114,7 +122,7 @@ export default function CaptureScreen() {
       zaklep.current = false;
       setBusy(false);
     }
-  }, [database, pokaziPotrditev, session.photo, subject]);
+  }, [database, pokaziPotrditev, session.photo, sprozi, subject]);
 
   // Sistemska navigacijska vrstica riše čez vsebino (Android je edge-to-edge),
   // zato gumbi potrebujejo odmik, sicer so pod njo.

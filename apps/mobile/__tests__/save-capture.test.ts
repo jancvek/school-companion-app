@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
-import { createMaterialsTable, listBySubject, type MaterialsDatabase } from '@/db/materials';
+import { listBySubject, type MaterialsDatabase } from '@/db/materials';
+import { migriraj } from '@/db/migrations';
 import { saveCapture } from '@/materials/save';
 
 import { createTestDatabase } from './test-database';
@@ -39,7 +40,7 @@ describe('shranjevanje posnetka', () => {
     );
 
     db = createTestDatabase();
-    await createMaterialsTable(db);
+    await migriraj(db);
   });
 
   afterEach(() => {

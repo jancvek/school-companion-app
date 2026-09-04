@@ -12,6 +12,8 @@ export type RouterMockState = {
 };
 
 export function expoRouterMock() {
+  const React = require('react');
+
   const stanje: RouterMockState = {
     params: {},
     router: { push: jest.fn(), back: jest.fn(), dismissAll: jest.fn() },
@@ -21,6 +23,9 @@ export function expoRouterMock() {
     Stack: { Screen: () => null },
     useRouter: () => stanje.router,
     useLocalSearchParams: () => stanje.params,
+    // Zaslon je v testu vedno v ospredju, zato je fokus enakovreden vpetju.
+    useFocusEffect: (ucinek: () => void | (() => void)) =>
+      React.useEffect(ucinek, [ucinek]),
     stanje,
   };
 }

@@ -36,6 +36,9 @@ export async function saveCapture(
     taken_at: takenAt,
     file_uri: fileUri,
     sync_status: 'pending',
+    sync_attempts: 0,
+    last_attempt_at: null,
+    sync_error: null,
   };
 
   try {
