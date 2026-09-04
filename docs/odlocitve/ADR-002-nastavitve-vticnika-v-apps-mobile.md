@@ -67,6 +67,4 @@ mrtvo skripto, ki ob zagonu izbriše `src` in `scripts`. Zanjo je bila
 odločitev nasprotna: **gre ven.** Odstrani jo lastnik, ker dovoljenjska plast
 modelu zavrne vsak ukaz z besedo `scripts`.
 
-Ta ADR ne trdi, da je odstranitev že izvedena — ob nastanku tega zapisa
-datoteka še obstaja. Če jo bereš in `git ls-files apps/mobile/scripts` še
-vedno vrne zadetek, odstranitev ni bila opravljena.
+Odstranjena je bila v commitu `5d24552`, potem ko je ta zapis že obstajal.
