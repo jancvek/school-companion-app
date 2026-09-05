@@ -421,6 +421,8 @@ class TestBrisanje:
             f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False
         )
 
+        # 303 in ne 302: sicer brskalnik ob osvežitvi ponovi POST.
+        assert odgovor.status_code == 303
         assert odgovor.headers["location"] == "/admin"
         assert odjemalec.get(odgovor.headers["location"]).status_code == 200
 
@@ -435,6 +437,8 @@ class TestBrisanje:
             f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False
         )
 
+        # 303 in ne 302: sicer brskalnik ob osvežitvi ponovi POST.
+        assert odgovor.status_code == 303
         assert odgovor.headers["location"] == "/admin/subjects/MAT"
         assert odjemalec.get(odgovor.headers["location"]).status_code == 200
 
@@ -768,3 +772,40 @@ class TestBrezJavaScripta:
             besedilo = odjemalec.get(pot).text.lower()
             for vzorec in self.VZORCI:
                 assert vzorec not in besedilo, f"{pot} vsebuje {vzorec}"
+
+
+class TestOblikovanje:
+    """Enotski testi za pretvorbe, ki jih strani samo izpišejo.
+
+    Prek HTTP je pokrita samo veja, ki jo ustvari testni zapis; ostale vejé
+    bi ostale nedokazane, čeprav sta obe v produkciji dosegljivi — posnetek
+    zvezka pri 1600 px zna preseči megabajt.
+    """
+
+    def test_velikost_v_bajtih(self) -> None:
+        from app.routers.admin import _velikost_opis
+
+        assert _velikost_opis(500) == "500 B"
+
+    def test_velikost_v_kilobajtih(self) -> None:
+        from app.routers.admin import _velikost_opis
+
+        assert _velikost_opis(2048) == "2 kB"
+
+    def test_velikost_v_megabajtih(self) -> None:
+        from app.routers.admin import _velikost_opis
+
+        assert _velikost_opis(2_500_000) == "2.4 MB"
+
+    def test_velikost_manjkajoce_datoteke(self) -> None:
+        from app.routers.admin import _velikost_opis
+
+        assert _velikost_opis(None) == "datoteke na disku ni"
+
+    def test_neznano_stanje_se_pokaze_dobesedno(self) -> None:
+        # V1-R03 doda stanja; dokler jih ni, se neznano stanje ne sme skriti
+        # za besedo „neznano" — operater mora videti, kaj je v bazi.
+        from app.subjects import oznaka_statusa
+
+        assert oznaka_statusa("nekaj-cisto-drugega") == "nekaj-cisto-drugega"
+        assert oznaka_statusa("ready") == "obdelano"

@@ -199,6 +199,13 @@ v nameščeni paket; brez te vrstice so testi zeleni, vsebnik pa pade ob prvi
 zahtevi. Izrisovalnik živi v `app.state.predloge`, kot vse drugo stanje
 aplikacije.
 
+Po brisanju stran pelje na predmet, iz katerega je bila slika — razen kadar
+je bila to zadnja slika predmeta, ki ni na seznamu desetih. Tak predmet
+obstaja samo, dokler ima kakšno sliko, zato bi bila njegova stran po brisanju
+404; v tem edinem primeru pelje na pregled. Kriterij pravi „preusmeri na
+seznam predmeta", drug kriterij pa za neznano kodo zahteva 404 — v tem kotu
+si nasprotujeta in izbrana je bila stran, ki obstaja.
+
 **Brisanje gre v obratnem vrstnem redu kot sprejem: najprej vrstica, nato
 datoteka.** Vrstica brez datoteke je pokvarjen vnos, ki ga operater vidi;
 datoteka brez vrstice je nevidna sirota, ki stane samo prostor. Brisanje je
