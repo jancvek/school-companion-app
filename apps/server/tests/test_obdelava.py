@@ -251,6 +251,7 @@ class TestNapake:
         def klicalec(pot: Path) -> IzidKlica:
             raise NapakaObdelave(
                 "Storitev OpenAI je zavrnila ključ (HTTP 401).",
+                prompt="POSLANI PROMPT",
                 raw_response="{}",
                 model="gpt-4.1",
                 input_tokens=10,
@@ -264,7 +265,12 @@ class TestNapake:
         assert material.error is not None
         assert "401" in material.error
         assert material.raw_response == "{}"
+        assert material.model == "gpt-4.1"
         assert material.input_tokens == 10
+        assert material.output_tokens == 0
+        # Kriterij zahteva sled ob **vsakem** izidu. Prav pri „model je vrnil
+        # neveljaven JSON" je vprašanje „kaj smo mu poslali" glavno.
+        assert material.prompt == "POSLANI PROMPT"
 
     def test_nepricakovana_izjema_gre_v_failed_z_berljivim_sporocilom(
         self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
@@ -535,3 +541,119 @@ class TestZapisIzida:
             MaterialsRepository(seja).zapisi_izid(UUID_ENA, izid)
 
         assert stevilo_vprasanj(motor) == 1
+
+
+class TestSledJeCelaObVsakemIzidu:
+    """Kriterij: prompt, surov odgovor, ime modela in oba števca — vedno.
+
+    Ločen razred, ker gre za trditev o **vseh** poteh izida hkrati; posamezen
+    test zgoraj vsakič preveri le svojo.
+    """
+
+    def test_uspeh_zapise_vseh_pet_polj(
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
+    ) -> None:
+        zapisi(motor, slike)
+        klicalec, _ = klicalec_vrne(uspesen_izid())
+
+        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+
+        material = preberi(motor)
+        assert material.prompt == "POSLANI PROMPT"
+        assert material.raw_response is not None
+        assert material.model is not None
+        assert material.input_tokens is not None
+        assert material.output_tokens is not None
+
+    def test_napaka_po_klicu_zapise_vseh_pet_polj(
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
+    ) -> None:
+        """Napaka, do katere pride po poslani zahtevi. Klic je bil plačan."""
+        zapisi(motor, slike)
+
+        def klicalec(pot: Path) -> IzidKlica:
+            raise NapakaObdelave(
+                "Model ni vrnil veljavnega JSON.",
+                prompt="POSLANI PROMPT",
+                raw_response="{to ni json",
+                model="gpt-4.1-2025-04-14",
+                input_tokens=1500,
+                output_tokens=12,
+            )
+
+        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+
+        material = preberi(motor)
+        assert material.prompt == "POSLANI PROMPT"
+        assert material.raw_response == "{to ni json"
+        assert material.model == "gpt-4.1-2025-04-14"
+        assert material.input_tokens == 1500
+        assert material.output_tokens == 12
+
+    def test_brez_klica_sledi_ni_in_se_ne_izmislja(
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
+    ) -> None:
+        """Manjkajoča slika pomeni, da zahteva ni bila poslana.
+
+        Prazna sled je tu resnica, ne pomanjkljivost — prompt, ki ni bil nikoli
+        poslan, v reviziji nima kaj iskati.
+        """
+        zapisi(motor, slike, vsebina=None)
+        klicalec, klicane = klicalec_vrne(uspesen_izid())
+
+        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+
+        material = preberi(motor)
+        assert klicane == []
+        assert material.prompt is None
+        assert material.raw_response is None
+        assert material.model is None
+
+    def test_izjema_pri_dostopu_do_diska_ne_pusti_zapisa_v_obdelavi(
+        self,
+        motor: Engine,
+        slike: Path,
+        tovarna_sej: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Zapis je prevzet, nato pade nekaj, kar ni klic modela.
+
+        `Path.is_file` pri zavrnjenem dostopu do mape vrže `PermissionError` in
+        ta ni napaka klicalca, ki bi jo `_izid_za` pretvoril v `failed`. Če je
+        ne bi ujel klicatelj, bi zapis ostal v `processing` — kriterij pa
+        pravi, da tam ne obtiči.
+        """
+        zapisi(motor, slike)
+        klicalec, klicane = klicalec_vrne(uspesen_izid())
+
+        def pokvarjen_dostop(mapa: Path, pot: Path) -> bool:
+            raise PermissionError("dostop do mape zavrnjen")
+
+        monkeypatch.setattr("app.obdelava.je_znotraj", pokvarjen_dostop)
+
+        with pytest.raises(PermissionError):
+            obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+
+        assert klicane == []
+        # Zapis je spet v vrsti, ne obtičal.
+        assert preberi(motor).status == STATUS_NOV
+
+    def test_zanka_prezivi_izjemo_pri_dostopu_do_diska(
+        self,
+        motor: Engine,
+        slike: Path,
+        tovarna_sej: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Ista izjema skozi `obdelaj_cakajoce`: obhod se konča, zanka ne pade."""
+        zapisi(motor, slike)
+        klicalec, _ = klicalec_vrne(uspesen_izid())
+
+        def pokvarjen_dostop(mapa: Path, pot: Path) -> bool:
+            raise PermissionError("dostop do mape zavrnjen")
+
+        monkeypatch.setattr("app.obdelava.je_znotraj", pokvarjen_dostop)
+
+        assert obdelaj_cakajoce(tovarna_sej, klicalec, slike) == 0
+        assert preberi(motor).status == STATUS_NOV
+

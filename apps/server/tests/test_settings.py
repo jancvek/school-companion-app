@@ -65,3 +65,32 @@ def test_privzetki_ne_zahtevajo_okolja(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert nastavitve.database_url.startswith("postgresql+psycopg://")
     assert nastavitve.images_dir.name == "images"
+
+
+def test_openai_kljuc_ni_pogoj_za_zagon() -> None:
+    """Za razliko od `API_KEY` odsotnost tega ključa strežnika ne ustavi.
+
+    Ustavi samo obdelavo — slike ostanejo `new`, dokler ključa ni
+    (`docs/odlocitve/ADR-009`). Če bi kdo temu polju dal `min_length`, bi se
+    strežnik nehal zaganjati brez ključa za OpenAI, in prevzem slik s telefona
+    bi padel skupaj z obdelavo.
+    """
+    nastavitve = Settings(api_key=VELJAVEN)
+
+    assert nastavitve.openai_api_key == ""
+
+
+def test_privzetki_obdelave() -> None:
+    """ADR-008: ime modela je nastavitev, ne konstanta v kodi."""
+    nastavitve = Settings(api_key=VELJAVEN)
+
+    assert nastavitve.openai_model == "gpt-4.1"
+    assert nastavitve.openai_timeout_seconds == 120.0
+    assert nastavitve.worker_interval_seconds == 30.0
+
+
+def test_ime_modela_pride_iz_okolja(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Zamenjava modela mora biti sprememba spremenljivke okolja (ADR-008)."""
+    monkeypatch.setenv("OPENAI_MODEL", "nekaj-novejsega")
+
+    assert Settings(api_key=VELJAVEN).openai_model == "nekaj-novejsega"

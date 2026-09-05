@@ -5,8 +5,11 @@ nastane: `naredi_klicalca` sprejme odjemalca kot argument, in tu je to
 preprost predmet, ki vrne ali vrže, kar test potrebuje.
 
 Izjeme storitve so prave (`openai.APIStatusError` in sorodne), ker je prav
-njihovo lovljenje tisto, kar se preverja. Sestavljene so z `httpx2`, ki ga
-`openai` uporablja interno — isti razred izjeme, kot bi ga vrgel pravi klic.
+njihovo lovljenje tisto, kar se preverja. Odziv in zahteva, ki ju nosijo, sta
+namenoma **preprosta predmeta** in ne pravi `httpx` objekti: HTTP plast, ki jo
+`openai` uporablja interno, ni deklarirana odvisnost tega projekta, in uvoz
+nanjo bi zbirko privezal na notranjost tuje knjižnice. Izjemam zadostuje
+`status_code`, `headers` in `request`.
 """
 
 import base64
@@ -15,7 +18,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-import httpx2
 import pytest
 from openai import APIConnectionError, APIStatusError, APITimeoutError
 
@@ -93,9 +95,17 @@ def odgovor_storitve(
     )
 
 
-def zahteva() -> httpx2.Request:
+# Vrneta `Any` in ne `SimpleNamespace`: `openai` je tu tipiziran na svojo HTTP
+# plast, ta pa ni deklarirana odvisnost tega projekta. Izjemam zadostuje, kar
+# res preberejo, in prav to tu podtaknemo.
+def zahteva() -> Any:
     """Zahteva, ki jo izjeme storitve nosijo s sabo."""
-    return httpx2.Request("POST", "https://api.openai.com/v1/chat/completions")
+    return SimpleNamespace(method="POST", url="https://api.openai.com/v1/chat/completions")
+
+
+def odziv_s_kodo(koda: int) -> Any:
+    """Odziv storitve z dano kodo; toliko, kolikor `APIStatusError` prebere."""
+    return SimpleNamespace(status_code=koda, headers={}, request=zahteva())
 
 
 @pytest.fixture
@@ -301,9 +311,7 @@ class TestNapakeStoritve:
     ) -> None:
         """Robni primer iz `v1.md`: napačen ključ je `failed`, ne mirujoč worker."""
         odjemalec = LazenOdjemalec(
-            izjema=APIStatusError(
-                "nope", response=httpx2.Response(koda, request=zahteva()), body=None
-            )
+            izjema=APIStatusError("nope", response=odziv_s_kodo(koda), body=None)
         )
 
         with pytest.raises(NapakaObdelave) as napaka:
@@ -314,9 +322,7 @@ class TestNapakeStoritve:
 
     def test_porabljena_kvota(self, slika: Path) -> None:
         odjemalec = LazenOdjemalec(
-            izjema=APIStatusError(
-                "nope", response=httpx2.Response(429, request=zahteva()), body=None
-            )
+            izjema=APIStatusError("nope", response=odziv_s_kodo(429), body=None)
         )
 
         with pytest.raises(NapakaObdelave) as napaka:
@@ -326,9 +332,7 @@ class TestNapakeStoritve:
 
     def test_napaka_na_strani_storitve(self, slika: Path) -> None:
         odjemalec = LazenOdjemalec(
-            izjema=APIStatusError(
-                "nope", response=httpx2.Response(503, request=zahteva()), body=None
-            )
+            izjema=APIStatusError("nope", response=odziv_s_kodo(503), body=None)
         )
 
         with pytest.raises(NapakaObdelave) as napaka:
@@ -354,17 +358,49 @@ class TestNapakeStoritve:
         with pytest.raises(NapakaObdelave) as napaka:
             naredi_klicalca(nastavitve_z(), odjemalec)(slika)
 
+        assert napaka.value.prompt == PROMPT
         assert napaka.value.raw_response == "{to ni json"
         assert napaka.value.model == "gpt-4.1-2025-04-14"
         assert napaka.value.input_tokens == 1500
         assert napaka.value.output_tokens == 2000
 
-    def test_napaka_pred_odgovorom_sledi_nima(self, slika: Path) -> None:
-        """Kadar storitev ni odgovorila, ni česa shraniti — in tudi ne izmisliti."""
+    def test_napaka_pred_odgovorom_nima_odgovora_ima_pa_prompt(self, slika: Path) -> None:
+        """Odgovora ni, poslana zahteva pa je bila — in ta je bila plačana.
+
+        Prompt zato gre v sled tudi tu; surov odgovor in ime modela ostaneta
+        prazna, ker ju ni od kod vzeti in se ju ne izmišljamo.
+        """
         odjemalec = LazenOdjemalec(izjema=APITimeoutError(request=zahteva()))
 
         with pytest.raises(NapakaObdelave) as napaka:
             naredi_klicalca(nastavitve_z(), odjemalec)(slika)
 
+        assert napaka.value.prompt == PROMPT
         assert napaka.value.raw_response is None
         assert napaka.value.model is None
+
+    def test_vsaka_napaka_po_poslani_zahtevi_nosi_prompt(self, slika: Path) -> None:
+        """Kriterij V1-R03: poslani prompt se shrani ob **vsakem** izidu.
+
+        Brez tega bi bil `prompt` v bazi `NULL` prav pri zapisih, kjer je
+        vprašanje „kaj smo modelu poslali" najbolj pri roki.
+        """
+        izjeme = [
+            APITimeoutError(request=zahteva()),
+            APIConnectionError(request=zahteva()),
+            APIStatusError("nope", response=odziv_s_kodo(401), body=None),
+            APIStatusError("nope", response=odziv_s_kodo(500), body=None),
+        ]
+
+        for izjema in izjeme:
+            with pytest.raises(NapakaObdelave) as napaka:
+                naredi_klicalca(nastavitve_z(), LazenOdjemalec(izjema=izjema))(slika)
+            assert napaka.value.prompt == PROMPT, type(izjema).__name__
+
+        # In dve poti, kjer je storitev odgovorila, a odgovor ni bil uporaben.
+        for vsebina in (None, "{to ni json"):
+            with pytest.raises(NapakaObdelave) as napaka:
+                naredi_klicalca(
+                    nastavitve_z(), LazenOdjemalec(odgovor=odgovor_storitve(vsebina))
+                )(slika)
+            assert napaka.value.prompt == PROMPT, repr(vsebina)

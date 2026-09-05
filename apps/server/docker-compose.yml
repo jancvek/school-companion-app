@@ -30,6 +30,8 @@ services:
       # napačno nastavljen ključ ne sme ustaviti prevzema slik s telefona.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1}
+      OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-120}
+      WORKER_INTERVAL_SECONDS: ${WORKER_INTERVAL_SECONDS:-30}
     volumes:
       - slike:/data/images
     ports:

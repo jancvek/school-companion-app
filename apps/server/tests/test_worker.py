@@ -10,6 +10,7 @@ obremenjenem stroju enkrat prekratek.
 """
 
 import asyncio
+import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -26,7 +27,7 @@ from app.models import STATUS_NOV, STATUS_PRIPRAVLJEN, STATUS_V_OBDELAVI, Materi
 from app.settings import Settings
 from app.vision import IzidKlica
 from app.worker import Obdelovalec, obnovi_obticale
-from tests.conftest import KLJUC
+from tests.conftest import KLJUC, OKOLJSKE_NASTAVITVE, naredi_testne_nastavitve
 from tests.test_obdelava import UUID_ENA, preberi, uspesen_izid, zapisi
 
 
@@ -244,3 +245,51 @@ def test_material_v_obdelavi_ni_izmisljen(motor: Engine, slike: Path) -> None:
         material = seja.get(Material, UUID_ENA)
         assert material is not None
         assert material.status == STATUS_V_OBDELAVI
+
+
+class TestZbirkaJeNeodvisnaOdOkolja:
+    """Da „testi ne kličejo omrežja" ostane lastnost kode, ne lastnost stroja.
+
+    `Settings` je `BaseSettings`: polje, ki ga klicatelj ne poda, pride iz
+    okolja. `OPENAI_API_KEY` je na stroju lastnika povsem pričakovano ime — in
+    če bi ga zbirka podedovala, bi `create_app` zgradil pravi odjemalec,
+    `TestClient` bi pognal življenjski cikel in testne slike bi zares
+    odpotovale k OpenAI, na račun lastnika.
+    """
+
+    def test_seja_okoljskih_nastavitev_nima(self) -> None:
+        """Neposreden dokaz, da fixture iz `conftest` res očisti okolje."""
+        prisotne = [ime for ime in OKOLJSKE_NASTAVITVE if ime in os.environ]
+
+        assert prisotne == []
+
+    def test_kljuc_v_okolju_ne_zazene_obdelave(
+        self, motor: Engine, slike: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Tudi če ključ v okolju je, ga testna aplikacija ne pobere.
+
+        Mutacijski test za `conftest`: če bi `naredi_testne_nastavitve` polje
+        `openai_api_key` spet prepustile privzetku, bi ta test padel — in ne bi,
+        kot prej, padel šele na stroju, kjer je spremenljivka slučajno
+        nastavljena.
+
+        Nastavitve nastanejo **v telesu testa** in ne prek fixture: fixture bi
+        nastal pred `monkeypatch.setenv` in spremenljivke sploh ne bi videl.
+        """
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-lazen-kljuc-iz-okolja")
+        zapisi(motor, slike)
+
+        aplikacija = create_app(nastavitve=naredi_testne_nastavitve(slike), motor=motor)
+
+        with TestClient(aplikacija):
+            assert aplikacija.state.klicalec is None
+            assert aplikacija.state.obdelovalec is None
+
+        assert preberi(motor).status == STATUS_NOV
+
+    def test_ime_modela_v_nastavitvah_se_v_testih_ne_uporabi(
+        self, nastavitve: Settings
+    ) -> None:
+        """Varovalo: če bi kak test vseeno prišel do klica, ne bi šel v pravi model."""
+        assert nastavitve.openai_model == "model-ki-se-ne-uporabi"
+        assert nastavitve.openai_api_key == ""

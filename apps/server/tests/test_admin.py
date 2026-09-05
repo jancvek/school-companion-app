@@ -1123,3 +1123,31 @@ class TestBrisanjeZVprasanji:
         odjemalec.post(f"/admin/materials/{UUID_ENA}/delete")
 
         assert stevilo_vprasanj(motor) == 4
+
+
+class TestSledJeVidnaTudiPriNapaki:
+    """Kriterij: stran pokaže vsa polja sledi, vključno pri `status='failed'`.
+
+    Ločeno od `TestPrikazObdelave`, ker gre za regresijo: prompt se pri napaki
+    prej ni shranil in blok „Poslani prompt" se na strani sploh ni izrisal.
+    """
+
+    def test_neuspel_zapis_pokaze_poslani_prompt(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        obdelaj(
+            motor,
+            status=STATUS_NAPAKA,
+            readable=None,
+            koliko_vprasanj=0,
+            error="Model ni vrnil veljavnega JSON.",
+        )
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "Poslani prompt" in besedilo
+        assert "POSLANI PROMPT ZA MODEL" in besedilo
+        assert "Surov odgovor modela" in besedilo
+        assert "gpt-4.1-2025-04-14" in besedilo
+        assert "1500" in besedilo

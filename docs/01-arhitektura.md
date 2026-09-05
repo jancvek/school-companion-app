@@ -259,6 +259,14 @@ tokenov. Brez tega primerjave med modeli, ki jo ADR-008 predvideva, ne bo
 mogoče narediti z dejanskimi podatki. Cene v evre ne računamo — cenik v
 nastavitvah bi se staral neopazno.
 
+**Znana omejitev: obdelava je vezana na en proces `api`.** Obnovitev obtičalih
+ob zagonu stoji na sklepu „ta hip ni v obdelavi nič", ki drži samo pri enem
+procesu. Če bi kdo dodal `uvicorn --workers`, bi zagon drugega procesa vrnil v
+`new` prav tiste zapise, ki jih prvi obdeluje, in slika bi bila plačana
+dvakrat. Pogojni prevzem tega ne prepreči, ker gre za dva zaporedna, vsak zase
+veljavna prehoda. Prava rešitev, če bo kdaj potrebna, je zaklep na ravni baze,
+ne več procesov.
+
 **Brez `OPENAI_API_KEY` se zanka sploh ne zažene.** Slike ostanejo `new` in se
 obdelajo same, ko je ključ nastavljen in strežnik zagnan znova; razlog gre v
 dnevnik ob zagonu. Prevzem slik, admin stran in `GET /health` tečejo naprej.

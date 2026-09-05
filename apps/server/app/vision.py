@@ -113,6 +113,7 @@ class NapakaObdelave(Exception):
         self,
         sporocilo: str,
         *,
+        prompt: str | None = None,
         raw_response: str | None = None,
         model: str | None = None,
         input_tokens: int | None = None,
@@ -120,6 +121,11 @@ class NapakaObdelave(Exception):
     ) -> None:
         super().__init__(sporocilo)
         self.sporocilo = sporocilo
+        #: Prompt, ki je bil poslan. Nastavljen povsod, kjer je do klica prišlo
+        #: — tudi ob časovni omejitvi in ob zavrnitvi. Klic je bil takrat
+        #: opravljen in plačan, in kriterij V1-R03 zahteva sled ob **vsakem**
+        #: izidu. `None` pomeni, da zahteva ni bila poslana.
+        self.prompt = prompt
         self.raw_response = raw_response
         self.model = model
         self.input_tokens = input_tokens
@@ -297,15 +303,19 @@ def naredi_klicalca(nastavitve: Settings, odjemalec: _OdjemalecKlepeta | None = 
                 },
             )
         except APITimeoutError as napaka:
+            # `prompt=PROMPT` tudi tu: zahteva je bila poslana, model se ni
+            # odzval. Sled brez tega ne bi povedala, kaj je dobil.
             raise NapakaObdelave(
-                f"Model se ni odzval v {nastavitve.openai_timeout_seconds:.0f} sekundah."
+                f"Model se ni odzval v {nastavitve.openai_timeout_seconds:.0f} sekundah.",
+                prompt=PROMPT,
             ) from napaka
         except APIConnectionError as napaka:
             raise NapakaObdelave(
-                "Do storitve OpenAI ni bilo mogoče priti. Preveri omrežno povezavo strežnika."
+                "Do storitve OpenAI ni bilo mogoče priti. Preveri omrežno povezavo strežnika.",
+                prompt=PROMPT,
             ) from napaka
         except APIStatusError as napaka:
-            raise NapakaObdelave(_opis_statusa(napaka)) from napaka
+            raise NapakaObdelave(_opis_statusa(napaka), prompt=PROMPT) from napaka
 
         uporaba = getattr(odgovor, "usage", None)
         vhodni = getattr(uporaba, "prompt_tokens", None)
@@ -319,6 +329,7 @@ def naredi_klicalca(nastavitve: Settings, odjemalec: _OdjemalecKlepeta | None = 
         if not surovo:
             raise NapakaObdelave(
                 "Model je vrnil prazen odgovor.",
+                prompt=PROMPT,
                 raw_response=surovo,
                 model=ime_modela,
                 input_tokens=vhodni,
@@ -332,6 +343,7 @@ def naredi_klicalca(nastavitve: Settings, odjemalec: _OdjemalecKlepeta | None = 
             # nizom in za tokene ne ve.
             raise NapakaObdelave(
                 napaka.sporocilo,
+                prompt=PROMPT,
                 raw_response=surovo,
                 model=ime_modela,
                 input_tokens=vhodni,

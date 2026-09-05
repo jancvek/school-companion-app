@@ -75,14 +75,16 @@ def obdelaj_zapis(
 
         pot = Path(material.image_path)
 
-    izid = _izid_za(klicalec, images_dir, pot, material_id)
-
+    # Vse od prevzema naprej je v enem `try`. `_izid_za` je pisan tako, da ne
+    # vrže, a „pisan tako" ni jamstvo: `Path.is_file` npr. pri zavrnjenem
+    # dostopu do mape vrže `PermissionError`. Če bi ta ušel mimo, bi zapis
+    # ostal v `processing` do naslednjega zagona strežnika — kriterij pa
+    # pravi, da tam ne obtiči.
     try:
+        izid = _izid_za(klicalec, images_dir, pot, material_id)
         with tovarna_sej() as seja:
             MaterialsRepository(seja).zapisi_izid(material_id, izid)
     except Exception:
-        # Zapis je prevzet, izida pa ni kam zapisati. Brez tega bi ostal v
-        # `processing` do naslednjega zagona strežnika.
         _sprosti(tovarna_sej, material_id)
         raise
 
@@ -92,7 +94,13 @@ def obdelaj_zapis(
 def _izid_za(
     klicalec: Klicalec, images_dir: Path, pot: Path, material_id: str
 ) -> IzidObdelave:
-    """Kaj se zapiše za ta zapis — uspeh ali napaka. Sam nikoli ne vrže."""
+    """Kaj se zapiše za ta zapis — uspeh ali napaka.
+
+    Napake klicalca ujame vse in jih pretvori v izid. Ne jamči pa, da ne vrže
+    nikoli: dostop do datotečnega sistema (`is_file`) zna vreči `PermissionError`
+    in ta gre naprej. Zato je klic te funkcije pri klicatelju v `try`, ki
+    prevzem sprosti.
+    """
     # Preverba pred klicem: za sliko, ki je ni, ne plačamo. Meja `images_dir`
     # je ista kot pri streženju slike na admin strani — pot je zapisala naša
     # koda, a je cena preverbe ena vrstica (`app/storage.py`).
@@ -112,9 +120,12 @@ def _izid_za(
         dnevnik.warning("Obdelava zapisa %s ni uspela: %s", material_id, napaka.sporocilo)
         return IzidObdelave(
             status=STATUS_NAPAKA,
-            # Prompt je konstanta in ne pride iz odgovora, zato ga ob napaki
-            # ni od kod vzeti; ostalo sled napaka nosi s sabo, kolikor je je
-            # do takrat nastalo.
+            # Sled se zapiše tudi tu. Kriterij V1-R03 zahteva prompt, surov
+            # odgovor, ime modela in porabo ob **vsakem** izidu — in prav pri
+            # napaki („model je vrnil neveljaven JSON") je vprašanje „kaj smo
+            # mu poslali" glavno. Napaka nosi s sabo toliko sledi, kolikor je
+            # je do nje nastalo.
+            prompt=napaka.prompt,
             raw_response=napaka.raw_response,
             model=napaka.model,
             input_tokens=napaka.input_tokens,

@@ -31,6 +31,13 @@ def obnovi_obticale(tovarna_sej: sessionmaker[Session]) -> int:
     Kliče se **ob zagonu, preden zanka steče**. Takrat noben zapis ni v
     resnični obdelavi, zato je vsak `processing` ostanek strežnika, ki se je
     ustavil sredi klica. Brez tega ga ne bi pobral nihče več.
+
+    **Znana omejitev:** ta sklep drži, dokler teče en sam proces `api`. Če bi
+    kdo dodal `uvicorn --workers`, bi zagon drugega procesa vrnil v `new` prav
+    tiste zapise, ki jih prvi ta hip obdeluje, in slika bi bila plačana
+    dvakrat. Pogojni prevzem (`prevzemi_za_obdelavo`) tega ne prepreči, ker
+    gre za dva zaporedna, vsak zase veljavna prehoda. Zato je obdelava v
+    ozadju vezana na en proces; glej `docs/01-arhitektura.md`.
     """
     with tovarna_sej() as seja:
         koliko = MaterialsRepository(seja).obnovi_obticale()
@@ -72,7 +79,9 @@ class Obdelovalec:
         obnovi_obticale(self._tovarna_sej)
         self._ustavi.clear()
         self._opravilo = asyncio.create_task(self._zanka(), name="obdelava")
-        dnevnik.info("Obdelava slik teče; razmik med obhodi je %.0f s.", self._interval)
+        # `%g` in ne `%.0f`: razmik pod sekundo (v testih) bi se sicer izpisal
+        # kot „0 s" in dnevnik bi trdil nekaj, kar ni res.
+        dnevnik.info("Obdelava slik teče; razmik med obhodi je %g s.", self._interval)
 
     async def ustavi(self) -> None:
         """Počaka, da se tekoči obhod izteče, in ustavi zanko."""
