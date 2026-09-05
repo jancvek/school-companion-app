@@ -256,6 +256,26 @@ class TestSlika:
 
         assert odjemalec.get(f"/admin/materials/{UUID_ENA}/image").status_code == 404
 
+    def test_obstojeca_datoteka_izven_mape_se_ne_pokaze(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, tmp_path: Path
+    ) -> None:
+        # Datoteka izven `images_dir`, ki res obstaja: brez preverbe v `_pogled`
+        # bi predloga narisala `<img>`, pot `/image` pa bi ga zavrnila — stran
+        # bi kazala pokvarjeno sliko namesto povedati, kaj je narobe.
+        zunaj = tmp_path / "zunaj.jpg"
+        zunaj.write_bytes(b"slika-zunaj-mape")
+        zapisi(motor, slike, vsebina=None)
+        with Session(motor) as seja:
+            material = seja.get(Material, UUID_ENA)
+            assert material is not None
+            material.image_path = str(zunaj)
+            seja.commit()
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "slike na disku pa ni" in besedilo
+        assert f'src="/admin/materials/{UUID_ENA}/image"' not in besedilo
+
     def test_pot_izven_mape_s_slikami_se_ne_prebere(
         self, odjemalec: TestClient, motor: Engine, slike: Path, tmp_path: Path
     ) -> None:
@@ -340,6 +360,12 @@ class TestBrisanje:
         assert not pot_ena.exists()
         assert pot_dva.exists()
         assert stevilo_vrstic(motor) == 1
+
+    def test_potrditvena_stran_neobstojecega_da_404(self, odjemalec: TestClient) -> None:
+        odgovor = odjemalec.get(f"/admin/materials/{UUID_ENA}/delete")
+
+        assert odgovor.status_code == 404
+        assert "text/html" in odgovor.headers["content-type"]
 
     def test_brisanje_neobstojecega_da_404(self, odjemalec: TestClient) -> None:
         odgovor = odjemalec.post(
@@ -430,7 +456,12 @@ class TestUbezanje:
     brez tega razreda tega razloga ni dokazoval noben test.
     """
 
-    NAPAD = '<script>x</script>'
+    #: Napad **brez poševnice**. To ni podrobnost: prva različica teh testov je
+    #: uporabljala `<script>x</script>`, in poševnica v njem je pomenila, da
+    #: zahtevek do `predmet.html` in do sporočila s kodo sploh ni prišel —
+    #: testa sta preverjala odsotnost napada, ki ga tja nihče ni poslal, in
+    #: ostala zelena tudi z izklopljenim ubežanjem.
+    NAPAD = "<img src=x onerror=alert(1)>"
 
     def test_predmet_na_seznamu_je_ubezan(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -440,7 +471,7 @@ class TestUbezanje:
         besedilo = odjemalec.get("/admin").text
 
         assert self.NAPAD not in besedilo
-        assert "&lt;script&gt;" in besedilo
+        assert "&lt;img" in besedilo
 
     def test_predmet_v_naslovu_strani_je_ubezan(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -474,6 +505,15 @@ class TestUbezanje:
 
         assert self.NAPAD not in besedilo
 
+    def test_predmet_na_potrditveni_strani_je_ubezan(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, subject=self.NAPAD)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}/delete").text
+
+        assert self.NAPAD not in besedilo
+
     def test_sporocilo_na_strani_404_je_ubezano(self, odjemalec: TestClient) -> None:
         odgovor = odjemalec.get(f"/admin/subjects/{self.NAPAD}")
 
@@ -491,28 +531,63 @@ class TestNeznanePoti:
         assert "text/html" in odgovor.headers["content-type"]
         assert '"detail"' not in odgovor.text
 
-    def test_koda_s_posevnico_ne_pristane_na_json(
+    def test_koda_s_posevnico_je_dosegljiva(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
-        # Povezava s te iste strani: `subject` sme vsebovati poševnico, zato
-        # `/admin/subjects/A/B` ne ujame nobena običajna pot.
+        # `subject` sme vsebovati poševnico (`POST /materials` ga omejuje samo
+        # po dolžini). Brez pretvornika `:path` bi bila povezava s strani
+        # `/admin` slepa ulica in slike takega predmeta nedosegljive.
         zapisi(motor, slike, subject="A/B")
 
         odgovor = odjemalec.get("/admin/subjects/A/B")
 
-        assert odgovor.status_code == 404
-        assert "text/html" in odgovor.headers["content-type"]
+        assert odgovor.status_code == 200
+        assert UUID_ENA in odgovor.text
 
-    def test_lovilec_ne_prekrije_pravih_poti(
+    def test_prestreznik_ne_prekrije_pravih_poti(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
-        # Lovilec je registriran zadnji; če bi bil prvi, bi prekril vse.
         zapisi(motor, slike)
 
         assert odjemalec.get("/admin").status_code == 200
         assert odjemalec.get("/admin/subjects/MAT").status_code == 200
         assert odjemalec.get(f"/admin/materials/{UUID_ENA}").status_code == 200
         assert odjemalec.get(f"/admin/materials/{UUID_ENA}/image").status_code == 200
+        assert odjemalec.get(f"/admin/materials/{UUID_ENA}/delete").status_code == 200
+
+    def test_koncna_posevnica_preusmeri_in_ne_pade(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # `/admin/` je naslov, ki ga brskalnik ponudi sam. Prva različica te
+        # zahteve je imela pot `/{ostanek:path}`, ki je Starlettejevo
+        # preusmeritev prekrila in vrnila 404 s trditvijo, da strani ni.
+        zapisi(motor, slike)
+
+        assert odjemalec.get("/admin/", follow_redirects=True).status_code == 200
+        assert odjemalec.get("/admin/subjects/MAT/", follow_redirects=True).status_code == 200
+
+    def test_neznana_pot_s_postom_da_slovensko_stran(self, odjemalec: TestClient) -> None:
+        odgovor = odjemalec.post("/admin/nekaj/cesar/ni")
+
+        assert odgovor.status_code == 404
+        assert "text/html" in odgovor.headers["content-type"]
+        assert '"detail"' not in odgovor.text
+
+    def test_napacna_metoda_pod_admin_da_slovensko_stran(self, odjemalec: TestClient) -> None:
+        # `/admin` obstaja, a samo kot GET. Lovilec `/{ostanek:path}` tega
+        # primera ni pokril; prestreznik ga.
+        odgovor = odjemalec.post("/admin")
+
+        assert odgovor.status_code == 405
+        assert "text/html" in odgovor.headers["content-type"]
+        assert '"detail"' not in odgovor.text
+
+    def test_napake_izven_admin_ostanejo_json(self, odjemalec: TestClient) -> None:
+        # Prestreznik je globalen; za telefon se mora umakniti privzetemu.
+        odgovor = odjemalec.get("/materials", headers={"X-API-Key": KLJUC})
+
+        assert odgovor.status_code == 405
+        assert "application/json" in odgovor.headers["content-type"]
 
 
 class TestPakiranje:

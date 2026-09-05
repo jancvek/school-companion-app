@@ -9,6 +9,7 @@ Uvicorn jo zato zažene z zastavico `--factory`.
 from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Engine
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.db import naredi_motor, naredi_tovarno_sej
 from app.routers import admin, materials
@@ -53,6 +54,10 @@ def create_app(nastavitve: Settings | None = None, motor: Engine | None = None) 
 
     app.include_router(materials.router)
     app.include_router(admin.router)
+
+    # Napake pod `/admin` naj bodo stran, ne JSON. Prestreznik se za vse
+    # ostale poti umakne privzetemu — glej `admin.prestrezi_napako`.
+    app.add_exception_handler(StarletteHTTPException, admin.prestrezi_napako)
 
     @app.get("/health", response_model=Zivost)
     def zivost() -> Zivost:

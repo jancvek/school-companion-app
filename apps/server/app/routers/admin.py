@@ -16,8 +16,10 @@ from typing import Annotated, Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from app.db import MaterialsRepository
@@ -27,7 +29,10 @@ from app.settings import Settings
 from app.storage import je_znotraj, pobrisi_sliko, velikost_slike
 from app.subjects import PREDMETI, oznaka_predmeta, oznaka_statusa, poisci_predmet
 
-router = APIRouter(prefix="/admin")
+#: Predpona vseh poti operaterske strani.
+PREDPONA = "/admin"
+
+router = APIRouter(prefix=PREDPONA)
 
 #: Mapa s predlogami. Izpelje se iz mesta te datoteke, ne iz trenutne mape.
 #:
@@ -102,14 +107,18 @@ def _velikost_opis(bajti: int | None) -> str:
     return f"{bajti / (1024 * 1024):.1f} MB"
 
 
-def _pogled(material: Material) -> dict[str, Any]:
+def _pogled(material: Material, images_dir: Path) -> dict[str, Any]:
     """Zapis, pripravljen za predlogo.
 
     Predloga ne računa in ne oblikuje — dobi gotove nize. Tako je oblikovanje
     testljivo brez izrisa in predloga ostane brana kot postavitev.
+
+    Za datoteko izven `images_dir` velja isto kot za manjkajočo. Sicer bi
+    predloga narisala `<img>`, pot `/image` pa bi ga zavrnila — stran bi
+    kazala pokvarjeno sliko namesto povedati, kaj je narobe.
     """
     pot = Path(material.image_path)
-    velikost = velikost_slike(pot)
+    velikost = velikost_slike(pot) if je_znotraj(images_dir, pot) else None
     return {
         "id": material.id,
         "koda": material.subject,
@@ -163,14 +172,19 @@ def pregled(
     )
 
 
-@router.get("/subjects/{koda}")
+@router.get("/subjects/{koda:path}")
 def predmet(
     request: Request,
     koda: str,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
 ) -> Response:
     """Slike enega predmeta, najnovejša prva."""
+    # Pretvornik `:path` požre tudi končno poševnico, zato `MAT/` ne bi bil
+    # `MAT`. Starlette bi to sicer preusmeril sam, a pri `:path` pot obstaja
+    # in preusmeritve ni. Koda predmeta se na poševnico nikoli ne konča.
+    koda = koda.rstrip("/")
     snovi = repozitorij.seznam_po_predmetu(koda)
 
     # Neznana koda brez ene same slike je tipkarska napaka v naslovu, ne prazen
@@ -186,7 +200,7 @@ def predmet(
         {
             "koda": koda,
             "oznaka": oznaka_predmeta(koda),
-            "snovi": [_pogled(snov) for snov in snovi],
+            "snovi": [_pogled(snov, nastavitve.images_dir) for snov in snovi],
         },
     )
 
@@ -197,13 +211,16 @@ def snov(
     material_id: str,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
 ) -> Response:
     """Podrobnosti ene slike."""
     material = repozitorij.poisci(material_id)
     if material is None:
         return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
-    return predloge.TemplateResponse(request, "snov.html", {"snov": _pogled(material)})
+    return predloge.TemplateResponse(
+        request, "snov.html", {"snov": _pogled(material, nastavitve.images_dir)}
+    )
 
 
 @router.get("/materials/{material_id}/image")
@@ -236,13 +253,16 @@ def potrdi_brisanje(
     material_id: str,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
 ) -> Response:
     """Vmesni korak pred brisanjem. Sam ne spremeni ničesar."""
     material = repozitorij.poisci(material_id)
     if material is None:
         return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
-    return predloge.TemplateResponse(request, "brisanje.html", {"snov": _pogled(material)})
+    return predloge.TemplateResponse(
+        request, "brisanje.html", {"snov": _pogled(material, nastavitve.images_dir)}
+    )
 
 
 @router.post("/materials/{material_id}/delete")
@@ -268,19 +288,39 @@ def izbrisi(
     return RedirectResponse(f"/admin/subjects/{material.subject}", status_code=303)
 
 
-# Ta pot mora ostati **zadnja**: ujame vse pod `/admin`, česar ni ujela nobena
-# pot pred njo. Registrirana prej bi jih prekrila vse.
-@router.get("/{ostanek:path}")
-def neznana_pot(
-    request: Request,
-    ostanek: str,
-    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
-) -> Response:
-    """Karkoli pod `/admin`, česar ni.
 
-    Brez tega bi operater dobil angleški JSON `{"detail": "Not Found"}`. To ni
-    le teoretično: `subject` na strani `POST /materials` ni omejen na nabor
-    znakov, zato koda s poševnico ustvari povezavo, ki se ne ujame z nobeno
-    potjo — in klik z lastne strani bi pristal na JSON-u.
+def je_admin_pot(pot: str) -> bool:
+    """Ali zahtevek pripada operaterski strani.
+
+    Isto ujemanje kot pri izvzetju iz preverbe ključa: `/admin` in
+    `/admin/...`, nikoli `/administration`.
     """
-    return _ni_najdeno(predloge, request, "Te strani na strežniku ni.")
+    return pot == PREDPONA or pot.startswith(f"{PREDPONA}/")
+
+
+async def prestrezi_napako(request: Request, izjema: Exception) -> Response:
+    """Napake pod `/admin` izriše kot stran, drugod pusti JSON.
+
+    Prvi poskus je bil pot `/{ostanek:path}` na koncu usmerjevalnika. Bila je
+    napačna: prekrila je Starlettejevo preusmeritev ob končni poševnici, zato
+    je `GET /admin/` — naslov, ki ga brskalnik ponudi sam — vrnil 404 s
+    trditvijo, da strani ni. Prestreznik se sproži šele, ko poti res ni, in se
+    preusmeritve ne dotakne. Pokrije tudi 405, ki ga lovilec ni.
+
+    Prestreznik je globalen, ker drugačnega FastAPI ne pozna, a se za vse
+    izven `/admin` umakne privzetemu — odgovori `POST /materials` morajo
+    ostati JSON, sicer telefon dobi HTML tam, kjer pričakuje sporočilo o
+    napaki (odločitev 7 v `docs/plan/V1-R04.md`).
+    """
+    if isinstance(izjema, StarletteHTTPException) and je_admin_pot(request.url.path):
+        sporocilo = (
+            "Te strani na strežniku ni."
+            if izjema.status_code == 404
+            else "Ta stran tega dejanja ne podpira."
+        )
+        predloge: Jinja2Templates = request.app.state.predloge
+        return predloge.TemplateResponse(
+            request, "najdena-ni.html", {"sporocilo": sporocilo}, status_code=izjema.status_code
+        )
+
+    return await http_exception_handler(request, izjema)  # type: ignore[arg-type]
