@@ -67,7 +67,20 @@ STATUSI: dict[str, str] = {
     "failed": "napaka",
 }
 
+#: Oznaka za obdelan zapis, s katerega model ni znal brati.
+#:
+#: Petega statusa namenoma ni: klic je uspel in bil plačan, torej to ni napaka
+#: obdelave. Razliko nosi polje `readable`, oznaka pa mora povedati oboje —
+#: „obdelano" samo bi bilo v tem primeru zavajajoče (`docs/plan/V1-R03.md`).
+STATUS_NEBERLJIVO = "obdelano — slika ni berljiva"
 
-def oznaka_statusa(status: str) -> str:
-    """Stanje obdelave za prikaz; neznano stanje pokaže dobesedno."""
+
+def oznaka_statusa(status: str, readable: bool | None = None) -> str:
+    """Stanje obdelave za prikaz; neznano stanje pokaže dobesedno.
+
+    `readable` je pomemben samo pri `ready`; pri ostalih stanjih je `None`,
+    ker obdelave, ki bi to lahko povedala, še ni bilo.
+    """
+    if status == "ready" and readable is False:
+        return STATUS_NEBERLJIVO
     return STATUSI.get(status, status)

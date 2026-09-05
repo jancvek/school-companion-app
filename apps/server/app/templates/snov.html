@@ -37,14 +37,105 @@
 
         <dt>Identifikator</dt>
         <dd>{{ snov.id }}</dd>
+
+        {# Ime modela in tokeni stojijo ob ostalih metapodatkih in ne v sledi
+           spodaj: to je podatek, ki ga operater primerja med slikami, ne
+           gradivo za razhroščevanje. Cene ne računamo — cenik v nastavitvah
+           bi se staral neopazno (`docs/plan/V1-R03.md`). #}
+        {% if snov.model %}
+          <dt>Model</dt>
+          <dd>{{ snov.model }}</dd>
+
+          <dt>Porabljeni tokeni</dt>
+          <dd>{{ snov.vhodni_tokeni }} vhodnih, {{ snov.izhodni_tokeni }} izhodnih</dd>
+        {% endif %}
       </dl>
 
-      {# Prepis, vprašanja, poslani prompt in odgovor modela pridejo z V1-R03;
-         v tej zahtevi jih v bazi še ni. #}
+      {# Gumb je `POST` in ne povezava: ponovna obdelava zavrže prejšnji
+         rezultat in stane nov klic (`docs/odlocitve/ADR-009`). Med obdelavo
+         ga ni — takrat ne bi naredil ničesar. #}
+      {% if snov.ponovna_obdelava_mozna %}
+        <form method="post" action="/admin/materials/{{ snov.id }}/reprocess">
+          <button class="gumb gumb-obdelava" type="submit">Pošlji v obdelavo</button>
+        </form>
+        <p class="drobno">
+          Zavrže dosedanji prepis, povzetek in vprašanja ter sproži nov klic
+          modela.
+        </p>
+      {% else %}
+        <p class="drobno">
+          Zapis je pravkar v obdelavi. Osveži stran čez nekaj trenutkov.
+        </p>
+      {% endif %}
 
       <a class="gumb" href="/admin/materials/{{ snov.id }}/delete">Izbriši sliko</a>
       <br>
       <a class="nazaj" href="/admin/subjects/{{ snov.koda|urlencode }}">← Nazaj na {{ snov.koda }}</a>
     </div>
   </div>
+
+  {% if snov.status == "failed" %}
+    <section class="izid">
+      <h2>Obdelava ni uspela</h2>
+      <p class="napaka">{{ snov.napaka }}</p>
+    </section>
+  {% elif snov.status == "ready" and snov.berljivo is false %}
+    <section class="izid">
+      <h2>Slika ni berljiva</h2>
+      <p class="opozorilo">
+        Model s te slike ni znal brati učne snovi, zato prepisa in vprašanj ni.
+        Slika je verjetno zamegljena, prazna ali posneta pod prevelikim kotom.
+      </p>
+    </section>
+  {% elif snov.status == "ready" %}
+    <section class="izid">
+      <h2>Povzetek</h2>
+      <p>{{ snov.povzetek }}</p>
+
+      <h2>Vprašanja</h2>
+      <ol class="vprasanja">
+        {% for vprasanje in snov.vprasanja %}
+          <li>
+            <p class="vprasanje">{{ vprasanje.vprasanje }}</p>
+            <p class="odgovor">{{ vprasanje.odgovor }}</p>
+          </li>
+        {% endfor %}
+      </ol>
+
+      <h2>Prepis</h2>
+      {# `pre` in ne `p`: prepis nosi prelome vrstic s slike in prav ti so
+         del tega, kar je bilo na strani. #}
+      <pre class="besedilo">{{ snov.prepis }}</pre>
+    </section>
+  {% endif %}
+
+  {% if snov.ima_sled %}
+    {# Zloženo privzeto: to je gradivo za razhroščevanje, ne za vsakdanji
+       pregled. `details` je HTML in ne JavaScript — stran ostane brez skript
+       (kriterij V1-R04). #}
+    <section class="izid">
+      <h2>Kaj je bilo poslano in kaj vrnjeno</h2>
+
+      {% if snov.prompt %}
+        <details>
+          <summary>Poslani prompt</summary>
+          <pre class="besedilo">{{ snov.prompt }}</pre>
+        </details>
+      {% endif %}
+
+      {% if snov.surov_odgovor %}
+        <details>
+          <summary>Surov odgovor modela</summary>
+          <pre class="besedilo">{{ snov.surov_odgovor }}</pre>
+        </details>
+      {% endif %}
+
+      {% if not snov.model %}
+        <p class="drobno">
+          Imena modela ni — do klica ni prišlo ali pa je odpovedal, preden je
+          storitev odgovorila.
+        </p>
+      {% endif %}
+    </section>
+  {% endif %}
 {% endblock %}
