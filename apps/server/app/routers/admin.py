@@ -286,6 +286,15 @@ def izbrisi(
 
     pobrisi_sliko(Path(material.image_path))
 
+    # Stran predmeta zna biti po tem brisanju 404: koda, ki ni na seznamu
+    # desetih, obstaja samo, dokler ima kakšno sliko. Brisanje zadnje bi
+    # operaterja poslalo na „Tega ni". Zahteva pravi „preusmeri na seznam
+    # predmeta", ne „na stran z napako", zato v tem edinem primeru pelje na
+    # pregled. Znan predmet ostane dosegljiv tudi prazen.
+    ostanek = repozitorij.seznam_po_predmetu(material.subject)
+    if not ostanek and poisci_predmet(material.subject) is None:
+        return RedirectResponse(PREDPONA, status_code=303)
+
     # 303 in ne 302: po `POST` mora brskalnik naslednjo zahtevo poslati kot
     # `GET`, sicer osvežitev strani ponovi brisanje.
     # Koda gre skozi `quote`: `?` in `#` bi glavo `Location` prerezala na

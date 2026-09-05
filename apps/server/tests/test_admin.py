@@ -223,15 +223,20 @@ class TestPodrobnosti:
         odgovor = odjemalec.get(f"/admin/materials/{UUID_ENA}")
 
         assert odgovor.status_code == 200
-        assert UUID_ENA in odgovor.text
-        assert "MAT" in odgovor.text
-        assert "4. 9. 2026 ob 09:30" in odgovor.text  # čas posnetka
-        assert "4. 9. 2026 ob 10:00" in odgovor.text  # čas prejema
-        assert "2 kB" in odgovor.text
+        # Trditve so vezane na izpisano polje, ne na golo pojavitev v besedilu.
+        # `UUID_ENA in besedilo` je bilo izpolnjeno že z naslovom slike, „MAT"
+        # pa s povratno povezavo — stran brez teh polj bi ostala zelena.
+        assert f"<dd>{UUID_ENA}</dd>" in odgovor.text
+        assert "Matematika" in odgovor.text
+        assert "<dd>4. 9. 2026 ob 09:30</dd>" in odgovor.text  # čas posnetka
+        assert "<dd>4. 9. 2026 ob 10:00</dd>" in odgovor.text  # čas prejema
+        assert "<dd>2 kB</dd>" in odgovor.text
+        assert "čaka na obdelavo" in odgovor.text
         # Brez te trditve bi kriterij „s sliko v polni velikosti" ostal
         # nedokazan: odstranitev <img> s strani ni podrla nobenega testa.
         assert f'src="/admin/materials/{UUID_ENA}/image"' in odgovor.text
-        assert str(pot.name) in odgovor.text
+        # Cela pot, ne le ime datoteke: kriterij pravi „pot do datoteke".
+        assert f"<dd>{pot}</dd>" in odgovor.text
         assert "čaka na obdelavo" in odgovor.text
 
     def test_ima_gumb_za_brisanje(
@@ -265,6 +270,7 @@ class TestPodrobnosti:
 
         assert odgovor.status_code == 200
         assert "slike na disku pa ni" in odgovor.text
+        assert "<dd>datoteke na disku ni</dd>" in odgovor.text
 
     def test_neznan_id_da_404_kot_html(self, odjemalec: TestClient) -> None:
         odgovor = odjemalec.get(f"/admin/materials/{UUID_ENA}")
@@ -393,14 +399,44 @@ class TestBrisanje:
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
         # `?` bi glavo `Location` prerezal na poizvedbo in operater bi pristal
-        # na predmetu „A", ne na „A?B".
-        zapisi(motor, slike, subject="A?B")
+        # na predmetu „A", ne na „A?B". Zapisa sta dva, da predmet po brisanju
+        # še obstaja — sicer preusmeritev po pravilu pelje na pregled.
+        zapisi(motor, slike, UUID_ENA, subject="A?B")
+        zapisi(motor, slike, UUID_DVA, subject="A?B")
 
         odgovor = odjemalec.post(
             f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False
         )
 
         assert odgovor.headers["location"] == "/admin/subjects/A%3FB"
+
+    def test_brisanje_zadnje_slike_neznanega_predmeta_pelje_na_pregled(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Predmet, ki ni med desetimi, obstaja samo, dokler ima sliko. Brez
+        # tega bi preusmeritev pristala na strani „Tega ni".
+        zapisi(motor, slike, subject="XXX")
+
+        odgovor = odjemalec.post(
+            f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False
+        )
+
+        assert odgovor.headers["location"] == "/admin"
+        assert odjemalec.get(odgovor.headers["location"]).status_code == 200
+
+    def test_brisanje_zadnje_slike_znanega_predmeta_pelje_na_predmet(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Znan predmet ostane dosegljiv tudi prazen — tam je sporočilo, da
+        # slik ni, in to je pravi konec brisanja.
+        zapisi(motor, slike, subject="MAT")
+
+        odgovor = odjemalec.post(
+            f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False
+        )
+
+        assert odgovor.headers["location"] == "/admin/subjects/MAT"
+        assert odjemalec.get(odgovor.headers["location"]).status_code == 200
 
     def test_brisanje_ne_pobrise_sosedov(
         self, odjemalec: TestClient, motor: Engine, slike: Path
