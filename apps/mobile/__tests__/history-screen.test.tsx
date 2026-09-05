@@ -1,7 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import HistoryForSubjectScreen from '../app/zgodovina/[subject]';
-import { createMaterialsTable, insertMaterial } from '@/db/materials';
+import { insertMaterial } from '@/db/materials';
+import { migriraj } from '@/db/migrations';
+import { SyncProvider } from '@/sync/use-sync';
 import type { Material } from '@/types';
 
 import { createTestDatabase } from './test-database';
@@ -22,6 +24,9 @@ function material(overrides: Partial<Material> = {}): Material {
     taken_at: '2026-09-01T10:00:00.000Z',
     file_uri: '',
     sync_status: 'pending',
+    sync_attempts: 0,
+    last_attempt_at: null,
+    sync_error: null,
     ...overrides,
   };
   // Ime datoteke sledi id-ju, tako kot v `saveCapture`.
@@ -33,7 +38,7 @@ let db: ReturnType<typeof createTestDatabase>;
 beforeEach(async () => {
   jest.clearAllMocks();
   db = createTestDatabase();
-  await createMaterialsTable(db);
+  await migriraj(db);
   sqlite.stanje.db = db;
   usmerjevalnik.stanje.params = { subject: 'MAT' };
 });
@@ -109,5 +114,87 @@ describe('zgodovina predmeta', () => {
     // ne le surove napake.
     expect(screen.getByText(/Vrni se in poskusi znova/)).toBeTruthy();
     expect(screen.getByText(/baza je zaklenjena/)).toBeTruthy();
+  });
+});
+
+describe('stanje prenosa v zgodovini', () => {
+  it('vsako stanje ima svojo oznako', async () => {
+    await insertMaterial(db, material({ id: 'a', sync_status: 'pending' }));
+    await insertMaterial(db, material({ id: 'b', sync_status: 'synced' }));
+    await insertMaterial(db, material({ id: 'c', sync_status: 'failed' }));
+
+    await render(<HistoryForSubjectScreen />);
+
+    expect(await screen.findByTestId('stanje-prenosa-pending')).toBeTruthy();
+    expect(screen.getByTestId('stanje-prenosa-synced')).toBeTruthy();
+    expect(screen.getByTestId('stanje-prenosa-failed')).toBeTruthy();
+  });
+
+  it('oznake so v slovenščini in povedo stanje', async () => {
+    await insertMaterial(db, material({ id: 'a', sync_status: 'pending' }));
+
+    await render(<HistoryForSubjectScreen />);
+
+    expect(await screen.findByText('Čaka na prenos')).toBeTruthy();
+  });
+
+  it('gumb „Poskusi znova" je viden samo, kadar je kaj neuspelo', async () => {
+    await insertMaterial(db, material({ id: 'a', sync_status: 'pending' }));
+
+    await render(<HistoryForSubjectScreen />);
+
+    await screen.findAllByTestId('posnetek');
+    expect(screen.queryByTestId('poskusi-znova')).toBeNull();
+  });
+
+  it('gumb se pokaže ob neuspelem zapisu', async () => {
+    await insertMaterial(db, material({ id: 'a', sync_status: 'failed' }));
+
+    await render(<HistoryForSubjectScreen />);
+
+    expect(await screen.findByTestId('poskusi-znova')).toBeTruthy();
+  });
+});
+
+describe('gumb „Poskusi znova"', () => {
+  it('vrne neuspel zapis v vrsto in počisti napako', async () => {
+    await insertMaterial(
+      db,
+      material({ id: 'a', sync_status: 'failed', sync_error: 'strežnik je zavrnil ključ' }),
+    );
+    const prenesiEno = jest.fn(() => new Promise<never>(() => {}));
+
+    await render(
+      <SyncProvider db={db} nastavitve={null} prenesiEno={prenesiEno}>
+        <HistoryForSubjectScreen />
+      </SyncProvider>,
+    );
+
+    await fireEvent.press(await screen.findByTestId('poskusi-znova'));
+
+    await waitFor(async () => {
+      const [vrstica] = await db.getAllAsync<Material>(
+        'SELECT * FROM materials WHERE id = ?',
+        ['a'],
+      );
+      expect(vrstica.sync_status).toBe('pending');
+      expect(vrstica.sync_error).toBeNull();
+    });
+  });
+
+  it('po dotiku gumba seznam pokaže novo stanje in gumb izgine', async () => {
+    await insertMaterial(db, material({ id: 'a', sync_status: 'failed' }));
+
+    await render(
+      <SyncProvider db={db} nastavitve={null}>
+        <HistoryForSubjectScreen />
+      </SyncProvider>,
+    );
+
+    await fireEvent.press(await screen.findByTestId('poskusi-znova'));
+
+    // Brez osvežitve seznama bi gumb izgledal, kot da ni naredil ničesar.
+    expect(await screen.findByTestId('stanje-prenosa-pending')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByTestId('poskusi-znova')).toBeNull());
   });
 });

@@ -1,0 +1,35 @@
+# Predloga za `apps/server/.env`. Prava datoteka NI v repozitoriju.
+# Kopiraj v `.env` in izpolni.
+#
+# To datoteko prebere **Docker Compose**, da razreši `${API_KEY}` in podobno,
+# in vrednosti poda vsebniku prek `environment:`. Strežnik sam `.env` ne bere:
+# `env_file` bi bil relativen na trenutno delovno mapo, zato bi se isti ukaz
+# obnašal različno glede na to, od kod je pognan.
+#
+# Zato pri ročnem zagonu mimo Compose (razvoj) spremenljivke izvozi sam, npr.:
+#   $env:API_KEY = "..."; uvicorn app.main:create_app --factory
+#
+# Ime te datoteke ni `.env.primer`, kot je predvideval plan: dovoljenjska
+# plast te seje zavrne pisanje vsake datoteke, ki se ujema z `.env*`.
+# Vsebina je ista — sama imena spremenljivk, brez vrednosti.
+
+# Statični ključ, ki ga telefon pošlje v glavi `X-API-Key`.
+# Vsaj 16 znakov, sicer se strežnik ne zažene — prazen ključ bi spustil skozi
+# vsakogar, ki pošlje prazno glavo.
+# Naredi ga naključno, npr. v PowerShellu:
+#   [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Max 256 }))
+API_KEY=
+
+# Povezava do Postgresa. V Docker Compose je gostitelj ime servisa `db`.
+DATABASE_URL=postgresql+psycopg://solski:zamenjaj-me@db:5432/solski
+
+# Geslo mora biti isto kot v DATABASE_URL — bere ga servis `db`.
+POSTGRES_PASSWORD=zamenjaj-me
+
+# Kam se zapisujejo slike znotraj vsebnika.
+IMAGES_DIR=/data/images
+
+# Naslov, na katerem posluša API. Vpiši Tailscale naslov tega stroja
+# (`tailscale ip -4`), da strežnik ni dosegljiv iz domačega omrežja ali
+# interneta. Za preizkus na istem stroju je smiselno 127.0.0.1.
+BIND_ADDRESS=127.0.0.1
