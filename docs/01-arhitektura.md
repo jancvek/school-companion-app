@@ -180,6 +180,13 @@ razširitev `vector` — vektorskih stolpcev še ni, iskanje po pomenu je V2.
 že izrecno nastavljen**; obratna prednost bi pomenila, da se testi migracije
 povežejo na živo bazo.
 
+Isti `env.py` kliče `fileConfig(..., disable_existing_loggers=False)`. Privzeti
+`True` utiša vse že ustvarjene zapisovalnike: v produkciji je to nevidno, ker
+`alembic upgrade head` teče kot svoj proces pred `uvicorn`, v testih pa Alembic
+teče v istem procesu in bi migracija tiho ugasnila dnevnik aplikacije za vse
+teste za sabo. Odkrito v V1-R03, ko je test dnevniškega zapisa ob manjkajočem
+`OPENAI_API_KEY` padel samo v celotni zbirki, ne pa sam.
+
 Slike živijo v `/data/images/<id>.jpg`. Zapis gre najprej v
 `/data/images/.tmp/` pod enoličnim imenom in se na končno mesto premakne
 atomarno; vrstica v bazi nastane šele za datoteko. Prekinjen prenos zato ne
@@ -258,6 +265,10 @@ storitve, ne naša invarianta, in ne zna povedati „med 5 in 10 vprašanj" —
 tokenov. Brez tega primerjave med modeli, ki jo ADR-008 predvideva, ne bo
 mogoče narediti z dejanskimi podatki. Cene v evre ne računamo — cenik v
 nastavitvah bi se staral neopazno.
+
+Zaustavitev strežnika ne čaka ne celega razmika ne cele serije: dogodek
+ustavitve gre tudi v obhod, ki ga pogleda **med** zapisi. Zapis, ki je takrat
+že v teku, se dokonča — prekinjen klic bi bil plačan in zavržen.
 
 **Znana omejitev: obdelava je vezana na en proces `api`.** Obnovitev obtičalih
 ob zagonu stoji na sklepu „ta hip ni v obdelavi nič", ki drži samo pri enem
