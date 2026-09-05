@@ -14,7 +14,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
-from app.models import STATUS_NOV, Material
+from app.models import (
+    STATUS_NAPAKA,
+    STATUS_NOV,
+    STATUS_PRIPRAVLJEN,
+    STATUS_V_OBDELAVI,
+    Material,
+    Question,
+)
 from tests.conftest import KLJUC
 
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
@@ -52,6 +59,51 @@ def zapisi(
         seja.commit()
 
     return pot
+
+
+def obdelaj(
+    motor: Engine,
+    material_id: str = UUID_ENA,
+    *,
+    status: str = STATUS_PRIPRAVLJEN,
+    readable: bool | None = True,
+    koliko_vprasanj: int = 5,
+    error: str | None = None,
+) -> None:
+    """Zapisu doda izid obdelave, kot bi ga zapisal worker (V1-R03).
+
+    Neposredno v bazo in ne skozi obdelavo: ta stran bere stanje, ne poti, po
+    kateri je stanje nastalo — isti razlog kot pri `zapisi`.
+    """
+    with Session(motor) as seja:
+        material = seja.get(Material, material_id)
+        assert material is not None
+        material.status = status
+        material.readable = readable
+        material.transcript = "Delci snovi se gibljejo." if readable else None
+        material.summary = "Zgradba snovi." if readable else None
+        material.prompt = "POSLANI PROMPT ZA MODEL"
+        material.raw_response = '{"readable": true}'
+        material.model = "gpt-4.1-2025-04-14"
+        material.input_tokens = 1500
+        material.output_tokens = 2000
+        material.error = error
+        material.questions = [
+            Question(
+                id=f"{material_id}-v{i}",
+                position=i,
+                question=f"Vprašanje {i}?",
+                answer=f"Odgovor {i}.",
+            )
+            for i in range(1, koliko_vprasanj + 1)
+        ]
+        seja.commit()
+
+
+def stevilo_vprasanj(motor: Engine) -> int:
+    """Koliko vrstic je v tabeli `questions`."""
+    with Session(motor) as seja:
+        return seja.scalar(select(func.count()).select_from(Question)) or 0
 
 
 def stevilo_vrstic(motor: Engine) -> int:
@@ -809,3 +861,265 @@ class TestOblikovanje:
 
         assert oznaka_statusa("nekaj-cisto-drugega") == "nekaj-cisto-drugega"
         assert oznaka_statusa("ready") == "obdelano"
+
+
+class TestPrikazObdelave:
+    """Stran s podrobnostmi mora pokazati izid obdelave (V1-R03)."""
+
+    def test_obdelan_zapis_pokaze_prepis_povzetek_in_vprasanja(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        obdelaj(motor, koliko_vprasanj=6)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "Delci snovi se gibljejo." in besedilo
+        assert "Zgradba snovi." in besedilo
+        for i in range(1, 7):
+            assert f"Vprašanje {i}?" in besedilo
+            assert f"Odgovor {i}." in besedilo
+
+    def test_obdelan_zapis_pokaze_model_in_tokene(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Kriterij zahteva ime modela in porabo tokenov.
+
+        Iz tega se dela primerjava med modeli (ADR-008), zato mora biti vidno
+        brez brskanja po bazi.
+        """
+        zapisi(motor, slike)
+        obdelaj(motor)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "gpt-4.1-2025-04-14" in besedilo
+        assert "1500" in besedilo
+        assert "2000" in besedilo
+
+    def test_obdelan_zapis_pokaze_poslani_prompt_in_surov_odgovor(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        obdelaj(motor)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "POSLANI PROMPT ZA MODEL" in besedilo
+        assert "Surov odgovor modela" in besedilo
+
+    def test_neobdelan_zapis_sledi_ne_kaze(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Prazni razdelki so šum. Dokler obdelave ni bilo, ni česa pokazati."""
+        zapisi(motor, slike)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "Poslani prompt" not in besedilo
+        assert "Vprašanja" not in besedilo
+        assert "čaka na obdelavo" in besedilo
+
+    def test_neuspela_obdelava_pokaze_napako_in_surov_odgovor(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Kriterij: stran pokaže besedilo napake, kadar je `status='failed'`."""
+        zapisi(motor, slike)
+        obdelaj(
+            motor,
+            status=STATUS_NAPAKA,
+            readable=None,
+            koliko_vprasanj=0,
+            error="Storitev OpenAI je zavrnila ključ (HTTP 401).",
+        )
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "Obdelava ni uspela" in besedilo
+        assert "zavrnila ključ (HTTP 401)" in besedilo
+        # Surov odgovor je pri napaki pogosto edini dokaz, zakaj je padlo.
+        assert "Surov odgovor modela" in besedilo
+
+    def test_neberljiva_slika_je_oznacena_in_nima_vprasanj(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Petega statusa ni; „obdelano" samo bi bilo tu zavajajoče."""
+        zapisi(motor, slike)
+        obdelaj(motor, readable=False, koliko_vprasanj=0)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "obdelano — slika ni berljiva" in besedilo
+        assert "Slika ni berljiva" in besedilo
+        assert "Vprašanja" not in besedilo
+
+    def test_stanje_je_vidno_tudi_v_seznamu_predmeta(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        obdelaj(motor, readable=False, koliko_vprasanj=0)
+
+        besedilo = odjemalec.get("/admin/subjects/MAT").text
+
+        assert "obdelano — slika ni berljiva" in besedilo
+
+
+class TestPonovnaObdelava:
+    """Gumb „Pošlji v obdelavo"."""
+
+    def test_vrne_zapis_v_vrsto_in_preusmeri_na_podrobnosti(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        obdelaj(motor)
+
+        odgovor = odjemalec.post(
+            f"/admin/materials/{UUID_ENA}/reprocess", follow_redirects=False
+        )
+
+        assert odgovor.status_code == 303
+        assert odgovor.headers["location"] == f"/admin/materials/{UUID_ENA}"
+        with Session(motor) as seja:
+            material = seja.get(Material, UUID_ENA)
+            assert material is not None
+            assert material.status == STATUS_NOV
+
+    def test_zavrze_prejsnji_rezultat_in_vprasanja(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """ADR-009: material ima največ en niz vprašanj."""
+        zapisi(motor, slike)
+        obdelaj(motor)
+        assert stevilo_vprasanj(motor) == 5
+
+        odjemalec.post(f"/admin/materials/{UUID_ENA}/reprocess")
+
+        assert stevilo_vprasanj(motor) == 0
+        with Session(motor) as seja:
+            material = seja.get(Material, UUID_ENA)
+            assert material is not None
+            assert material.transcript is None
+            assert material.model is None
+            assert material.input_tokens is None
+
+    def test_dela_tudi_iz_stanja_napake(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        obdelaj(motor, status=STATUS_NAPAKA, readable=None, koliko_vprasanj=0, error="padlo")
+
+        odjemalec.post(f"/admin/materials/{UUID_ENA}/reprocess")
+
+        with Session(motor) as seja:
+            material = seja.get(Material, UUID_ENA)
+            assert material is not None
+            assert material.status == STATUS_NOV
+            assert material.error is None
+
+    def test_gumb_ni_navadna_povezava(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """`GET` na to pot ne sme ničesar spremeniti.
+
+        Isto pravilo kot pri brisanju (ADR-006): dejanje je nepovratno in
+        stane plačan klic, zato ga predpomnilnik ali predogled povezave ne
+        smeta sprožiti.
+        """
+        zapisi(motor, slike)
+        obdelaj(motor)
+
+        odgovor = odjemalec.get(f"/admin/materials/{UUID_ENA}/reprocess")
+
+        assert odgovor.status_code == 405
+        assert "Ta stran tega dejanja ne podpira." in odgovor.text
+        with Session(motor) as seja:
+            material = seja.get(Material, UUID_ENA)
+            assert material is not None
+            assert material.status == STATUS_PRIPRAVLJEN
+        assert stevilo_vprasanj(motor) == 5
+
+    def test_neznan_zapis_vrne_stran_in_ne_sled_izjeme(self, odjemalec: TestClient) -> None:
+        odgovor = odjemalec.post(f"/admin/materials/{UUID_DVA}/reprocess")
+
+        assert odgovor.status_code == 404
+        assert "Zapisa s tem identifikatorjem na strežniku ni." in odgovor.text
+
+    def test_zapisa_v_obdelavi_ne_spremeni(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Tam pravkar teče klic; njegov izid bi prišel čez to, kar bi počistili."""
+        zapisi(motor, slike)
+        obdelaj(motor, status=STATUS_V_OBDELAVI, readable=None, koliko_vprasanj=3)
+
+        odgovor = odjemalec.post(
+            f"/admin/materials/{UUID_ENA}/reprocess", follow_redirects=False
+        )
+
+        assert odgovor.status_code == 303
+        with Session(motor) as seja:
+            material = seja.get(Material, UUID_ENA)
+            assert material is not None
+            assert material.status == STATUS_V_OBDELAVI
+        assert stevilo_vprasanj(motor) == 3
+
+    def test_med_obdelavo_gumba_ni(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Gumb, ki ne naredi ničesar, laže."""
+        zapisi(motor, slike)
+        obdelaj(motor, status=STATUS_V_OBDELAVI, readable=None, koliko_vprasanj=0)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "Pošlji v obdelavo" not in besedilo
+        assert "pravkar v obdelavi" in besedilo
+
+    def test_gumb_je_na_strani_obdelanega_zapisa(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        obdelaj(motor)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "Pošlji v obdelavo" in besedilo
+        assert f'action="/admin/materials/{UUID_ENA}/reprocess"' in besedilo
+        assert 'method="post"' in besedilo
+
+
+class TestBrisanjeZVprasanji:
+    """Regresija V1-R04: brisanje mora pobrisati tudi vprašanja.
+
+    Brez kaskade bi bila to na Postgresu kršitev tujega ključa, na SQLite pa
+    bi tiho pustila osirotela vprašanja — zbirka bi bila zelena, produkcija
+    ne (odločitev 6 v `docs/plan/V1-R03.md`).
+    """
+
+    def test_brisanje_pobrise_tudi_vprasanja(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        pot = zapisi(motor, slike)
+        obdelaj(motor)
+        assert stevilo_vprasanj(motor) == 5
+
+        odgovor = odjemalec.post(
+            f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False
+        )
+
+        assert odgovor.status_code == 303
+        assert stevilo_vrstic(motor) == 0
+        assert stevilo_vprasanj(motor) == 0
+        assert not pot.exists()
+
+    def test_brisanje_ne_pobrise_vprasanj_drugega_materiala(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Kaskada mora seči natanko do otrok tega zapisa in nič dlje."""
+        zapisi(motor, slike, UUID_ENA)
+        zapisi(motor, slike, UUID_DVA)
+        obdelaj(motor, UUID_ENA, koliko_vprasanj=5)
+        obdelaj(motor, UUID_DVA, koliko_vprasanj=4)
+
+        odjemalec.post(f"/admin/materials/{UUID_ENA}/delete")
+
+        assert stevilo_vprasanj(motor) == 4

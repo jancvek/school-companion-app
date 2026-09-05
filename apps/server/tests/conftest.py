@@ -13,8 +13,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.db import naredi_tovarno_sej
 from app.main import create_app
 from app.models import Base
 from app.settings import Settings
@@ -53,6 +55,16 @@ def motor() -> Iterator[Engine]:
     Base.metadata.create_all(motor)
     yield motor
     motor.dispose()
+
+
+@pytest.fixture
+def tovarna_sej(motor: Engine) -> sessionmaker[Session]:
+    """Tovarna sej nad testno bazo.
+
+    Obdelava (V1-R03) dela mimo zahtev HTTP in ima za vsak korak svojo sejo,
+    zato jo testi poganjajo neposredno nad tem, ne prek odjemalca.
+    """
+    return naredi_tovarno_sej(motor)
 
 
 @pytest.fixture
