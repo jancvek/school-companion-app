@@ -17,6 +17,7 @@ naredil, obdelava ne ve — v testih je to preprosta funkcija.
 
 import base64
 import json
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,7 @@ from typing import Any, Protocol
 
 from openai import (
     APIConnectionError,
+    APIError,
     APIStatusError,
     APITimeoutError,
     OpenAI,
@@ -31,6 +33,8 @@ from openai import (
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.settings import Settings
+
+dnevnik = logging.getLogger(__name__)
 
 #: Najmanj in največ vprašanj, ki jih sme vrniti model (kriterij: 5-10).
 #:
@@ -316,6 +320,19 @@ def naredi_klicalca(nastavitve: Settings, odjemalec: _OdjemalecKlepeta | None = 
             ) from napaka
         except APIStatusError as napaka:
             raise NapakaObdelave(_opis_statusa(napaka), prompt=PROMPT) from napaka
+        except APIError as napaka:
+            # Vse ostalo, kar zna vreči `openai` — npr.
+            # `APIResponseValidationError`, ki ni podrazred nobene od zgornjih
+            # treh. Brez te veje bi taka napaka ušla do splošnega lovilca v
+            # `app/obdelava.py` in zapis bi končal v `failed` **brez sledi**,
+            # čeprav je bila zahteva poslana in plačana. Prav to je primer,
+            # kjer kriterij „shrani se poslani prompt" največ pomeni.
+            dnevnik.exception("Klic modela je odpovedal z napako knjižnice openai.")
+            raise NapakaObdelave(
+                f"Klic modela ni uspel ({type(napaka).__name__}). "
+                "Podrobnosti so v dnevniku strežnika.",
+                prompt=PROMPT,
+            ) from napaka
 
         uporaba = getattr(odgovor, "usage", None)
         vhodni = getattr(uporaba, "prompt_tokens", None)

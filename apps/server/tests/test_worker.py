@@ -10,8 +10,9 @@ obremenjenem stroju enkrat prekratek.
 """
 
 import asyncio
+import logging
 import os
-import time
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -199,27 +200,37 @@ class TestPriklopNaAplikacijo:
             images_dir=slike,
             worker_interval_seconds=0.01,
         )
-        aplikacija = create_app(
-            nastavitve=nastavitve, motor=motor, klicalec=lambda pot: izid
-        )
+        obdelan = threading.Event()
+
+        def klicalec(pot: Path) -> IzidKlica:
+            obdelan.set()
+            return izid
+
+        aplikacija = create_app(nastavitve=nastavitve, motor=motor, klicalec=klicalec)
 
         with TestClient(aplikacija) as odjemalec:
             assert aplikacija.state.obdelovalec is not None
             # Zahteva na strežnik med tem, ko obdelava teče: preverba živosti
-            # ne sme čakati na klic modela. Zanka dela v svoji niti, zato se
-            # na izid čaka z rokom in ne s fiksnim spanjem.
+            # ne sme čakati na klic modela.
             assert odjemalec.get("/health").status_code == 200
-            rok = time.monotonic() + 5
-            while time.monotonic() < rok and preberi(motor).status != STATUS_PRIPRAVLJEN:
-                time.sleep(0.01)
+            assert obdelan.wait(timeout=10), "zanka modela ni poklicala"
 
+        # Bazo beremo šele **za** blokom: izhod iz `TestClient` počaka na
+        # `ustavi()`, ta pa na tekoči obhod, zato je zapis izida takrat že
+        # končan. Branje med tem, ko zanka teče, bi si z njo delilo eno samo
+        # SQLite povezavo (`StaticPool`) — in test bi bil občasno rdeč iz
+        # razloga, ki s strežnikom nima zveze.
         assert preberi(motor).status == STATUS_PRIPRAVLJEN
 
-    def test_kljuc_v_nastavitvah_naredi_klicalca(self, motor: Engine, slike: Path) -> None:
+    def test_kljuc_v_nastavitvah_naredi_klicalca(
+        self, motor: Engine, slike: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Brez podanega klicalca ga aplikacija zgradi sama — a le, če ključ je.
 
-        Odjemalec tu nastane, vendar se ne uporabi: `create_app` ne pošlje
-        nobene zahteve, `TestClient` pa se v tem testu ne odpre.
+        `naredi_klicalca` je podtaknjen, zato pravi `openai.OpenAI` odjemalec
+        v tej zbirki nikoli ne nastane — kriterij plana pravi natanko to.
+        Preveri se, da je bil poklican **s temi** nastavitvami: klic z drugimi
+        bi pomenil, da ime modela iz nastavitev ne pride do klica (ADR-008).
         """
         nastavitve = Settings(
             api_key=KLJUC,
@@ -227,10 +238,41 @@ class TestPriklopNaAplikacijo:
             images_dir=slike,
             openai_api_key="ta-kljuc-obstaja",
         )
+        prejete: list[Settings] = []
+
+        def lazna_tovarna(podane: Settings) -> Callable[[Path], IzidKlica]:
+            prejete.append(podane)
+            return lambda pot: uspesen_izid()
+
+        monkeypatch.setattr("app.main.naredi_klicalca", lazna_tovarna)
 
         aplikacija = create_app(nastavitve=nastavitve, motor=motor)
 
         assert aplikacija.state.klicalec is not None
+        assert prejete == [nastavitve]
+
+    def test_brez_kljuca_gre_razlog_v_dnevnik(
+        self, aplikacija: FastAPI, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """ADR-009: odsotnost ključa je vidna **samo** v dnevniku.
+
+        Zato ta test: brez njega bi izbris tega zapisa naredil mirujočo
+        obdelavo popolnoma nevidno — slike bi se nabirale v „čaka na obdelavo"
+        in nikjer ne bi pisalo, zakaj. Robni primer v `docs/verzije/v1.md` in
+        vrstica „Brez ključa" v tabeli Test casi plana zahtevata prav to.
+        """
+        # Raven se nastavi na korenskem zapisovalniku: `caplog` svoj lovilec
+        # obesi tam, in življenjski cikel teče v drugi niti kot test.
+        with caplog.at_level(logging.WARNING), TestClient(aplikacija):
+            pass
+
+        opozorila = [
+            z.getMessage()
+            for z in caplog.records
+            if z.name == "app.main" and z.levelno >= logging.WARNING
+        ]
+        assert any("OPENAI_API_KEY" in z for z in opozorila), caplog.text
+        assert any("obdelava slik ne teče" in z for z in opozorila), caplog.text
 
 
 def test_material_v_obdelavi_ni_izmisljen(motor: Engine, slike: Path) -> None:

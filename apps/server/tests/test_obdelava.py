@@ -657,3 +657,78 @@ class TestSledJeCelaObVsakemIzidu:
         assert obdelaj_cakajoce(tovarna_sej, klicalec, slike) == 0
         assert preberi(motor).status == STATUS_NOV
 
+
+class TestUstavljanjeMedSerijo:
+    """Zaustavitev strežnika ne sme čakati cele serije čakajočih slik."""
+
+    def test_obhod_se_ustavi_med_zapisi(
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
+    ) -> None:
+        """Po prvem zapisu se obhod ozre na zastavico in neha.
+
+        Brez tega bi `ustavi()` pri dvajsetih čakajočih slikah in časovni
+        omejitvi 120 s blokiral zaustavitev do štirideset minut.
+        """
+        zapisi(motor, slike, UUID_ENA, taken_at="2026-09-04T07:00:00+00:00")
+        zapisi(motor, slike, UUID_DVA, taken_at="2026-09-04T09:00:00+00:00")
+        izid = uspesen_izid()
+        obdelanih = 0
+
+        def klicalec(pot: Path) -> IzidKlica:
+            nonlocal obdelanih
+            obdelanih += 1
+            return izid
+
+        # Zastavica je postavljena od začetka drugega kroga naprej.
+        assert obdelaj_cakajoce(tovarna_sej, klicalec, slike, lambda: obdelanih >= 1) == 1
+
+        assert obdelanih == 1
+        assert preberi(motor, UUID_ENA).status == STATUS_PRIPRAVLJEN
+        # Drugi ostane v vrsti in ga pobere naslednji zagon.
+        assert preberi(motor, UUID_DVA).status == STATUS_NOV
+
+    def test_zapis_ki_je_ze_v_teku_se_dokonca(
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
+    ) -> None:
+        """Prekinjen klic bi bil plačan in zavržen, zato se ne prekinja."""
+        zapisi(motor, slike)
+        izid = uspesen_izid()
+
+        def klicalec(pot: Path) -> IzidKlica:
+            return izid
+
+        # Zastavica je postavljena že pred prvim zapisom in obhod ne naredi nič.
+        assert obdelaj_cakajoce(tovarna_sej, klicalec, slike, lambda: True) == 0
+        assert preberi(motor).status == STATUS_NOV
+
+        # Brez zastavice gre isti zapis normalno skozi.
+        assert obdelaj_cakajoce(tovarna_sej, klicalec, slike) == 1
+        assert preberi(motor).status == STATUS_PRIPRAVLJEN
+
+    def test_izjema_pri_branju_po_prevzemu_sprosti_zapis(
+        self,
+        motor: Engine,
+        slike: Path,
+        tovarna_sej: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Od prevzema naprej mora zapis vsaka pot spraviti iz `processing`.
+
+        Tu odpove branje zapisa **takoj po** prevzemu — okno med dvema sejama,
+        ki je bilo prej zunaj `try`.
+        """
+        zapisi(motor, slike)
+        klicalec, klicane = klicalec_vrne(uspesen_izid())
+        izvirni = MaterialsRepository.poisci
+
+        def pokvarjeno_branje(self: MaterialsRepository, material_id: str) -> Material | None:
+            raise RuntimeError("baza je med prevzemom in branjem odpovedala")
+
+        monkeypatch.setattr(MaterialsRepository, "poisci", pokvarjeno_branje)
+
+        with pytest.raises(RuntimeError):
+            obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+
+        monkeypatch.setattr(MaterialsRepository, "poisci", izvirni)
+        assert klicane == []
+        assert preberi(motor).status == STATUS_NOV

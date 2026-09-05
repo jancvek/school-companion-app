@@ -11,6 +11,7 @@ ta čas bi po nepotrebnem držala povezavo in zaklenjeno vrstico.
 """
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -24,7 +25,10 @@ dnevnik = logging.getLogger(__name__)
 
 
 def obdelaj_cakajoce(
-    tovarna_sej: sessionmaker[Session], klicalec: Klicalec, images_dir: Path
+    tovarna_sej: sessionmaker[Session],
+    klicalec: Klicalec,
+    images_dir: Path,
+    naj_se_ustavi: Callable[[], bool] | None = None,
 ) -> int:
     """Obdela vse zapise, ki čakajo; vrne, koliko jih je obdelala.
 
@@ -33,12 +37,24 @@ def obdelaj_cakajoce(
 
     **Napaka pri enem zapisu ne sme ustaviti ostalih.** Zato je vsak zapis v
     svojem `try`; zanka nad njimi teče naprej tudi ob nepričakovani izjemi.
+
+    `naj_se_ustavi` se vpraša **med** zapisi. Brez tega bi zaustavitev
+    strežnika čakala celo serijo: pri dvajsetih čakajočih slikah in časovni
+    omejitvi 120 s je to do štirideset minut. Zapis, ki je takrat že v teku, se
+    dokonča — prekinjen klic bi bil plačan in zavržen.
     """
     with tovarna_sej() as seja:
         cakajoci = [material.id for material in MaterialsRepository(seja).seznam_novih()]
 
     obdelanih = 0
     for material_id in cakajoci:
+        if naj_se_ustavi is not None and naj_se_ustavi():
+            dnevnik.info(
+                "Obdelava se ustavlja; %d zapisov ostaja v vrsti za naslednji zagon.",
+                len(cakajoci) - obdelanih,
+            )
+            break
+
         try:
             if obdelaj_zapis(tovarna_sej, klicalec, images_dir, material_id):
                 obdelanih += 1
@@ -63,25 +79,27 @@ def obdelaj_zapis(
     drug, bodisi ni več v stanju `new`. To ni napaka.
     """
     with tovarna_sej() as seja:
-        repozitorij = MaterialsRepository(seja)
-        if not repozitorij.prevzemi_za_obdelavo(material_id):
+        if not MaterialsRepository(seja).prevzemi_za_obdelavo(material_id):
             return False
 
-        material = repozitorij.poisci(material_id)
-        if material is None:
-            # Zapis je nekdo izbrisal med prevzemom in branjem. Brisati ni
-            # česa in pisati ni kam.
-            return False
-
-        pot = Path(material.image_path)
-
-    # Vse od prevzema naprej je v enem `try`. `_izid_za` je pisan tako, da ne
-    # vrže, a „pisan tako" ni jamstvo: `Path.is_file` npr. pri zavrnjenem
-    # dostopu do mape vrže `PermissionError`. Če bi ta ušel mimo, bi zapis
-    # ostal v `processing` do naslednjega zagona strežnika — kriterij pa
-    # pravi, da tam ne obtiči.
+    # **Vse od prevzema naprej je v enem `try`.** Od trenutka, ko je zapis
+    # `processing`, ga mora vsaka pot izvedbe od tam tudi spraviti — sicer bi
+    # obtičal do naslednjega zagona strežnika, kriterij pa pravi, da tam ne
+    # obtiči. `_izid_za` je pisan tako, da napak klicalca ne spusti naprej, a
+    # „pisan tako" ni jamstvo: `Path.is_file` pri zavrnjenem dostopu do mape
+    # vrže `PermissionError`, odpoved baze pa lahko podre tudi branje zapisa
+    # ali zapis izida.
     try:
+        with tovarna_sej() as seja:
+            material = MaterialsRepository(seja).poisci(material_id)
+            if material is None:
+                # Zapis je nekdo izbrisal med prevzemom in branjem. Sprostiti
+                # ni česa in pisati ni kam.
+                return False
+            pot = Path(material.image_path)
+
         izid = _izid_za(klicalec, images_dir, pot, material_id)
+
         with tovarna_sej() as seja:
             MaterialsRepository(seja).zapisi_izid(material_id, izid)
     except Exception:

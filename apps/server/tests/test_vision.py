@@ -19,7 +19,12 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from openai import APIConnectionError, APIStatusError, APITimeoutError
+from openai import (
+    APIConnectionError,
+    APIResponseValidationError,
+    APIStatusError,
+    APITimeoutError,
+)
 
 from app.settings import Settings
 from app.vision import (
@@ -390,6 +395,10 @@ class TestNapakeStoritve:
             APIConnectionError(request=zahteva()),
             APIStatusError("nope", response=odziv_s_kodo(401), body=None),
             APIStatusError("nope", response=odziv_s_kodo(500), body=None),
+            # Ni podrazred nobene od zgornjih treh, je pa `APIError`. Brez
+            # lovilca zanjo bi ušla do splošnega lovilca v `app/obdelava.py`
+            # in zapis bi končal v `failed` brez sledi.
+            APIResponseValidationError(response=odziv_s_kodo(200), body=None),
         ]
 
         for izjema in izjeme:
@@ -404,3 +413,31 @@ class TestNapakeStoritve:
                     nastavitve_z(), LazenOdjemalec(odgovor=odgovor_storitve(vsebina))
                 )(slika)
             assert napaka.value.prompt == PROMPT, repr(vsebina)
+
+
+class TestNepricakovaneNapakeKnjiznice:
+    """Kar zna vreči `openai`, a ni ne časovna omejitev ne odgovor s statusom."""
+
+    def test_napaka_openai_ne_ubije_klicalca_in_ohrani_prompt(self, slika: Path) -> None:
+        odjemalec = LazenOdjemalec(
+            izjema=APIResponseValidationError(response=odziv_s_kodo(200), body=None)
+        )
+
+        with pytest.raises(NapakaObdelave) as napaka:
+            naredi_klicalca(nastavitve_z(), odjemalec)(slika)
+
+        assert napaka.value.prompt == PROMPT
+        assert "APIResponseValidationError" in napaka.value.sporocilo
+        # Sporočilo pove, kaj naj operaterka naredi, in ne kaže surove sledi.
+        assert "dnevniku strežnika" in napaka.value.sporocilo
+
+    def test_napaka_izven_knjiznice_gre_naprej(self, slika: Path) -> None:
+        """Kar ni `APIError`, ni naša domena — ujame jo obdelava, ne ta modul.
+
+        Brez te meje bi vsaka napaka v `sestavi_sporocila` ali v odjemalcu
+        izgledala kot napaka storitve.
+        """
+        odjemalec = LazenOdjemalec(izjema=ZeroDivisionError("delitev z nic"))
+
+        with pytest.raises(ZeroDivisionError):
+            naredi_klicalca(nastavitve_z(), odjemalec)(slika)

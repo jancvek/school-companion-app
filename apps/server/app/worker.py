@@ -56,8 +56,9 @@ class Obdelovalec:
 
     Ustavitev teče prek dogodka in ne prek preklica: preklic med `to_thread`
     ne prekine niti, ki že teče, dogodek pa poskrbi, da se zanka po koncu
-    trenutnega obhoda ne uspava znova. Zaustavitev strežnika zato ne čaka
-    celega razmika.
+    trenutnega obhoda ne uspava znova. Isti dogodek gre v `obdelaj_cakajoce`,
+    ki ga pogleda med zapisi — zaustavitev zato ne čaka ne celega razmika ne
+    cele serije, ampak kvečjemu en klic modela, ki je že v teku.
     """
 
     def __init__(
@@ -95,9 +96,17 @@ class Obdelovalec:
         dnevnik.info("Obdelava slik je ustavljena.")
 
     async def en_obhod(self) -> int:
-        """En obhod obdelave. Ločen zato, da se da preizkusiti brez časovnika."""
+        """En obhod obdelave. Ločen zato, da se da preizkusiti brez časovnika.
+
+        Obdelavi podamo dogodek ustavitve: obhod ga preveri med zapisi in se
+        ustavi, namesto da bi zaustavitev strežnika čakala celo serijo.
+        """
         return await asyncio.to_thread(
-            obdelaj_cakajoce, self._tovarna_sej, self._klicalec, self._images_dir
+            obdelaj_cakajoce,
+            self._tovarna_sej,
+            self._klicalec,
+            self._images_dir,
+            self._ustavi.is_set,
         )
 
     async def _zanka(self) -> None:
