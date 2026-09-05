@@ -44,7 +44,7 @@
 
       <a class="gumb" href="/admin/materials/{{ snov.id }}/delete">Izbriši sliko</a>
       <br>
-      <a class="nazaj" href="/admin/subjects/{{ snov.koda }}">← Nazaj na {{ snov.koda }}</a>
+      <a class="nazaj" href="/admin/subjects/{{ snov.koda|urlencode }}">← Nazaj na {{ snov.koda }}</a>
     </div>
   </div>
 {% endblock %}

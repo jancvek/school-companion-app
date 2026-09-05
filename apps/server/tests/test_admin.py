@@ -86,7 +86,9 @@ class TestSeznamPredmetov:
 
         assert odgovor.status_code == 200
         for koda in ("NAR", "MAT", "TJA", "GEO", "SLJ", "LUM", "ZGO", "TIT", "DKE", "GUM"):
-            assert koda in odgovor.text, f"predmeta {koda} ni na seznamu"
+            # Prek `vrstica_predmeta`, ne z `koda in besedilo`: „MAT" se ujame
+            # tudi znotraj „Matematika" in trditev ne bi dokazovala ničesar.
+            vrstica_predmeta(odgovor.text, koda)
         assert "Matematika" in odgovor.text
 
     def test_stevci_so_pravi(self, odjemalec: TestClient, motor: Engine, slike: Path) -> None:
@@ -140,6 +142,17 @@ class TestSeznamPredmeta:
 
         # Dva zapisa z različnim `taken_at`: obrnjen `ORDER BY` ta test podre.
         assert besedilo.index(UUID_DVA) < besedilo.index(UUID_ENA)
+
+    def test_slika_v_seznamu_vodi_na_podrobnosti(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Brez te trditve bi bilo mogoče povezavo odstraniti ali preusmeriti
+        # drugam, ne da bi kaj padlo: UUID je na strani tudi v `src` slike.
+        zapisi(motor, slike)
+
+        besedilo = odjemalec.get("/admin/subjects/MAT").text
+
+        assert f'href="/admin/materials/{UUID_ENA}"' in besedilo
 
     def test_slike_se_nalagajo_leno(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -220,6 +233,28 @@ class TestPodrobnosti:
         assert f'src="/admin/materials/{UUID_ENA}/image"' in odgovor.text
         assert str(pot.name) in odgovor.text
         assert "čaka na obdelavo" in odgovor.text
+
+    def test_ima_gumb_za_brisanje(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Kriterij pravi „gumb na strani s podrobnostmi odpre potrditveno
+        # stran". Vsi testi brisanja hodijo naravnost na URL, zato bi brez te
+        # trditve gumb lahko izginil in brisanje bi ostalo dosegljivo samo z
+        # ročno vtipkanim naslovom.
+        zapisi(motor, slike)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert f'href="/admin/materials/{UUID_ENA}/delete"' in besedilo
+
+    def test_povratna_povezava_je_ubezana_za_url(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, subject="A?B")
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert 'href="/admin/subjects/A%3FB"' in besedilo
 
     def test_manjkajoca_datoteka_ne_podre_strani(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -353,6 +388,19 @@ class TestBrisanje:
         assert odgovor.headers["location"] == "/admin/subjects/MAT"
         assert stevilo_vrstic(motor) == 0
         assert not pot.exists()
+
+    def test_preusmeritev_po_brisanju_je_ubezana(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # `?` bi glavo `Location` prerezal na poizvedbo in operater bi pristal
+        # na predmetu „A", ne na „A?B".
+        zapisi(motor, slike, subject="A?B")
+
+        odgovor = odjemalec.post(
+            f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False
+        )
+
+        assert odgovor.headers["location"] == "/admin/subjects/A%3FB"
 
     def test_brisanje_ne_pobrise_sosedov(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -603,6 +651,8 @@ class TestNeznanePoti:
         odgovor = odjemalec.post("/admin")
 
         assert odgovor.status_code == 405
+        # Privzeti ročnik pošlje `Allow`; prestreznik je ne sme zavreči.
+        assert odgovor.headers["allow"] == "GET"
         assert "text/html" in odgovor.headers["content-type"]
         assert '"detail"' not in odgovor.text
 
@@ -642,3 +692,43 @@ class TestPakiranje:
             "brisanje.html",
             "najdena-ni.html",
         }
+
+
+class TestBrezJavaScripta:
+    """Stran ne sme uporabljati JavaScripta.
+
+    Kriterij iz `docs/verzije/v1.md` in odločitev 1 v planu: vsa dinamika so
+    obrazci. Brez tega testa bi bila zahteva izpolnjena samo, dokler se je
+    nekdo spomni — dodan `<script>` ne bi podrl ničesar.
+    """
+
+    #: Vzorci, ki pomenijo, da se na strani izvaja koda.
+    VZORCI = ("<script", "javascript:", "onclick=", "onload=", "onerror=", "onsubmit=")
+
+    def test_v_predlogah_ni_javascripta(self) -> None:
+        from app.routers.admin import MAPA_PREDLOG
+
+        najdeno = [
+            f"{pot.name}: {vzorec}"
+            for pot in sorted(MAPA_PREDLOG.glob("*.html"))
+            for vzorec in self.VZORCI
+            if vzorec in pot.read_text(encoding="utf-8").lower()
+        ]
+
+        assert najdeno == []
+
+    def test_v_izrisani_strani_ni_javascripta(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Predloge so eno, izris drugo: skript bi lahko prišel tudi iz vsebine.
+        zapisi(motor, slike)
+
+        for pot in (
+            "/admin",
+            "/admin/subjects/MAT",
+            f"/admin/materials/{UUID_ENA}",
+            f"/admin/materials/{UUID_ENA}/delete",
+        ):
+            besedilo = odjemalec.get(pot).text.lower()
+            for vzorec in self.VZORCI:
+                assert vzorec not in besedilo, f"{pot} vsebuje {vzorec}"

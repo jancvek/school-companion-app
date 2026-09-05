@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request
@@ -267,10 +268,8 @@ def potrdi_brisanje(
 
 @router.post("/materials/{material_id}/delete")
 def izbrisi(
-    request: Request,
     material_id: str,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
-    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
 ) -> Response:
     """Izbriše zapis in njegovo datoteko."""
     # Najprej vrstica, nato datoteka — obratno kot pri sprejemu, in namenoma.
@@ -289,7 +288,11 @@ def izbrisi(
 
     # 303 in ne 302: po `POST` mora brskalnik naslednjo zahtevo poslati kot
     # `GET`, sicer osvežitev strani ponovi brisanje.
-    return RedirectResponse(f"/admin/subjects/{material.subject}", status_code=303)
+    # Koda gre skozi `quote`: `?` in `#` bi glavo `Location` prerezala na
+    # poizvedbo oziroma sidro in operater bi pristal na napačnem predmetu.
+    return RedirectResponse(
+        f"{PREDPONA}/subjects/{quote(material.subject, safe='')}", status_code=303
+    )
 
 
 def je_admin_pot(pot: str) -> bool:
