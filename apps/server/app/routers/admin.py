@@ -279,14 +279,17 @@ def izbrisi(
     # korak, hočemo drugo napako (odločitev 5 v `docs/plan/V1-R04.md`).
     material = repozitorij.pobrisi(material_id)
     if material is None:
-        return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
+        # Zahteva pravi „brez sesutja, preusmeritev na seznam", ne 404: to se
+        # zgodi, ko je operater isto sliko izbrisal v drugem zavihku. Rezultat
+        # je tak, kot ga je hotel — slike ni. Predmeta ni več od kod prebrati,
+        # zato pelje na pregled.
+        return RedirectResponse(PREDPONA, status_code=303)
 
     pobrisi_sliko(Path(material.image_path))
 
     # 303 in ne 302: po `POST` mora brskalnik naslednjo zahtevo poslati kot
     # `GET`, sicer osvežitev strani ponovi brisanje.
     return RedirectResponse(f"/admin/subjects/{material.subject}", status_code=303)
-
 
 
 def je_admin_pot(pot: str) -> bool:
@@ -320,7 +323,13 @@ async def prestrezi_napako(request: Request, izjema: Exception) -> Response:
         )
         predloge: Jinja2Templates = request.app.state.predloge
         return predloge.TemplateResponse(
-            request, "najdena-ni.html", {"sporocilo": sporocilo}, status_code=izjema.status_code
+            request,
+            "najdena-ni.html",
+            {"sporocilo": sporocilo},
+            status_code=izjema.status_code,
+            # Privzeti ročnik pri 405 pošlje glavo `Allow`; brskalniku je vseeno,
+            # orodjem ni, in zavreči jo brez razloga ni prav.
+            headers=izjema.headers,
         )
 
     return await http_exception_handler(request, izjema)  # type: ignore[arg-type]

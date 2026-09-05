@@ -173,6 +173,8 @@ class TestSeznamPredmeta:
         besedilo = odjemalec.get("/admin/subjects/MAT").text
 
         assert "4. 9. 2026 ob 09:30" in besedilo
+        # Kriterij zahteva pod vsako sliko čas **in** stanje obdelave.
+        assert "čaka na obdelavo" in besedilo
 
     def test_prazen_predmet_da_sporocilo_in_ne_napako(self, odjemalec: TestClient) -> None:
         odgovor = odjemalec.get("/admin/subjects/GEO")
@@ -213,6 +215,9 @@ class TestPodrobnosti:
         assert "4. 9. 2026 ob 09:30" in odgovor.text  # čas posnetka
         assert "4. 9. 2026 ob 10:00" in odgovor.text  # čas prejema
         assert "2 kB" in odgovor.text
+        # Brez te trditve bi kriterij „s sliko v polni velikosti" ostal
+        # nedokazan: odstranitev <img> s strani ni podrla nobenega testa.
+        assert f'src="/admin/materials/{UUID_ENA}/image"' in odgovor.text
         assert str(pot.name) in odgovor.text
         assert "čaka na obdelavo" in odgovor.text
 
@@ -367,12 +372,18 @@ class TestBrisanje:
         assert odgovor.status_code == 404
         assert "text/html" in odgovor.headers["content-type"]
 
-    def test_brisanje_neobstojecega_da_404(self, odjemalec: TestClient) -> None:
+    def test_brisanje_ze_izbrisanega_preusmeri_na_pregled(
+        self, odjemalec: TestClient
+    ) -> None:
+        # Zahteva: „brez sesutja, preusmeritev na seznam". To se zgodi, ko je
+        # operater isto sliko izbrisal v drugem zavihku — rezultat je tak, kot
+        # ga je hotel, zato stran o napaki ni pravi odgovor.
         odgovor = odjemalec.post(
             f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False
         )
 
-        assert odgovor.status_code == 404
+        assert odgovor.status_code == 303
+        assert odgovor.headers["location"] == "/admin"
 
     def test_brisanje_zapisa_brez_datoteke_uspe(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -541,6 +552,19 @@ class TestNeznanePoti:
 
         odgovor = odjemalec.get("/admin/subjects/A/B")
 
+        assert odgovor.status_code == 200
+        assert UUID_ENA in odgovor.text
+
+    def test_koda_z_vprasajem_je_dosegljiva_s_povezave(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # `?` in `#` bi povezavo prerezala; predloga kodo zato ubeži za URL.
+        zapisi(motor, slike, subject="A?B")
+
+        seznam = odjemalec.get("/admin").text
+        assert "/admin/subjects/A%3FB" in seznam
+
+        odgovor = odjemalec.get("/admin/subjects/A%3FB")
         assert odgovor.status_code == 200
         assert UUID_ENA in odgovor.text
 

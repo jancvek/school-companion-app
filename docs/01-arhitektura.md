@@ -176,10 +176,22 @@ Strežniško izrisan HTML za lastnika sistema (`docs/00-namen.md`, vloga
 | `/admin/materials/{id}/image` | GET | datoteka slike |
 | `/admin/materials/{id}/delete` | GET | potrditvena stran |
 | `/admin/materials/{id}/delete` | POST | izbriše in preusmeri (303) |
-| `/admin/{karkoli}` | GET | slovenska stran 404 (lovilec, registriran zadnji) |
 
 Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Prijave ni** —
 meja je Tailscale; posledice, vključno s CSRF, so v `docs/odlocitve/ADR-006`.
+
+Napake pod `/admin` (404, 405) izriše prestreznik `StarletteHTTPException`,
+registriran v `create_app`. Izven te predpone se umakne privzetemu, ker morajo
+odgovori `POST /materials` ostati JSON — telefon tam pričakuje sporočilo o
+napaki, ne strani. Prvi poskus je bila pot `/{ostanek:path}` na koncu
+usmerjevalnika; ta je prekrila Starlettejevo preusmeritev ob končni poševnici,
+zato je `GET /admin/` vrnil 404 s trditvijo, da strani ni. Prestreznik se
+sproži šele, ko poti res ni.
+
+Koda predmeta sme vsebovati karkoli (`POST /materials` jo omejuje samo po
+dolžini), zato je pot `subjects/{koda:path}` in povezava nanjo ubežana za URL.
+Brez obojega bi bile slike predmeta s poševnico ali vprašajem iz vmesnika
+nedosegljive.
 
 Predloge so v `app/templates/`, pot do njih se izpelje iz `__file__` in ne iz
 trenutne mape. `[tool.setuptools.package-data]` v `pyproject.toml` jih vključi

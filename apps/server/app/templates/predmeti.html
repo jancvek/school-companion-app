@@ -14,7 +14,7 @@
        zamolklejši zapis in števec. #}
     {% for vrstica in predmeti %}
       <li>
-        <a href="/admin/subjects/{{ vrstica.koda }}"
+        <a href="/admin/subjects/{{ vrstica.koda|urlencode }}"
            class="{{ '' if vrstica.koliko else 'prazen' }}">
           <span><span class="koda">{{ vrstica.koda }}</span> — {{ vrstica.oznaka }}</span>
           <span class="stevec">{{ vrstica.koliko }}</span>
