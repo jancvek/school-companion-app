@@ -12,7 +12,7 @@
 | Strežnik | FastAPI (Python) | Naraven za AI/vision klice, lahek |
 | Podatkovna baza (strežnik) | PostgreSQL + pgvector | Ena baza za metapodatke in (kasneje) vektorje, brez ločene vektorske baze |
 | Povezljivost telefon ↔ strežnik | Tailscale | Dostop do domačega strežnika brez port-forwardinga |
-| Vision / OCR | Cloud vision API (Claude ali Gemini — izbira odprta) | Klasični OCR (Tesseract) ne obvlada slovenskega rokopisa |
+| Vision / OCR | OpenAI `gpt-4.1` — **izbrano, še ni implementirano** (pride v V1-R03) | Klasični OCR (Tesseract) ne obvlada slovenskega rokopisa; izbira in njena začasnost sta v `docs/odlocitve/ADR-008` |
 | Orkestracija strežnika | Docker Compose (`api` + `db`) | Brez Celery/Redis — obseg (5–25 slik/teden) tega ne potrebuje |
 
 ## Moduli
