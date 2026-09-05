@@ -256,6 +256,33 @@ trenutno delovno mapo. `BIND_ADDRESS` naj bo Tailscale naslov tega stroja
 (`tailscale ip -4`) — privzetek `127.0.0.1` je namenoma neuporaben od zunaj.
 `API_KEY` mora imeti vsaj 16 znakov, sicer se strežnik ne zažene.
 
+#### Odprto: strežnik po nenadzorovanem ponovnem zagonu
+
+**Docker Desktop se zaganja ob prijavi uporabnika, ne ob zagonu sistema**
+(vnos v `HKCU\...\CurrentVersion\Run`). Vsebnika imata
+`restart: unless-stopped` in se po zagonu Dockerja vrneta sama — a le, če je
+seja sploh vzpostavljena.
+
+Praktična posledica: če se stroj ponoči znova zažene in se nihče ne prijavi,
+strežnik ostane dol. **Podatki se ne izgubijo** — slike ostanejo na telefonu
+s stanjem `pending` in domača stran kaže števec čakajočih. Cena ni izguba,
+ampak da lahko mine teden, preden kdo opazi.
+
+Stanje stroja ob tem zapisu: BitLocker ni vklopljen (ni TPM), račun je
+lokalen, samodejni vpis ni nastavljen.
+
+Pretehtane možnosti, **odločitev je odložena na kasnejšo fazo**:
+
+| Možnost | Za | Proti |
+|---|---|---|
+| Samodejni vpis + takojšen zaklep seje (Sysinternals Autologon, geslo kot LSA skrivnost) | ohrani preverjeno postavitev in vezavo na Tailscale; malo dela | geslo mora biti shranjeno na stroju |
+| Nadzorno opravilo, ki na ~15 min preveri `/health` in po potrebi požene `docker compose up -d` | pokrije tudi sesut Docker in zamrznjen WSL; ne zahteva gesla | sam po sebi ne reši odsotne seje |
+| Docker Engine v WSL distribuciji namesto Docker Desktopa, zagnan kot opravilo ob zagonu | ne potrebuje prijave; odpravi tudi pripetost na staro 4.26.1 | **WSL2 objavlja vrata prek NAT na `localhost`**, zato `BIND_ADDRESS` preneha delovati; omrežno mejo bi nadomestil požarni zid ali `portproxy` — pravilo, ki ga je lahko narobe nastaviti in ki ga nihče ne testira (nasprotuje odločitvi 8 v planu V1-R02) |
+| Ne narediti nič | nič dela; podatki so varni | zamik pri opazitvi izpada |
+
+Če strežnik kdaj preraste ta stroj, je pravi odgovor ločena Linux naprava, ne
+prepletanje WSL-a.
+
 ### Celotna preverba
 
 ```powershell
