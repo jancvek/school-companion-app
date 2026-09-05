@@ -31,6 +31,8 @@ samopreverjanje iz dejanske snovi, ki jo je Maša tisti dan imela pri pouku.
 | Sinhronizacija (`sync_status`) | Stanje prenosa slike s telefona na strežnik: `pending` → `synced` |
 | Status obdelave (na strežniku) | `new` → `processing` → `ready` \| `failed` — ali je vision model že prepisal sliko in sestavil vprašanja |
 | Prepis (`transcript`) | Dobesedno besedilo, ki ga vision model prebere s slike |
+| Povzetek (`summary`) | Dva do štirje stavki o vsebini ene snovi, da je snov prepoznavna brez branja celega prepisa |
+| Berljivost (`readable`) | Ali je model s slike sploh znal brati. Neberljiva slika je obdelana, a brez prepisa in vprašanj |
 | Kviz | 5–10 vprašanj in odgovorov, ki jih AI sestavi iz ene snovi |
 | Težavnost | Ocena lahko / srednje / težko, ki jo Maša doda k vsakemu vprašanju po odgovoru |
 

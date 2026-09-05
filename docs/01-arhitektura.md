@@ -12,7 +12,8 @@
 | Strežnik | FastAPI (Python) | Naraven za AI/vision klice, lahek |
 | Podatkovna baza (strežnik) | PostgreSQL + pgvector | Ena baza za metapodatke in (kasneje) vektorje, brez ločene vektorske baze |
 | Povezljivost telefon ↔ strežnik | Tailscale | Dostop do domačega strežnika brez port-forwardinga |
-| Vision / OCR | OpenAI `gpt-4.1` — **izbrano, še ni implementirano** (pride v V1-R03) | Klasični OCR (Tesseract) ne obvlada slovenskega rokopisa; izbira in njena začasnost sta v `docs/odlocitve/ADR-008` |
+| Vision / OCR | OpenAI `gpt-4.1` prek uradnega paketa `openai` (od V1-R03) | Klasični OCR (Tesseract) ne obvlada slovenskega rokopisa; izbira in njena začasnost sta v `docs/odlocitve/ADR-008` |
+| Obdelava v ozadju | `asyncio` opravilo v procesu `api` | Pri 5–25 slikah na teden Celery in Redis ne rešita nobene težave tega projekta; „kar bi lahko bila mikrostoritev, naj bo funkcija" |
 | Orkestracija strežnika | Docker Compose (`api` + `db`) | Brez Celery/Redis — obseg (5–25 slik/teden) tega ne potrebuje |
 
 ## Moduli
@@ -20,7 +21,7 @@
 | Modul | Odgovornost | Datoteke |
 |---|---|---|
 | `apps/mobile` | Kamera, izbira predmeta, lokalna baza, zgodovina, upload worker | `apps/mobile/` (od V1-R01; upload worker od V1-R02) |
-| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`; obdelava pride v V1-R03 | `apps/server/` (od V1-R02; `/admin` od V1-R04) |
+| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03) |
 
 Ločena mapi namenoma ne delita orodij za monorepo (npr. Turborepo) — gre za
 dva jezika (TypeScript / Python) brez skupne kode, zato vsaka živi s svojim
@@ -60,6 +61,27 @@ Dostop do baze teče skozi tanek vmesnik `MaterialsDatabase`
 (`src/db/materials.ts`), ki ga funkcije dobijo kot argument. `expo-sqlite` se
 pojavi samo v `src/db/open.ts` in v korenski postavitvi, zato je poslovna
 logika testljiva brez naprave.
+
+### Notranja delitev `apps/server`
+
+| Datoteka | Odgovornost |
+|---|---|
+| `app/main.py` | tovarna aplikacije, življenjski cikel (zagon in ustavitev obdelave) |
+| `app/routers/materials.py` | `POST /materials` — prevzem slike s telefona |
+| `app/routers/admin.py` | operaterska stran |
+| `app/db.py` | motor, seje in `MaterialsRepository` — edina pot do baze |
+| `app/models.py` | tabeli `materials` in `questions` |
+| `app/storage.py` | zapis, meja mape in brisanje slik na disku |
+| `app/vision.py` | **edini modul, ki uvaža `openai`**: prompt, shema odgovora, klic |
+| `app/obdelava.py` | kaj se zgodi z enim zapisom: prevzem, klic, zapis izida. Sinhron |
+| `app/worker.py` | časovnik: obhodi v presledkih, zagon in ustavitev. Brez poslovne logike |
+| `app/settings.py` | nastavitve iz okolja |
+| `app/subjects.py` | predmeti in slovenske oznake stanj |
+
+Delitev med `obdelava.py` in `worker.py` je namenska: poslovna logika ne ve za
+`asyncio`, zato je testljiva brez zaganjanja zanke. Delitev med `vision.py` in
+vsem ostalim zahteva ADR-008 — menjava modela ali ponudnika mora biti sprememba
+ene datoteke in ene spremenljivke okolja.
 
 ## Podatkovni model
 
@@ -116,8 +138,38 @@ Tabela `materials` (nastane v V1-R02, razširi jo V1-R03):
 | `subject` | `VARCHAR(16) NOT NULL` | koda predmeta |
 | `taken_at` | `TIMESTAMPTZ NOT NULL` | trenutek posnetka, normaliziran v UTC |
 | `image_path` | `VARCHAR(1024) NOT NULL` | pot do slike na disku strežnika |
-| `status` | `VARCHAR(16) NOT NULL` | v V1-R02 vedno `new`; prehodi so V1-R03 |
+| `status` | `VARCHAR(16) NOT NULL` | `new` → `processing` → `ready` \| `failed` |
 | `received_at` | `TIMESTAMPTZ NOT NULL` | kdaj je strežnik zapis prevzel |
+| `readable` | `BOOLEAN` | ali je model s slike znal brati (V1-R03) |
+| `transcript` | `TEXT` | prepis (V1-R03) |
+| `summary` | `TEXT` | povzetek (V1-R03) |
+| `prompt` | `TEXT` | poslani prompt, v celoti (V1-R03) |
+| `raw_response` | `TEXT` | odgovor modela pred razčlenjevanjem (V1-R03) |
+| `model` | `VARCHAR(128)` | ime modela, kot ga je vrnila storitev (V1-R03) |
+| `input_tokens`, `output_tokens` | `INTEGER` | poraba (V1-R03) |
+| `error` | `TEXT` | zakaj obdelava ni uspela (V1-R03) |
+
+Vsi stolpci V1-R03 so `NULL`-abilni — vrstice iz V1-R02 so morale migracijo
+prestati nedotaknjene in jih worker pobere kot vsako drugo.
+
+Tabela `questions` (V1-R03):
+
+| Stolpec | Tip | Opomba |
+|---|---|---|
+| `id` | `VARCHAR(36) PRIMARY KEY` | UUID, generiran **na strežniku** |
+| `material_id` | `VARCHAR(36) NOT NULL` | tuji ključ na `materials.id`, `ON DELETE CASCADE`, indeksiran |
+| `position` | `INTEGER NOT NULL` | zaporedje znotraj materiala, od 1 |
+| `question` | `TEXT NOT NULL` | besedilo vprašanja |
+| `answer` | `TEXT NOT NULL` | pričakovan odgovor |
+
+Vprašanja imajo svojo tabelo in ne polja JSON, ker bo `V1-R05` ocene težavnosti
+vezala na `question_id`. **Vprašanje ni trajno:** ponovna obdelava zavrže
+prejšnji izid skupaj z vsemi vprašanji materiala (`docs/odlocitve/ADR-009`).
+
+Kaskada je nastavljena **dvakrat**: `ondelete="CASCADE"` v shemi in
+`cascade="all, delete-orphan"` v ORM. Prvo velja na Postgresu, drugo tudi na
+SQLite, ki tujih ključev privzeto ne uveljavlja — brez druge bi testi
+dokazovali manj kot produkcija.
 
 `id` je `VARCHAR` in ne `UUID`, čas pa `DateTime(timezone=True)`, ker mora ista
 shema stati nad Postgresom (produkcija) in nad SQLite (testi).
@@ -162,11 +214,62 @@ zamika do 5 minut. Prenaša zaporedno, enega za drugim. Po *Shrani* se prenos
 samo sproži — nanj se **ne čaka**, sicer bi zaporedno slikanje ob nedosegljivem
 strežniku obtičalo in ADR-003 bi padel.
 
+## Vision obdelava (V1-R03)
+
+Zanka teče kot `asyncio` opravilo v procesu `api`, priklopljeno na `lifespan`.
+Vsakih 30 s (`WORKER_INTERVAL_SECONDS`) pobere zapise s `status='new'`,
+najstarejši posnetek prvi, in jih obdela **zaporedno**. Samo delo teče v niti
+(`asyncio.to_thread`), ker sta SQLAlchemy in odjemalec OpenAI sinhrona; brez
+tega bi en klic za sto sekund ustavil celoten strežnik.
+
+Zapis se prevzame s **pogojnim** `UPDATE ... WHERE status='new'` in delo se
+nadaljuje samo, če je bila spremenjena natanko ena vrstica. Danes teče en sam
+proces `uvicorn` in tekmovanja ni; pogoj je tu zato, da ga tudi ne bo, če kdaj
+kdo doda `--workers`. Prevzem in zapis izida sta ločeni transakciji, ker med
+njima teče klic, ki traja sekunde.
+
+Prehodi stanj:
+
+| Iz | V | Kdaj |
+|---|---|---|
+| `new` | `processing` | prevzem v obhodu zanke |
+| `processing` | `ready` | klic je uspel (tudi kadar je slika neberljiva) |
+| `processing` | `failed` | napaka klica, neveljaven odgovor ali manjkajoča slika |
+| `processing` | `new` | ob zagonu strežnika (obtičal zapis) ali če izida ni kam zapisati |
+| `ready` \| `failed` \| `new` | `new` | gumb „Pošlji v obdelavo" na admin strani |
+
+**Neberljiva slika ni peti status.** Klic je uspel in bil plačan, torej to ni
+napaka obdelave: zapis je `ready` s `readable=false`, brez prepisa in brez
+vprašanj. Razliko pokaže oznaka „obdelano — slika ni berljiva".
+
+**Vrstica brez datoteke na disku gre v `failed` brez klica** — za sliko, ki je
+ni, ne plačamo. Meja `images_dir` je ista kot pri streženju slike na admin
+strani.
+
+Klic gre skozi `app/vision.py` in nikjer drugje (ADR-008). Slika potuje kot
+base64 v `data:` URL, ker je strežnik za Tailscale in OpenAI do njegovih
+naslovov nima dostopa. Odgovor je strukturiran po shemi (`json_schema`,
+`strict: true`), a gre vseeno skozi preverbo s Pydantic: `strict` je obljuba
+storitve, ne naša invarianta, in ne zna povedati „med 5 in 10 vprašanj" —
+`minItems` v strogem načinu ni podprt, zato to mejo uveljavimo ob sprejemu.
+
+**Revizijska sled se zapiše ob vsakem izidu, tudi neuspešnem:** poslani prompt
+(v celoti, ne kot oznaka različice), surov odgovor, ime modela in poraba
+tokenov. Brez tega primerjave med modeli, ki jo ADR-008 predvideva, ne bo
+mogoče narediti z dejanskimi podatki. Cene v evre ne računamo — cenik v
+nastavitvah bi se staral neopazno.
+
+**Brez `OPENAI_API_KEY` se zanka sploh ne zažene.** Slike ostanejo `new` in se
+obdelajo same, ko je ključ nastavljen in strežnik zagnan znova; razlog gre v
+dnevnik ob zagonu. Prevzem slik, admin stran in `GET /health` tečejo naprej.
+Napačen (od storitve zavrnjen) ključ pa je `failed` kot vsaka druga napaka
+klica. Glej `docs/odlocitve/ADR-009`.
+
 ## Operaterska stran (`/admin`)
 
 Strežniško izrisan HTML za lastnika sistema (`docs/00-namen.md`, vloga
 „spremlja delovanje"). Brez JavaScripta, brez gradnje frontenda, brez `npm` v
-`apps/server`. Nastala v V1-R04; V1-R03 jo razširi s prikazom obdelave.
+`apps/server`. Nastala v V1-R04; V1-R03 jo je razširila s prikazom obdelave.
 
 | Pot | Metoda | Kaj |
 |---|---|---|
@@ -176,6 +279,7 @@ Strežniško izrisan HTML za lastnika sistema (`docs/00-namen.md`, vloga
 | `/admin/materials/{id}/image` | GET | datoteka slike |
 | `/admin/materials/{id}/delete` | GET | potrditvena stran |
 | `/admin/materials/{id}/delete` | POST | izbriše in preusmeri (303) |
+| `/admin/materials/{id}/reprocess` | POST | vrne v vrsto in preusmeri (303) |
 
 Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Prijave ni** —
 meja je Tailscale; posledice, vključno s CSRF, so v `docs/odlocitve/ADR-006`.
@@ -249,6 +353,7 @@ V1-R02 telefonu ni dodala nobene odvisnosti — prenos teče prek
 | `alembic` | migracije sheme | V1-R02 |
 | `pydantic-settings` | nastavitve iz okolja | V1-R02 |
 | `jinja2` | predloge operaterske strani | V1-R04 |
+| `openai` | klic vision modela; izbran zaradi strukturiranega izhoda po shemi | V1-R03 |
 | razvojno: `ruff`, `mypy`, `pytest`, `httpx` | preverbe; `httpx` rabi `TestClient` | V1-R02 |
 
 ## Kako se poganja in testira
@@ -321,6 +426,11 @@ vsebniku; strežnik sam `.env` ne bere, ker bi bil `env_file` relativen na
 trenutno delovno mapo. `BIND_ADDRESS` naj bo Tailscale naslov tega stroja
 (`tailscale ip -4`) — privzetek `127.0.0.1` je namenoma neuporaben od zunaj.
 `API_KEY` mora imeti vsaj 16 znakov, sicer se strežnik ne zažene.
+
+`OPENAI_API_KEY` se obnaša drugače od `API_KEY`: brez njega strežnik **normalno
+steče** in slike sprejema, ne teče pa obdelava. `OPENAI_MODEL` (privzeto
+`gpt-4.1`), `OPENAI_TIMEOUT_SECONDS` (120) in `WORKER_INTERVAL_SECONDS` (30) so
+neobvezni.
 
 #### Odprto: strežnik po nenadzorovanem ponovnem zagonu
 
