@@ -10,6 +10,7 @@ kar v bazi res obstaja.
 """
 
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 from zoneinfo import ZoneInfo
@@ -28,23 +29,47 @@ from app.subjects import PREDMETI, oznaka_predmeta, oznaka_statusa, poisci_predm
 
 router = APIRouter(prefix="/admin")
 
-#: Pot do predlog se izpelje iz mesta te datoteke, ne iz trenutne mape.
+#: Mapa s predlogami. Izpelje se iz mesta te datoteke, ne iz trenutne mape.
 #:
 #: Isti razlog kot pri `mypy.ini` in `env_file` v V1-R02: pot, relativna na
 #: delovno mapo, bi pomenila, da se strežnik obnaša različno glede na to, od
 #: kod je pognan (odločitev 2 v `docs/plan/V1-R04.md`).
-PREDLOGE = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
+MAPA_PREDLOG = Path(__file__).resolve().parent.parent / "templates"
 
-#: Časovni pas, v katerem operater bere ure.
+#: Ime časovnega pasu, v katerem operater bere ure.
 #:
 #: V bazi je vse v UTC. Stran, ki bi kazala UTC, bi ob vsakem posnetku
 #: zahtevala računanje na pamet — in prav ura posnetka je podatek, po katerem
 #: operater sliko prepozna.
 #:
-#: Pas je zapisan imensko in ne kot odmik, ker se odmik dvakrat na leto
-#: spremeni. Imenski pas zahteva bazo časovnih pasov: na Windows jo prinese
-#: paket `tzdata` (v `pyproject.toml`), v Linux vsebniku pa je brez njega ni.
-DOMACI_PAS = ZoneInfo("Europe/Ljubljana")
+#: Pas je imenski in ne odmik, ker se odmik dvakrat na leto spremeni. Bazo
+#: pasov prinese sistem: v vsebniku `python:3.12-slim` je v `/usr/share/
+#: zoneinfo`, na Windows pa paket `tzdata`, ki ga zahteva že `psycopg`.
+#: Zato tu ni nove odvisnosti.
+DOMACI_PAS = "Europe/Ljubljana"
+
+
+@lru_cache(maxsize=1)
+def _pas() -> ZoneInfo:
+    """Časovni pas, poiskan ob prvi uporabi in nato zapomnjen.
+
+    Namenoma **ni** modulska konstanta: `ZoneInfo` brez baze pasov vrže
+    izjemo, in ta bi ob uvozu modula podrla celo aplikacijo — tudi
+    `GET /health` in `POST /materials`. Udobje pri prikazu ure ne sme biti
+    pogoj za življenje strežnika.
+    """
+    return ZoneInfo(DOMACI_PAS)
+
+
+def daj_predloge(request: Request) -> Jinja2Templates:
+    """Izrisovalnik predlog te aplikacije.
+
+    Iz `app.state` in ne iz modulske globale, iz istega razloga kot vse
+    ostalo v `app/dependencies.py`: vsak test dobi svojo, popolnoma ločeno
+    aplikacijo (odločitev iz plana, „`Jinja2Templates` v `app.state`").
+    """
+    predloge: Jinja2Templates = request.app.state.predloge
+    return predloge
 
 
 def _cas(trenutek: datetime) -> str:
@@ -62,7 +87,7 @@ def _cas(trenutek: datetime) -> str:
     """
     if trenutek.tzinfo is None:
         trenutek = trenutek.replace(tzinfo=UTC)
-    lokalni = trenutek.astimezone(DOMACI_PAS)
+    lokalni = trenutek.astimezone(_pas())
     return f"{lokalni.day}. {lokalni.month}. {lokalni.year} ob {lokalni:%H:%M}"
 
 
@@ -98,14 +123,14 @@ def _pogled(material: Material) -> dict[str, Any]:
     }
 
 
-def _ni_najdeno(request: Request, sporocilo: str) -> Response:
+def _ni_najdeno(predloge: Jinja2Templates, request: Request, sporocilo: str) -> Response:
     """404 kot stran, ne kot JSON.
 
     Globalnega prestreznika za `HTTPException` namenoma ni: ta bi spremenil
     tudi odgovore `POST /materials` iz JSON v HTML in podrl telefon
     (odločitev 7 v `docs/plan/V1-R04.md`).
     """
-    return PREDLOGE.TemplateResponse(
+    return predloge.TemplateResponse(
         request, "najdena-ni.html", {"sporocilo": sporocilo}, status_code=404
     )
 
@@ -114,6 +139,7 @@ def _ni_najdeno(request: Request, sporocilo: str) -> Response:
 def pregled(
     request: Request,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
 ) -> Response:
     """Vsi predmeti s številom slik."""
     steviloma = repozitorij.stej_po_predmetih()
@@ -130,7 +156,7 @@ def pregled(
     for koda in sorted(steviloma.keys() - znane):
         vrstice.append({"koda": koda, "oznaka": "predmet ni na seznamu", "koliko": steviloma[koda]})
 
-    return PREDLOGE.TemplateResponse(
+    return predloge.TemplateResponse(
         request,
         "predmeti.html",
         {"predmeti": vrstice, "skupaj": sum(steviloma.values())},
@@ -142,6 +168,7 @@ def predmet(
     request: Request,
     koda: str,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
 ) -> Response:
     """Slike enega predmeta, najnovejša prva."""
     snovi = repozitorij.seznam_po_predmetu(koda)
@@ -149,9 +176,11 @@ def predmet(
     # Neznana koda brez ene same slike je tipkarska napaka v naslovu, ne prazen
     # predmet. Koda, ki slike ima, je veljavna, tudi če ni na seznamu.
     if not snovi and poisci_predmet(koda) is None:
-        return _ni_najdeno(request, f"Predmeta s kodo „{koda}“ ni ne na seznamu ne v bazi.")
+        return _ni_najdeno(
+            predloge, request, f"Predmeta s kodo „{koda}“ ni ne na seznamu ne v bazi."
+        )
 
-    return PREDLOGE.TemplateResponse(
+    return predloge.TemplateResponse(
         request,
         "predmet.html",
         {
@@ -167,13 +196,14 @@ def snov(
     request: Request,
     material_id: str,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
 ) -> Response:
     """Podrobnosti ene slike."""
     material = repozitorij.poisci(material_id)
     if material is None:
-        return _ni_najdeno(request, "Zapisa s tem identifikatorjem na strežniku ni.")
+        return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
-    return PREDLOGE.TemplateResponse(request, "snov.html", {"snov": _pogled(material)})
+    return predloge.TemplateResponse(request, "snov.html", {"snov": _pogled(material)})
 
 
 @router.get("/materials/{material_id}/image")
@@ -181,12 +211,13 @@ def slika(
     request: Request,
     material_id: str,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
 ) -> Response:
     """Sama datoteka slike."""
     material = repozitorij.poisci(material_id)
     if material is None:
-        return _ni_najdeno(request, "Zapisa s tem identifikatorjem na strežniku ni.")
+        return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
     pot = Path(material.image_path)
 
@@ -194,7 +225,7 @@ def slika(
     # cena preverbe ena vrstica, cena napačne predpostavke pa branje poljubne
     # datoteke s strežnika (odločitev 8 v `docs/plan/V1-R04.md`).
     if not je_znotraj(nastavitve.images_dir, pot) or not pot.is_file():
-        return _ni_najdeno(request, "Slike tega zapisa na disku ni.")
+        return _ni_najdeno(predloge, request, "Slike tega zapisa na disku ni.")
 
     return FileResponse(pot, media_type="image/jpeg")
 
@@ -204,13 +235,14 @@ def potrdi_brisanje(
     request: Request,
     material_id: str,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
 ) -> Response:
     """Vmesni korak pred brisanjem. Sam ne spremeni ničesar."""
     material = repozitorij.poisci(material_id)
     if material is None:
-        return _ni_najdeno(request, "Zapisa s tem identifikatorjem na strežniku ni.")
+        return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
-    return PREDLOGE.TemplateResponse(request, "brisanje.html", {"snov": _pogled(material)})
+    return predloge.TemplateResponse(request, "brisanje.html", {"snov": _pogled(material)})
 
 
 @router.post("/materials/{material_id}/delete")
@@ -218,6 +250,7 @@ def izbrisi(
     request: Request,
     material_id: str,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
 ) -> Response:
     """Izbriše zapis in njegovo datoteko."""
     # Najprej vrstica, nato datoteka — obratno kot pri sprejemu, in namenoma.
@@ -226,10 +259,28 @@ def izbrisi(
     # korak, hočemo drugo napako (odločitev 5 v `docs/plan/V1-R04.md`).
     material = repozitorij.pobrisi(material_id)
     if material is None:
-        return _ni_najdeno(request, "Zapisa s tem identifikatorjem na strežniku ni.")
+        return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
     pobrisi_sliko(Path(material.image_path))
 
     # 303 in ne 302: po `POST` mora brskalnik naslednjo zahtevo poslati kot
     # `GET`, sicer osvežitev strani ponovi brisanje.
     return RedirectResponse(f"/admin/subjects/{material.subject}", status_code=303)
+
+
+# Ta pot mora ostati **zadnja**: ujame vse pod `/admin`, česar ni ujela nobena
+# pot pred njo. Registrirana prej bi jih prekrila vse.
+@router.get("/{ostanek:path}")
+def neznana_pot(
+    request: Request,
+    ostanek: str,
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+) -> Response:
+    """Karkoli pod `/admin`, česar ni.
+
+    Brez tega bi operater dobil angleški JSON `{"detail": "Not Found"}`. To ni
+    le teoretično: `subject` na strani `POST /materials` ni omejen na nabor
+    znakov, zato koda s poševnico ustvari povezavo, ki se ne ujame z nobeno
+    potjo — in klik z lastne strani bi pristal na JSON-u.
+    """
+    return _ni_najdeno(predloge, request, "Te strani na strežniku ni.")

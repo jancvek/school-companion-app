@@ -91,6 +91,14 @@ Tehnične meje, ki jih ta odločitev nalaga:
     tiste, ki jih bo dodala V1-R03.
   - Kdorkoli v omrežju lahko izbriše sliko. Brisanje je nepovratno — glej
     spodaj.
+  - **Brisanje je izpostavljeno tudi prek tuje strani (CSRF).** Obrazec nima
+    žetona, ker ni seje, ki bi ga nosila. Poljubna stran, ki jo operater odpre
+    v istem brskalniku, lahko v ozadju pošlje `POST` na
+    `/admin/materials/<id>/delete`. Izkoristljivost je majhna — napadalec mora
+    uganiti UUID in poznati Tailscale naslov — a možnost obstaja in je
+    posledica te odločitve, ne pomanjkljivost izvedbe. Žeton bi zahteval sejo;
+    seja bi zahtevala prijavo, kar je prav tisto, kar ta odločitev opušča. Če
+    kdaj pride možnost B3 (geslo), naj z njo pride tudi žeton.
 - **Nepovratnost brisanja.** Ko je zapis na telefonu `synced`, ga upload
   worker nikoli več ne pošlje; gumb „Poskusi znova" vrne v vrsto samo zapise
   s stanjem `failed`. Slika, izbrisana na strežniku, je zato tam izgubljena

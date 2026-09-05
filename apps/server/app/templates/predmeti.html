@@ -7,21 +7,18 @@
   <p class="pod">Skupaj {{ skupaj }} {{ "slika" if skupaj == 1 else "slik" }} na strežniku.</p>
 
   <ul class="predmeti">
-    {# Predmeti brez slik ostanejo vidni, samo brez povezave — sicer bi seznam
-       iz dneva v dan spreminjal dolžino in ne bi bilo videti, česa ni. #}
+    {# Predmeti brez slik ostanejo vidni — sicer bi seznam iz dneva v dan
+       spreminjal dolžino in ne bi bilo videti, česa ni. Povezavo imajo tudi
+       oni: brez nje bi bila stran „za ta predmet še ni nobene slike"
+       dosegljiva samo z ročno vtipkanim naslovom. Da je predmet prazen, pove
+       zamolklejši zapis in števec. #}
     {% for vrstica in predmeti %}
       <li>
-        {% if vrstica.koliko %}
-          <a href="/admin/subjects/{{ vrstica.koda }}">
-            <span><span class="koda">{{ vrstica.koda }}</span> — {{ vrstica.oznaka }}</span>
-            <span class="stevec">{{ vrstica.koliko }}</span>
-          </a>
-        {% else %}
-          <span class="prazen">
-            <span><span class="koda">{{ vrstica.koda }}</span> — {{ vrstica.oznaka }}</span>
-            <span class="stevec">0</span>
-          </span>
-        {% endif %}
+        <a href="/admin/subjects/{{ vrstica.koda }}"
+           class="{{ '' if vrstica.koliko else 'prazen' }}">
+          <span><span class="koda">{{ vrstica.koda }}</span> — {{ vrstica.oznaka }}</span>
+          <span class="stevec">{{ vrstica.koliko }}</span>
+        </a>
       </li>
     {% endfor %}
   </ul>

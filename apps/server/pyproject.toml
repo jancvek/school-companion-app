@@ -16,10 +16,6 @@ dependencies = [
     "alembic",
     "pydantic-settings",
     "jinja2",
-    # Baza casovnih pasov. Na Windows jo prinese ze `psycopg`, v Linux
-    # vsebniku pa je brez tega zapisa ni in `ZoneInfo("Europe/Ljubljana")`
-    # vrze izjemo. Glej `_cas` v `app/routers/admin.py`.
-    "tzdata",
 ]
 
 [project.optional-dependencies]

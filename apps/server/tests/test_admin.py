@@ -99,13 +99,14 @@ class TestSeznamPredmetov:
         assert ">0</span>" in vrstica_predmeta(besedilo, "GEO")
         assert ">1</span>" not in vrstica_predmeta(besedilo, "MAT")
 
-    def test_predmet_brez_slik_je_viden_in_brez_povezave(
-        self, odjemalec: TestClient
-    ) -> None:
+    def test_predmet_brez_slik_je_viden_in_dosegljiv(self, odjemalec: TestClient) -> None:
+        # Povezava mora biti tudi pri praznem predmetu, sicer je stran s
+        # sporočilom „še ni nobene slike" dosegljiva samo z ročno vtipkanim
+        # naslovom.
         besedilo = odjemalec.get("/admin").text
 
         assert "GEO" in besedilo
-        assert 'href="/admin/subjects/GEO"' not in besedilo
+        assert 'href="/admin/subjects/GEO"' in besedilo
 
     def test_predmet_ki_ni_na_seznamu_je_vseeno_viden(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -289,7 +290,21 @@ class TestBrisanje:
         assert stevilo_vrstic(motor) == 1
         assert pot.exists()
 
-    def test_potrditvena_stran_ima_obrazec_in_ne_povezave(
+    def test_potrditvena_stran_pokaze_kaj_bo_izbrisano(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Kriterij zahteva potrditveno stran „s sliko, predmetom in datumom".
+        # Brez teh treh trditev bi test ostal zelen, tudi če bi predloga
+        # vprašala „izbrisati?" in ne povedala, kaj.
+        zapisi(motor, slike)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}/delete").text
+
+        assert f'src="/admin/materials/{UUID_ENA}/image"' in besedilo
+        assert "MAT" in besedilo
+        assert "4. 9. 2026 ob 09:30" in besedilo
+
+    def test_potrditvena_stran_brise_z_obrazcem_in_ne_s_povezavo(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
         zapisi(motor, slike)
@@ -297,6 +312,7 @@ class TestBrisanje:
         besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}/delete").text
 
         assert 'method="post"' in besedilo
+        assert f'href="/admin/materials/{UUID_ENA}/delete"' not in besedilo
 
     def test_post_izbrise_vrstico_in_datoteko_ter_preusmeri(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -402,3 +418,128 @@ class TestKljucOstajaZahtevanDrugod:
 
     def test_health_ostaja_dosegljiv_brez_kljuca(self, odjemalec: TestClient) -> None:
         assert odjemalec.get("/health").status_code == 200
+
+
+class TestUbezanje:
+    """Vsebina iz baze ne sme priti v HTML nespremenjena.
+
+    `subject` je na `POST /materials` omejen samo na dolžino (`min_length=1,
+    max_length=16`), ne na nabor znakov — poljubnih šestnajst znakov gre skozi
+    in konča v izpisu. Ubežanje je bil edini razlog, da je bila izbrana Jinja2
+    namesto sestavljanja HTML iz nizov (odločitev 1 v `docs/plan/V1-R04.md`);
+    brez tega razreda tega razloga ni dokazoval noben test.
+    """
+
+    NAPAD = '<script>x</script>'
+
+    def test_predmet_na_seznamu_je_ubezan(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, subject=self.NAPAD)
+
+        besedilo = odjemalec.get("/admin").text
+
+        assert self.NAPAD not in besedilo
+        assert "&lt;script&gt;" in besedilo
+
+    def test_predmet_v_naslovu_strani_je_ubezan(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, subject=self.NAPAD)
+
+        besedilo = odjemalec.get(f"/admin/subjects/{self.NAPAD}").text
+
+        assert self.NAPAD not in besedilo
+
+    def test_predmet_v_podrobnostih_je_ubezan(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, subject=self.NAPAD)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert self.NAPAD not in besedilo
+
+    def test_pot_do_datoteke_je_ubezana(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, vsebina=None)
+        with Session(motor) as seja:
+            material = seja.get(Material, UUID_ENA)
+            assert material is not None
+            material.image_path = f"/data/images/{self.NAPAD}.jpg"
+            seja.commit()
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert self.NAPAD not in besedilo
+
+    def test_sporocilo_na_strani_404_je_ubezano(self, odjemalec: TestClient) -> None:
+        odgovor = odjemalec.get(f"/admin/subjects/{self.NAPAD}")
+
+        assert odgovor.status_code == 404
+        assert self.NAPAD not in odgovor.text
+
+
+class TestNeznanePoti:
+    """Karkoli pod `/admin`, česar ni, mora biti slovenska stran."""
+
+    def test_neznana_pod_pot_da_slovensko_stran(self, odjemalec: TestClient) -> None:
+        odgovor = odjemalec.get("/admin/nekaj/cesar/ni")
+
+        assert odgovor.status_code == 404
+        assert "text/html" in odgovor.headers["content-type"]
+        assert '"detail"' not in odgovor.text
+
+    def test_koda_s_posevnico_ne_pristane_na_json(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Povezava s te iste strani: `subject` sme vsebovati poševnico, zato
+        # `/admin/subjects/A/B` ne ujame nobena običajna pot.
+        zapisi(motor, slike, subject="A/B")
+
+        odgovor = odjemalec.get("/admin/subjects/A/B")
+
+        assert odgovor.status_code == 404
+        assert "text/html" in odgovor.headers["content-type"]
+
+    def test_lovilec_ne_prekrije_pravih_poti(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Lovilec je registriran zadnji; če bi bil prvi, bi prekril vse.
+        zapisi(motor, slike)
+
+        assert odjemalec.get("/admin").status_code == 200
+        assert odjemalec.get("/admin/subjects/MAT").status_code == 200
+        assert odjemalec.get(f"/admin/materials/{UUID_ENA}").status_code == 200
+        assert odjemalec.get(f"/admin/materials/{UUID_ENA}/image").status_code == 200
+
+
+class TestPakiranje:
+    """Predloge morajo biti v nameščenem paketu, ne le v izvorni mapi."""
+
+    def test_predloge_so_navedene_kot_podatki_paketa(self) -> None:
+        # Gradnje kolesa v enotskem testu ne poganjamo — predolgo traja in
+        # zahteva omrežje. Ta test varuje prav vrstico, brez katere predloge
+        # iz kolesa izpadejo, testi pa ostanejo zeleni (odločitev 9 v
+        # `docs/plan/V1-R04.md`).
+        besedilo = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+
+        assert "[tool.setuptools.package-data]" in besedilo
+        assert 'app = ["templates/*.html"]' in besedilo
+
+    def test_vse_predloge_so_v_mapi_paketa(self) -> None:
+        from app.routers.admin import MAPA_PREDLOG
+
+        imena = {pot.name for pot in MAPA_PREDLOG.glob("*.html")}
+
+        assert imena == {
+            "osnova.html",
+            "predmeti.html",
+            "predmet.html",
+            "snov.html",
+            "brisanje.html",
+            "najdena-ni.html",
+        }

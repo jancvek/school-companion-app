@@ -7,6 +7,7 @@ Uvicorn jo zato zažene z zastavico `--factory`.
 """
 
 from fastapi import FastAPI
+from fastapi.templating import Jinja2Templates
 from sqlalchemy import Engine
 
 from app.db import naredi_motor, naredi_tovarno_sej
@@ -41,6 +42,7 @@ def create_app(nastavitve: Settings | None = None, motor: Engine | None = None) 
     app.state.nastavitve = nastavitve
     app.state.motor = motor
     app.state.tovarna_sej = naredi_tovarno_sej(motor)
+    app.state.predloge = Jinja2Templates(directory=str(admin.MAPA_PREDLOG))
 
     app.add_middleware(
         ApiKeyMiddleware,
