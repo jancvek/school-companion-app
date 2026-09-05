@@ -1,0 +1,42 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}{{ koda }}{% endblock %}
+
+{% block vsebina %}
+  <h1>{{ koda }} — {{ oznaka }}</h1>
+
+  {% if snovi %}
+    <p class="pod">{{ snovi|length }} {{ "slika" if snovi|length == 1 else "slik" }}, najnovejša prva.</p>
+    <ul class="mreza">
+      {% for snov in snovi %}
+        <li>
+          <a href="/admin/materials/{{ snov.id }}">
+            {% if snov.velikost is not none %}
+              {# `loading="lazy"` je edino, kar ta seznam drži hiter: brskalnik
+                 naloži samo slike, ki so na zaslonu. Brez tega bi stran z dvesto
+                 posnetki prenesla ~80 MB (odločitev iz faze 1). #}
+              <img src="/admin/materials/{{ snov.id }}/image" alt="" loading="lazy">
+            {% else %}
+              {# Brez tega bi brskalnik na tem mestu narisal ikono pokvarjene
+                 slike — kar je videti kot napaka strani, ne kot podatek o
+                 manjkajoči datoteki. #}
+              <span class="brez-slike">slike na disku ni</span>
+            {% endif %}
+            <span class="opis">
+              <span class="cas">{{ snov.cas }}</span>
+              <span class="stanje">{{ snov.stanje }}</span>
+            </span>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="opozorilo">
+      Za ta predmet na strežniku še ni nobene slike. Če je bila slika
+      posneta danes, morda še čaka na prenos — to je vidno v aplikaciji na
+      telefonu, ne tukaj.
+    </p>
+  {% endif %}
+
+  <a class="nazaj" href="/admin">← Nazaj na predmete</a>
+{% endblock %}

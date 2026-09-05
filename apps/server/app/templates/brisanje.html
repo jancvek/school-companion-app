@@ -1,0 +1,34 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}Izbrisati sliko?{% endblock %}
+
+{% block vsebina %}
+  <h1>Izbrisati to sliko?</h1>
+  <p class="pod">{{ snov.koda }} — {{ snov.oznaka }}, {{ snov.cas }}</p>
+
+  <div class="snov">
+    <div>
+      {% if snov.velikost is not none %}
+        <img src="/admin/materials/{{ snov.id }}/image" alt="Posneta snov">
+      {% else %}
+        <p class="opozorilo">Slike na disku ni; izbrisan bo samo zapis v bazi.</p>
+      {% endif %}
+    </div>
+
+    <div>
+      <p class="opozorilo">
+        Brisanje je dokončno. Slika na telefonu ostane, a je od tam ni mogoče
+        poslati znova — aplikacija prenesenega posnetka ne pošilja drugič.
+        Na strežniku te slike po tem koraku ne bo več.
+      </p>
+
+      {# Brisanje je POST in nikoli navadna povezava: brskalniki povezave
+         prednalagajo, in en napačen klik je nepovraten. #}
+      <form method="post" action="/admin/materials/{{ snov.id }}/delete">
+        <button class="gumb" type="submit">Da, izbriši</button>
+      </form>
+
+      <a class="nazaj" href="/admin/materials/{{ snov.id }}">← Ne, vrni se</a>
+    </div>
+  </div>
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}Predmeti{% endblock %}
+
+{% block vsebina %}
+  <h1>Predmeti</h1>
+  <p class="pod">Skupaj {{ skupaj }} {{ "slika" if skupaj == 1 else "slik" }} na strežniku.</p>
+
+  <ul class="predmeti">
+    {# Predmeti brez slik ostanejo vidni, samo brez povezave — sicer bi seznam
+       iz dneva v dan spreminjal dolžino in ne bi bilo videti, česa ni. #}
+    {% for vrstica in predmeti %}
+      <li>
+        {% if vrstica.koliko %}
+          <a href="/admin/subjects/{{ vrstica.koda }}">
+            <span><span class="koda">{{ vrstica.koda }}</span> — {{ vrstica.oznaka }}</span>
+            <span class="stevec">{{ vrstica.koliko }}</span>
+          </a>
+        {% else %}
+          <span class="prazen">
+            <span><span class="koda">{{ vrstica.koda }}</span> — {{ vrstica.oznaka }}</span>
+            <span class="stevec">0</span>
+          </span>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+{% endblock %}

@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from sqlalchemy import Engine
 
 from app.db import naredi_motor, naredi_tovarno_sej
-from app.routers import materials
+from app.routers import admin, materials
 from app.schemas import Zivost
 from app.security import ApiKeyMiddleware
 from app.settings import Settings
@@ -18,6 +18,16 @@ from app.settings import Settings
 #: Poti, ki ključa ne zahtevajo. `GET /health` mora odgovoriti tudi brez njega,
 #: sicer preverba živosti ne loči „strežnik ne teče" od „ključ ni pravi".
 IZVZETE_POTI = frozenset({"/health"})
+
+#: Predpone, ki ključa ne zahtevajo.
+#:
+#: Operaterska stran teče v brskalniku, ta pa glave `X-API-Key` ne zna
+#: poslati. Meja pred njo je Tailscale in vezava strežnika na tisti naslov —
+#: glej `docs/odlocitve/ADR-006`, ki to izbiro in njene posledice zapiše.
+#:
+#: **Tu ne dodajaj ničesar brez ADR.** Vsaka predpona na tem seznamu je pot,
+#: ki jo lahko odpre kdorkoli v omrežju.
+IZVZETE_PREDPONE = frozenset({"/admin"})
 
 
 def create_app(nastavitve: Settings | None = None, motor: Engine | None = None) -> FastAPI:
@@ -36,9 +46,11 @@ def create_app(nastavitve: Settings | None = None, motor: Engine | None = None) 
         ApiKeyMiddleware,
         api_key=nastavitve.api_key,
         izvzete_poti=IZVZETE_POTI,
+        izvzete_predpone=IZVZETE_PREDPONE,
     )
 
     app.include_router(materials.router)
+    app.include_router(admin.router)
 
     @app.get("/health", response_model=Zivost)
     def zivost() -> Zivost:

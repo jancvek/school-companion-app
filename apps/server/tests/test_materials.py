@@ -166,11 +166,17 @@ class TestKljuc:
         #
         # Glava je podana kot bajti, ker odjemalec ne-ASCII niza sploh ne bi
         # poslal — omejitev je na njegovi strani, ne na strežnikovi.
+        #
+        # Bajti so tudi v ključu glave, ne le v vrednosti: odjemalec sprejme
+        # preslikavo nizov ali preslikavo bajtov, ne pa mešanice. Mešanica je
+        # tekla, dokler je bil tip ohlapnejši, in je zdaj napaka `mypy`.
+        # Popravljeno pri V1-R04, ker je blokiralo `verify`; vsebina testa je
+        # nespremenjena.
         odgovor = odjemalec.post(
             "/materials",
             data=polja(),
             files=datoteka(),
-            headers={"X-API-Key": b"\xc4-tuj-kljuc"},
+            headers={b"X-API-Key": b"\xc4-tuj-kljuc"},
         )
 
         assert odgovor.status_code == 401

@@ -7,7 +7,7 @@ dokazati, da funkcija tak vnos prenese; tu je.
 
 import pytest
 
-from app.security import kljuc_se_ujema
+from app.security import je_izvzeta, kljuc_se_ujema
 
 PRAVI = "kljuc-za-teste"
 
@@ -50,3 +50,27 @@ def test_prazen_pricakovani_kljuc_ne_odpre_streznika() -> None:
     assert kljuc_se_ujema("", "") is False
     assert kljuc_se_ujema(None, "") is False
     assert kljuc_se_ujema("karkoli", "") is False
+
+
+@pytest.mark.parametrize(
+    ("pot", "pricakovano"),
+    [
+        ("/health", True),
+        ("/admin", True),
+        ("/admin/", True),
+        ("/admin/subjects/MAT", True),
+        ("/materials", False),
+        ("/", False),
+        # Predpona se ne sme ujeti na pot, ki se le začne enako. Golo
+        # `startswith("/admin")` bi vse tri odprlo brez ključa.
+        ("/administration", False),
+        ("/admin-nekaj", False),
+        ("/adminmaterials", False),
+        # Predpona velja od začetka poti, ne kjerkoli v njej.
+        ("/materials/admin", False),
+    ],
+)
+def test_izvzetost_poti(pot: str, pricakovano: bool) -> None:
+    assert (
+        je_izvzeta(pot, frozenset({"/health"}), frozenset({"/admin"})) is pricakovano
+    )

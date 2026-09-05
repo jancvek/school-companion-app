@@ -39,16 +39,39 @@ def kljuc_se_ujema(ponujeni: str | None, pricakovani: str) -> bool:
     return secrets.compare_digest(ponujeni.encode("utf-8"), pricakovani.encode("utf-8"))
 
 
+def je_izvzeta(pot: str, poti: frozenset[str], predpone: frozenset[str]) -> bool:
+    """Ali je pot izvzeta iz preverbe ključa.
+
+    Predpona se ujame samo na sami sebi in na tem, kar ji sledi za poševnico:
+    `/admin` in `/admin/karkoli`, **ne** pa `/administration`. Golo
+    `startswith("/admin")` bi izvzelo vsako pot, ki se slučajno začne enako —
+    in tako izvzetje bi bilo videti pravilno vse do dneva, ko nastane pot s
+    podobnim imenom (odločitev 6 v `docs/plan/V1-R04.md`).
+    """
+    if pot in poti:
+        return True
+    return any(pot == predpona or pot.startswith(f"{predpona}/") for predpona in predpone)
+
+
 class ApiKeyMiddleware:
     """Zavrne vsako zahtevo brez veljavnega ključa, razen na izvzetih poteh."""
 
-    def __init__(self, app: ASGIApp, api_key: str, izvzete_poti: frozenset[str]) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        api_key: str,
+        izvzete_poti: frozenset[str],
+        izvzete_predpone: frozenset[str] = frozenset(),
+    ) -> None:
         self.app = app
         self.api_key = api_key
         self.izvzete_poti = izvzete_poti
+        self.izvzete_predpone = izvzete_predpone
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope["path"] in self.izvzete_poti:
+        if scope["type"] != "http" or je_izvzeta(
+            scope["path"], self.izvzete_poti, self.izvzete_predpone
+        ):
             await self.app(scope, receive, send)
             return
 
