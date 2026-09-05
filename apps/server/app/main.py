@@ -7,10 +7,12 @@ Uvicorn jo zato zažene z zastavico `--factory`.
 """
 
 from fastapi import FastAPI
+from fastapi.templating import Jinja2Templates
 from sqlalchemy import Engine
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.db import naredi_motor, naredi_tovarno_sej
-from app.routers import materials
+from app.routers import admin, materials
 from app.schemas import Zivost
 from app.security import ApiKeyMiddleware
 from app.settings import Settings
@@ -18,6 +20,16 @@ from app.settings import Settings
 #: Poti, ki ključa ne zahtevajo. `GET /health` mora odgovoriti tudi brez njega,
 #: sicer preverba živosti ne loči „strežnik ne teče" od „ključ ni pravi".
 IZVZETE_POTI = frozenset({"/health"})
+
+#: Predpone, ki ključa ne zahtevajo.
+#:
+#: Operaterska stran teče v brskalniku, ta pa glave `X-API-Key` ne zna
+#: poslati. Meja pred njo je Tailscale in vezava strežnika na tisti naslov —
+#: glej `docs/odlocitve/ADR-006`, ki to izbiro in njene posledice zapiše.
+#:
+#: **Tu ne dodajaj ničesar brez ADR.** Vsaka predpona na tem seznamu je pot,
+#: ki jo lahko odpre kdorkoli v omrežju.
+IZVZETE_PREDPONE = frozenset({"/admin"})
 
 
 def create_app(nastavitve: Settings | None = None, motor: Engine | None = None) -> FastAPI:
@@ -31,14 +43,21 @@ def create_app(nastavitve: Settings | None = None, motor: Engine | None = None) 
     app.state.nastavitve = nastavitve
     app.state.motor = motor
     app.state.tovarna_sej = naredi_tovarno_sej(motor)
+    app.state.predloge = Jinja2Templates(directory=str(admin.MAPA_PREDLOG))
 
     app.add_middleware(
         ApiKeyMiddleware,
         api_key=nastavitve.api_key,
         izvzete_poti=IZVZETE_POTI,
+        izvzete_predpone=IZVZETE_PREDPONE,
     )
 
     app.include_router(materials.router)
+    app.include_router(admin.router)
+
+    # Napake pod `/admin` naj bodo stran, ne JSON. Prestreznik se za vse
+    # ostale poti umakne privzetemu — glej `admin.prestrezi_napako`.
+    app.add_exception_handler(StarletteHTTPException, admin.prestrezi_napako)
 
     @app.get("/health", response_model=Zivost)
     def zivost() -> Zivost:

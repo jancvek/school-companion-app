@@ -1,0 +1,50 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}{{ snov.koda }} — {{ snov.cas }}{% endblock %}
+
+{% block vsebina %}
+  <h1>{{ snov.koda }} — {{ snov.oznaka }}</h1>
+  <p class="pod">{{ snov.cas }}</p>
+
+  <div class="snov">
+    <div>
+      {% if snov.velikost is not none %}
+        <img src="/admin/materials/{{ snov.id }}/image" alt="Posneta snov">
+      {% else %}
+        <p class="opozorilo">
+          Zapis v bazi obstaja, slike na disku pa ni. Datoteka je bila
+          verjetno odstranjena mimo te strani. Zapis lahko izbrišeš spodaj.
+        </p>
+      {% endif %}
+    </div>
+
+    <div>
+      <dl>
+        <dt>Stanje obdelave</dt>
+        <dd>{{ snov.stanje }}</dd>
+
+        <dt>Čas posnetka</dt>
+        <dd>{{ snov.cas }}</dd>
+
+        <dt>Čas prejema na strežniku</dt>
+        <dd>{{ snov.prejeto }}</dd>
+
+        <dt>Velikost datoteke</dt>
+        <dd>{{ snov.velikost_opis }}</dd>
+
+        <dt>Pot do datoteke</dt>
+        <dd>{{ snov.pot }}</dd>
+
+        <dt>Identifikator</dt>
+        <dd>{{ snov.id }}</dd>
+      </dl>
+
+      {# Prepis, vprašanja, poslani prompt in odgovor modela pridejo z V1-R03;
+         v tej zahtevi jih v bazi še ni. #}
+
+      <a class="gumb" href="/admin/materials/{{ snov.id }}/delete">Izbriši sliko</a>
+      <br>
+      <a class="nazaj" href="/admin/subjects/{{ snov.koda|urlencode }}">← Nazaj na {{ snov.koda }}</a>
+    </div>
+  </div>
+{% endblock %}

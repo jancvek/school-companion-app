@@ -20,7 +20,7 @@
 | Modul | Odgovornost | Datoteke |
 |---|---|---|
 | `apps/mobile` | Kamera, izbira predmeta, lokalna baza, zgodovina, upload worker | `apps/mobile/` (od V1-R01; upload worker od V1-R02) |
-| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba; obdelava pride v V1-R03 | `apps/server/` (od V1-R02) |
+| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`; obdelava pride v V1-R03 | `apps/server/` (od V1-R02; `/admin` od V1-R04) |
 
 Ločena mapi namenoma ne delita orodij za monorepo (npr. Turborepo) — gre za
 dva jezika (TypeScript / Python) brez skupne kode, zato vsaka živi s svojim
@@ -142,8 +142,14 @@ in slika se ne povozi.
 
 Ključ preverja **ASGI vmesna plast**, ne odvisnost endpointa: FastAPI telo
 zahteve prebere pred razreševanjem odvisnosti, zato bi strežnik večmegabajtno
-sliko najprej prebral in šele nato ugotovil, da ključ ne velja. `GET /health`
-je iz preverbe izvzet.
+sliko najprej prebral in šele nato ugotovil, da ključ ne velja. Izvzeta sta
+`GET /health` in celotna predpona `/admin`.
+
+Izvzetje predpone je **varnostna meja, ne priročnost**: ujame se na `/admin`
+in na `/admin/...`, nikoli na pot, ki se le začne enako (`/administration`).
+Da izvzetje ne odpre ničesar drugega, dokazuje razred
+`TestKljucOstajaZahtevanDrugod` v `tests/test_admin.py` — brez njega bi bila
+sprememba te vrstice nevidna do dneva, ko bi bilo prepozno.
 
 Na telefonu prenos teče prek `File.upload` iz `expo-file-system` (nativni
 multipart naravnost z diska, brez nalaganja v pomnilnik JS), s časovno
@@ -155,6 +161,65 @@ vsakem uspešnem *Shrani* in nato vsakih 30 s, po neuspehu s podvojevanjem
 zamika do 5 minut. Prenaša zaporedno, enega za drugim. Po *Shrani* se prenos
 samo sproži — nanj se **ne čaka**, sicer bi zaporedno slikanje ob nedosegljivem
 strežniku obtičalo in ADR-003 bi padel.
+
+## Operaterska stran (`/admin`)
+
+Strežniško izrisan HTML za lastnika sistema (`docs/00-namen.md`, vloga
+„spremlja delovanje"). Brez JavaScripta, brez gradnje frontenda, brez `npm` v
+`apps/server`. Nastala v V1-R04; V1-R03 jo razširi s prikazom obdelave.
+
+| Pot | Metoda | Kaj |
+|---|---|---|
+| `/admin` | GET | vseh deset predmetov s števci; predmet iz baze, ki ga na seznamu ni, je viden pod svojo kodo |
+| `/admin/subjects/{koda}` | GET | slike predmeta, najnovejša prva, lena naložitev |
+| `/admin/materials/{id}` | GET | podrobnosti ene slike |
+| `/admin/materials/{id}/image` | GET | datoteka slike |
+| `/admin/materials/{id}/delete` | GET | potrditvena stran |
+| `/admin/materials/{id}/delete` | POST | izbriše in preusmeri (303) |
+
+Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Prijave ni** —
+meja je Tailscale; posledice, vključno s CSRF, so v `docs/odlocitve/ADR-006`.
+
+Napake pod `/admin` (404, 405) izriše prestreznik `StarletteHTTPException`,
+registriran v `create_app`. Izven te predpone se umakne privzetemu, ker morajo
+odgovori `POST /materials` ostati JSON — telefon tam pričakuje sporočilo o
+napaki, ne strani. Prvi poskus je bila pot `/{ostanek:path}` na koncu
+usmerjevalnika; ta je prekrila Starlettejevo preusmeritev ob končni poševnici,
+zato je `GET /admin/` vrnil 404 s trditvijo, da strani ni. Prestreznik se
+sproži šele, ko poti res ni.
+
+Koda predmeta sme vsebovati karkoli (`POST /materials` jo omejuje samo po
+dolžini), zato je pot `subjects/{koda:path}` in povezava nanjo ubežana za URL.
+Brez obojega bi bile slike predmeta s poševnico ali vprašajem iz vmesnika
+nedosegljive.
+
+Predloge so v `app/templates/`, pot do njih se izpelje iz `__file__` in ne iz
+trenutne mape. `[tool.setuptools.package-data]` v `pyproject.toml` jih vključi
+v nameščeni paket; brez te vrstice so testi zeleni, vsebnik pa pade ob prvi
+zahtevi. Izrisovalnik živi v `app.state.predloge`, kot vse drugo stanje
+aplikacije.
+
+Po brisanju stran pelje na predmet, iz katerega je bila slika — razen kadar
+je bila to zadnja slika predmeta, ki ni na seznamu desetih. Tak predmet
+obstaja samo, dokler ima kakšno sliko, zato bi bila njegova stran po brisanju
+404; v tem edinem primeru pelje na pregled. Kriterij pravi „preusmeri na
+seznam predmeta", drug kriterij pa za neznano kodo zahteva 404 — v tem kotu
+si nasprotujeta in izbrana je bila stran, ki obstaja.
+
+**Brisanje gre v obratnem vrstnem redu kot sprejem: najprej vrstica, nato
+datoteka.** Vrstica brez datoteke je pokvarjen vnos, ki ga operater vidi;
+datoteka brez vrstice je nevidna sirota, ki stane samo prostor. Brisanje je
+nepovratno — zapis, ki je na telefonu `synced`, upload worker nikoli več ne
+pošlje.
+
+Ure so v pasu `Europe/Ljubljana`, ker jih operater primerja s tem, kar kaže
+telefon. Bazo pasov prinese sistem (v vsebniku `/usr/share/zoneinfo`, na
+Windows paket `tzdata`, ki ga zahteva že `psycopg`), zato tu ni nove
+odvisnosti. `ZoneInfo` se ustvari ob prvi uporabi in ne ob uvozu modula —
+sicer bi manjkajoča baza pasov podrla tudi `GET /health` in `POST /materials`.
+
+Čas iz baze je lahko brez podatka o pasu: Postgres ga v `TIMESTAMPTZ` vrne,
+**SQLite pa ne**. Prikaz ga zato normalizira v UTC, preden ga pretvori.
 
 ## Zunanje odvisnosti
 
@@ -183,6 +248,7 @@ V1-R02 telefonu ni dodala nobene odvisnosti — prenos teče prek
 | `sqlalchemy`, `psycopg[binary]` | dostop do baze; `binary` zato, ker na Windows ni prevajalnika | V1-R02 |
 | `alembic` | migracije sheme | V1-R02 |
 | `pydantic-settings` | nastavitve iz okolja | V1-R02 |
+| `jinja2` | predloge operaterske strani | V1-R04 |
 | razvojno: `ruff`, `mypy`, `pytest`, `httpx` | preverbe; `httpx` rabi `TestClient` | V1-R02 |
 
 ## Kako se poganja in testira

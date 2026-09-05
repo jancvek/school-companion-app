@@ -67,6 +67,34 @@ def shrani_sliko(images_dir: Path, material_id: str, vir: BereBajte) -> Path:
     return koncna
 
 
+def velikost_slike(pot: Path) -> int | None:
+    """Velikost datoteke v bajtih, ali `None`, če je na disku ni.
+
+    Manjkajoča datoteka ni izjema. Vrstica brez datoteke je stanje, ki se v
+    pregledu mora pokazati, ne pa podreti strani.
+    """
+    try:
+        return pot.stat().st_size
+    except OSError:
+        return None
+
+
+def je_znotraj(mapa: Path, pot: Path) -> bool:
+    """Ali `pot` leži znotraj `mapa`, po razrešitvi simbolnih povezav.
+
+    Pot do slike je zapisala naša koda in bi ji smeli zaupati. Ne zaupamo ji,
+    ker je razlika med „zaupam" in „preverim" tri vrstice, posledica napačne
+    predpostavke pa branje poljubne datoteke s strežnika (odločitev 8 v
+    `docs/plan/V1-R04.md`).
+    """
+    try:
+        razresena = pot.resolve(strict=False)
+        koren = mapa.resolve(strict=False)
+    except OSError:
+        return False
+    return razresena == koren or koren in razresena.parents
+
+
 def pobrisi_sliko(pot: Path) -> None:
     """Pobriše sliko, za katero se je izkazalo, da vrstice v bazi ne bo.
 

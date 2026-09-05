@@ -5,7 +5,7 @@ tako testi tečejo nad SQLite v pomnilniku, produkcija pa nad Postgresom, in
 oboje skozi isto kodo.
 """
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -27,7 +27,7 @@ def naredi_tovarno_sej(motor: Engine) -> sessionmaker[Session]:
 
 
 class MaterialsRepository:
-    """Operacije nad tabelo `materials`, ki jih potrebuje V1-R02."""
+    """Operacije nad tabelo `materials`, ki jih potrebujeta V1-R02 in V1-R04."""
 
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -59,3 +59,43 @@ class MaterialsRepository:
             return False
 
         return True
+
+    def stej_po_predmetih(self) -> dict[str, int]:
+        """Koliko zapisov je pri katerem predmetu.
+
+        Vrne samo predmete, ki v bazi res so. Kateri predmeti se pokažejo tudi
+        s številom nič, je odločitev vmesnika, ne baze.
+        """
+        vrstice = self.session.execute(
+            select(Material.subject, func.count()).group_by(Material.subject)
+        ).all()
+        return {subject: koliko for subject, koliko in vrstice}
+
+    def seznam_po_predmetu(self, subject: str) -> list[Material]:
+        """Zapisi enega predmeta, od najnovejšega navzdol.
+
+        Vrstni red je enak kot v zgodovini na telefonu (`taken_at DESC`), da
+        isti posnetek na obeh straneh stoji na istem mestu.
+        """
+        return list(
+            self.session.scalars(
+                select(Material)
+                .where(Material.subject == subject)
+                .order_by(Material.taken_at.desc())
+            )
+        )
+
+    def pobrisi(self, material_id: str) -> Material | None:
+        """Pobriše zapis in vrne, kar je bilo pobrisano, ali `None`.
+
+        Vrne cel zapis, ne le `True`, ker klicatelj potrebuje `image_path` (da
+        pobriše datoteko) in `subject` (da ve, kam preusmeriti). Objekt je po
+        `commit` še vedno berljiv, ker je `expire_on_commit=False`.
+        """
+        material = self.poisci(material_id)
+        if material is None:
+            return None
+
+        self.session.delete(material)
+        self.session.commit()
+        return material
