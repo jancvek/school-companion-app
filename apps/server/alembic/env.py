@@ -21,7 +21,13 @@ from app.models import Base
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # `disable_existing_loggers=False` in ne privzeti `True`: privzetek utiša
+    # **vse** že ustvarjene zapisovalnike, torej tudi `app.main` in
+    # `app.worker`. V produkciji je to nevidno, ker `alembic upgrade head`
+    # teče kot svoj proces pred `uvicorn`; v testih, kjer Alembic teče v istem
+    # procesu, pa migracija tiho ugasne dnevnik aplikacije za vse teste za
+    # sabo. Migracija sheme ne sme odločati, ali strežnik še kaj pove.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # `alembic.ini` `sqlalchemy.url` namenoma nima, zato je ob običajnem zagonu
 # (`alembic upgrade head` v vsebniku) tu prazno in obvelja okolje. Kadar pa je

@@ -29,6 +29,26 @@ POSTGRES_PASSWORD=zamenjaj-me
 # Kam se zapisujejo slike znotraj vsebnika.
 IMAGES_DIR=/data/images
 
+# Ključ za OpenAI (vision obdelava, V1-R03). Dobiš ga na
+# https://platform.openai.com/api-keys.
+#
+# Brez njega strežnik normalno steče in slike s telefona sprejema — ne teče
+# samo obdelava. Slike ostanejo v stanju „čaka na obdelavo" in se obdelajo
+# same, ko ključ vpišeš in strežnik zaženeš znova (`docs/odlocitve/ADR-009`).
+OPENAI_API_KEY=
+
+# Ime vision modela. Zamenjava novejšega je sprememba te vrstice in ponovni
+# zagon — glej `docs/odlocitve/ADR-008`, ki pove tudi, kdaj se izbira pregleda
+# znova.
+OPENAI_MODEL=gpt-4.1
+
+# Časovna omejitev enega klica modela, v sekundah. Obdelava teče zaporedno,
+# zato bi klic brez omejitve ustavil vrsto za vse ostale slike.
+OPENAI_TIMEOUT_SECONDS=120
+
+# Razmik med obhodi obdelave, v sekundah.
+WORKER_INTERVAL_SECONDS=30
+
 # Naslov, na katerem posluša API. Vpiši Tailscale naslov tega stroja
 # (`tailscale ip -4`), da strežnik ni dosegljiv iz domačega omrežja ali
 # interneta. Za preizkus na istem stroju je smiselno 127.0.0.1.

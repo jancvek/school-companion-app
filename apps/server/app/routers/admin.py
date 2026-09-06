@@ -4,9 +4,11 @@ Stran je namenjena lastniku sistema, ne učenki (`docs/00-namen.md`, vloga
 „spremlja delovanje"). Ključa ne zahteva — meja je Tailscale; glej
 `docs/odlocitve/ADR-006` za to izbiro in njene posledice.
 
-Prikaza rezultatov obdelave tu ni. Prompt, odgovor modela, prepis, vprašanja
-in gumb „Pošlji v obdelavo" pridejo z V1-R03; ta zahteva pokaže samo tisto,
-kar v bazi res obstaja.
+Stran s podrobnostmi od V1-R03 pokaže tudi izid obdelave — prepis, povzetek,
+vprašanja z odgovori — in celotno revizijsko sled klica: poslani prompt, surov
+odgovor modela, ime modela in porabo tokenov. Gumb „Pošlji v obdelavo" zapis
+vrne v vrsto; ker to zavrže prejšnji rezultat, je `POST` in ne povezava
+(`docs/odlocitve/ADR-009`).
 """
 
 from datetime import UTC, datetime
@@ -25,7 +27,7 @@ from starlette.responses import Response
 
 from app.db import MaterialsRepository
 from app.dependencies import daj_nastavitve, daj_repozitorij
-from app.models import Material
+from app.models import STATUS_V_OBDELAVI, Material
 from app.settings import Settings
 from app.storage import je_znotraj, pobrisi_sliko, velikost_slike
 from app.subjects import PREDMETI, oznaka_predmeta, oznaka_statusa, poisci_predmet
@@ -117,6 +119,10 @@ def _pogled(material: Material, images_dir: Path) -> dict[str, Any]:
     Za datoteko izven `images_dir` velja isto kot za manjkajočo. Sicer bi
     predloga narisala `<img>`, pot `/image` pa bi ga zavrnila — stran bi
     kazala pokvarjeno sliko namesto povedati, kaj je narobe.
+
+    Vprašanj in revizijske sledi tu **ni**: ta pogled se izriše tudi za vsako
+    sliko v seznamu predmeta, in branje vprašanj bi tam pomenilo eno poizvedbo
+    na sliko. Za stran s podrobnostmi je `_pogled_podrobno`.
     """
     pot = Path(material.image_path)
     velikost = velikost_slike(pot) if je_znotraj(images_dir, pot) else None
@@ -126,11 +132,61 @@ def _pogled(material: Material, images_dir: Path) -> dict[str, Any]:
         "oznaka": oznaka_predmeta(material.subject),
         "cas": _cas(material.taken_at),
         "prejeto": _cas(material.received_at),
-        "stanje": oznaka_statusa(material.status),
+        "stanje": oznaka_statusa(material.status, material.readable),
         "pot": material.image_path,
         "velikost": velikost,
         "velikost_opis": _velikost_opis(velikost),
     }
+
+
+def _stevilo(koliko: int | None) -> str:
+    """Število tokenov za prikaz; manjkajoč podatek ni nič in ni ničla."""
+    return "—" if koliko is None else f"{koliko}"
+
+
+def _pogled_podrobno(material: Material, images_dir: Path) -> dict[str, Any]:
+    """Kot `_pogled`, plus izid obdelave in revizijska sled (V1-R03).
+
+    Vse, kar je posebej za to stran, je zbrano tu: predloga potem samo
+    razporeja. Zastavice (`je_ready`, `ima_sled`, …) so izračunane, ker bi
+    predloga sicer sklepala o pomenu statusov — in bi se sklepanje podvojilo
+    ob vsakem novem stanju.
+    """
+    pogled = _pogled(material, images_dir)
+    pogled.update(
+        {
+            "status": material.status,
+            "berljivo": material.readable,
+            "prepis": material.transcript,
+            "povzetek": material.summary,
+            "napaka": material.error,
+            "model": material.model,
+            "prompt": material.prompt,
+            "surov_odgovor": material.raw_response,
+            "vhodni_tokeni": _stevilo(material.input_tokens),
+            "izhodni_tokeni": _stevilo(material.output_tokens),
+            "vprasanja": [
+                {"stevilka": vprasanje.position, "vprasanje": vprasanje.question,
+                 "odgovor": vprasanje.answer}
+                for vprasanje in material.questions
+            ],
+            # Sled se pokaže, kadar je karkoli od nje nastalo — tudi pri
+            # `failed`, kjer je surov odgovor pogosto edino, kar pojasni zakaj.
+            "ima_sled": any(
+                (
+                    material.prompt,
+                    material.raw_response,
+                    material.model,
+                    material.input_tokens is not None,
+                    material.output_tokens is not None,
+                )
+            ),
+            # Zapisa, ki ga pravkar obdeluje worker, ne ponujamo v ponovno
+            # obdelavo: gumb bi ne naredil ničesar in bi lagal.
+            "ponovna_obdelava_mozna": material.status != STATUS_V_OBDELAVI,
+        }
+    )
+    return pogled
 
 
 def _ni_najdeno(predloge: Jinja2Templates, request: Request, sporocilo: str) -> Response:
@@ -220,7 +276,7 @@ def snov(
         return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
     return predloge.TemplateResponse(
-        request, "snov.html", {"snov": _pogled(material, nastavitve.images_dir)}
+        request, "snov.html", {"snov": _pogled_podrobno(material, nastavitve.images_dir)}
     )
 
 
@@ -301,6 +357,36 @@ def izbrisi(
     # poizvedbo oziroma sidro in operater bi pristal na napačnem predmetu.
     return RedirectResponse(
         f"{PREDPONA}/subjects/{quote(material.subject, safe='')}", status_code=303
+    )
+
+
+@router.post("/materials/{material_id}/reprocess")
+def ponovno_obdelaj(
+    request: Request,
+    material_id: str,
+    repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+) -> Response:
+    """Vrne zapis v vrsto in s tem sproži ponovno obdelavo.
+
+    Samo `POST`, nikoli navadna povezava — enako pravilo kot pri brisanju
+    (ADR-006). Dejanje je nepovratno: zavrže prejšnji prepis, povzetek,
+    revizijsko sled in vsa vprašanja (`docs/odlocitve/ADR-009`). Vmesne
+    potrditvene strani vseeno ni, ker za razliko od brisanja slika ostane in
+    se da obdelati znova.
+    """
+    material = repozitorij.poisci(material_id)
+    if material is None:
+        return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
+
+    # Izid namenoma ne vpliva na odgovor. `False` pomeni, da je zapis že v
+    # obdelavi; takrat je stran, na katero peljemo, prav tista, ki to pove.
+    repozitorij.vrni_v_vrsto(material_id)
+
+    # 303 iz istega razloga kot pri brisanju: osvežitev strani ne sme dejanja
+    # ponoviti — tu bi to pomenilo še en plačan klic modela.
+    return RedirectResponse(
+        f"{PREDPONA}/materials/{quote(material_id, safe='')}", status_code=303
     )
 
 

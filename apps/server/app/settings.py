@@ -42,3 +42,26 @@ class Settings(BaseSettings):
 
     #: Mapa, v katero se zapisujejo prejete slike.
     images_dir: Path = Path("/data/images")
+
+    #: Ključ za OpenAI. **Privzetek je prazen niz in to je namerno.**
+    #:
+    #: Za razliko od `api_key` odsotnost tega ključa strežnika ne ustavi:
+    #: prevzem slik, admin stran in `GET /health` delujejo brez njega. Ustavi
+    #: samo obdelavo — worker se ne zažene in slike ostanejo `new`, dokler
+    #: ključa ni. Glej `docs/odlocitve/ADR-009` za to razliko in za razlog,
+    #: zakaj manjkajoč ključ ne pomeni `status='failed'`.
+    openai_api_key: str = ""
+
+    #: Ime vision modela. **Nastavitev, ne konstanta v kodi** (ADR-008):
+    #: zamenjava z novejšim modelom mora biti sprememba spremenljivke okolja
+    #: in ponovni zagon, ne predelava.
+    openai_model: str = "gpt-4.1"
+
+    #: Časovna omejitev enega klica modela, v sekundah.
+    #:
+    #: Meja ni okras. Klic brez nje bi lahko visel neomejeno; worker obdeluje
+    #: zaporedno, zato bi en tak klic ustavil vrsto za vse ostale slike.
+    openai_timeout_seconds: float = 120.0
+
+    #: Razmik med obhodi worker zanke, v sekundah (kriterij pravi ~30).
+    worker_interval_seconds: float = 30.0
