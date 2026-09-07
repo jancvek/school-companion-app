@@ -2,6 +2,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { opisVerzije } from '@/config/verzija';
 import { useSync } from '@/sync/use-sync';
 import { theme } from '@/ui/theme';
 
@@ -42,6 +43,12 @@ export default function HomeScreen() {
       </Pressable>
 
       <StanjePrenosa nastavljen={nastavljen} pending={povzetek.pending} failed={povzetek.failed} />
+
+      {/* Katera gradnja je nameščena (V1-R06). Samo izpis — brez dotika, da
+          ne tekmuje z gumboma nad sabo. */}
+      <Text testID="verzija" style={styles.verzija}>
+        {opisVerzije()}
+      </Text>
     </View>
   );
 }
@@ -129,6 +136,13 @@ const styles = StyleSheet.create({
   stanjeNapaka: {
     color: theme.danger,
     fontSize: 15,
+    textAlign: 'center',
+  },
+  verzija: {
+    marginTop: theme.spacing * 1.5,
+    color: theme.textMuted,
+    fontSize: 12,
+    opacity: 0.7,
     textAlign: 'center',
   },
 });

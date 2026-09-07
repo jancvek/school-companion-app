@@ -34,7 +34,7 @@ običajnim orodjem (`npm`/`package.json` v `apps/mobile`,
 |---|---|
 | `app/` | zasloni; usmerjanje je datotečno (`expo-router`) |
 | `src/constants/` | seznam desetih predmetov (`{ value, label }`) |
-| `src/config/` | naslov strežnika in API ključ, kot sta prišla ob gradnji |
+| `src/config/` | kar pride v aplikacijo ob gradnji: naslov strežnika, API ključ in oznaka gradnje |
 | `src/db/` | verzionirana shema (migracije) in poizvedbe nad tabelo `materials` |
 | `src/sync/` | prenos na strežnik: en prenos, čakalna vrsta, priklop na življenjski cikel. **Edina mapa v aplikaciji z omrežnim klicem.** |
 | `src/photos/` | stiskanje slike in zapis v `documentDirectory/photos/` |
@@ -401,6 +401,13 @@ sam, `app.config.ts` ju prepiše v `extra`). Brez njiju se worker ne zažene,
 aplikacija pa deluje kot v V1-R01 in to tudi pove. Ključ s tem konča vgrajen v
 APK — to je zavestno, ker gre za en družinski ključ na omrežju, ki je že
 zaprto s Tailscale; cena je, da zamenjava ključa zahteva novo gradnjo.
+
+Po isti poti pride tudi **oznaka gradnje** (V1-R06): `app.config.ts` prepiše
+`EAS_BUILD_ID` v `extra.buildId`, domača stran pa jo izpiše kot
+`1.0.0 · gradnja 317bdcd1`. Brez tega izpisa dveh APK na telefonu ni mogoče
+ločiti — verzija je pri obeh `1.0.0` in `versionCode` pri obeh 1. Razvojna
+gradnja spremenljivke nima in vrstica takrat pove `razvojna gradnja`; prazna
+vrednost šteje enako kot odsotna.
 
 ### `apps/server`
 

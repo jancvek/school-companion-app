@@ -191,3 +191,25 @@ describe('stanje prenosa na domači strani', () => {
     expect(usmerjevalnik.stanje.router.push).toHaveBeenCalledWith('/slikaj');
   });
 });
+
+describe('vidna verzija (V1-R06)', () => {
+  it('domača stran pove, katera gradnja je nameščena', async () => {
+    await render(<HomeScreen />);
+
+    const vrstica = await screen.findByTestId('verzija');
+
+    // Brez te vrstice dveh APK z isto verzijo na telefonu ni mogoče ločiti.
+    expect(vrstica).toBeTruthy();
+    expect(String(vrstica.props.children)).toMatch(/gradnja/);
+  });
+
+  it('vrstica z verzijo se ne da pritisniti', async () => {
+    // Izpis, ne gumb: dotik mora iti mimo nje, da ne tekmuje z „Slikaj snov".
+    await render(<HomeScreen />);
+
+    const vrstica = await screen.findByTestId('verzija');
+
+    expect(vrstica.props.onPress).toBeUndefined();
+    expect(vrstica.props.accessibilityRole).toBeUndefined();
+  });
+});
