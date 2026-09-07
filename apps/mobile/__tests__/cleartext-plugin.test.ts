@@ -45,11 +45,19 @@ describe('dovoliCleartext', () => {
     expect(glavnaAplikacija(manifest)['android:usesCleartextTraffic']).toBe('true');
   });
 
-  it('pusti ostale atribute pri miru', () => {
+  it('doda natanko en atribut in nobenega drugega', () => {
+    // Primerjava celotne množice ključev, ne le dveh: kriterij plana se glasi
+    // „ne spreminja ničesar razen enega atributa", posamične trditve pa novega
+    // atributa, ki bi se prikradel zraven, ne bi opazile.
     const manifest = manifestZ({ 'android:label': '@string/app_name' });
 
     dovoliCleartext(manifest);
 
+    expect(Object.keys(glavnaAplikacija(manifest)).sort()).toEqual([
+      'android:label',
+      'android:name',
+      'android:usesCleartextTraffic',
+    ]);
     expect(glavnaAplikacija(manifest)['android:label']).toBe('@string/app_name');
     expect(glavnaAplikacija(manifest)['android:name']).toBe('.MainApplication');
   });
@@ -72,5 +80,26 @@ describe('registracija plugina', () => {
 
   it('izvožena je funkcija, kot jo Expo pričakuje', () => {
     expect(typeof withCleartextTraffic).toBe('function');
+  });
+
+  it('registrira spremembo manifesta in jo tudi izvede', async () => {
+    // Brez tega primera bi ovojnica, ki tiho ne registrira ničesar
+    // (`(config) => config`), pustila vse teste zelene — plugin bi „delal",
+    // gradnja bi uspela in aplikacija spet ne bi prenašala. Ugotovitev
+    // pregledovalca ob prvem pregledu.
+    const konfiguracija = withCleartextTraffic({ name: 'test', slug: 'test' });
+    const spremembaManifesta = konfiguracija.mods?.android?.manifest;
+
+    expect(typeof spremembaManifesta).toBe('function');
+
+    const izid = await spremembaManifesta({
+      ...konfiguracija,
+      modResults: manifestZ({}),
+      modRequest: {},
+    });
+
+    expect(izid.modResults.manifest.application[0].$['android:usesCleartextTraffic']).toBe(
+      'true',
+    );
   });
 });
