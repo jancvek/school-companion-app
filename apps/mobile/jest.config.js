@@ -16,5 +16,7 @@ module.exports = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
   },
-  collectCoverageFrom: ['src/**/*.{ts,tsx}', 'app/**/*.tsx'],
+  // `app.config.ts` je zraven namenoma: njegova pokritost je bila 0 %, ne da
+  // bi to kdo videl — prav tam pa se `extra` sestavi (V1-R06, drugi pregled).
+  collectCoverageFrom: ['src/**/*.{ts,tsx}', 'app/**/*.tsx', 'app.config.ts'],
 };

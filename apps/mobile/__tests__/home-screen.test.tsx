@@ -205,11 +205,13 @@ describe('vidna verzija (V1-R06)', () => {
 
   it('vrstica z verzijo se ne da pritisniti', async () => {
     // Izpis, ne gumb: dotik mora iti mimo nje, da ne tekmuje z „Slikaj snov".
+    // Trditev je o vedenju in ne o lastnostih samega <Text> — sicer bi vrstica
+    // lahko postala gumb, zavit v <Pressable>, in test bi to preživel.
+    // Ugotovitev pregledovalca ob drugem pregledu.
     await render(<HomeScreen />);
 
-    const vrstica = await screen.findByTestId('verzija');
+    await fireEvent.press(await screen.findByTestId('verzija'));
 
-    expect(vrstica.props.onPress).toBeUndefined();
-    expect(vrstica.props.accessibilityRole).toBeUndefined();
+    expect(usmerjevalnik.stanje.router.push).not.toHaveBeenCalled();
   });
 });
