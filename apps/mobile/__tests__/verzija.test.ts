@@ -6,7 +6,6 @@
  * `undefined` ali prazne vrstice.
  */
 
-import { preberiNastavitve } from '@/config/server';
 import { DOLZINA_OZNAKE, opisVerzije } from '@/config/verzija';
 
 describe('opisVerzije', () => {
@@ -65,16 +64,6 @@ describe('opisVerzije', () => {
   });
 });
 
-describe('regresija V1-R02', () => {
-  it('novo polje v extra ne povozi naslova in ključa', () => {
-    // `app.config.ts` piše vsa tri polja v isti `extra`; če bi se pobila,
-    // bi tiho odpovedal prenos — in to brez enega samega rdečega testa.
-    const nastavitve = preberiNastavitve({
-      serverBaseUrl: 'http://100.0.0.1:8000',
-      apiKey: 'kljuc',
-      buildId: '317bdcd1-c7db-4c2c-8a6b-1cb1ce15ea29',
-    });
-
-    expect(nastavitve).toEqual({ baseUrl: 'http://100.0.0.1:8000', apiKey: 'kljuc' });
-  });
-});
+// Regresija V1-R02 (naslov in ključ preživita novo polje) je v
+// `app-config.test.ts`, ker se lahko pobijejo samo v `app.config.ts` — test
+// nad ročno sestavljenim predmetom o tej datoteki ne pove ničesar.
