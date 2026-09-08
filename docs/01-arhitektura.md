@@ -468,8 +468,9 @@ zaprto s Tailscale; cena je, da zamenjava ključa zahteva novo gradnjo.
 
 Po isti poti pride tudi **oznaka gradnje** (V1-R06): `app.config.ts` prepiše
 `EAS_BUILD_ID` v `extra.buildId`, domača stran pa jo izpiše kot
-`1.0.0 · gradnja 317bdcd1`. Brez tega izpisa dveh APK na telefonu ni mogoče
-ločiti — verzija je pri obeh `1.0.0` in `versionCode` pri obeh 1. Razvojna
+`1.0.0 · gradnja 317bdcd1`. Brez tega izpisa dveh APK na telefonu ni bilo
+mogoče ločiti — verzija je bila pri obeh `1.0.0` in `versionCode` pri obeh 1;
+`versionCode` odtlej šteje EAS sam (glej spodaj). Razvojna
 gradnja spremenljivke nima in vrstica takrat pove `razvojna gradnja`; prazna
 vrednost šteje enako kot odsotna.
 
