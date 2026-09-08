@@ -480,6 +480,13 @@ APK, interna distribucija, okolje `preview`). Naslov in ključ tam nista v
 `.env`, ampak med spremenljivkami okolja EAS za to okolje; `app.json` nosi
 `owner` in `extra.eas.projectId`.
 
+**Verzijo gradnje hrani EAS, ne repozitorij** (`appVersionSource: "remote"`,
+`autoIncrement` v profilu `preview`). `versionCode` zato zraste sam ob vsaki
+gradnji in dveh APK ne loči le izpis na domači strani, ampak tudi Android. V
+`app.json` `android.versionCode` namenoma ni — številka, ki bi jo bilo treba
+ročno povečevati, se pozabi natanko takrat, ko je potrebna. Cena je, da je
+števec pri EAS in ga svež klon sam ne pozna.
+
 Promet do strežnika je **nešifriran** (`http://` na Tailscale naslov). Android
 ga v release gradnji privzeto blokira, zato ga izrecno dovoli lokalni config
 plugin `apps/mobile/plugins/with-cleartext-traffic.js`, ki v glavno
