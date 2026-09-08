@@ -14,7 +14,12 @@ from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
 from app.db import MaterialsRepository
 from app.dependencies import daj_nastavitve, daj_repozitorij
 from app.models import STATUS_NOV, Material
-from app.schemas import MaterialPrevzet
+from app.schemas import (
+    BrisanjePotrjeno,
+    MaterialPrevzet,
+    PotrditevBrisanja,
+    ZaBrisanjeNaNapravi,
+)
 from app.settings import Settings
 from app.storage import pobrisi_sliko, shrani_sliko
 
@@ -56,6 +61,18 @@ def prevzemi_material(
     # vrstica bi ostala prva, vsebina pa bi bila druga.
     obstojeci = repozitorij.poisci(identifikator)
     if obstojeci is not None:
+        if obstojeci.archived_at is not None:
+            # `410` in ne `200`: posnetek, ki je na telefonu obtičal v
+            # `pending`, bi sicer po arhiviranju tam ostal za vedno — z
+            # delovnega seznama je lahko že padel, ker je bilo brisanje na
+            # napravi že potrjeno (`docs/odlocitve/ADR-011`). Statusna koda
+            # je edino, na kar se telefon zanese; polje `archived` je za
+            # človeka, ki bere odgovor.
+            response.status_code = 410
+            return MaterialPrevzet(
+                id=identifikator, status=obstojeci.status, created=False, archived=True
+            )
+
         response.status_code = 200
         # Status beremo iz zapisa in ga ne vpišemo na trdo: v V1-R02 je vedno
         # `new`, v V1-R03 pa bo obdelan zapis že `ready` ali `failed` in
@@ -90,3 +107,35 @@ def prevzemi_material(
         return MaterialPrevzet(id=identifikator, status=status, created=False)
 
     return MaterialPrevzet(id=identifikator, status=material.status, created=True)
+
+
+@router.get("/materials/pending-deletion", response_model=ZaBrisanjeNaNapravi)
+def za_brisanje_na_napravi(
+    repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+) -> ZaBrisanjeNaNapravi:
+    """Materiali, ki jih mora telefon zbrisati pri sebi.
+
+    Celoten delovni seznam, brez kazalca in brez časovnega žiga. Seznam se
+    krajša sam, ko telefon potrjuje, zato telefonu ni treba hraniti stanja
+    sinhronizacije — in prav to je razlog, da ta zahteva ne prinese migracije
+    lokalne sheme (`docs/odlocitve/ADR-011`).
+    """
+    return ZaBrisanjeNaNapravi(ids=repozitorij.seznam_za_brisanje())
+
+
+@router.post("/materials/deleted-on-device", response_model=BrisanjePotrjeno)
+def potrdi_brisanje_na_napravi(
+    telo: PotrditevBrisanja,
+    repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+) -> BrisanjePotrjeno:
+    """Sprejme potrditve, da danih materialov na napravi ni več.
+
+    Potrditev pomeni „tega tu ni več", ne „pravkar sem ga izbrisal": zapis, ki
+    ga sveže nameščena aplikacija sploh nima, se potrdi enako. Brez tega
+    seznam po ponovni namestitvi nikoli ne bi padel na nič.
+
+    Neznan `id` ni napaka — zapis je bil medtem že dokončno izbrisan in
+    izid je tak, kot ga je telefon hotel. Zato tu ni 404, ampak štetje
+    zadetih vrstic.
+    """
+    return BrisanjePotrjeno(confirmed=repozitorij.potrdi_brisanje(telo.ids))

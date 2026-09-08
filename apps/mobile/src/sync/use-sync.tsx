@@ -7,6 +7,10 @@
  * Teče samo, dokler je aplikacija v ospredju. Ko gre v ozadje, se ustavi:
  * prenos v ozadju je izrecno zunaj obsega V1-R02.
  *
+ * Od V1-R07 sta tu dve ponavljanji z različnim ritmom: prenos vsakih 30 s (s
+ * podvojevanjem po neuspehih) in preverjanje arhiva vsakih 5 minut. Drugo je
+ * počasno opravilo brez povoda — 30-sekundni ritem bi bil zanj brez pomena.
+ *
  * Datoteka je `.tsx` in ne `.ts`, kot je predvideval plan, ker vsebuje
  * ponudnika konteksta.
  */
@@ -28,6 +32,13 @@ import { preberiNastavitve, type ServerConfig } from '../config/server';
 import { countByStatus, retryFailed, type MaterialsDatabase } from '../db/materials';
 import { asMaterialsDatabase } from '../db/open';
 import type { SyncPovzetek } from '../types';
+import {
+  preveriIzbrisane,
+  ustvariOdjemalca,
+  ustvariPonavljalnik,
+  type Odjemalec,
+  type Ponavljalnik,
+} from './izbrisi';
 import { prenesi, type Izid } from './upload';
 import { ustvariRazporejevalnik, type PrenesiEno, type Razporejevalnik } from './worker';
 
@@ -55,6 +66,8 @@ export type SyncProviderProps = {
   nastavitve?: ServerConfig | null;
   /** Podtakljivo v testih; sicer pravi prenos. */
   prenesiEno?: PrenesiEno;
+  /** Podtakljivo v testih; sicer pravi klic na strežnik (V1-R07). */
+  odjemalec?: Odjemalec;
 };
 
 export function SyncProvider({
@@ -62,6 +75,7 @@ export function SyncProvider({
   db: dbLastnost,
   nastavitve: nastavitveLastnost,
   prenesiEno: prenesiEnoLastnost,
+  odjemalec: odjemalecLastnost,
 }: SyncProviderProps) {
   const sqlite = useSQLiteContext();
   const db = useMemo(
@@ -76,6 +90,13 @@ export function SyncProvider({
 
   const [povzetek, setPovzetek] = useState<SyncPovzetek>(PRAZEN_POVZETEK);
   const razporejevalnik = useRef<Razporejevalnik | null>(null);
+
+  // Odjemalec za arhiv nastane samo, kadar sta naslov in ključ v gradnji.
+  // Brez njiju aplikacija deluje kot v V1-R01 in nima s kom govoriti.
+  const odjemalec = useMemo<Odjemalec | null>(
+    () => odjemalecLastnost ?? (nastavitve ? ustvariOdjemalca(nastavitve) : null),
+    [nastavitve, odjemalecLastnost],
+  );
 
   const osvezi = useCallback(async () => {
     try {
@@ -132,6 +153,43 @@ export function SyncProvider({
       razporejevalnik.current = null;
     };
   }, [db, nastavitve, osvezi, prenesiEno, prenesiEnoLastnost]);
+
+  // Preverjanje arhiva (V1-R07). Svoj učinek in ne veja v zgornjem: ritma
+  // sta različna, ustavljanje pa je isto — oboje teče samo v ospredju.
+  useEffect(() => {
+    if (odjemalec === null) return;
+
+    const ponavljalnik: Ponavljalnik = ustvariPonavljalnik({
+      naloga: async () => {
+        const izid = await preveriIzbrisane(db, odjemalec);
+        // Običajen obhod ne najde ničesar in takrat baze ne beremo po
+        // nepotrebnem. Ob neuspehu osvežimo, čeprav se baza morda ni
+        // spremenila: vrstica je takrat lahko že šla in spodletelo je šele
+        // brisanje datoteke, eno odvečno branje pa je cenejše od števca,
+        // ki laže.
+        //
+        // Kadar odpove sama potrditev strežniku, `preveriIzbrisane` vrže in
+        // sem sploh ne pridemo. Števci so takrat do naslednjega cikla
+        // prenosa (30 s) zastareli; to je zavestna cena, ne spregled.
+        if (izid.pobrisani > 0 || izid.neuspeli > 0) await osvezi();
+      },
+    });
+
+    if (AppState.currentState === 'active') ponavljalnik.zazeni();
+
+    const narocnina = AppState.addEventListener('change', (stanje) => {
+      if (stanje === 'active') {
+        ponavljalnik.zazeni();
+      } else {
+        ponavljalnik.ustavi();
+      }
+    });
+
+    return () => {
+      narocnina.remove();
+      ponavljalnik.ustavi();
+    };
+  }, [db, odjemalec, osvezi]);
 
   const sprozi = useCallback(() => {
     razporejevalnik.current?.sprozi();

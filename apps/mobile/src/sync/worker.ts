@@ -18,6 +18,7 @@ import {
   type MaterialsDatabase,
 } from '../db/materials';
 import type { Material } from '../types';
+import { pobrisiLokalno } from './izbrisi';
 import type { Izid } from './upload';
 
 /** Koliko časa mine med rednimi poskusi, dokler gre vse gladko. */
@@ -56,6 +57,10 @@ export type PrenesiEno = (material: Material) => Promise<Izid>;
 export async function prenesiCakajoce(
   db: MaterialsDatabase,
   prenesiEno: PrenesiEno,
+  pobrisiArhiviranega: (
+    db: MaterialsDatabase,
+    material: Material,
+  ) => Promise<void> = pobrisiLokalno,
 ): Promise<Povzetek> {
   const cakajoci = await listPending(db);
   const povzetek: Povzetek = { preneseni: 0, cakajoci: 0, neuspeli: 0 };
@@ -66,6 +71,15 @@ export async function prenesiCakajoce(
     if (izid.vrsta === 'synced') {
       await markSynced(db, material.id);
       povzetek.preneseni += 1;
+      continue;
+    }
+
+    if (izid.vrsta === 'arhiviran') {
+      // Snov je na strežniku arhivirana in je tam ni več smiselno iskati.
+      // Pobrišemo jo lokalno, enako kot bi jo seznam za brisanje — in je ne
+      // štejemo ne med prenesene ne med neuspele, ker ni bila ne eno ne
+      // drugo (`docs/odlocitve/ADR-011`).
+      await pobrisiArhiviranega(db, material);
       continue;
     }
 

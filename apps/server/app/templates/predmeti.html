@@ -4,7 +4,14 @@
 
 {% block vsebina %}
   <h1>Predmeti</h1>
-  <p class="pod">Skupaj {{ skupaj }} {{ "slika" if skupaj == 1 else "slik" }} na strežniku.</p>
+  <p class="pod">
+    Skupaj {{ skupaj }} {{ "slika" if skupaj == 1 else "slik" }} v uporabi.
+    {# Arhiv je štet posebej in ne v skupnem številu: arhivirana slika je
+       umaknjena iz uporabe in bi seštevek delala neprimerljiv čez čas. #}
+    {% if arhiviranih %}
+      <a href="/admin/archive">V arhivu {{ arhiviranih }}.</a>
+    {% endif %}
+  </p>
 
   <ul class="predmeti">
     {# Predmeti brez slik ostanejo vidni — sicer bi seznam iz dneva v dan

@@ -100,6 +100,36 @@ def obdelaj(
         seja.commit()
 
 
+def arhiviraj(
+    motor: Engine,
+    material_id: str = UUID_ENA,
+    *,
+    potrjeno: bool = False,
+    arhivirano: str = "2026-09-05T10:00:00+00:00",
+) -> None:
+    """Postavi zapis v arhiv, po potrebi s potrditvijo s telefona.
+
+    Neposredno v bazo in ne skozi pot: te strani berejo stanje, ne poti, po
+    kateri je stanje nastalo — isti razlog kot pri `zapisi` in `obdelaj`.
+    """
+    with Session(motor) as seja:
+        material = seja.get(Material, material_id)
+        assert material is not None
+        material.archived_at = datetime.fromisoformat(arhivirano)
+        material.device_deleted_at = (
+            datetime(2026, 9, 5, 12, 0, tzinfo=UTC) if potrjeno else None
+        )
+        seja.commit()
+
+
+def cas_arhiviranja(motor: Engine, material_id: str = UUID_ENA) -> datetime | None:
+    """Kdaj je bil zapis arhiviran."""
+    with Session(motor) as seja:
+        material = seja.get(Material, material_id)
+        assert material is not None
+        return material.archived_at
+
+
 def stevilo_vprasanj(motor: Engine) -> int:
     """Koliko vrstic je v tabeli `questions`."""
     with Session(motor) as seja:
@@ -291,18 +321,22 @@ class TestPodrobnosti:
         assert f"<dd>{pot}</dd>" in odgovor.text
         assert "čaka na obdelavo" in odgovor.text
 
-    def test_ima_gumb_za_brisanje(
+    def test_ima_gumb_za_arhiviranje(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
         # Kriterij pravi „gumb na strani s podrobnostmi odpre potrditveno
-        # stran". Vsi testi brisanja hodijo naravnost na URL, zato bi brez te
-        # trditve gumb lahko izginil in brisanje bi ostalo dosegljivo samo z
-        # ročno vtipkanim naslovom.
+        # stran". Vsi testi arhiviranja hodijo naravnost na URL, zato bi brez
+        # te trditve gumb lahko izginil in dejanje bi ostalo dosegljivo samo
+        # z ročno vtipkanim naslovom.
+        #
+        # Do V1-R07 je tu stalo brisanje; `docs/odlocitve/ADR-011` ga je
+        # zamenjalo z arhiviranjem.
         zapisi(motor, slike)
 
         besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
 
-        assert f'href="/admin/materials/{UUID_ENA}/delete"' in besedilo
+        assert f'href="/admin/materials/{UUID_ENA}/archive"' in besedilo
+        assert f'href="/admin/materials/{UUID_ENA}/delete"' not in besedilo
 
     def test_povratna_povezava_je_ubezana_za_url(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -394,111 +428,382 @@ class TestSlika:
         assert b"tega-nihce-ne-sme-videti" not in odgovor.content
 
 
-class TestBrisanje:
-    """`GET` in `POST /admin/materials/{id}/delete`."""
+class TestArhiviranje:
+    """`GET` in `POST /admin/materials/{id}/archive` ter `GET /admin/archive`."""
 
-    def test_potrditvena_stran_nicesar_ne_izbrise(
+    def test_potrditvena_stran_nicesar_ne_spremeni(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
         pot = zapisi(motor, slike)
 
-        odgovor = odjemalec.get(f"/admin/materials/{UUID_ENA}/delete")
+        odgovor = odjemalec.get(f"/admin/materials/{UUID_ENA}/archive")
 
         assert odgovor.status_code == 200
-        assert stevilo_vrstic(motor) == 1
+        assert cas_arhiviranja(motor) is None
         assert pot.exists()
 
-    def test_potrditvena_stran_pokaze_kaj_bo_izbrisano(
+    def test_potrditvena_stran_pokaze_kaj_bo_arhivirano(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
-        # Kriterij zahteva potrditveno stran „s sliko, predmetom in datumom".
-        # Brez teh treh trditev bi test ostal zelen, tudi če bi predloga
-        # vprašala „izbrisati?" in ne povedala, kaj.
+        # Isto pravilo kot pri brisanju v V1-R04: potrditvena stran mora
+        # povedati, kaj potrjuješ — slika, predmet, datum.
         zapisi(motor, slike)
 
-        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}/delete").text
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}/archive").text
 
         assert f'src="/admin/materials/{UUID_ENA}/image"' in besedilo
         assert "MAT" in besedilo
         assert "4. 9. 2026 ob 09:30" in besedilo
 
-    def test_potrditvena_stran_brise_z_obrazcem_in_ne_s_povezavo(
+    def test_arhivira_z_obrazcem_in_ne_s_povezavo(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
         zapisi(motor, slike)
 
-        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}/delete").text
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}/archive").text
 
         assert 'method="post"' in besedilo
-        assert f'href="/admin/materials/{UUID_ENA}/delete"' not in besedilo
+        assert f'href="/admin/materials/{UUID_ENA}/archive"' not in besedilo
 
-    def test_post_izbrise_vrstico_in_datoteko_ter_preusmeri(
+    def test_post_arhivira_in_pusti_vrstico_ter_datoteko(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
+        # Bistvo `ADR-011`: arhiviranje ni brisanje. Vrstica in datoteka
+        # ostaneta, gre samo iz pregleda.
         pot = zapisi(motor, slike)
 
         odgovor = odjemalec.post(
-            f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False
+            f"/admin/materials/{UUID_ENA}/archive", follow_redirects=False
         )
 
-        # 303 in ne 302: osvežitev strani po brisanju ne sme brisati znova.
+        # 303 in ne 302: osvežitev strani po arhiviranju ne sme dejanja ponoviti.
         assert odgovor.status_code == 303
         assert odgovor.headers["location"] == "/admin/subjects/MAT"
-        assert stevilo_vrstic(motor) == 0
-        assert not pot.exists()
+        assert stevilo_vrstic(motor) == 1
+        assert pot.exists()
+        assert cas_arhiviranja(motor) is not None
 
-    def test_preusmeritev_po_brisanju_je_ubezana(
+    def test_arhivirana_slika_izgine_s_seznama_predmeta(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Pozabljen filter je tiha napaka: arhiv bi obstajal, a ne bi ničesar
+        # skril. Zato ima vsaka od treh poizvedb svoj test.
+        zapisi(motor, slike, UUID_ENA)
+        zapisi(motor, slike, UUID_DVA)
+        arhiviraj(motor, UUID_ENA)
+
+        besedilo = odjemalec.get("/admin/subjects/MAT").text
+
+        assert UUID_ENA not in besedilo
+        assert UUID_DVA in besedilo
+
+    def test_arhivirana_slika_ne_steje_v_pregledu(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, UUID_ENA)
+        zapisi(motor, slike, UUID_DVA)
+        arhiviraj(motor, UUID_ENA)
+
+        besedilo = odjemalec.get("/admin").text
+
+        assert ">1<" in vrstica_predmeta(besedilo, "MAT")
+        assert "V arhivu 1." in besedilo
+
+    def test_ponovno_arhiviranje_ne_premakne_casa(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Čas arhiviranja je podatek, po katerem operater bere, kdaj je sliko
+        # umaknil. Drugi klik na osveženi strani ga ne sme prepisati.
+        zapisi(motor, slike)
+        arhiviraj(motor)
+        prvi = cas_arhiviranja(motor)
+
+        odjemalec.post(f"/admin/materials/{UUID_ENA}/archive", follow_redirects=False)
+
+        assert cas_arhiviranja(motor) == prvi
+
+    def test_preusmeritev_po_arhiviranju_je_ubezana(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
         # `?` bi glavo `Location` prerezal na poizvedbo in operater bi pristal
-        # na predmetu „A", ne na „A?B". Zapisa sta dva, da predmet po brisanju
+        # na predmetu „A", ne na „A?B". Zapisa sta dva, da predmet po umiku
         # še obstaja — sicer preusmeritev po pravilu pelje na pregled.
         zapisi(motor, slike, UUID_ENA, subject="A?B")
         zapisi(motor, slike, UUID_DVA, subject="A?B")
 
         odgovor = odjemalec.post(
-            f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False
+            f"/admin/materials/{UUID_ENA}/archive", follow_redirects=False
         )
 
         assert odgovor.headers["location"] == "/admin/subjects/A%3FB"
 
-    def test_brisanje_zadnje_slike_neznanega_predmeta_pelje_na_pregled(
+    def test_umik_zadnje_slike_neznanega_predmeta_pelje_na_pregled(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
-        # Predmet, ki ni med desetimi, obstaja samo, dokler ima sliko. Brez
-        # tega bi preusmeritev pristala na strani „Tega ni".
+        # Predmet, ki ni med desetimi, obstaja samo, dokler ima aktivno sliko.
+        # Brez tega bi preusmeritev pristala na strani „Tega ni".
         zapisi(motor, slike, subject="XXX")
 
         odgovor = odjemalec.post(
-            f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False
+            f"/admin/materials/{UUID_ENA}/archive", follow_redirects=False
         )
 
-        # 303 in ne 302: sicer brskalnik ob osvežitvi ponovi POST.
         assert odgovor.status_code == 303
         assert odgovor.headers["location"] == "/admin"
         assert odjemalec.get(odgovor.headers["location"]).status_code == 200
 
-    def test_brisanje_zadnje_slike_znanega_predmeta_pelje_na_predmet(
+    def test_umik_zadnje_slike_znanega_predmeta_pelje_na_predmet(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
-        # Znan predmet ostane dosegljiv tudi prazen — tam je sporočilo, da
-        # slik ni, in to je pravi konec brisanja.
         zapisi(motor, slike, subject="MAT")
+
+        odgovor = odjemalec.post(
+            f"/admin/materials/{UUID_ENA}/archive", follow_redirects=False
+        )
+
+        assert odgovor.status_code == 303
+        assert odgovor.headers["location"] == "/admin/subjects/MAT"
+        assert odjemalec.get(odgovor.headers["location"]).status_code == 200
+
+    def test_potrditvena_stran_neobstojecega_da_404(self, odjemalec: TestClient) -> None:
+        odgovor = odjemalec.get(f"/admin/materials/{UUID_ENA}/archive")
+
+        assert odgovor.status_code == 404
+        assert "text/html" in odgovor.headers["content-type"]
+
+    def test_arhiviranje_neobstojecega_preusmeri_na_pregled(
+        self, odjemalec: TestClient
+    ) -> None:
+        odgovor = odjemalec.post(
+            f"/admin/materials/{UUID_ENA}/archive", follow_redirects=False
+        )
+
+        assert odgovor.status_code == 303
+        assert odgovor.headers["location"] == "/admin"
+
+    def test_arhivirani_zapis_ni_vec_v_vrsti_za_obdelavo(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Tretja poizvedba, ki mora arhiv izločiti. Brez tega bi plačali klic
+        # modela za sliko, ki je bila umaknjena.
+        from app.db import MaterialsRepository
+
+        zapisi(motor, slike)
+        arhiviraj(motor)
+
+        with Session(motor) as seja:
+            assert MaterialsRepository(seja).seznam_novih() == []
+
+    def test_arhivirani_zapis_nima_gumba_za_ponovno_obdelavo(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        arhiviraj(motor)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "reprocess" not in besedilo
+
+    def test_arhiv_pokaze_zapis_in_da_telefon_se_ni_potrdil(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        arhiviraj(motor)
+
+        besedilo = odjemalec.get("/admin/archive").text
+
+        assert UUID_ENA in besedilo
+        assert "5. 9. 2026 ob 12:00" in besedilo
+        assert "čaka na telefon" in besedilo
+
+    def test_arhiviran_zapis_ne_trdi_da_je_v_obdelavi(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # `ponovna_obdelava_mozna` je `false` iz dveh razlogov. Brez ločene veje
+        # v predlogi bi arhivirana snov trdila, da je pravkar v obdelavi, in
+        # operaterju naročila, naj osvežuje stran, ki se ne bo spremenila nikoli.
+        zapisi(motor, slike)
+        obdelaj(motor)
+        arhiviraj(motor)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "pravkar v obdelavi" not in besedilo
+        assert "Arhivirana snov se ne obdeluje" in besedilo
+
+    def test_arhiv_pokaze_predmet_in_cas_posnetka(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        arhiviraj(motor)
+
+        besedilo = odjemalec.get("/admin/archive").text
+
+        # Skupaj in ne vsak zase: „MAT" se na strani lahko pojavi tudi kje
+        # drugje, ta trditev pa govori o kartici te snovi.
+        assert "MAT — 4. 9. 2026 ob 09:30" in besedilo
+
+    def test_arhiv_ureja_po_casu_arhiviranja_navzdol(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Kriterij pravi „najnovejše arhivirana prva". Z enim samim zapisom bi
+        # obrat vrstnega reda ostal neopazen.
+        zapisi(motor, slike, UUID_ENA)
+        zapisi(motor, slike, UUID_DVA)
+        arhiviraj(motor, UUID_ENA, arhivirano="2026-09-05T10:00:00+00:00")
+        arhiviraj(motor, UUID_DVA, arhivirano="2026-09-06T10:00:00+00:00")
+
+        besedilo = odjemalec.get("/admin/archive").text
+
+        assert besedilo.index(UUID_DVA) < besedilo.index(UUID_ENA)
+
+    def test_arhiv_pokaze_kljukico_ko_je_telefon_potrdil(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        arhiviraj(motor, potrjeno=True)
+
+        besedilo = odjemalec.get("/admin/archive").text
+
+        assert "izbrisano na telefonu" in besedilo
+
+    def test_prazen_arhiv_da_sporocilo_in_ne_napako(self, odjemalec: TestClient) -> None:
+        odgovor = odjemalec.get("/admin/archive")
+
+        assert odgovor.status_code == 200
+        assert "Arhiv je prazen" in odgovor.text
+
+
+class TestPociscenjeSlike:
+    """`POST /admin/materials/{id}/purge-image`."""
+
+    def test_pobrise_datoteko_in_pusti_vrstico(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Vsakdanji način sproščanja prostora: velike so datoteke, ne vrstice.
+        pot = zapisi(motor, slike)
+        obdelaj(motor)
+        arhiviraj(motor)
+
+        odgovor = odjemalec.post(
+            f"/admin/materials/{UUID_ENA}/purge-image", follow_redirects=False
+        )
+
+        assert odgovor.status_code == 303
+        assert not pot.exists()
+        assert stevilo_vrstic(motor) == 1
+        assert stevilo_vprasanj(motor) == 5
+
+    def test_ni_dovoljeno_dokler_zapis_ni_v_arhivu(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        pot = zapisi(motor, slike)
+
+        odgovor = odjemalec.post(
+            f"/admin/materials/{UUID_ENA}/purge-image", follow_redirects=False
+        )
+
+        assert odgovor.status_code == 409
+        assert pot.exists()
+
+    def test_neobstojec_zapis_da_404(self, odjemalec: TestClient) -> None:
+        odgovor = odjemalec.post(f"/admin/materials/{UUID_ENA}/purge-image")
+
+        assert odgovor.status_code == 404
+
+
+class TestDokoncnoBrisanje:
+    """`GET` in `POST /admin/materials/{id}/delete` po `ADR-011`.
+
+    Brisanje je odslej zadnja stopnja in ne prva: dovoljeno je šele, ko je
+    telefon potrdil, da te slike pri njem ni več. Sicer telefon za brisanje
+    nikoli ne izve in slika mu ostane za vedno — natanko težava, ki jo je
+    V1-R07 prišla odpravit.
+    """
+
+    def test_potrditvena_stran_pred_potrditvijo_telefona_da_409(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        arhiviraj(motor)
+
+        odgovor = odjemalec.get(f"/admin/materials/{UUID_ENA}/delete")
+
+        assert odgovor.status_code == 409
+        assert "text/html" in odgovor.headers["content-type"]
+
+    def test_gumb_se_ne_pokaze_dokler_telefon_ni_potrdil(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        arhiviraj(motor)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert f'href="/admin/materials/{UUID_ENA}/delete"' not in besedilo
+
+    def test_gumb_se_pokaze_po_potrditvi(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        arhiviraj(motor, potrjeno=True)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert f'href="/admin/materials/{UUID_ENA}/delete"' in besedilo
+
+    def test_post_pred_potrditvijo_telefona_ne_izbrise(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Gumb, ki ga stran ne izriše, ni varovalka. Ročno vtipkan `POST` mora
+        # naleteti na isto pravilo.
+        pot = zapisi(motor, slike)
+        arhiviraj(motor)
 
         odgovor = odjemalec.post(
             f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False
         )
 
-        # 303 in ne 302: sicer brskalnik ob osvežitvi ponovi POST.
+        assert odgovor.status_code == 409
+        assert stevilo_vrstic(motor) == 1
+        assert pot.exists()
+
+    def test_potrditvena_stran_pove_koliko_vprasanj_ostane(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Brez tega bi bilo brisanje videti nevarnejše, kot je — in po V2 bi
+        # operater mislil, da z njim briše tudi statistiko.
+        zapisi(motor, slike)
+        obdelaj(motor)
+        arhiviraj(motor, potrjeno=True)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}/delete").text
+
+        assert "Vprašanja (5) ostanejo" in besedilo
+
+    def test_post_izbrise_vrstico_in_datoteko_ter_pelje_v_arhiv(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        pot = zapisi(motor, slike)
+        arhiviraj(motor, potrjeno=True)
+
+        odgovor = odjemalec.post(
+            f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False
+        )
+
+        # Nazaj v arhiv in ne na predmet: s seznama predmeta je bila slika
+        # umaknjena že ob arhiviranju.
         assert odgovor.status_code == 303
-        assert odgovor.headers["location"] == "/admin/subjects/MAT"
-        assert odjemalec.get(odgovor.headers["location"]).status_code == 200
+        assert odgovor.headers["location"] == "/admin/archive"
+        assert stevilo_vrstic(motor) == 0
+        assert not pot.exists()
 
     def test_brisanje_ne_pobrise_sosedov(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
         pot_ena = zapisi(motor, slike, UUID_ENA)
         pot_dva = zapisi(motor, slike, UUID_DVA)
+        arhiviraj(motor, UUID_ENA, potrjeno=True)
 
         odjemalec.post(f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False)
 
@@ -512,23 +817,22 @@ class TestBrisanje:
         assert odgovor.status_code == 404
         assert "text/html" in odgovor.headers["content-type"]
 
-    def test_brisanje_ze_izbrisanega_preusmeri_na_pregled(
-        self, odjemalec: TestClient
-    ) -> None:
-        # Zahteva: „brez sesutja, preusmeritev na seznam". To se zgodi, ko je
-        # operater isto sliko izbrisal v drugem zavihku — rezultat je tak, kot
-        # ga je hotel, zato stran o napaki ni pravi odgovor.
+    def test_brisanje_ze_izbrisanega_pelje_v_arhiv(self, odjemalec: TestClient) -> None:
+        # Zahteva V1-R04: „brez sesutja, preusmeritev na seznam". To se zgodi,
+        # ko je operater isto sliko izbrisal v drugem zavihku — rezultat je
+        # tak, kot ga je hotel.
         odgovor = odjemalec.post(
             f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False
         )
 
         assert odgovor.status_code == 303
-        assert odgovor.headers["location"] == "/admin"
+        assert odgovor.headers["location"] == "/admin/archive"
 
     def test_brisanje_zapisa_brez_datoteke_uspe(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
         zapisi(motor, slike, vsebina=None)
+        arhiviraj(motor, potrjeno=True)
 
         odgovor = odjemalec.post(
             f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False
@@ -661,7 +965,7 @@ class TestUbezanje:
     ) -> None:
         zapisi(motor, slike, subject=self.NAPAD)
 
-        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}/delete").text
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}/archive").text
 
         assert self.NAPAD not in besedilo
 
@@ -717,7 +1021,8 @@ class TestNeznanePoti:
         assert odjemalec.get("/admin/subjects/MAT").status_code == 200
         assert odjemalec.get(f"/admin/materials/{UUID_ENA}").status_code == 200
         assert odjemalec.get(f"/admin/materials/{UUID_ENA}/image").status_code == 200
-        assert odjemalec.get(f"/admin/materials/{UUID_ENA}/delete").status_code == 200
+        assert odjemalec.get(f"/admin/materials/{UUID_ENA}/archive").status_code == 200
+        assert odjemalec.get("/admin/archive").status_code == 200
 
     def test_koncna_posevnica_preusmeri_in_ne_pade(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -781,6 +1086,8 @@ class TestPakiranje:
             "predmeti.html",
             "predmet.html",
             "snov.html",
+            "arhiv.html",
+            "arhiviranje.html",
             "brisanje.html",
             "najdena-ni.html",
         }
@@ -1088,18 +1395,20 @@ class TestPonovnaObdelava:
 
 
 class TestBrisanjeZVprasanji:
-    """Regresija V1-R04: brisanje mora pobrisati tudi vprašanja.
+    """Regresija V1-R07: dokončno brisanje mora vprašanja **pustiti**.
 
-    Brez kaskade bi bila to na Postgresu kršitev tujega ključa, na SQLite pa
-    bi tiho pustila osirotela vprašanja — zbirka bi bila zelena, produkcija
-    ne (odločitev 6 v `docs/plan/V1-R03.md`).
+    Do V1-R07 sta tu stali dve kaskadi, ki sta vprašanja pobrisali skupaj z
+    materialom, in ta razred je to zahteval. `docs/odlocitve/ADR-012` obrne
+    pravilo: vprašanje nosi statistiko, ki jo bo V2 vezala nanj, in te ne sme
+    vzeti brisanje slike. Test ni oslabljen, ampak obrnjen skupaj s pogodbo.
     """
 
-    def test_brisanje_pobrise_tudi_vprasanja(
+    def test_brisanje_pusti_vprasanja_in_jim_vzame_material(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
         pot = zapisi(motor, slike)
         obdelaj(motor)
+        arhiviraj(motor, potrjeno=True)
         assert stevilo_vprasanj(motor) == 5
 
         odgovor = odjemalec.post(
@@ -1108,21 +1417,47 @@ class TestBrisanjeZVprasanji:
 
         assert odgovor.status_code == 303
         assert stevilo_vrstic(motor) == 0
-        assert stevilo_vprasanj(motor) == 0
+        assert stevilo_vprasanj(motor) == 5
         assert not pot.exists()
 
-    def test_brisanje_ne_pobrise_vprasanj_drugega_materiala(
+        with Session(motor) as seja:
+            for vprasanje in seja.scalars(select(Question)):
+                assert vprasanje.material_id is None
+
+    def test_brisanje_ne_zamaje_vprasanj_drugega_materiala(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
-        """Kaskada mora seči natanko do otrok tega zapisa in nič dlje."""
+        """Sosedov material mora ostati pripet svojim vprašanjem."""
         zapisi(motor, slike, UUID_ENA)
         zapisi(motor, slike, UUID_DVA)
         obdelaj(motor, UUID_ENA, koliko_vprasanj=5)
         obdelaj(motor, UUID_DVA, koliko_vprasanj=4)
+        arhiviraj(motor, UUID_ENA, potrjeno=True)
 
         odjemalec.post(f"/admin/materials/{UUID_ENA}/delete")
 
-        assert stevilo_vprasanj(motor) == 4
+        assert stevilo_vprasanj(motor) == 9
+        with Session(motor) as seja:
+            sosedova = seja.scalars(
+                select(Question).where(Question.material_id == UUID_DVA)
+            ).all()
+            assert len(sosedova) == 4
+
+    def test_ponovna_obdelava_vprasanja_se_vedno_zavrze(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Upokojevanje vprašanj je V2; do takrat velja `ADR-009`.
+
+        Brez tega testa bi odstranitev `delete-orphan` iz modela tiho
+        spremenila ponovno obdelavo iz brisanja v osirotenje — in vsak nov
+        klic bi za sabo puščal kup vprašanj brez materiala.
+        """
+        zapisi(motor, slike)
+        obdelaj(motor)
+
+        odjemalec.post(f"/admin/materials/{UUID_ENA}/reprocess")
+
+        assert stevilo_vprasanj(motor) == 0
 
 
 class TestSledJeVidnaTudiPriNapaki:

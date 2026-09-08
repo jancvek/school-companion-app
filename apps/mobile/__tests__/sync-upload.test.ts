@@ -51,11 +51,20 @@ describe('razvrščanje statusa', () => {
     expect(razvrstiStatus(status).vrsta).toBe('pending');
   });
 
+  it('410 pomeni, da je snov arhivirana, in ne neuspeh', () => {
+    // Edini 4xx, ki ne pomeni „ne bo šlo", ampak „te snovi ni več".
+    // Brez posebne veje bi zapis končal v `failed` in ostal na telefonu,
+    // dokler ga kdo ročno ne bi vrnil v vrsto (`docs/odlocitve/ADR-011`).
+    expect(razvrstiStatus(410).vrsta).toBe('arhiviran');
+  });
+
   it('razlog pri zavrnjenem ključu pove, kaj je treba narediti', () => {
     const izid = razvrstiStatus(401);
 
     expect(izid.vrsta).toBe('failed');
-    if (izid.vrsta !== 'synced') {
+    // Zožitev je pozitivna in ne „vse razen synced": od V1-R07 obstaja tudi
+    // izid `arhiviran`, ki razloga nima.
+    if (izid.vrsta === 'failed') {
       expect(izid.razlog).toMatch(/ključ/i);
       expect(izid.razlog).not.toMatch(/^401$/);
     }
@@ -107,7 +116,7 @@ describe('en prenos', () => {
     // Klicatelj je worker, ki teče brez čakanja — vržena napaka bi končala
     // kot nezavrnjena obljuba.
     expect(izid.vrsta).toBe('pending');
-    if (izid.vrsta !== 'synced') {
+    if (izid.vrsta === 'pending') {
       expect(izid.razlog).toMatch(/ni dosegljiv/i);
     }
   });
@@ -132,7 +141,7 @@ describe('časovna omejitev prenosa', () => {
     const izid = await prenesi(material(), NASTAVITVE, nalozi, 30);
 
     expect(izid.vrsta).toBe('pending');
-    if (izid.vrsta !== 'synced') {
+    if (izid.vrsta === 'pending') {
       expect(izid.razlog).toMatch(/ni odzval pravočasno/i);
     }
   });

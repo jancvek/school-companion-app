@@ -54,6 +54,26 @@ class Material(Base):
     #: Trenutek, ko je strežnik zapis prevzel.
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
+    # --- Arhiv (V1-R07). Oboje je `NULL`, dokler se ni zgodilo. ---
+
+    #: Kdaj je bil zapis arhiviran; `NULL` pomeni aktiven.
+    #:
+    #: Ločen stolpec in **ne** peto stanje `status`: `status` je avtomat
+    #: obdelave, arhiv pa je druga os — arhiviran zapis je lahko hkrati
+    #: `ready`. Isti razlog kot pri `readable` (`docs/odlocitve/ADR-011`).
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    #: Kdaj je telefon potrdil, da tega materiala pri njem ni več.
+    #:
+    #: Potrditev pomeni „na tej napravi ga ni več", ne „pravkar sem ga
+    #: izbrisal" — zapis, ki ga aplikacija sploh nima (sveža namestitev), se
+    #: potrdi enako. Dokler je `NULL`, dokončno brisanje ni dovoljeno.
+    device_deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # --- Izid obdelave (V1-R03). Vse je `NULL`, dokler obdelave ni bilo. ---
 
     #: Ali je model s slike sploh znal brati.
@@ -96,14 +116,18 @@ class Material(Base):
 
     #: Vprašanja tega materiala, po zaporedju.
     #:
-    #: `cascade="all, delete-orphan"` **brez** `passive_deletes`: otroke pobriše
-    #: ORM sam, torej tudi na SQLite, ki tujih ključev privzeto ne uveljavlja.
-    #: `ondelete="CASCADE"` v shemi je druga, neodvisna mreža na Postgresu.
-    #: Obe sta tu zato, da testi ne dokazujejo manj kot produkcija
-    #: (odločitev 6 v `docs/plan/V1-R03.md`).
+    #: **Brez kaskade brisanja.** Do V1-R07 sta tu stali dve mreži, ki sta
+    #: vprašanja pobrisali skupaj z materialom; `docs/odlocitve/ADR-012` ju
+    #: namenoma odstrani, ker mora vprašanje material preživeti. Ob brisanju
+    #: materiala ORM otrokom postavi `material_id = NULL` — tudi na SQLite,
+    #: kjer tuji ključi privzeto niso uveljavljeni, zato testi še naprej
+    #: dokazujejo isto kot produkcija.
+    #:
+    #: Posledica, ki se ne vidi sama od sebe: `questions.clear()` odslej
+    #: vprašanj ne pobriše, ampak jih osiroti. Kjer jih je treba res
+    #: pobrisati, to počne `MaterialsRepository` izrecno.
     questions: Mapped[list["Question"]] = relationship(
         back_populates="material",
-        cascade="all, delete-orphan",
         order_by="Question.position",
     )
 
@@ -126,9 +150,29 @@ class Question(Base):
     #: s telefona) — vprašanje nastane tu in nikjer drugje.
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
 
-    #: Material, iz katerega je vprašanje nastalo.
-    material_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("materials.id", ondelete="CASCADE"), nullable=False, index=True
+    #: Material, iz katerega je vprašanje nastalo, ali `NULL`, kadar je bil
+    #: material dokončno izbrisan.
+    #:
+    #: `SET NULL` in ne `CASCADE`: vprašanje nosi statistiko, ki jo bo V2
+    #: vezala nanj, in te ne sme vzeti brisanje slike
+    #: (`docs/odlocitve/ADR-012`).
+    material_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("materials.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    #: Predmet materiala, prepisan ob nastanku vprašanja.
+    #:
+    #: Denormalizirano namenoma: ko materiala ni več, mora vprašanje še vedno
+    #: povedati, iz katere snovi je. Isti vzorec kot račun, ki prepiše naslov
+    #: kupca, namesto da ga referencira.
+    subject: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    #: Čas posnetka materiala, prepisan ob nastanku vprašanja.
+    material_taken_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     #: Zaporedna številka znotraj materiala (od 1). Vrstni red, v katerem jih
@@ -143,4 +187,4 @@ class Question(Base):
     #: novim klicem modela.
     answer: Mapped[str] = mapped_column(Text, nullable=False)
 
-    material: Mapped[Material] = relationship(back_populates="questions")
+    material: Mapped[Material | None] = relationship(back_populates="questions")

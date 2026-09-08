@@ -2,7 +2,8 @@
 
 - **Datum:** 2026-09-05
 - **Nastalo pri:** V1-R03 (faza 1–2, pred implementacijo)
-- **Status:** Sprejeto
+- **Status:** Sprejeto; odločitev **A1** (usoda vprašanj ob ponovni
+  obdelavi) je nadomeščena z `ADR-012`. Odločitev **B2** velja naprej.
 - **Zoži:** robni primer *„API ključ manjka ali je napačen → … `status='failed'`"*
   pri V1-R03 v `docs/verzije/v1.md`
 - **Doda:** pravilo o usodi prejšnjega rezultata ob „Pošlji v obdelavo", ki ga

@@ -60,7 +60,12 @@ class TestUspesenPrenos:
         )
 
         assert odgovor.status_code == 201
-        assert odgovor.json() == {"id": UUID_ENA, "status": "new", "created": True}
+        assert odgovor.json() == {
+            "id": UUID_ENA,
+            "status": "new",
+            "created": True,
+            "archived": False,
+        }
 
         with Session(motor) as seja:
             zapis = seja.get(Material, UUID_ENA)
@@ -335,7 +340,12 @@ class TestOdgovorOdrazaZapis:
         )
 
         assert odgovor.status_code == 200
-        assert odgovor.json() == {"id": UUID_ENA, "status": "ready", "created": False}
+        assert odgovor.json() == {
+            "id": UUID_ENA,
+            "status": "ready",
+            "created": False,
+            "archived": False,
+        }
 
     def test_ob_tekmovanju_odgovor_ne_trdi_da_je_zapis_nastal(
         self,
@@ -386,4 +396,9 @@ class TestOdgovorOdrazaZapis:
         )
 
         assert odgovor.status_code == 200
-        assert odgovor.json() == {"id": UUID_ENA, "status": "ready", "created": False}
+        assert odgovor.json() == {
+            "id": UUID_ENA,
+            "status": "ready",
+            "created": False,
+            "archived": False,
+        }

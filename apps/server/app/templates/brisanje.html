@@ -1,9 +1,9 @@
 {% extends "osnova.html" %}
 
-{% block naslov %}Izbrisati sliko?{% endblock %}
+{% block naslov %}Izbrisati dokončno?{% endblock %}
 
 {% block vsebina %}
-  <h1>Izbrisati to sliko?</h1>
+  <h1>Izbrisati to snov dokončno?</h1>
   <p class="pod">{{ snov.koda }} — {{ snov.oznaka }}, {{ snov.cas }}</p>
 
   <div class="snov">
@@ -17,15 +17,27 @@
 
     <div>
       <p class="opozorilo">
-        Brisanje je dokončno. Slika na telefonu ostane, a je od tam ni mogoče
-        poslati znova — aplikacija prenesenega posnetka ne pošilja drugič.
-        Na strežniku te slike po tem koraku ne bo več.
+        Šla bosta <strong>slika in prepis</strong>. Telefon je to snov pri sebi
+        že pobrisal ({{ snov.potrjeno_ob }}), zato brisanje tu ne pusti ničesar
+        za sabo.
+      </p>
+
+      {# Vprašanja material preživijo (`docs/odlocitve/ADR-012`). Brez tega
+         stavka bi bilo brisanje videti nevarnejše, kot je — in po V2 bi
+         operater mislil, da z njim briše tudi statistiko. #}
+      <p class="drobno">
+        {% if snov.stevilo_vprasanj %}
+          Vprašanja ({{ snov.stevilo_vprasanj }}) ostanejo. Ohranijo predmet in
+          čas posnetka te snovi, izgubijo pa povezavo na sliko.
+        {% else %}
+          Ta snov nima vprašanj.
+        {% endif %}
       </p>
 
       {# Brisanje je POST in nikoli navadna povezava: brskalniki povezave
          prednalagajo, in en napačen klik je nepovraten. #}
       <form method="post" action="/admin/materials/{{ snov.id }}/delete">
-        <button class="gumb" type="submit">Da, izbriši</button>
+        <button class="gumb" type="submit">Da, izbriši dokončno</button>
       </form>
 
       <a class="nazaj" href="/admin/materials/{{ snov.id }}">← Ne, vrni se</a>

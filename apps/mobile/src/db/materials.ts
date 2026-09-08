@@ -55,6 +55,29 @@ export async function insertMaterial(
   );
 }
 
+/** En zapis po `id`, ali `null`, če ga ni. */
+export async function findById(
+  db: MaterialsDatabase,
+  id: string,
+): Promise<Material | null> {
+  const vrstice = await db.getAllAsync<Material>(
+    `SELECT ${MATERIAL_COLUMNS} FROM materials WHERE id = ?`,
+    [id],
+  );
+  return vrstice[0] ?? null;
+}
+
+/**
+ * Pobriše en zapis (V1-R07).
+ *
+ * Kliče se, ko je snov na strežniku arhivirana. Vrstica gre prva, datoteka
+ * za njo: vrstica brez datoteke je vidna okvara v Zgodovini, osirotela
+ * datoteka pa je nevidna in stane samo prostor.
+ */
+export async function deleteById(db: MaterialsDatabase, id: string): Promise<void> {
+  await db.runAsync(`DELETE FROM materials WHERE id = ?`, [id]);
+}
+
 /** Posnetki enega predmeta, od najnovejšega navzdol. */
 export async function listBySubject(
   db: MaterialsDatabase,

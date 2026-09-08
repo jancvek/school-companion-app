@@ -20,8 +20,8 @@
 
 | Modul | Odgovornost | Datoteke |
 |---|---|---|
-| `apps/mobile` | Kamera, izbira predmeta, lokalna baza, zgodovina, upload worker | `apps/mobile/` (od V1-R01; upload worker od V1-R02) |
-| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03) |
+| `apps/mobile` | Kamera, izbira predmeta, lokalna baza, zgodovina, upload worker, brisanje arhiviranih snovi | `apps/mobile/` (od V1-R01; upload worker od V1-R02; brisanje od V1-R07) |
+| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju, arhiv | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03; arhiv od V1-R07) |
 
 Ločena mapi namenoma ne delita orodij za monorepo (npr. Turborepo) — gre za
 dva jezika (TypeScript / Python) brez skupne kode, zato vsaka živi s svojim
@@ -36,7 +36,7 @@ običajnim orodjem (`npm`/`package.json` v `apps/mobile`,
 | `src/constants/` | seznam desetih predmetov (`{ value, label }`) |
 | `src/config/` | kar pride v aplikacijo ob gradnji: naslov strežnika, API ključ in oznaka gradnje |
 | `src/db/` | verzionirana shema (migracije) in poizvedbe nad tabelo `materials` |
-| `src/sync/` | prenos na strežnik: en prenos, čakalna vrsta, priklop na življenjski cikel. **Edina mapa v aplikaciji z omrežnim klicem.** |
+| `src/sync/` | prenos na strežnik: en prenos, čakalna vrsta, priklop na življenjski cikel; od V1-R07 tudi brisanje snovi, ki so na strežniku arhivirane. **Edina mapa v aplikaciji z omrežnim klicem.** |
 | `src/photos/` | stiskanje slike in zapis v `documentDirectory/photos/` |
 | `src/materials/` | shranjevanje posnetka: najprej datoteka, nato vrstica |
 | `src/capture/` | stanje zaslona s kamero (kamera ↔ predogled) |
@@ -101,6 +101,9 @@ Tabela `materials`:
 | `last_attempt_at` | `TEXT` | ISO 8601 v UTC; `NULL`, dokler poskusa ni bilo (V1-R02) |
 | `sync_error` | `TEXT` | zakaj zadnji poskus ni uspel (V1-R02) |
 
+V1-R07 lokalne sheme **ni** spremenila: telefon o arhivu ne hrani ničesar,
+ker delovni seznam pride vsakič v celoti s strežnika. `SHEMA_VERZIJA` ostaja 1.
+
 Indeks `materials_subject_taken_at (subject, taken_at DESC)` — zgodovina bere
 po predmetu in po času navzdol. Čakalna vrsta bere obratno (`taken_at ASC`),
 da najstarejši posnetek ne čaka najdlje.
@@ -141,6 +144,8 @@ Tabela `materials` (nastane v V1-R02, razširi jo V1-R03):
 | `image_path` | `VARCHAR(1024) NOT NULL` | pot do slike na disku strežnika |
 | `status` | `VARCHAR(16) NOT NULL` | `new` → `processing` → `ready` \| `failed` |
 | `received_at` | `TIMESTAMPTZ NOT NULL` | kdaj je strežnik zapis prevzel |
+| `archived_at` | `TIMESTAMPTZ` | kdaj je bil umaknjen v arhiv; `NULL` = aktiven (V1-R07) |
+| `device_deleted_at` | `TIMESTAMPTZ` | kdaj je telefon potrdil, da ga pri njem ni več (V1-R07) |
 | `readable` | `BOOLEAN` | ali je model s slike znal brati (V1-R03) |
 | `transcript` | `TEXT` | prepis (V1-R03) |
 | `summary` | `TEXT` | povzetek (V1-R03) |
@@ -158,7 +163,9 @@ Tabela `questions` (V1-R03):
 | Stolpec | Tip | Opomba |
 |---|---|---|
 | `id` | `VARCHAR(36) PRIMARY KEY` | UUID, generiran **na strežniku** |
-| `material_id` | `VARCHAR(36) NOT NULL` | tuji ključ na `materials.id`, `ON DELETE CASCADE`, indeksiran |
+| `material_id` | `VARCHAR(36)` | tuji ključ na `materials.id`, `ON DELETE SET NULL`, indeksiran; `NULL`, ko je material dokončno izbrisan (V1-R07) |
+| `subject` | `VARCHAR(16)` | predmet materiala, prepisan ob nastanku (V1-R07) |
+| `material_taken_at` | `TIMESTAMPTZ` | čas posnetka materiala, prepisan ob nastanku (V1-R07) |
 | `position` | `INTEGER NOT NULL` | zaporedje znotraj materiala, od 1 |
 | `question` | `TEXT NOT NULL` | besedilo vprašanja |
 | `answer` | `TEXT NOT NULL` | pričakovan odgovor |
@@ -167,13 +174,27 @@ Vprašanja imajo svojo tabelo in ne polja JSON, ker bo `V1-R05` ocene težavnost
 vezala na `question_id`. **Vprašanje ni trajno:** ponovna obdelava zavrže
 prejšnji izid skupaj z vsemi vprašanji materiala (`docs/odlocitve/ADR-009`).
 
-Kaskada je nastavljena **dvakrat**: `ondelete="CASCADE"` v shemi in
-`cascade="all, delete-orphan"` v ORM. Prvo velja na Postgresu, drugo tudi na
-SQLite, ki tujih ključev privzeto ne uveljavlja — brez druge bi testi
-dokazovali manj kot produkcija.
+**Vprašanje material preživi.** Do V1-R07 je bila kaskada nastavljena dvakrat
+(`ondelete="CASCADE"` v shemi in `cascade="all, delete-orphan"` v ORM);
+`docs/odlocitve/ADR-012` je obe odstranil, ker vprašanje nosi statistiko, ki
+jo bo V2 vezala nanj. Ob brisanju materiala ORM otrokom postavi
+`material_id = NULL` — tudi na SQLite, kjer tuji ključi privzeto niso
+uveljavljeni, zato testi še naprej dokazujejo isto kot produkcija.
+
+Posledica, ki se ne vidi sama od sebe: `material.questions.clear()` odslej
+vprašanj ne pobriše, ampak jih osiroti. Kjer jih je treba res pobrisati
+(ponovna obdelava po `ADR-009`), to počne `MaterialsRepository` izrecno.
+Denormalizirana `subject` in `material_taken_at` sta tam zato, da vprašanje
+brez materiala še vedno pove, iz katere snovi in katerega dne je.
 
 `id` je `VARCHAR` in ne `UUID`, čas pa `DateTime(timezone=True)`, ker mora ista
 shema stati nad Postgresom (produkcija) in nad SQLite (testi).
+
+Migracija `0003_arhiv` prevesi tuji ključ `questions.material_id` s `CASCADE`
+na `SET NULL`. Na SQLite gre to skozi `op.batch_alter_table` s `copy_from`
+(tabela se prepiše na novo, ker `ALTER` tujega ključa tam ne obstaja), na
+Postgresu z navadnim `ALTER`. Ime starega ključa je dialektni privzetek
+(`questions_material_id_fkey`), novi je poimenovan.
 
 Migracije vodi **Alembic** (`apps/server/alembic/`). Prva migracija ustvari
 razširitev `vector` — vektorskih stolpcev še ni, iskanje po pomenu je V2.
@@ -199,6 +220,11 @@ pusti polovične slike na mestu, kjer jo bo V1-R03 iskal kot celo.
 Prvi prenos vrne **201**, ponoven prenos istega `id` **200** in polje
 `created: false` — telefon oboje šteje za uspeh. Obstoječi zapis se ne prepiše
 in slika se ne povozi.
+
+Od V1-R07 obstaja tretji izid: **410** za zapis, ki je medtem šel v arhiv.
+Telefon ga zbriše pri sebi in ne šteje za neuspeh. Brez tega bi posnetek, ki
+je na telefonu obtičal v `pending`, tam ostal za vedno — z delovnega seznama
+je lahko že padel, ker je bilo brisanje na napravi že potrjeno.
 
 Ključ preverja **ASGI vmesna plast**, ne odvisnost endpointa: FastAPI telo
 zahteve prebere pred razreševanjem odvisnosti, zato bi strežnik večmegabajtno
@@ -297,8 +323,12 @@ Strežniško izrisan HTML za lastnika sistema (`docs/00-namen.md`, vloga
 | `/admin/subjects/{koda}` | GET | slike predmeta, najnovejša prva, lena naložitev |
 | `/admin/materials/{id}` | GET | podrobnosti ene slike |
 | `/admin/materials/{id}/image` | GET | datoteka slike |
-| `/admin/materials/{id}/delete` | GET | potrditvena stran |
-| `/admin/materials/{id}/delete` | POST | izbriše in preusmeri (303) |
+| `/admin/archive` | GET | arhivirane snovi, najnovejše arhivirane prve (V1-R07) |
+| `/admin/materials/{id}/archive` | GET | potrditvena stran za arhiviranje (V1-R07) |
+| `/admin/materials/{id}/archive` | POST | umakne v arhiv in preusmeri (303) (V1-R07) |
+| `/admin/materials/{id}/purge-image` | POST | pobriše samo datoteko (V1-R07) |
+| `/admin/materials/{id}/delete` | GET | potrditvena stran za dokončno brisanje |
+| `/admin/materials/{id}/delete` | POST | dokončno izbriše in preusmeri (303) |
 | `/admin/materials/{id}/reprocess` | POST | vrne v vrsto in preusmeri (303) |
 
 Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Prijave ni** —
@@ -332,9 +362,42 @@ si nasprotujeta in izbrana je bila stran, ki obstaja.
 
 **Brisanje gre v obratnem vrstnem redu kot sprejem: najprej vrstica, nato
 datoteka.** Vrstica brez datoteke je pokvarjen vnos, ki ga operater vidi;
-datoteka brez vrstice je nevidna sirota, ki stane samo prostor. Brisanje je
-nepovratno — zapis, ki je na telefonu `synced`, upload worker nikoli več ne
-pošlje.
+datoteka brez vrstice je nevidna sirota, ki stane samo prostor. Isto pravilo
+velja na telefonu.
+
+## Arhiv in brisanje na telefonu (V1-R07)
+
+Gumb na strani s podrobnostmi **arhivira** in ne briše. Arhiviran zapis izgine
+iz števcev na `/admin`, s seznama predmeta in iz vrste za obdelavo, na
+strežniku pa ostane s prepisom, povzetkom in vprašanji. Vrnitve iz arhiva ni;
+razlogi so v `docs/odlocitve/ADR-011`.
+
+Arhiv je **svoja os in ne peto stanje** `status`: `status` je avtomat obdelave
+in arhiviran zapis je lahko hkrati `ready`. Isti razlog kot pri `readable`.
+
+Telefon vsakih 5 minut (in ob zagonu, dokler je aplikacija v ospredju) vpraša
+`GET /materials/pending-deletion`. Odgovor je **celoten delovni seznam** —
+arhivirano, česar naprava še ni potrdila — in ne odsek za nekim kazalcem.
+Seznam se krajša sam, ko telefon potrjuje, zato telefonu ni treba hraniti
+ničesar in lokalna shema se ne spremeni. Časovni žig zadnje sinhronizacije je
+bil zavrnjen: pade na razliki ur in na transakciji, ki se potrdi šele potem,
+ko je telefon kazalec že premaknil čezenj.
+
+Za vsak `id` telefon pobriše **najprej vrstico, nato datoteko**, in šele nato
+pošlje `POST /materials/deleted-on-device`. Potrditev pred dejanskim brisanjem
+bi pomenila zapis, ki ga strežnik šteje za pospravljenega, na telefonu pa
+ostane. Zapis, ki ga naprava nima (sveža namestitev), se potrdi takoj —
+potrditev pomeni „tega tu ni več", ne „pravkar sem ga izbrisal". Ponovljena
+potrditev ničesar ne premakne; prenos je *at-least-once*.
+
+V mobilnem vmesniku se ob tem ne zgodi nič: slika iz Zgodovine samo izgine.
+
+**Dokončno brisanje ima dve stopnji.** „Počisti sliko" pobriše samo datoteko
+in je dovoljeno kadarkoli po arhiviranju. „Izbriši dokončno" pobriše tudi
+vrstico in je dovoljeno **šele, ko je `device_deleted_at` postavljen** —
+sicer telefon za brisanje nikoli ne izve. Pravilo velja v vmesniku, v poti in
+v repozitoriju: gumb, ki ga stran ne izriše, ni varovalka. Vprašanja ob tem
+ostanejo.
 
 Ure so v pasu `Europe/Ljubljana`, ker jih operater primerja s tem, kar kaže
 telefon. Bazo pasov prinese sistem (v vsebniku `/usr/share/zoneinfo`, na
