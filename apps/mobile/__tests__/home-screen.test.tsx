@@ -191,3 +191,27 @@ describe('stanje prenosa na domači strani', () => {
     expect(usmerjevalnik.stanje.router.push).toHaveBeenCalledWith('/slikaj');
   });
 });
+
+describe('vidna verzija (V1-R06)', () => {
+  it('domača stran pove, katera gradnja je nameščena', async () => {
+    await render(<HomeScreen />);
+
+    const vrstica = await screen.findByTestId('verzija');
+
+    // Brez te vrstice dveh APK z isto verzijo na telefonu ni mogoče ločiti.
+    expect(vrstica).toBeTruthy();
+    expect(String(vrstica.props.children)).toMatch(/gradnja/);
+  });
+
+  it('vrstica z verzijo se ne da pritisniti', async () => {
+    // Izpis, ne gumb: dotik mora iti mimo nje, da ne tekmuje z „Slikaj snov".
+    // Trditev je o vedenju in ne o lastnostih samega <Text> — sicer bi vrstica
+    // lahko postala gumb, zavit v <Pressable>, in test bi to preživel.
+    // Ugotovitev pregledovalca ob drugem pregledu.
+    await render(<HomeScreen />);
+
+    await fireEvent.press(await screen.findByTestId('verzija'));
+
+    expect(usmerjevalnik.stanje.router.push).not.toHaveBeenCalled();
+  });
+});
