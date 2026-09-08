@@ -1,9 +1,12 @@
 /**
  * Katera gradnja aplikacije teče na tem telefonu.
  *
- * Brez tega izpisa dveh APK z isto verzijo ni mogoče ločiti: `versionCode` je
- * pri obeh 1, v Nastavitvah piše pri obeh `1.0.0`, edini razpoložljivi test pa
- * je posreden („ali prenos deluje"). Povod je popravek V1-R02.
+ * Brez tega izpisa dveh APK z isto verzijo ni bilo mogoče ločiti: `versionCode`
+ * je bil pri obeh 1, v Nastavitvah je pri obeh pisalo `1.0.0`, edini
+ * razpoložljivi test pa je bil posreden („ali prenos deluje"). Povod je
+ * popravek V1-R02. `versionCode` odtlej šteje EAS sam (`eas.json`,
+ * `autoIncrement`); ta vrstica ostaja tisto, kar je vidno brez brskanja po
+ * Nastavitvah.
  *
  * Oznaka gradnje pride iz EAS ob gradnji (`EAS_BUILD_ID` → `extra.buildId` v
  * `app.config.ts`). Razvojna gradnja je nima in to tudi pove — prazna vrstica

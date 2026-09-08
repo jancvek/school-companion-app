@@ -468,8 +468,9 @@ zaprto s Tailscale; cena je, da zamenjava ključa zahteva novo gradnjo.
 
 Po isti poti pride tudi **oznaka gradnje** (V1-R06): `app.config.ts` prepiše
 `EAS_BUILD_ID` v `extra.buildId`, domača stran pa jo izpiše kot
-`1.0.0 · gradnja 317bdcd1`. Brez tega izpisa dveh APK na telefonu ni mogoče
-ločiti — verzija je pri obeh `1.0.0` in `versionCode` pri obeh 1. Razvojna
+`1.0.0 · gradnja 317bdcd1`. Brez tega izpisa dveh APK na telefonu ni bilo
+mogoče ločiti — verzija je bila pri obeh `1.0.0` in `versionCode` pri obeh 1;
+`versionCode` odtlej šteje EAS sam (glej spodaj). Razvojna
 gradnja spremenljivke nima in vrstica takrat pove `razvojna gradnja`; prazna
 vrednost šteje enako kot odsotna.
 
@@ -479,6 +480,13 @@ Distribucija je EAS Build, profil `preview` v `apps/mobile/eas.json` (Android
 APK, interna distribucija, okolje `preview`). Naslov in ključ tam nista v
 `.env`, ampak med spremenljivkami okolja EAS za to okolje; `app.json` nosi
 `owner` in `extra.eas.projectId`.
+
+**Verzijo gradnje hrani EAS, ne repozitorij** (`appVersionSource: "remote"`,
+`autoIncrement` v profilu `preview`). `versionCode` zato zraste sam ob vsaki
+gradnji in dveh APK ne loči le izpis na domači strani, ampak tudi Android. V
+`app.json` `android.versionCode` namenoma ni — številka, ki bi jo bilo treba
+ročno povečevati, se pozabi natanko takrat, ko je potrebna. Cena je, da je
+števec pri EAS in ga svež klon sam ne pozna.
 
 Promet do strežnika je **nešifriran** (`http://` na Tailscale naslov). Android
 ga v release gradnji privzeto blokira, zato ga izrecno dovoli lokalni config
