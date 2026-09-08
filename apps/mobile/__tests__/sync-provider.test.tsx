@@ -24,8 +24,25 @@ const USPEH: Izid = { vrsta: 'synced' };
 
 let db: ReturnType<typeof createTestDatabase>;
 let prvotnoStanje: string;
-/** Poslušalec, ki ga ponudnik prijavi na `AppState`. */
-let sporociStanje: (stanje: AppStateStatus) => void;
+/** Poslušalci, ki jih ponudnik prijavi na `AppState`. */
+let poslusalci: ((stanje: AppStateStatus) => void)[];
+
+/**
+ * Sporoči novo stanje vsem prijavljenim poslušalcem.
+ *
+ * Seznam in ne ena vrednost: od V1-R07 ponudnik prijavi dva — prenos in
+ * preverjanje arhiva. Mock, ki bi hranil zadnjega, bi prvega utišal in test
+ * bi padel iz razloga, ki z njegovo trditvijo nima zveze.
+ */
+function sporociStanje(stanje: AppStateStatus): void {
+  for (const poslusalec of [...poslusalci]) poslusalec(stanje);
+}
+
+/** Odjemalec za arhiv, ki nikoli ničesar ne najde. */
+const MIREN_ODJEMALEC = {
+  preberiSeznam: async () => [],
+  potrdi: async () => {},
+};
 
 function material(id: string): Material {
   return {
@@ -46,11 +63,17 @@ beforeEach(async () => {
   await migriraj(db);
 
   prvotnoStanje = AppState.currentState;
+  poslusalci = [];
   jest.spyOn(AppState, 'addEventListener').mockImplementation((dogodek, poslusalec) => {
-    if (dogodek === 'change') {
-      sporociStanje = poslusalec as (stanje: AppStateStatus) => void;
-    }
-    return { remove: jest.fn() };
+    if (dogodek !== 'change') return { remove: jest.fn() };
+
+    const f = poslusalec as (stanje: AppStateStatus) => void;
+    poslusalci.push(f);
+    return {
+      remove: jest.fn(() => {
+        poslusalci = poslusalci.filter((p) => p !== f);
+      }),
+    };
   });
 });
 
@@ -62,7 +85,12 @@ afterEach(() => {
 
 async function izrisi(prenesiEno: jest.Mock) {
   return render(
-    <SyncProvider db={db} nastavitve={NASTAVITVE} prenesiEno={prenesiEno}>
+    <SyncProvider
+      db={db}
+      nastavitve={NASTAVITVE}
+      prenesiEno={prenesiEno}
+      odjemalec={MIREN_ODJEMALEC}
+    >
       <Text>vsebina</Text>
     </SyncProvider>,
   );

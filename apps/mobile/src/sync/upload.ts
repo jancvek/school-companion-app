@@ -24,7 +24,13 @@ import type { Material } from '../types';
 export type Izid =
   | { vrsta: 'synced' }
   | { vrsta: 'pending'; razlog: string }
-  | { vrsta: 'failed'; razlog: string };
+  | { vrsta: 'failed'; razlog: string }
+  /**
+   * Snov je na strežniku arhivirana. Ni napaka in ni uspeh prenosa —
+   * zapis se lokalno zbriše, enako kot bi ga seznam za brisanje
+   * (`docs/odlocitve/ADR-010`).
+   */
+  | { vrsta: 'arhiviran' };
 
 /** Kar potrebuje ta modul od `expo-file-system`; v testih se podtakne. */
 export type NaloziDatoteko = (
@@ -55,6 +61,11 @@ const ZACASNE_4XX = new Set([408, 429]);
 
 /** Odloči, kaj status pomeni za zapis v bazi. */
 export function razvrstiStatus(status: number): Izid {
+  // Pred splošno vejo 4xx: `410` je edini 4xx, ki ne pomeni „ne bo šlo",
+  // ampak „te snovi ni več". Brez te vrstice bi zapis končal v `failed` in
+  // ostal na telefonu, dokler ga kdo ročno ne bi vrnil v vrsto.
+  if (status === 410) return { vrsta: 'arhiviran' };
+
   if (status >= 200 && status < 300) {
     // 201 je nov zapis, 200 je zapis, ki je na strežniku že bil. Oboje pomeni,
     // da je slika tam — idempotentnost je uspeh, ne napaka.

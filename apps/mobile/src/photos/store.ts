@@ -49,6 +49,18 @@ export async function savePhoto(sourceUri: string, fileName: string): Promise<st
 }
 
 /**
+ * Pobriše sliko posnetka, ki ga na strežniku ni več (V1-R07).
+ *
+ * Za razliko od `discardPhoto` napake **ne** požre: klicatelj se po njej
+ * odloči, ali sme strežniku potrditi, da posnetka pri njem ni več. Datoteka,
+ * ki je ni, šteje za uspeh — cilj je stanje „ni je", ne dejanje brisanja.
+ */
+export function removePhoto(fileUri: string): void {
+  const file = new File(fileUri);
+  if (file.exists) file.delete();
+}
+
+/**
  * Pobriše sliko, za katero se je izkazalo, da vrstice v bazi ne bo.
  * Napake namenoma požre — brisanje je pospravljanje za drugo napako in je ne
  * sme prekriti.
