@@ -639,8 +639,9 @@ class TestArhiviranje:
 
         besedilo = odjemalec.get("/admin/archive").text
 
-        assert "MAT" in besedilo
-        assert "4. 9. 2026 ob 09:30" in besedilo
+        # Skupaj in ne vsak zase: „MAT" se na strani lahko pojavi tudi kje
+        # drugje, ta trditev pa govori o kartici te snovi.
+        assert "MAT — 4. 9. 2026 ob 09:30" in besedilo
 
     def test_arhiv_ureja_po_casu_arhiviranja_navzdol(
         self, odjemalec: TestClient, motor: Engine, slike: Path

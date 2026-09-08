@@ -62,7 +62,7 @@ describe('preveriIzbrisane', () => {
     expect(await findById(db, 'a')).toBeNull();
     expect(pobrisane).toEqual(['file:///documents/photos/a.jpg']);
     expect(streznik.potrjeni).toEqual([['a']]);
-    expect(izid).toEqual({ pobrisani: 1, potrjeni: 1 });
+    expect(izid).toEqual({ pobrisani: 1, potrjeni: 1, neuspeli: 0 });
   });
 
   it('vrstico pobriše pred datoteko', async () => {
@@ -92,7 +92,7 @@ describe('preveriIzbrisane', () => {
     });
 
     expect(streznik.potrjeni).toEqual([['ni-ga']]);
-    expect(izid).toEqual({ pobrisani: 0, potrjeni: 1 });
+    expect(izid).toEqual({ pobrisani: 0, potrjeni: 1, neuspeli: 0 });
   });
 
   it('ne potrdi zapisa, čigar datoteke ni znal pobrisati', async () => {
@@ -108,6 +108,13 @@ describe('preveriIzbrisane', () => {
 
     expect(streznik.potrjeni).toEqual([['b']]);
     expect(izid.potrjeni).toBe(1);
+    // Vrstica za „a" je kljub temu šla — brisanje datoteke je drugi korak.
+    expect(await findById(db, 'a')).toBeNull();
+    // Zato mora izid to povedati: `pobrisani` šteje samo do konca
+    // pospravljene zapise („b"), `neuspeli` pa je znak klicatelju, da se je
+    // baza vseeno spremenila in da je treba osvežiti števce.
+    expect(izid.pobrisani).toBe(1);
+    expect(izid.neuspeli).toBe(1);
   });
 
   it('ena neuspela datoteka ne ustavi ostalih', async () => {
@@ -127,7 +134,7 @@ describe('preveriIzbrisane', () => {
     const izid = await preveriIzbrisane(db, streznik, () => {});
 
     expect(streznik.potrjeni).toEqual([]);
-    expect(izid).toEqual({ pobrisani: 0, potrjeni: 0 });
+    expect(izid).toEqual({ pobrisani: 0, potrjeni: 0, neuspeli: 0 });
   });
 
   it('nedosegljiv strežnik pusti zapise pri miru', async () => {

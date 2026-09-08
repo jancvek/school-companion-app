@@ -163,8 +163,10 @@ export function SyncProvider({
       naloga: async () => {
         const izid = await preveriIzbrisane(db, odjemalec);
         // Števce osvežimo samo, kadar se je kaj res zgodilo: običajen obhod
-        // ne najde ničesar in ne sme po nepotrebnem brati baze.
-        if (izid.pobrisani > 0) await osvezi();
+        // ne najde ničesar in ne sme po nepotrebnem brati baze. Tudi ob
+        // neuspehu: vrstica je takrat lahko že šla, spodletelo pa je
+        // brisanje datoteke.
+        if (izid.pobrisani > 0 || izid.neuspeli > 0) await osvezi();
       },
     });
 

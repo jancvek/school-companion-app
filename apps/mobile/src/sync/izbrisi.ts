@@ -43,6 +43,14 @@ export type PovzetekBrisanja = {
   pobrisani: number;
   /** Koliko `id` je bilo strežniku potrjenih (tudi tistih, ki jih ni bilo). */
   potrjeni: number;
+  /**
+   * Koliko jih ni šlo do konca in ostajajo nepotrjeni.
+   *
+   * Ločeno od `pobrisani`, ker se lahko zgodi oboje hkrati: vrstica je šla,
+   * datoteka pa ne. Klicatelj po tem ve, da mora osvežiti števce, čeprav
+   * `pobrisani` ostaja `0`.
+   */
+  neuspeli: number;
 };
 
 /**
@@ -82,7 +90,7 @@ export async function preveriIzbrisane(
   pobrisiDatoteko: (fileUri: string) => void = removePhoto,
 ): Promise<PovzetekBrisanja> {
   const ids = await odjemalec.preberiSeznam();
-  const povzetek: PovzetekBrisanja = { pobrisani: 0, potrjeni: 0 };
+  const povzetek: PovzetekBrisanja = { pobrisani: 0, potrjeni: 0, neuspeli: 0 };
   if (ids.length === 0) return povzetek;
 
   const potrjeni: string[] = [];
@@ -91,17 +99,17 @@ export async function preveriIzbrisane(
     try {
       const material = await findById(db, id);
       if (material !== null) {
-        // Koraka sta tu razpisana in ne skrita v `pobrisiLokalno`, da se
-        // števec ujema s tem, kar se je res zgodilo: vrstica je lahko šla,
-        // datoteka pa ne. Domača stran mora takrat vseeno osvežiti števce.
-        await deleteById(db, id);
+        // Vrstni red živi v `pobrisiLokalno` in nikjer drugje. Razpisati
+        // koraka tudi tu bi pomenilo isto pravilo na dveh mestih — in
+        // drugo mesto bi ostalo brez testa.
+        await pobrisiLokalno(db, material, pobrisiDatoteko);
         povzetek.pobrisani += 1;
-        pobrisiDatoteko(material.file_uri);
       }
       potrjeni.push(id);
     } catch {
       // Ta zapis ostane nepotrjen in pride na seznam še enkrat. Obhod se
       // nadaljuje: ena neuspela datoteka ne sme ustaviti ostalih.
+      povzetek.neuspeli += 1;
     }
   }
 
