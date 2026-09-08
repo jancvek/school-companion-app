@@ -616,6 +616,46 @@ class TestArhiviranje:
         assert "5. 9. 2026 ob 12:00" in besedilo
         assert "čaka na telefon" in besedilo
 
+    def test_arhiviran_zapis_ne_trdi_da_je_v_obdelavi(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # `ponovna_obdelava_mozna` je `false` iz dveh razlogov. Brez ločene veje
+        # v predlogi bi arhivirana snov trdila, da je pravkar v obdelavi, in
+        # operaterju naročila, naj osvežuje stran, ki se ne bo spremenila nikoli.
+        zapisi(motor, slike)
+        obdelaj(motor)
+        arhiviraj(motor)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "pravkar v obdelavi" not in besedilo
+        assert "Arhivirana snov se ne obdeluje" in besedilo
+
+    def test_arhiv_pokaze_predmet_in_cas_posnetka(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        arhiviraj(motor)
+
+        besedilo = odjemalec.get("/admin/archive").text
+
+        assert "MAT" in besedilo
+        assert "4. 9. 2026 ob 09:30" in besedilo
+
+    def test_arhiv_ureja_po_casu_arhiviranja_navzdol(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Kriterij pravi „najnovejše arhivirana prva". Z enim samim zapisom bi
+        # obrat vrstnega reda ostal neopazen.
+        zapisi(motor, slike, UUID_ENA)
+        zapisi(motor, slike, UUID_DVA)
+        arhiviraj(motor, UUID_ENA, arhivirano="2026-09-05T10:00:00+00:00")
+        arhiviraj(motor, UUID_DVA, arhivirano="2026-09-06T10:00:00+00:00")
+
+        besedilo = odjemalec.get("/admin/archive").text
+
+        assert besedilo.index(UUID_DVA) < besedilo.index(UUID_ENA)
+
     def test_arhiv_pokaze_kljukico_ko_je_telefon_potrdil(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:

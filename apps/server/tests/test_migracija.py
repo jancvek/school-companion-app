@@ -165,6 +165,108 @@ def test_obstojeci_zapis_prezivi_migracijo(baza: str) -> None:
         motor.dispose()
 
 
+def test_obstojeca_vprasanja_prezivijo_prepis_tabele(baza: str) -> None:
+    """Vrstice iz V1-R03 morajo prestati prepis tabele `questions`.
+
+    Migracija `0003_arhiv` na SQLite tabelo **prepiše na novo**
+    (`batch_alter_table` s `copy_from`), ker `ALTER` tujega ključa tam ne
+    obstaja. Brez tega testa se prepis nikoli ne izvede nad nobeno vrstico in
+    nič ne dokazuje, da podatki pri tem ne izginejo.
+
+    Hkrati je to edini test, ki požene zapolnitev denormaliziranega izvora.
+    Brez nje bi vprašanje po dokončnem brisanju materiala ne vedelo več, iz
+    katere snovi je (`docs/odlocitve/ADR-011`).
+    """
+    config = alembic_nastavitve(baza)
+    command.upgrade(config, "0002_obdelava")
+
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            povezava.execute(
+                text(
+                    "INSERT INTO materials "
+                    "(id, subject, taken_at, image_path, status, received_at) "
+                    "VALUES ('star', 'ZGO', '2026-09-01 08:00:00', "
+                    "'/data/images/star.jpg', 'ready', '2026-09-01 08:05:00')"
+                )
+            )
+            povezava.execute(
+                text(
+                    "INSERT INTO questions (id, material_id, position, question, answer) "
+                    "VALUES ('v1', 'star', 1, 'Kdaj?', 'Leta 1991.')"
+                )
+            )
+
+        command.upgrade(config, "head")
+
+        with motor.connect() as povezava:
+            vrstica = povezava.execute(
+                text(
+                    "SELECT material_id, question, answer, subject, material_taken_at "
+                    "FROM questions WHERE id = 'v1'"
+                )
+            ).one()
+
+        assert vrstica.material_id == "star"
+        assert vrstica.question == "Kdaj?"
+        assert vrstica.answer == "Leta 1991."
+        # Izvor se napolni iz materiala, ne pusti prazen.
+        assert vrstica.subject == "ZGO"
+        assert str(vrstica.material_taken_at).startswith("2026-09-01 08:00:00")
+    finally:
+        motor.dispose()
+
+
+def test_razveljavitev_prezivi_podatke(baza: str) -> None:
+    """`downgrade` nad polno bazo, ne le nad prazno.
+
+    Prepis tabele v obratno smer in vrnitev `NOT NULL` na `material_id` sta
+    poteza, ki nad prazno bazo uspe vedno. Test brez podatkov torej ne bi
+    dokazal ničesar o njej.
+    """
+    config = alembic_nastavitve(baza)
+    command.upgrade(config, "head")
+
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            povezava.execute(
+                text(
+                    "INSERT INTO materials "
+                    "(id, subject, taken_at, image_path, status, received_at) "
+                    "VALUES ('star', 'MAT', '2026-09-01 08:00:00', "
+                    "'/data/images/star.jpg', 'ready', '2026-09-01 08:05:00')"
+                )
+            )
+            povezava.execute(
+                text(
+                    "INSERT INTO questions "
+                    "(id, material_id, position, question, answer, subject) "
+                    "VALUES ('v1', 'star', 1, 'Kdaj?', 'Leta 1991.', 'MAT')"
+                )
+            )
+            # Sirota, ki je shema pred to migracijo ne zna zapisati.
+            povezava.execute(
+                text(
+                    "INSERT INTO questions "
+                    "(id, material_id, position, question, answer, subject) "
+                    "VALUES ('v2', NULL, 1, 'Brez materiala?', 'Da.', 'MAT')"
+                )
+            )
+
+        command.downgrade(config, "0002_obdelava")
+
+        with motor.connect() as povezava:
+            preostala = povezava.execute(text("SELECT id FROM questions")).scalars().all()
+
+        # Vprašanje z materialom ostane, sirota gre — tako je zapisano v
+        # docstringu migracije in nikjer drugje to ni preverjeno.
+        assert preostala == ["v1"]
+    finally:
+        motor.dispose()
+
+
 def test_primarni_kljuc_je_id(baza: str) -> None:
     """Idempotentnost stoji na tem, da je `id` primarni ključ."""
     command.upgrade(alembic_nastavitve(baza), "head")

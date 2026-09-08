@@ -3,6 +3,7 @@ import {
   PHOTO_MAX_WIDTH,
   compressPhoto,
   discardPhoto,
+  removePhoto,
   savePhoto,
 } from '@/photos/store';
 
@@ -86,6 +87,9 @@ beforeEach(() => {
 
   fileSystem.spies.move.mockResolvedValue(undefined);
   fileSystem.spies.obstaja.mockReturnValue(true);
+  // `clearAllMocks` počisti klice, ne pa podtaknjenih implementacij. Brez
+  // te vrstice bi bil izid testa odvisen od vrstnega reda v datoteki.
+  fileSystem.spies.izbrisi.mockImplementation(() => {});
 });
 
 describe('stiskanje slike', () => {
@@ -157,5 +161,43 @@ describe('brisanje slike brez vrstice', () => {
 
     expect(() => discardPhoto(SIROTA)).not.toThrow();
     expect(fileSystem.spies.izbrisi).not.toHaveBeenCalled();
+  });
+});
+
+describe('brisanje slike, ki je na strežniku arhivirana', () => {
+  const SLIKA = 'file:///documents/photos/arhivirana.jpg';
+
+  it('pobriše datoteko, če obstaja', () => {
+    removePhoto(SLIKA);
+
+    expect(fileSystem.spies.izbrisi).toHaveBeenCalledWith(SLIKA);
+  });
+
+  it('datoteka, ki je ni, ni napaka', () => {
+    // Cilj je stanje „ni je", ne dejanje brisanja.
+    fileSystem.spies.obstaja.mockReturnValue(false);
+
+    expect(() => removePhoto(SLIKA)).not.toThrow();
+    expect(fileSystem.spies.izbrisi).not.toHaveBeenCalled();
+  });
+
+  it('napake NE požre — za razliko od discardPhoto', () => {
+    // To je edina varovalka pravila „telefon nikoli ne potrdi brisanja, ki se
+    // ni zgodilo". Če bi napako požrl, bi strežnik dobil potrditev, arhiv bi
+    // pokazal kljukico in odklenil dokončno brisanje, slika pa bi na telefonu
+    // ostala (`docs/odlocitve/ADR-010`).
+    fileSystem.spies.izbrisi.mockImplementation(() => {
+      throw new Error('datoteka je zaklenjena');
+    });
+
+    expect(() => removePhoto(SLIKA)).toThrow('datoteka je zaklenjena');
+  });
+
+  it('tudi napaka pri preverjanju obstoja ne sme biti tiha', () => {
+    fileSystem.spies.obstaja.mockImplementation(() => {
+      throw new Error('ni dostopa');
+    });
+
+    expect(() => removePhoto(SLIKA)).toThrow();
   });
 });

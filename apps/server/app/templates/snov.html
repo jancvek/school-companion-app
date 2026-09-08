@@ -69,6 +69,14 @@
           Zavrže dosedanji prepis, povzetek in vprašanja ter sproži nov klic
           modela.
         </p>
+      {% elif snov.arhiviran %}
+        {# `ponovna_obdelava_mozna` je `false` iz dveh različnih razlogov.
+           Brez te veje bi arhivirana snov trdila, da je pravkar v obdelavi,
+           in operaterju naročila, naj osvežuje stran, ki se ne bo
+           spremenila nikoli. #}
+        <p class="drobno">
+          Arhivirana snov se ne obdeluje več.
+        </p>
       {% else %}
         <p class="drobno">
           Zapis je pravkar v obdelavi. Osveži stran čez nekaj trenutkov.

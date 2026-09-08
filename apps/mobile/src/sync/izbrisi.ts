@@ -91,8 +91,12 @@ export async function preveriIzbrisane(
     try {
       const material = await findById(db, id);
       if (material !== null) {
-        await pobrisiLokalno(db, material, pobrisiDatoteko);
+        // Koraka sta tu razpisana in ne skrita v `pobrisiLokalno`, da se
+        // števec ujema s tem, kar se je res zgodilo: vrstica je lahko šla,
+        // datoteka pa ne. Domača stran mora takrat vseeno osvežiti števce.
+        await deleteById(db, id);
         povzetek.pobrisani += 1;
+        pobrisiDatoteko(material.file_uri);
       }
       potrjeni.push(id);
     } catch {
@@ -120,7 +124,15 @@ export type Zahteva = (
   },
 ) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
 
-/** Klic s časovno omejitvijo, ki se vedno konča. */
+/**
+ * Klic s časovno omejitvijo, ki se **vedno** konča.
+ *
+ * Omejitev je izpeljana dvojno, enako kot pri prenosu (`upload.ts`):
+ * `signal` prekine sam klic, `Promise.race` pa poskrbi, da se ta funkcija
+ * konča tudi, če bi `fetch` signal prezrl. Brez druge polovice bi viseč klic
+ * pustil zaporo v `ustvariPonavljalnik` postavljeno in preverjanje arhiva bi
+ * bilo do ponovnega zagona aplikacije mrtvo.
+ */
 async function poslji(
   zahteva: Zahteva,
   url: string,
@@ -128,11 +140,22 @@ async function poslji(
   casovnaOmejitevMs: number,
 ): Promise<{ ok: boolean; status: number; json(): Promise<unknown> }> {
   const nadzor = new AbortController();
-  const ura = setTimeout(() => nadzor.abort(), casovnaOmejitevMs);
+  let ura: ReturnType<typeof setTimeout> | undefined;
+
+  const potek = new Promise<never>((_resolve, reject) => {
+    ura = setTimeout(() => {
+      nadzor.abort();
+      reject(new Error('Strežnik se ni odzval pravočasno.'));
+    }, casovnaOmejitevMs);
+  });
+
   try {
-    return await zahteva(url, { ...moznosti, signal: nadzor.signal });
+    return await Promise.race([
+      zahteva(url, { ...moznosti, signal: nadzor.signal }),
+      potek,
+    ]);
   } finally {
-    clearTimeout(ura);
+    if (ura !== undefined) clearTimeout(ura);
   }
 }
 

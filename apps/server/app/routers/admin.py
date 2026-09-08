@@ -489,6 +489,7 @@ def izbrisi(
     material_id: str,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
 ) -> Response:
     """Dokončno izbriše zapis in njegovo datoteko.
 
@@ -513,7 +514,12 @@ def izbrisi(
         # ga je hotel.
         return RedirectResponse(f"{PREDPONA}/archive", status_code=303)
 
-    pobrisi_sliko(Path(pobrisani.image_path))
+    # Ista meja kot pri „Počisti sliko" in pri streženju slike. Do V1-R07 je
+    # ta klic meje ni imel; zdaj stojita poti druga ob drugi in razlike ne bi
+    # pojasnilo nič.
+    pot = Path(pobrisani.image_path)
+    if je_znotraj(nastavitve.images_dir, pot):
+        pobrisi_sliko(pot)
 
     # Nazaj v arhiv in ne na predmet: s seznama predmeta je bila ta slika
     # umaknjena že ob arhiviranju.

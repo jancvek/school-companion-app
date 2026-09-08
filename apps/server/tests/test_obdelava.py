@@ -542,6 +542,66 @@ class TestZapisIzida:
 
         assert stevilo_vprasanj(motor) == 1
 
+    def test_vprasanje_dobi_izvor_svojega_materiala(
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
+    ) -> None:
+        """Predmet in čas posnetka se prepišeta v vprašanje ob nastanku.
+
+        Denormalizirano namenoma: material se sme dokončno izbrisati, vprašanje
+        pa mora tudi potem povedati, iz katere snovi in katerega dne je
+        (`docs/odlocitve/ADR-011`). Brez tega testa bi bili obe polji lahko
+        tiho `NULL` in nihče tega ne bi opazil do dneva, ko bi bilo prepozno.
+        """
+        zapisi(motor, slike, taken_at="2026-09-04T07:30:00+00:00")
+
+        with tovarna_sej() as seja:
+            MaterialsRepository(seja).zapisi_izid(
+                UUID_ENA,
+                IzidObdelave(
+                    status=STATUS_PRIPRAVLJEN,
+                    readable=True,
+                    vprasanja=(VprasanjeZaZapis(question="V?", answer="O."),),
+                ),
+            )
+
+        with Session(motor) as seja:
+            vprasanje = seja.scalars(select(Question)).one()
+            assert vprasanje.subject == "MAT"
+            assert vprasanje.material_taken_at is not None
+            # SQLite pasu ne vrne, Postgres ga — primerjamo, kar je skupno.
+            assert vprasanje.material_taken_at.replace(tzinfo=None) == datetime(
+                2026, 9, 4, 7, 30
+            )
+
+    def test_izvor_prezivi_brisanje_materiala(
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
+    ) -> None:
+        """Po dokončnem brisanju materiala vprašanje še vedno ve, od kod je."""
+        zapisi(motor, slike)
+
+        with tovarna_sej() as seja:
+            repozitorij = MaterialsRepository(seja)
+            repozitorij.zapisi_izid(
+                UUID_ENA,
+                IzidObdelave(
+                    status=STATUS_PRIPRAVLJEN,
+                    readable=True,
+                    vprasanja=(VprasanjeZaZapis(question="V?", answer="O."),),
+                ),
+            )
+
+        with Session(motor) as seja:
+            material = seja.get(Material, UUID_ENA)
+            assert material is not None
+            seja.delete(material)
+            seja.commit()
+
+        with Session(motor) as seja:
+            vprasanje = seja.scalars(select(Question)).one()
+            assert vprasanje.material_id is None
+            assert vprasanje.subject == "MAT"
+            assert vprasanje.material_taken_at is not None
+
 
 class TestSledJeCelaObVsakemIzidu:
     """Kriterij: prompt, surov odgovor, ime modela in oba števca — vedno.

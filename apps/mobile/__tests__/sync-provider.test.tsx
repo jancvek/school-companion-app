@@ -1,9 +1,10 @@
 import { act, render, waitFor } from '@testing-library/react-native';
 import { AppState, Text, type AppStateStatus } from 'react-native';
 
-import { insertMaterial } from '@/db/materials';
+import { findById, insertMaterial } from '@/db/materials';
 import { migriraj } from '@/db/migrations';
 import { SyncProvider } from '@/sync/use-sync';
+import type { Odjemalec } from '@/sync/izbrisi';
 import type { Izid } from '@/sync/upload';
 import { INTERVAL_MS } from '@/sync/worker';
 import type { Material } from '@/types';
@@ -18,6 +19,18 @@ import { createTestDatabase } from './test-database';
  */
 
 jest.mock('expo-sqlite', () => require('./screen-mocks').expoSqliteMock());
+
+// Brisanje arhivirane snovi se dotakne datoteke prek `expo-file-system`.
+// Podtaknemo ga, da ta test govori o priklopu na življenjski cikel in ne o
+// disku; datoteke tu nikoli ni.
+jest.mock('expo-file-system', () => ({
+  __esModule: true,
+  File: class {
+    exists = false;
+    delete() {}
+  },
+  UploadType: { MULTIPART: 'multipart' },
+}));
 
 const NASTAVITVE = { baseUrl: 'http://sto.ts.net:8000', apiKey: 'kljuc' };
 const USPEH: Izid = { vrsta: 'synced' };
@@ -39,7 +52,7 @@ function sporociStanje(stanje: AppStateStatus): void {
 }
 
 /** Odjemalec za arhiv, ki nikoli ničesar ne najde. */
-const MIREN_ODJEMALEC = {
+const MIREN_ODJEMALEC: Odjemalec = {
   preberiSeznam: async () => [],
   potrdi: async () => {},
 };
@@ -83,17 +96,28 @@ afterEach(() => {
   db.close();
 });
 
-async function izrisi(prenesiEno: jest.Mock) {
+async function izrisi(prenesiEno: jest.Mock, odjemalec = MIREN_ODJEMALEC) {
   return render(
     <SyncProvider
       db={db}
       nastavitve={NASTAVITVE}
       prenesiEno={prenesiEno}
-      odjemalec={MIREN_ODJEMALEC}
+      odjemalec={odjemalec}
     >
       <Text>vsebina</Text>
     </SyncProvider>,
   );
+}
+
+/** Odjemalec, ki enkrat vrne dani seznam in si zapomni potrditve. */
+function odjemalecZ(ids: string[]): Odjemalec & {
+  preberiSeznam: jest.Mock;
+  potrdi: jest.Mock;
+} {
+  return {
+    preberiSeznam: jest.fn(async () => ids),
+    potrdi: jest.fn(async (_kaj: string[]) => {}),
+  };
 }
 
 it('v ospredju prenaša', async () => {
@@ -190,4 +214,47 @@ it('brez nastavitev se worker ne prijavi na AppState', async () => {
   expect(AppState.addEventListener).not.toHaveBeenCalled();
   const [vrstica] = await db.getAllAsync<Material>('SELECT * FROM materials', []);
   expect(vrstica.sync_status).toBe('pending');
+});
+
+/**
+ * Preverjanje arhiva (V1-R07).
+ *
+ * Brez teh testov je mogoče priklop na življenjski cikel v celoti odstraniti,
+ * zbirka pa ostane zelena: enotski testi v `sync-izbrisi.test.ts` preverjajo
+ * `preveriIzbrisane` in ponavljalnik **ločeno**, nikoli spojena skozi
+ * ponudnika. Aplikacija bi arhiviranih slik ne zbrisala nikoli.
+ */
+it('v ospredju pobriše snov, ki je na strežniku arhivirana', async () => {
+  (AppState as { currentState: string }).currentState = 'active';
+  await insertMaterial(db, material('a'));
+  const odjemalec = odjemalecZ(['a']);
+
+  await izrisi(jest.fn(async () => USPEH), odjemalec);
+
+  await waitFor(async () => expect(await findById(db, 'a')).toBeNull());
+  expect(odjemalec.potrdi).toHaveBeenCalledWith(['a']);
+});
+
+it('če aplikacija ob vpetju ni v ospredju, arhiva ne preverja', async () => {
+  (AppState as { currentState: string }).currentState = 'background';
+  const odjemalec = odjemalecZ(['a']);
+
+  await izrisi(jest.fn(async () => USPEH), odjemalec);
+  await new Promise(process.nextTick);
+
+  expect(odjemalec.preberiSeznam).not.toHaveBeenCalled();
+});
+
+it('ob vrnitvi v ospredje spet preveri arhiv', async () => {
+  (AppState as { currentState: string }).currentState = 'background';
+  await insertMaterial(db, material('a'));
+  const odjemalec = odjemalecZ(['a']);
+
+  await izrisi(jest.fn(async () => USPEH), odjemalec);
+  await new Promise(process.nextTick);
+  expect(odjemalec.preberiSeznam).not.toHaveBeenCalled();
+
+  sporociStanje('active');
+
+  await waitFor(async () => expect(await findById(db, 'a')).toBeNull());
 });
