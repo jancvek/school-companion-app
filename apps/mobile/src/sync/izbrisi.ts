@@ -39,7 +39,12 @@ export type Odjemalec = {
 
 /** Kar se je v enem obhodu zgodilo. */
 export type PovzetekBrisanja = {
-  /** Koliko zapisov je bilo lokalno pobrisanih. */
+  /**
+   * Koliko zapisov je šlo **do konca** — vrstica in datoteka.
+   *
+   * Zapis, ki mu je šla vrstica, datoteka pa ne, tu ni štet; tega pokrije
+   * `neuspeli`. Baza se je takrat vseeno spremenila.
+   */
   pobrisani: number;
   /** Koliko `id` je bilo strežniku potrjenih (tudi tistih, ki jih ni bilo). */
   potrjeni: number;

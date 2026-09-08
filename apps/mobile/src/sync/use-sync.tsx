@@ -162,10 +162,15 @@ export function SyncProvider({
     const ponavljalnik: Ponavljalnik = ustvariPonavljalnik({
       naloga: async () => {
         const izid = await preveriIzbrisane(db, odjemalec);
-        // Števce osvežimo samo, kadar se je kaj res zgodilo: običajen obhod
-        // ne najde ničesar in ne sme po nepotrebnem brati baze. Tudi ob
-        // neuspehu: vrstica je takrat lahko že šla, spodletelo pa je
-        // brisanje datoteke.
+        // Običajen obhod ne najde ničesar in takrat baze ne beremo po
+        // nepotrebnem. Ob neuspehu osvežimo, čeprav se baza morda ni
+        // spremenila: vrstica je takrat lahko že šla in spodletelo je šele
+        // brisanje datoteke, eno odvečno branje pa je cenejše od števca,
+        // ki laže.
+        //
+        // Kadar odpove sama potrditev strežniku, `preveriIzbrisane` vrže in
+        // sem sploh ne pridemo. Števci so takrat do naslednjega cikla
+        // prenosa (30 s) zastareli; to je zavestna cena, ne spregled.
         if (izid.pobrisani > 0 || izid.neuspeli > 0) await osvezi();
       },
     });
