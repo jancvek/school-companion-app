@@ -549,7 +549,7 @@ class TestZapisIzida:
 
         Denormalizirano namenoma: material se sme dokončno izbrisati, vprašanje
         pa mora tudi potem povedati, iz katere snovi in katerega dne je
-        (`docs/odlocitve/ADR-011`). Brez tega testa bi bili obe polji lahko
+        (`docs/odlocitve/ADR-012`). Brez tega testa bi bili obe polji lahko
         tiho `NULL` in nihče tega ne bi opazil do dneva, ko bi bilo prepozno.
         """
         zapisi(motor, slike, taken_at="2026-09-04T07:30:00+00:00")

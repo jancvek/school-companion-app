@@ -173,7 +173,7 @@ describe('prenos, ki naleti na arhiviran zapis', () => {
   it('zapis pobriše lokalno in ga ne šteje za neuspeh', async () => {
     // Rob, ki ga seznam za brisanje ne pokrije: posnetek je obtičal v
     // `pending`, medtem ko je bil na strežniku arhiviran in že potrjen, zato
-    // je s seznama padel (`docs/odlocitve/ADR-010`).
+    // je s seznama padel (`docs/odlocitve/ADR-011`).
     await insertMaterial(db, material('a', { sync_status: 'pending' }));
     const arhiviran: Izid = { vrsta: 'arhiviran' };
 

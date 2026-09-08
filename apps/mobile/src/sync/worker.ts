@@ -78,7 +78,7 @@ export async function prenesiCakajoce(
       // Snov je na strežniku arhivirana in je tam ni več smiselno iskati.
       // Pobrišemo jo lokalno, enako kot bi jo seznam za brisanje — in je ne
       // štejemo ne med prenesene ne med neuspele, ker ni bila ne eno ne
-      // drugo (`docs/odlocitve/ADR-010`).
+      // drugo (`docs/odlocitve/ADR-011`).
       await pobrisiArhiviranega(db, material);
       continue;
     }

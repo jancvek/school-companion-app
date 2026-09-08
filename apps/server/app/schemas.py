@@ -20,7 +20,7 @@ class MaterialPrevzet(BaseModel):
     #: `True`, kadar je zapis arhiviran. Spremlja odgovor `410 Gone` in je
     #: namenjeno branju s strani človeka: telefon se odloči po statusni
     #: kodi, ker mu nalagalec datotek telesa odgovora ne izpostavi
-    #: zanesljivo (`docs/odlocitve/ADR-010`).
+    #: zanesljivo (`docs/odlocitve/ADR-011`).
     archived: bool = False
 
 

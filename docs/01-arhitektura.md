@@ -175,7 +175,7 @@ prejšnji izid skupaj z vsemi vprašanji materiala (`docs/odlocitve/ADR-009`).
 
 **Vprašanje material preživi.** Do V1-R07 je bila kaskada nastavljena dvakrat
 (`ondelete="CASCADE"` v shemi in `cascade="all, delete-orphan"` v ORM);
-`docs/odlocitve/ADR-011` je obe odstranil, ker vprašanje nosi statistiko, ki
+`docs/odlocitve/ADR-012` je obe odstranil, ker vprašanje nosi statistiko, ki
 jo bo V2 vezala nanj. Ob brisanju materiala ORM otrokom postavi
 `material_id = NULL` — tudi na SQLite, kjer tuji ključi privzeto niso
 uveljavljeni, zato testi še naprej dokazujejo isto kot produkcija.
@@ -369,7 +369,7 @@ velja na telefonu.
 Gumb na strani s podrobnostmi **arhivira** in ne briše. Arhiviran zapis izgine
 iz števcev na `/admin`, s seznama predmeta in iz vrste za obdelavo, na
 strežniku pa ostane s prepisom, povzetkom in vprašanji. Vrnitve iz arhiva ni;
-razlogi so v `docs/odlocitve/ADR-010`.
+razlogi so v `docs/odlocitve/ADR-011`.
 
 Arhiv je **svoja os in ne peto stanje** `status`: `status` je avtomat obdelave
 in arhiviran zapis je lahko hkrati `ready`. Isti razlog kot pri `readable`.

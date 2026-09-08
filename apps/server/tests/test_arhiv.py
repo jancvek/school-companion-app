@@ -232,7 +232,7 @@ class TestPrenosArhiviranega:
     ) -> None:
         # Brez tega bi posnetek, ki je na telefonu obtičal v `pending`, tam
         # ostal za vedno: z delovnega seznama je lahko že padel, ker je bilo
-        # brisanje na napravi že potrjeno (`docs/odlocitve/ADR-010`).
+        # brisanje na napravi že potrjeno (`docs/odlocitve/ADR-011`).
         pot = zapisi(motor, slike, UUID_ENA, arhivirano=ARHIVIRANO, potrjeno=POTRJENO)
 
         odgovor = odjemalec.post(

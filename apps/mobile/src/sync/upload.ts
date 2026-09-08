@@ -28,7 +28,7 @@ export type Izid =
   /**
    * Snov je na strežniku arhivirana. Ni napaka in ni uspeh prenosa —
    * zapis se lokalno zbriše, enako kot bi ga seznam za brisanje
-   * (`docs/odlocitve/ADR-010`).
+   * (`docs/odlocitve/ADR-011`).
    */
   | { vrsta: 'arhiviran' };
 

@@ -165,7 +165,7 @@ class MaterialsRepository:
         """Pobriše vsa vprašanja danega materiala.
 
         Odkar `Material.questions` nima več `delete-orphan`
-        (`docs/odlocitve/ADR-011`), bi `questions.clear()` vprašanjem samo
+        (`docs/odlocitve/ADR-012`), bi `questions.clear()` vprašanjem samo
         postavil `material_id = NULL` in za sabo pustil sirote. Brisanje je
         zato izrecno in na enem mestu.
 
@@ -241,7 +241,7 @@ class MaterialsRepository:
                     answer=vprasanje.answer,
                     # Izvor se prepiše ob nastanku: ko materiala ne bo več,
                     # mora vprašanje še vedno vedeti, iz česa je
-                    # (`docs/odlocitve/ADR-011`).
+                    # (`docs/odlocitve/ADR-012`).
                     subject=material.subject,
                     material_taken_at=material.taken_at,
                 )
@@ -356,7 +356,7 @@ class MaterialsRepository:
 
         To je celoten delovni seznam, ne odsek za nekim kazalcem: seznam se
         sam krajša, ko telefon potrjuje, zato mu ni treba hraniti ničesar
-        (`docs/odlocitve/ADR-010`). Najprej najstarejše arhivirani, iz
+        (`docs/odlocitve/ADR-011`). Najprej najstarejše arhivirani, iz
         istega razloga kot pri čakalni vrsti prenosa.
         """
         return list(
@@ -405,11 +405,11 @@ class MaterialsRepository:
         **Brisanje je dovoljeno šele, ko je telefon potrdil, da zapisa pri
         njem ni več.** Sicer telefon za brisanje nikoli ne izve in slika mu
         ostane za vedno — natanko težava, ki jo je V1-R07 prišla odpravit
-        (`docs/odlocitve/ADR-010`). Zavrnitev je tu in ne samo v vmesniku,
+        (`docs/odlocitve/ADR-011`). Zavrnitev je tu in ne samo v vmesniku,
         ker gumb, ki ga stran ne izriše, ni varovalka.
 
         Vprašanja se ob tem **ne** pobrišejo — ostanejo z `material_id`
-        `NULL` in svojim izvorom (`docs/odlocitve/ADR-011`).
+        `NULL` in svojim izvorom (`docs/odlocitve/ADR-012`).
         """
         material = self.poisci(material_id)
         if material is None or material.device_deleted_at is None:

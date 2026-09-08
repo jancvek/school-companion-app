@@ -329,7 +329,7 @@ class TestPodrobnosti:
         # te trditve gumb lahko izginil in dejanje bi ostalo dosegljivo samo
         # z ročno vtipkanim naslovom.
         #
-        # Do V1-R07 je tu stalo brisanje; `docs/odlocitve/ADR-010` ga je
+        # Do V1-R07 je tu stalo brisanje; `docs/odlocitve/ADR-011` ga je
         # zamenjalo z arhiviranjem.
         zapisi(motor, slike)
 
@@ -468,7 +468,7 @@ class TestArhiviranje:
     def test_post_arhivira_in_pusti_vrstico_ter_datoteko(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
-        # Bistvo `ADR-010`: arhiviranje ni brisanje. Vrstica in datoteka
+        # Bistvo `ADR-011`: arhiviranje ni brisanje. Vrstica in datoteka
         # ostaneta, gre samo iz pregleda.
         pot = zapisi(motor, slike)
 
@@ -713,7 +713,7 @@ class TestPociscenjeSlike:
 
 
 class TestDokoncnoBrisanje:
-    """`GET` in `POST /admin/materials/{id}/delete` po `ADR-010`.
+    """`GET` in `POST /admin/materials/{id}/delete` po `ADR-011`.
 
     Brisanje je odslej zadnja stopnja in ne prva: dovoljeno je šele, ko je
     telefon potrdil, da te slike pri njem ni več. Sicer telefon za brisanje
@@ -1398,7 +1398,7 @@ class TestBrisanjeZVprasanji:
     """Regresija V1-R07: dokončno brisanje mora vprašanja **pustiti**.
 
     Do V1-R07 sta tu stali dve kaskadi, ki sta vprašanja pobrisali skupaj z
-    materialom, in ta razred je to zahteval. `docs/odlocitve/ADR-011` obrne
+    materialom, in ta razred je to zahteval. `docs/odlocitve/ADR-012` obrne
     pravilo: vprašanje nosi statistiko, ki jo bo V2 vezala nanj, in te ne sme
     vzeti brisanje slike. Test ni oslabljen, ampak obrnjen skupaj s pogodbo.
     """

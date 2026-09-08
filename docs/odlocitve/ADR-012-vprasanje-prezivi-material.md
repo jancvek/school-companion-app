@@ -1,4 +1,4 @@
-# ADR-011: Vprašanje preživi material; nič se ne briše, vse se upokoji
+# ADR-012: Vprašanje preživi material; nič se ne briše, vse se upokoji
 
 - **Datum:** 2026-09-07
 - **Nastalo pri:** V1-R07 (faza 1–2, pred implementacijo)
@@ -16,7 +16,7 @@ odločiti, ali je to sprejemljivo … vendar tega ne sme odkriti naknadno v kodi
 Zdaj se odloča. Lastnik hoče **statistiko na posamezno vprašanje čez leta** —
 kolikokrat je bilo postavljeno in kako težko ji je bilo — da se lahko po vsakem
 kvizu z Mašo osebno lotita samo tistih vprašanj, ki so ji bila težka. Ob tem
-`ADR-010` uvaja dokončno brisanje materiala.
+`ADR-011` uvaja dokončno brisanje materiala.
 
 Obe stvari trčita v isto točko: **vprašanje danes ni trajno.** Ena ponovna
 obdelava ali eno dokončno brisanje bi vzela vso zgodovino odgovorov.
@@ -55,13 +55,13 @@ obdelava ali eno dokončno brisanje bi vzela vso zgodovino odgovorov.
   `materials`. Če se odstotki kdaj izkažejo za počasne, se števci dodajo kot
   predpomnilnik — nikoli kot resnica.
 - **Poskus nosi `mode`** (zaenkrat vedno `samoocena`), da je vsaka statistika
-  samoopisna od prvega dne. Glej `ADR-013`.
+  samoopisna od prvega dne. Glej `ADR-014`.
 
 ## Kaj se izvede kdaj
 
 | Del | Kje |
 |---|---|
-| `material_id` nullable, `SET NULL`, brez ORM kaskade, denormaliziran izvor | **V1-R07** — dokončno brisanje iz `ADR-010` tega ne more brez |
+| `material_id` nullable, `SET NULL`, brez ORM kaskade, denormaliziran izvor | **V1-R07** — dokončno brisanje iz `ADR-011` tega ne more brez |
 | `retired_at`, sprememba ponovne obdelave, `question_attempts` | **V2** |
 
 Do takrat ponovna obdelava vprašanja še vedno zavrže. To je sprejemljivo, ker
@@ -71,7 +71,7 @@ statistike takrat še ni in torej ni česa izgubiti — ne pa zato, ker bi bilo 
 
 - **Kaj to olajša:** kviz izpred dveh let ostane v celoti berljiv tudi po treh
   ponovnih obdelavah materiala. Dokončno brisanje slike ne uniči znanja, ki je
-  iz nje nastalo. Kasnejša uvedba ABC vprašanj (`ADR-013`) ne more razbiti
+  iz nje nastalo. Kasnejša uvedba ABC vprašanj (`ADR-014`) ne more razbiti
   ničesar za nazaj, ker se za nazaj nič ne spreminja.
 - **Kaj to oteži:**
   - Vsaka poizvedba nad vprašanji mora izločiti upokojena. Kjer se to pozabi, se

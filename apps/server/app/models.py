@@ -60,7 +60,7 @@ class Material(Base):
     #:
     #: Ločen stolpec in **ne** peto stanje `status`: `status` je avtomat
     #: obdelave, arhiv pa je druga os — arhiviran zapis je lahko hkrati
-    #: `ready`. Isti razlog kot pri `readable` (`docs/odlocitve/ADR-010`).
+    #: `ready`. Isti razlog kot pri `readable` (`docs/odlocitve/ADR-011`).
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -117,7 +117,7 @@ class Material(Base):
     #: Vprašanja tega materiala, po zaporedju.
     #:
     #: **Brez kaskade brisanja.** Do V1-R07 sta tu stali dve mreži, ki sta
-    #: vprašanja pobrisali skupaj z materialom; `docs/odlocitve/ADR-011` ju
+    #: vprašanja pobrisali skupaj z materialom; `docs/odlocitve/ADR-012` ju
     #: namenoma odstrani, ker mora vprašanje material preživeti. Ob brisanju
     #: materiala ORM otrokom postavi `material_id = NULL` — tudi na SQLite,
     #: kjer tuji ključi privzeto niso uveljavljeni, zato testi še naprej
@@ -155,7 +155,7 @@ class Question(Base):
     #:
     #: `SET NULL` in ne `CASCADE`: vprašanje nosi statistiko, ki jo bo V2
     #: vezala nanj, in te ne sme vzeti brisanje slike
-    #: (`docs/odlocitve/ADR-011`).
+    #: (`docs/odlocitve/ADR-012`).
     material_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("materials.id", ondelete="SET NULL"),

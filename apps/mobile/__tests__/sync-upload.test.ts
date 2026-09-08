@@ -54,7 +54,7 @@ describe('razvrščanje statusa', () => {
   it('410 pomeni, da je snov arhivirana, in ne neuspeh', () => {
     // Edini 4xx, ki ne pomeni „ne bo šlo", ampak „te snovi ni več".
     // Brez posebne veje bi zapis končal v `failed` in ostal na telefonu,
-    // dokler ga kdo ročno ne bi vrnil v vrsto (`docs/odlocitve/ADR-010`).
+    // dokler ga kdo ročno ne bi vrnil v vrsto (`docs/odlocitve/ADR-011`).
     expect(razvrstiStatus(410).vrsta).toBe('arhiviran');
   });
 

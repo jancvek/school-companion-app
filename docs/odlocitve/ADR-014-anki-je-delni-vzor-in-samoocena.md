@@ -1,4 +1,4 @@
-# ADR-013: Anki je delni vzor; odgovarjanje je štiristopenjska samoocena
+# ADR-014: Anki je delni vzor; odgovarjanje je štiristopenjska samoocena
 
 - **Datum:** 2026-09-07
 - **Nastalo pri:** V1-R07 (faza 1–2), velja za V2

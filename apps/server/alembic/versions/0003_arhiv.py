@@ -1,7 +1,7 @@
 """Arhiv slik in vprašanja, ki preživijo material.
 
-Tri stvari naenkrat, ker so ena odločitev (`docs/odlocitve/ADR-010` in
-`ADR-011`):
+Tri stvari naenkrat, ker so ena odločitev (`docs/odlocitve/ADR-011` in
+`ADR-012`):
 
 1. `materials` dobi `archived_at` in `device_deleted_at` — arhiv je svoja os,
    ne peto stanje `status`.

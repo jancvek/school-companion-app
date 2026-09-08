@@ -1,4 +1,4 @@
-# ADR-012: Kvizi gredo v V2; `V1-R05` se umakne; V1 se zapre z R06 in R07
+# ADR-013: Kvizi gredo v V2; `V1-R05` se umakne; V1 se zapre z R06 in R07
 
 - **Datum:** 2026-09-07
 - **Nastalo pri:** V1-R07 (faza 1–2)

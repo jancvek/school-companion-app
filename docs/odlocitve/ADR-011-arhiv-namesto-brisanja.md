@@ -1,4 +1,4 @@
-# ADR-010: Arhiv namesto brisanja; telefon briše in to potrdi
+# ADR-011: Arhiv namesto brisanja; telefon briše in to potrdi
 
 - **Datum:** 2026-09-07
 - **Nastalo pri:** V1-R07 (faza 1–2, pred implementacijo)
@@ -86,7 +86,7 @@ zahteva — ne zakomentirana koda, ki se stara.
 ## Posledice
 
 - **Kaj to olajša:** prepis, povzetek in vprašanja preživijo umik slike, kar je
-  pogoj za `ADR-011`. Ponovni prenos arhiviranega zapisa materiala ne obudi.
+  pogoj za `ADR-012`. Ponovni prenos arhiviranega zapisa materiala ne obudi.
   Telefon ne nosi stanja sinhronizacije, zato tu ni nove lokalne migracije.
 - **Kaj to oteži:**
   - Vsaka poizvedba admin pregleda mora odslej izločiti arhivirane. Kjer se to

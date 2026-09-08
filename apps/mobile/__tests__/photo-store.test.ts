@@ -185,7 +185,7 @@ describe('brisanje slike, ki je na strežniku arhivirana', () => {
     // To je edina varovalka pravila „telefon nikoli ne potrdi brisanja, ki se
     // ni zgodilo". Če bi napako požrl, bi strežnik dobil potrditev, arhiv bi
     // pokazal kljukico in odklenil dokončno brisanje, slika pa bi na telefonu
-    // ostala (`docs/odlocitve/ADR-010`).
+    // ostala (`docs/odlocitve/ADR-011`).
     fileSystem.spies.izbrisi.mockImplementation(() => {
       throw new Error('datoteka je zaklenjena');
     });

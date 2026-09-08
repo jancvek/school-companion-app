@@ -65,7 +65,7 @@ def prevzemi_material(
             # `410` in ne `200`: posnetek, ki je na telefonu obtičal v
             # `pending`, bi sicer po arhiviranju tam ostal za vedno — z
             # delovnega seznama je lahko že padel, ker je bilo brisanje na
-            # napravi že potrjeno (`docs/odlocitve/ADR-010`). Statusna koda
+            # napravi že potrjeno (`docs/odlocitve/ADR-011`). Statusna koda
             # je edino, na kar se telefon zanese; polje `archived` je za
             # človeka, ki bere odgovor.
             response.status_code = 410
@@ -118,7 +118,7 @@ def za_brisanje_na_napravi(
     Celoten delovni seznam, brez kazalca in brez časovnega žiga. Seznam se
     krajša sam, ko telefon potrjuje, zato telefonu ni treba hraniti stanja
     sinhronizacije — in prav to je razlog, da ta zahteva ne prinese migracije
-    lokalne sheme (`docs/odlocitve/ADR-010`).
+    lokalne sheme (`docs/odlocitve/ADR-011`).
     """
     return ZaBrisanjeNaNapravi(ids=repozitorij.seznam_za_brisanje())
 

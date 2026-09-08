@@ -5,7 +5,7 @@
  * potrdila. Telefon si zato ne zapomni ničesar — ne kazalca ne časa zadnje
  * sinhronizacije. Časovni žig bi padel na razliki ur in na transakciji, ki se
  * potrdi šele potem, ko je telefon kazalec že premaknil čezenj
- * (`docs/odlocitve/ADR-010`).
+ * (`docs/odlocitve/ADR-011`).
  *
  * Modul je v `src/sync/`, ker se dotakne omrežja — regresijski test
  * `__tests__/no-network.test.ts` drugje tega ne dovoli.

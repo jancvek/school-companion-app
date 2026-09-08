@@ -104,7 +104,7 @@ def test_vprasanja_kazejo_na_material(baza: str) -> None:
     """Tuji ključ mora biti `SET NULL`, ne `CASCADE`.
 
     Do V1-R07 je bil `CASCADE` in ta test je to tudi zahteval. Zamenjava ni
-    oslabitev testa, ampak sprememba pogodbe: `docs/odlocitve/ADR-011` pravi,
+    oslabitev testa, ampak sprememba pogodbe: `docs/odlocitve/ADR-012` pravi,
     da mora vprašanje material preživeti, ker nosi statistiko, ki jo bo V2
     vezala nanj. `CASCADE` v shemi bi to odločitev tiho izničil povsod, kjer
     gre brisanje mimo ORM.
@@ -175,7 +175,7 @@ def test_obstojeca_vprasanja_prezivijo_prepis_tabele(baza: str) -> None:
 
     Hkrati je to edini test, ki požene zapolnitev denormaliziranega izvora.
     Brez nje bi vprašanje po dokončnem brisanju materiala ne vedelo več, iz
-    katere snovi je (`docs/odlocitve/ADR-011`).
+    katere snovi je (`docs/odlocitve/ADR-012`).
     """
     config = alembic_nastavitve(baza)
     command.upgrade(config, "0002_obdelava")

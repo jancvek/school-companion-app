@@ -414,7 +414,7 @@ def arhiviraj(
 
     Nadomešča brisanje, ki je do V1-R07 stalo na tem mestu. Slika izgine iz
     pregleda in jo telefon pri sebi zbriše, na strežniku pa ostane s prepisom
-    in vprašanji (`docs/odlocitve/ADR-010`).
+    in vprašanji (`docs/odlocitve/ADR-011`).
     """
     material = repozitorij.arhiviraj(material_id)
     if material is None:
@@ -494,7 +494,7 @@ def izbrisi(
     """Dokončno izbriše zapis in njegovo datoteko.
 
     Dovoljeno šele, ko je telefon potrdil, da zapisa pri njem ni več
-    (`docs/odlocitve/ADR-010`). Preverba je tudi v repozitoriju; ta tu je zato,
+    (`docs/odlocitve/ADR-011`). Preverba je tudi v repozitoriju; ta tu je zato,
     da operater dobi pojasnilo namesto tihe preusmeritve.
     """
     material = repozitorij.poisci(material_id)
@@ -507,7 +507,7 @@ def izbrisi(
     # korak, hočemo drugo napako (odločitev 5 v `docs/plan/V1-R04.md`).
     #
     # Vprašanja tega materiala ostanejo — z `material_id = NULL` in svojim
-    # izvorom (`docs/odlocitve/ADR-011`).
+    # izvorom (`docs/odlocitve/ADR-012`).
     pobrisani = repozitorij.pobrisi(material_id)
     if pobrisani is None:
         # Zapisa ni; operater ga je izbrisal v drugem zavihku. Izid je tak, kot
