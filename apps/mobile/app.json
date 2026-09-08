@@ -38,10 +38,17 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
-      ]
+      ],
+      "./plugins/with-cleartext-traffic"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "owner": "jancv1",
+    "extra": {
+      "eas": {
+        "projectId": "d73ffecc-186f-4d05-b198-68125ae62b8b"
+      }
     }
   }
 }

@@ -42,6 +42,7 @@ običajnim orodjem (`npm`/`package.json` v `apps/mobile`,
 | `src/capture/` | stanje zaslona s kamero (kamera ↔ predogled) |
 | `src/ui/` | skupni gradniki in barve |
 | `src/types.ts` | tip `Material` (ena vrstica tabele `materials`) |
+| `plugins/` | Expo config plugini — koda, ki teče **ob gradnji**, ne v aplikaciji |
 | `__tests__/` | enotski in komponentni testi |
 
 **React Compiler je izklopljen.** Expo predloga ga vklopi
@@ -401,6 +402,44 @@ sam, `app.config.ts` ju prepiše v `extra`). Brez njiju se worker ne zažene,
 aplikacija pa deluje kot v V1-R01 in to tudi pove. Ključ s tem konča vgrajen v
 APK — to je zavestno, ker gre za en družinski ključ na omrežju, ki je že
 zaprto s Tailscale; cena je, da zamenjava ključa zahteva novo gradnjo.
+
+#### Gradnja APK in nešifriran promet
+
+Distribucija je EAS Build, profil `preview` v `apps/mobile/eas.json` (Android
+APK, interna distribucija, okolje `preview`). Naslov in ključ tam nista v
+`.env`, ampak med spremenljivkami okolja EAS za to okolje; `app.json` nosi
+`owner` in `extra.eas.projectId`.
+
+Promet do strežnika je **nešifriran** (`http://` na Tailscale naslov). Android
+ga v release gradnji privzeto blokira, zato ga izrecno dovoli lokalni config
+plugin `apps/mobile/plugins/with-cleartext-traffic.js`, ki v glavno
+`<application>` zapiše `android:usesCleartextTraffic="true"`. Dovoljenje velja
+za celo aplikacijo; utemeljitev, zavrnjene možnosti in odprta pot k HTTPS so v
+`docs/odlocitve/ADR-010`.
+
+**To je razred napake, ki ga zeleni testi ne ujamejo.** Plugin teče ob gradnji,
+enotski testi pa vidijo samo njegovo funkcijo in registracijo v `app.json`.
+Dve preverbi, ki gresta dlje:
+
+```powershell
+npx expo config --type introspect      # razreši plugine in izpiše manifest
+unzip -o app.apk AndroidManifest.xml   # kaj je v resnici v zgrajeni APK
+```
+
+Prva pokaže v nekaj sekundah in brez gradnje, ali je plugin registriran in ali
+učinkuje. **Njen izpis vsebuje `extra.apiKey` in naslov strežnika v čisti
+obliki** — ne lepi ga v prijave napak in ne shranjuj v dnevnik; kadar gre le za
+manifest, ga poženi s praznima `SERVER_API_KEY` in `SERVER_BASE_URL`.
+
+Druga pove, kaj je v zgrajeni APK. `AndroidManifest.xml` je tam **binarni
+AXML**: ime atributa je v nizovnem bazenu in ga `grep -a` najde, vrednost
+`true` pa je shranjena kot tipiziran boolean in kot besedilo ni vidna. Prisotno
+ime atributa je zato dokaz, da je plugin učinkoval (prej ga v manifestu sploh
+ni bilo), za odčitano vrednost pa je potreben `aapt2 dump xmltree` ali
+`apktool d` — nobeden od njiju ni na tem stroju na `PATH`.
+
+Zadnja beseda ostane preizkus na telefonu: slika mora priti do stanja
+„Preneseno".
 
 ### `apps/server`
 
