@@ -101,11 +101,17 @@ def test_migracija_pokrije_vse_tabele_iz_modelov(baza: str) -> None:
 
 
 def test_vprasanja_kazejo_na_material(baza: str) -> None:
-    """Tuji ključ s kaskado je druga mreža poleg kaskade v ORM.
+    """Tuji ključ mora biti `SET NULL`, ne `CASCADE`.
 
-    Na SQLite je brez `PRAGMA foreign_keys=ON` neaktiven, zato ga tu ne
-    preverjamo z brisanjem, ampak v shemi — na Postgresu je prav on tisti, ki
-    prepreči osirotela vprašanja pri brisanju mimo ORM.
+    Do V1-R07 je bil `CASCADE` in ta test je to tudi zahteval. Zamenjava ni
+    oslabitev testa, ampak sprememba pogodbe: `docs/odlocitve/ADR-011` pravi,
+    da mora vprašanje material preživeti, ker nosi statistiko, ki jo bo V2
+    vezala nanj. `CASCADE` v shemi bi to odločitev tiho izničil povsod, kjer
+    gre brisanje mimo ORM.
+
+    Na SQLite je tuji ključ brez `PRAGMA foreign_keys=ON` neaktiven, zato ga
+    tu ne preverjamo z brisanjem, ampak v shemi — na Postgresu je prav on
+    tisti, ki odloča pri brisanju mimo ORM.
     """
     command.upgrade(alembic_nastavitve(baza), "head")
 
@@ -116,7 +122,7 @@ def test_vprasanja_kazejo_na_material(baza: str) -> None:
         assert kljuci[0]["referred_table"] == "materials"
         assert kljuci[0]["constrained_columns"] == ["material_id"]
         assert kljuci[0]["referred_columns"] == ["id"]
-        assert kljuci[0]["options"]["ondelete"].upper() == "CASCADE"
+        assert kljuci[0]["options"]["ondelete"].upper() == "SET NULL"
     finally:
         motor.dispose()
 

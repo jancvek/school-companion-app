@@ -1,0 +1,48 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}Arhiv{% endblock %}
+
+{% block vsebina %}
+  <h1>Arhiv</h1>
+
+  {% if snovi %}
+    <p class="pod">
+      {{ snovi|length }} {{ "slika" if snovi|length == 1 else "slik" }},
+      najnovejše arhivirana prva. Prepis in vprašanja teh snovi ostajajo.
+    </p>
+    <ul class="mreza">
+      {% for snov in snovi %}
+        <li>
+          <a href="/admin/materials/{{ snov.id }}">
+            {% if snov.velikost is not none %}
+              <img src="/admin/materials/{{ snov.id }}/image" alt="" loading="lazy">
+            {% else %}
+              {# V arhivu je manjkajoča datoteka pogosto namerna („Počisti
+                 sliko"), zato tu ne pomeni napake. #}
+              <span class="brez-slike">slike na disku ni</span>
+            {% endif %}
+            <span class="opis">
+              <span class="cas">{{ snov.koda }} — {{ snov.cas }}</span>
+              <span class="stanje">arhivirano {{ snov.arhivirano_ob }}</span>
+              {# Kljukica pove, ali je telefon sliko pri sebi res pobrisal.
+                 Dokler je ni, dokončno brisanje ni mogoče. #}
+              <span class="stanje">
+                {% if snov.potrjeno %}
+                  ✓ izbrisano na telefonu
+                {% else %}
+                  čaka na telefon
+                {% endif %}
+              </span>
+            </span>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="opozorilo">
+      Arhiv je prazen. Slika pride sem, ko jo umakneš s strani s podrobnostmi.
+    </p>
+  {% endif %}
+
+  <a class="nazaj" href="/admin">← Nazaj na predmete</a>
+{% endblock %}

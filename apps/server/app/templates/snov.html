@@ -4,7 +4,9 @@
 
 {% block vsebina %}
   <h1>{{ snov.koda }} — {{ snov.oznaka }}</h1>
-  <p class="pod">{{ snov.cas }}</p>
+  <p class="pod">
+    {{ snov.cas }}{% if snov.arhiviran %} — <strong>v arhivu</strong>{% endif %}
+  </p>
 
   <div class="snov">
     <div>
@@ -12,8 +14,13 @@
         <img src="/admin/materials/{{ snov.id }}/image" alt="Posneta snov">
       {% else %}
         <p class="opozorilo">
-          Zapis v bazi obstaja, slike na disku pa ni. Datoteka je bila
-          verjetno odstranjena mimo te strani. Zapis lahko izbrišeš spodaj.
+          Zapis v bazi obstaja, slike na disku pa ni.
+          {% if snov.arhiviran %}
+            V arhivu je to pogosto namerno — datoteko počisti gumb
+            „Počisti sliko z diska".
+          {% else %}
+            Datoteka je bila verjetno odstranjena mimo te strani.
+          {% endif %}
         </p>
       {% endif %}
     </div>
@@ -68,7 +75,46 @@
         </p>
       {% endif %}
 
-      <a class="gumb" href="/admin/materials/{{ snov.id }}/delete">Izbriši sliko</a>
+      {% if not snov.arhiviran %}
+        {# Do V1-R07 je tu stalo brisanje. Arhiviranje ga nadomesti:
+           telefon sliko zbriše pri sebi, znanje iz nje pa ostane
+           (`docs/odlocitve/ADR-010`). #}
+        <a class="gumb" href="/admin/materials/{{ snov.id }}/archive">Arhiviraj sliko</a>
+        <p class="drobno">
+          Slika izgine iz pregleda in jo telefon zbriše pri sebi. Prepis,
+          povzetek in vprašanja ostanejo.
+        </p>
+      {% else %}
+        <p class="opozorilo">
+          Arhivirano {{ snov.arhivirano_ob }}.
+          {% if snov.potrjeno %}
+            Telefon je brisanje potrdil {{ snov.potrjeno_ob }}.
+          {% else %}
+            Telefon brisanja še ni potrdil.
+          {% endif %}
+        </p>
+
+        {% if snov.velikost is not none %}
+          <form method="post" action="/admin/materials/{{ snov.id }}/purge-image">
+            <button class="gumb" type="submit">Počisti sliko z diska</button>
+          </form>
+          <p class="drobno">
+            Pobriše samo datoteko. Zapis, prepis in vprašanja ostanejo.
+          </p>
+        {% endif %}
+
+        {# Dokončno brisanje se pokaže šele po potrditvi s telefona. Gumb,
+           ki ga stran ne izriše, ni varovalka — zato isto pravilo velja
+           tudi v poti in v repozitoriju. #}
+        {% if snov.potrjeno %}
+          <a class="gumb" href="/admin/materials/{{ snov.id }}/delete">Izbriši dokončno</a>
+        {% else %}
+          <p class="drobno">
+            Dokončno brisanje bo mogoče, ko telefon potrdi, da te slike pri
+            njem ni več.
+          </p>
+        {% endif %}
+      {% endif %}
       <br>
       <a class="nazaj" href="/admin/subjects/{{ snov.koda|urlencode }}">← Nazaj na {{ snov.koda }}</a>
     </div>

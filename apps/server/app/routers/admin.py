@@ -99,6 +99,11 @@ def _cas(trenutek: datetime) -> str:
     return f"{lokalni.day}. {lokalni.month}. {lokalni.year} ob {lokalni:%H:%M}"
 
 
+def _cas_ali_prazno(trenutek: datetime | None) -> str | None:
+    """Kot `_cas`, a prenese tudi „se še ni zgodilo"."""
+    return None if trenutek is None else _cas(trenutek)
+
+
 def _velikost_opis(bajti: int | None) -> str:
     """Velikost datoteke v berljivi obliki."""
     if bajti is None:
@@ -136,6 +141,12 @@ def _pogled(material: Material, images_dir: Path) -> dict[str, Any]:
         "pot": material.image_path,
         "velikost": velikost,
         "velikost_opis": _velikost_opis(velikost),
+        "arhiviran": material.archived_at is not None,
+        "arhivirano_ob": _cas_ali_prazno(material.archived_at),
+        # „Potrjeno" pomeni, da je telefon sporočil, da tega materiala pri
+        # njem ni več. Dokler ni, dokončno brisanje ni dovoljeno.
+        "potrjeno": material.device_deleted_at is not None,
+        "potrjeno_ob": _cas_ali_prazno(material.device_deleted_at),
     }
 
 
@@ -182,8 +193,13 @@ def _pogled_podrobno(material: Material, images_dir: Path) -> dict[str, Any]:
                 )
             ),
             # Zapisa, ki ga pravkar obdeluje worker, ne ponujamo v ponovno
-            # obdelavo: gumb bi ne naredil ničesar in bi lagal.
-            "ponovna_obdelava_mozna": material.status != STATUS_V_OBDELAVI,
+            # obdelavo: gumb bi ne naredil ničesar in bi lagal. Arhiviranega
+            # tudi ne — worker ga ne pobira več, gumb bi torej samo pobrisal
+            # dosedanji izid in ne bi naredil novega.
+            "ponovna_obdelava_mozna": (
+                material.status != STATUS_V_OBDELAVI and material.archived_at is None
+            ),
+            "stevilo_vprasanj": len(material.questions),
         }
     )
     return pogled
@@ -198,6 +214,48 @@ def _ni_najdeno(predloge: Jinja2Templates, request: Request, sporocilo: str) -> 
     """
     return predloge.TemplateResponse(
         request, "najdena-ni.html", {"sporocilo": sporocilo}, status_code=404
+    )
+
+
+#: Pojasnilo, zakaj dokončnega brisanja (še) ni.
+ZADRZANO = (
+    "Dokončno brisanje je mogoče šele, ko telefon potrdi, da te slike pri njem "
+    "ni več. Dokler potrditve ni, bi slika na telefonu ostala za vedno. "
+    "Sliko lahko medtem počistiš z diska — zapis, prepis in vprašanja ostanejo."
+)
+
+
+def _ni_dovoljeno(predloge: Jinja2Templates, request: Request, sporocilo: str) -> Response:
+    """409 kot stran, ne kot JSON.
+
+    Ni 404: zapis obstaja in operater ga vidi. Ni tiha preusmeritev: klik,
+    ki ne naredi ničesar in tega ne pove, je slabši od zavrnitve.
+    """
+    return predloge.TemplateResponse(
+        request,
+        "najdena-ni.html",
+        {"naslov": "Tega še ne gre", "sporocilo": sporocilo},
+        status_code=409,
+    )
+
+
+def _po_umiku(repozitorij: MaterialsRepository, koda: str) -> RedirectResponse:
+    """Kam pelje pot, ko slika izgine s seznama predmeta.
+
+    Stran predmeta zna biti po umiku 404: koda, ki ni na seznamu desetih,
+    obstaja samo, dokler ima kakšno aktivno sliko. Umik zadnje bi operaterja
+    poslal na „Tega ni", zato v tem edinem primeru pelje na pregled. Znan
+    predmet ostane dosegljiv tudi prazen.
+
+    303 in ne 302: po `POST` mora brskalnik naslednjo zahtevo poslati kot
+    `GET`, sicer osvežitev strani dejanje ponovi. Koda gre skozi `quote`:
+    `?` in `#` bi glavo `Location` prerezala na poizvedbo oziroma sidro.
+    """
+    if not repozitorij.seznam_po_predmetu(koda) and poisci_predmet(koda) is None:
+        return RedirectResponse(PREDPONA, status_code=303)
+
+    return RedirectResponse(
+        f"{PREDPONA}/subjects/{quote(koda, safe='')}", status_code=303
     )
 
 
@@ -225,7 +283,32 @@ def pregled(
     return predloge.TemplateResponse(
         request,
         "predmeti.html",
-        {"predmeti": vrstice, "skupaj": sum(steviloma.values())},
+        {
+            "predmeti": vrstice,
+            "skupaj": sum(steviloma.values()),
+            "arhiviranih": repozitorij.stej_arhivirane(),
+        },
+    )
+
+
+@router.get("/archive")
+def arhiv(
+    request: Request,
+    repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
+) -> Response:
+    """Arhivirane slike, najnovejše arhivirane prve.
+
+    Vrstni red je po času arhiviranja in ne po času posnetka: ta stran
+    odgovarja na vprašanje „kaj sem umaknil in ali je telefon to pospravil",
+    ne „kdaj je bila snov posneta".
+    """
+    snovi = repozitorij.seznam_arhiviranih()
+    return predloge.TemplateResponse(
+        request,
+        "arhiv.html",
+        {"snovi": [_pogled(snov, nastavitve.images_dir) for snov in snovi]},
     )
 
 
@@ -304,6 +387,81 @@ def slika(
     return FileResponse(pot, media_type="image/jpeg")
 
 
+@router.get("/materials/{material_id}/archive")
+def potrdi_arhiviranje(
+    request: Request,
+    material_id: str,
+    repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
+) -> Response:
+    """Vmesni korak pred arhiviranjem. Sam ne spremeni ničesar."""
+    material = repozitorij.poisci(material_id)
+    if material is None:
+        return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
+
+    return predloge.TemplateResponse(
+        request, "arhiviranje.html", {"snov": _pogled(material, nastavitve.images_dir)}
+    )
+
+
+@router.post("/materials/{material_id}/archive")
+def arhiviraj(
+    material_id: str,
+    repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+) -> Response:
+    """Umakne sliko v arhiv.
+
+    Nadomešča brisanje, ki je do V1-R07 stalo na tem mestu. Slika izgine iz
+    pregleda in jo telefon pri sebi zbriše, na strežniku pa ostane s prepisom
+    in vprašanji (`docs/odlocitve/ADR-010`).
+    """
+    material = repozitorij.arhiviraj(material_id)
+    if material is None:
+        # Isto ravnanje kot pri brisanju: zapisa ni, izid je tak, kot ga je
+        # operater hotel. Predmeta ni od kod prebrati, zato pelje na pregled.
+        return RedirectResponse(PREDPONA, status_code=303)
+
+    return _po_umiku(repozitorij, material.subject)
+
+
+@router.post("/materials/{material_id}/purge-image")
+def pocisti_sliko(
+    request: Request,
+    material_id: str,
+    repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
+) -> Response:
+    """Pobriše samo datoteko; vrstica, prepis in vprašanja ostanejo.
+
+    To je vsakdanji način sproščanja prostora: velike so datoteke, ne vrstice.
+    Dovoljen je pri arhiviranem zapisu ne glede na to, ali je telefon brisanje
+    že potrdil — datoteka na strežniku s telefonom nima zveze.
+    """
+    material = repozitorij.poisci(material_id)
+    if material is None:
+        return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
+
+    if material.archived_at is None:
+        return _ni_dovoljeno(
+            predloge,
+            request,
+            "Sliko je mogoče počistiti šele, ko je zapis v arhivu.",
+        )
+
+    pot = Path(material.image_path)
+    # Ista meja kot pri streženju slike: pot je zapisala naša koda, a je ne
+    # jemljemo za dano — cena preverbe je ena vrstica, cena napačne
+    # predpostavke pa brisanje poljubne datoteke s strežnika.
+    if je_znotraj(nastavitve.images_dir, pot):
+        pobrisi_sliko(pot)
+
+    return RedirectResponse(
+        f"{PREDPONA}/materials/{quote(material_id, safe='')}", status_code=303
+    )
+
+
 @router.get("/materials/{material_id}/delete")
 def potrdi_brisanje(
     request: Request,
@@ -312,52 +470,54 @@ def potrdi_brisanje(
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
 ) -> Response:
-    """Vmesni korak pred brisanjem. Sam ne spremeni ničesar."""
+    """Vmesni korak pred dokončnim brisanjem. Sam ne spremeni ničesar."""
     material = repozitorij.poisci(material_id)
     if material is None:
         return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
+    if material.device_deleted_at is None:
+        return _ni_dovoljeno(predloge, request, ZADRZANO)
+
     return predloge.TemplateResponse(
-        request, "brisanje.html", {"snov": _pogled(material, nastavitve.images_dir)}
+        request, "brisanje.html", {"snov": _pogled_podrobno(material, nastavitve.images_dir)}
     )
 
 
 @router.post("/materials/{material_id}/delete")
 def izbrisi(
+    request: Request,
     material_id: str,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
 ) -> Response:
-    """Izbriše zapis in njegovo datoteko."""
+    """Dokončno izbriše zapis in njegovo datoteko.
+
+    Dovoljeno šele, ko je telefon potrdil, da zapisa pri njem ni več
+    (`docs/odlocitve/ADR-010`). Preverba je tudi v repozitoriju; ta tu je zato,
+    da operater dobi pojasnilo namesto tihe preusmeritve.
+    """
+    material = repozitorij.poisci(material_id)
+    if material is not None and material.device_deleted_at is None:
+        return _ni_dovoljeno(predloge, request, ZADRZANO)
+
     # Najprej vrstica, nato datoteka — obratno kot pri sprejemu, in namenoma.
     # Vrstica brez datoteke je pokvarjen vnos, ki ga operater vidi; datoteka
     # brez vrstice je nevidna sirota, ki stane samo prostor. Če odpove drugi
     # korak, hočemo drugo napako (odločitev 5 v `docs/plan/V1-R04.md`).
-    material = repozitorij.pobrisi(material_id)
-    if material is None:
-        # Zahteva pravi „brez sesutja, preusmeritev na seznam", ne 404: to se
-        # zgodi, ko je operater isto sliko izbrisal v drugem zavihku. Rezultat
-        # je tak, kot ga je hotel — slike ni. Predmeta ni več od kod prebrati,
-        # zato pelje na pregled.
-        return RedirectResponse(PREDPONA, status_code=303)
+    #
+    # Vprašanja tega materiala ostanejo — z `material_id = NULL` in svojim
+    # izvorom (`docs/odlocitve/ADR-011`).
+    pobrisani = repozitorij.pobrisi(material_id)
+    if pobrisani is None:
+        # Zapisa ni; operater ga je izbrisal v drugem zavihku. Izid je tak, kot
+        # ga je hotel.
+        return RedirectResponse(f"{PREDPONA}/archive", status_code=303)
 
-    pobrisi_sliko(Path(material.image_path))
+    pobrisi_sliko(Path(pobrisani.image_path))
 
-    # Stran predmeta zna biti po tem brisanju 404: koda, ki ni na seznamu
-    # desetih, obstaja samo, dokler ima kakšno sliko. Brisanje zadnje bi
-    # operaterja poslalo na „Tega ni". Zahteva pravi „preusmeri na seznam
-    # predmeta", ne „na stran z napako", zato v tem edinem primeru pelje na
-    # pregled. Znan predmet ostane dosegljiv tudi prazen.
-    ostanek = repozitorij.seznam_po_predmetu(material.subject)
-    if not ostanek and poisci_predmet(material.subject) is None:
-        return RedirectResponse(PREDPONA, status_code=303)
-
-    # 303 in ne 302: po `POST` mora brskalnik naslednjo zahtevo poslati kot
-    # `GET`, sicer osvežitev strani ponovi brisanje.
-    # Koda gre skozi `quote`: `?` in `#` bi glavo `Location` prerezala na
-    # poizvedbo oziroma sidro in operater bi pristal na napačnem predmetu.
-    return RedirectResponse(
-        f"{PREDPONA}/subjects/{quote(material.subject, safe='')}", status_code=303
-    )
+    # Nazaj v arhiv in ne na predmet: s seznama predmeta je bila ta slika
+    # umaknjena že ob arhiviranju.
+    return RedirectResponse(f"{PREDPONA}/archive", status_code=303)
 
 
 @router.post("/materials/{material_id}/reprocess")

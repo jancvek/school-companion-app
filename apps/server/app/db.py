@@ -5,11 +5,21 @@ tako testi tečejo nad SQLite v pomnilniku, produkcija pa nad Postgresom, in
 oboje skozi isto kodo.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import uuid4
 
-from sqlalchemy import CursorResult, Engine, create_engine, func, select, update
+from sqlalchemy import (
+    CursorResult,
+    Engine,
+    create_engine,
+    delete,
+    func,
+    select,
+    update,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql import Update
@@ -111,7 +121,9 @@ class MaterialsRepository:
         s številom nič, je odločitev vmesnika, ne baze.
         """
         vrstice = self.session.execute(
-            select(Material.subject, func.count()).group_by(Material.subject)
+            select(Material.subject, func.count())
+            .where(Material.archived_at.is_(None))
+            .group_by(Material.subject)
         ).all()
         return {subject: koliko for subject, koliko in vrstice}
 
@@ -124,7 +136,7 @@ class MaterialsRepository:
         return list(
             self.session.scalars(
                 select(Material)
-                .where(Material.subject == subject)
+                .where(Material.subject == subject, Material.archived_at.is_(None))
                 .order_by(Material.taken_at.desc())
             )
         )
@@ -149,6 +161,24 @@ class MaterialsRepository:
         self.session.commit()
         return int(izid.rowcount)
 
+    def _zavrzi_vprasanja(self, material: Material) -> None:
+        """Pobriše vsa vprašanja danega materiala.
+
+        Odkar `Material.questions` nima več `delete-orphan`
+        (`docs/odlocitve/ADR-011`), bi `questions.clear()` vprašanjem samo
+        postavil `material_id = NULL` in za sabo pustil sirote. Brisanje je
+        zato izrecno in na enem mestu.
+
+        Stavek gre mimo seje, zato je zbirka nato razveljavljena — sicer bi
+        `material.questions` še vedno vračal predmete, ki jih v bazi ni več.
+
+        V V2 to postane upokojitev (`retired_at`), ne brisanje. Do takrat
+        ponovna obdelava vprašanja še vedno zavrže — kar je sprejemljivo
+        samo zato, ker statistike, ki bi jo to uničilo, še ni.
+        """
+        self.session.execute(delete(Question).where(Question.material_id == material.id))
+        self.session.expire(material, ["questions"])
+
     def seznam_novih(self) -> list[Material]:
         """Zapisi, ki čakajo na obdelavo, od najstarejšega naprej.
 
@@ -158,7 +188,7 @@ class MaterialsRepository:
         return list(
             self.session.scalars(
                 select(Material)
-                .where(Material.status == STATUS_NOV)
+                .where(Material.status == STATUS_NOV, Material.archived_at.is_(None))
                 .order_by(Material.taken_at.asc())
             )
         )
@@ -201,7 +231,7 @@ class MaterialsRepository:
         material.output_tokens = izid.output_tokens
         material.error = izid.error
 
-        material.questions.clear()
+        self._zavrzi_vprasanja(material)
         for zaporedje, vprasanje in enumerate(izid.vprasanja, start=1):
             material.questions.append(
                 Question(
@@ -209,6 +239,11 @@ class MaterialsRepository:
                     position=zaporedje,
                     question=vprasanje.question,
                     answer=vprasanje.answer,
+                    # Izvor se prepiše ob nastanku: ko materiala ne bo več,
+                    # mora vprašanje še vedno vedeti, iz česa je
+                    # (`docs/odlocitve/ADR-011`).
+                    subject=material.subject,
+                    material_taken_at=material.taken_at,
                 )
             )
 
@@ -240,7 +275,7 @@ class MaterialsRepository:
         material.input_tokens = None
         material.output_tokens = None
         material.error = None
-        material.questions.clear()
+        self._zavrzi_vprasanja(material)
 
         self.session.commit()
         return True
@@ -276,15 +311,108 @@ class MaterialsRepository:
             update(Material).where(Material.status == STATUS_V_OBDELAVI).values(status=STATUS_NOV)
         )
 
+    # --- Arhiv (V1-R07) ---
+
+    def arhiviraj(self, material_id: str) -> Material | None:
+        """Umakne zapis v arhiv; vrne zapis ali `None`, če ga ni.
+
+        Ponovno arhiviranje že arhiviranega zapisa **ne premakne** časa.
+        Čas arhiviranja je podatek, po katerem operater bere, kdaj je sliko
+        umaknil; drugi klik na osveženi strani ga ne sme prepisati.
+        """
+        material = self.poisci(material_id)
+        if material is None:
+            return None
+
+        if material.archived_at is None:
+            material.archived_at = datetime.now(UTC)
+            self.session.commit()
+
+        return material
+
+    def stej_arhivirane(self) -> int:
+        """Koliko zapisov je v arhivu."""
+        return int(
+            self.session.scalar(
+                select(func.count()).select_from(Material).where(
+                    Material.archived_at.is_not(None)
+                )
+            )
+            or 0
+        )
+
+    def seznam_arhiviranih(self) -> list[Material]:
+        """Arhivirani zapisi, najnovejše arhivirani prvi."""
+        return list(
+            self.session.scalars(
+                select(Material)
+                .where(Material.archived_at.is_not(None))
+                .order_by(Material.archived_at.desc())
+            )
+        )
+
+    def seznam_za_brisanje(self) -> list[str]:
+        """`id` zapisov, ki jih mora telefon še zbrisati.
+
+        To je celoten delovni seznam, ne odsek za nekim kazalcem: seznam se
+        sam krajša, ko telefon potrjuje, zato mu ni treba hraniti ničesar
+        (`docs/odlocitve/ADR-010`). Najprej najstarejše arhivirani, iz
+        istega razloga kot pri čakalni vrsti prenosa.
+        """
+        return list(
+            self.session.scalars(
+                select(Material.id)
+                .where(
+                    Material.archived_at.is_not(None),
+                    Material.device_deleted_at.is_(None),
+                )
+                .order_by(Material.archived_at.asc())
+            )
+        )
+
+    def potrdi_brisanje(self, material_ids: Iterable[str]) -> int:
+        """Zapiše, da danih zapisov na napravi ni več; vrne, koliko jih je zadel.
+
+        Pogoj `archived_at IS NOT NULL` ni okras: potrditev za **aktiven**
+        zapis bi pomenila, da bi ga bilo mogoče dokončno izbrisati, čeprav
+        ga telefon ni nikoli dobil navodila zbrisati.
+
+        Pogoj `device_deleted_at IS NULL` poskrbi, da ponovljena potrditev
+        časa ne premakne. Prenos s telefona je *at-least-once* in ista
+        potrditev bo prišla večkrat; to ni napaka in se tako tudi obnaša.
+        """
+        seznam = list(material_ids)
+        if not seznam:
+            return 0
+
+        return self._posodobi(
+            update(Material)
+            .where(
+                Material.id.in_(seznam),
+                Material.archived_at.is_not(None),
+                Material.device_deleted_at.is_(None),
+            )
+            .values(device_deleted_at=datetime.now(UTC))
+        )
+
     def pobrisi(self, material_id: str) -> Material | None:
-        """Pobriše zapis in vrne, kar je bilo pobrisano, ali `None`.
+        """Dokončno pobriše zapis in vrne, kar je bilo pobrisano, ali `None`.
 
         Vrne cel zapis, ne le `True`, ker klicatelj potrebuje `image_path` (da
         pobriše datoteko) in `subject` (da ve, kam preusmeriti). Objekt je po
         `commit` še vedno berljiv, ker je `expire_on_commit=False`.
+
+        **Brisanje je dovoljeno šele, ko je telefon potrdil, da zapisa pri
+        njem ni več.** Sicer telefon za brisanje nikoli ne izve in slika mu
+        ostane za vedno — natanko težava, ki jo je V1-R07 prišla odpravit
+        (`docs/odlocitve/ADR-010`). Zavrnitev je tu in ne samo v vmesniku,
+        ker gumb, ki ga stran ne izriše, ni varovalka.
+
+        Vprašanja se ob tem **ne** pobrišejo — ostanejo z `material_id`
+        `NULL` in svojim izvorom (`docs/odlocitve/ADR-011`).
         """
         material = self.poisci(material_id)
-        if material is None:
+        if material is None or material.device_deleted_at is None:
             return None
 
         self.session.delete(material)

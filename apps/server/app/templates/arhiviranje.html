@@ -1,0 +1,38 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}Arhivirati sliko?{% endblock %}
+
+{% block vsebina %}
+  <h1>Arhivirati to sliko?</h1>
+  <p class="pod">{{ snov.koda }} — {{ snov.oznaka }}, {{ snov.cas }}</p>
+
+  <div class="snov">
+    <div>
+      {% if snov.velikost is not none %}
+        <img src="/admin/materials/{{ snov.id }}/image" alt="Posneta snov">
+      {% else %}
+        <p class="opozorilo">Slike na disku ni; arhiviran bo zapis brez nje.</p>
+      {% endif %}
+    </div>
+
+    <div>
+      <p class="opozorilo">
+        Slika izgine iz pregleda predmetov in jo bo telefon ob naslednjem
+        preverjanju zbrisal tudi pri sebi. <strong>Na strežniku ostane</strong>
+        — s prepisom, povzetkom in vprašanji — in jo najdeš v arhivu.
+      </p>
+      <p class="drobno">
+        Vrnitve iz arhiva ni. Ko telefon brisanje potrdi, je mogoče zapis tudi
+        dokončno izbrisati.
+      </p>
+
+      {# Arhiviranje je `POST` in nikoli navadna povezava: brskalniki povezave
+         prednalagajo, in ta korak se ne da razveljaviti (ADR-006). #}
+      <form method="post" action="/admin/materials/{{ snov.id }}/archive">
+        <button class="gumb" type="submit">Da, arhiviraj</button>
+      </form>
+
+      <a class="nazaj" href="/admin/materials/{{ snov.id }}">← Ne, vrni se</a>
+    </div>
+  </div>
+{% endblock %}
