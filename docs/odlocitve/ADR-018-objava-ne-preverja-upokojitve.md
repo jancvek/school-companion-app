@@ -64,13 +64,25 @@ jo po tej odločitvi brez ugovora sprejela.
 
 ## Kaj objava vseeno preverja
 
-Da to ni luknja, ampak ozko izvzetje:
+Da to ni luknja, ampak ozko izvzetje. Objava je edina pot, ki v bazo piše, in
+vsakemu polju iz obrazca pogleda pod prste — skrito polje ni varovalka, po
+istem pravilu kot gumb, ki ga stran ne izriše:
 
-- vsak `question_id` mora obstajati — sicer 409 in nič v bazi;
-- **noben se ne sme ponoviti** — sicer 409. Ta preverba je nastala v istem
-  pregledu: brez nje bi spremenjen obrazec ustvaril kviz z dvema enakima
-  postavkama in bi `V2-R04` isti odgovor štela dvakrat;
+- vstop mora biti eden od treh, predmetni vstop mora imeti predmet;
+- vsak `question_id` mora obstajati in **noben se ne sme ponoviti** — sicer
+  409 in nič v bazi. Oboje ujame ena primerjava: `najdena` je slovar, ključan
+  po `id`, ki ga manjkajoče vprašanje skrajša, podvojeno pa ne podaljša;
+- ime sme meriti največ 200 znakov in koda predmeta 16 — natanko širina
+  stolpcev. Preverba je v kodi in ne v bazi, ker testi tečejo nad SQLite, ki
+  dolžine `VARCHAR` ne uveljavlja: na Postgresu bi bil predolg vnos `DataError`
+  in operater bi dobil angleški „Internal Server Error", zbirka pa bi bila
+  zelena;
 - besedilo se prepiše iz baze in nikoli iz obrazca.
+
+Prva različica tega razdelka je za zavrnitev podvojitve navajala napačen
+razlog — da je ločena preverba s `set()` potrebna, ker naj primerjava števila
+najdenih podvojitve ne bi ujela. Ujame jo; ločena preverba je bila mrtva veja
+in je ob tem popravku šla ven.
 
 ## Posledice
 

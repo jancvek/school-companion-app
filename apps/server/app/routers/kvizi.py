@@ -521,7 +521,7 @@ def objavi(
 
     predmet = None if vstop == VSTOP_DANES else (subject or None)
     kviz = repozitorij.objavi(
-        ime=ime.strip() or _predlagano_ime(predmet, datetime.now(UTC)),
+        ime=ime or _predlagano_ime(predmet, datetime.now(UTC)),
         subject=predmet,
         vprasanja=vprasanja,
     )

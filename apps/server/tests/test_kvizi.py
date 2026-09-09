@@ -28,7 +28,13 @@ from app.models import (
     Quiz,
     QuizItem,
 )
-from app.routers.kvizi import VPRASANJA, _stevilo_z_besedo
+from app.routers.kvizi import (
+    NAJVEC_IME,
+    NAJVEC_KODA,
+    PRIVZETO_STEVILO,
+    VPRASANJA,
+    _stevilo_z_besedo,
+)
 from tests.conftest import KLJUC
 
 #: Trije stabilni identifikatorji; testi jih berejo iz izrisane strani.
@@ -403,12 +409,14 @@ class TestPredogled:
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=5)
 
+        # Polje `stevilo` se namenoma **ne** poslje: prav privzetek je tu
+        # kriterij, in test, ki vrednost poslje, ga ne dokazuje.
         odgovor = odjemalec.post(
             "/admin/quizzes/preview",
-            data={"vstop": "nova", "subject": "MAT", "stevilo": "3", "snov": [UUID_ENA]},
+            data={"vstop": "nova", "subject": "MAT", "snov": [UUID_ENA]},
         )
 
-        assert odgovor.text.count('name="vprasanje"') == 3
+        assert odgovor.text.count('name="vprasanje"') == PRIVZETO_STEVILO == 3
 
     def test_vzame_prvih_n_po_position(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -488,20 +496,30 @@ class TestPredogled:
     def test_opozori_nad_tridesetimi(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
-        idji = [f"snov-{i:02d}" for i in range(4)]
+        idji = [f"snov-{i:02d}" for i in range(3)]
         for material_id in idji:
             snov(motor, slike, material_id, vprasanj=10)
+        # Enaintrideseto vprašanje in ne desetih: meja se preizkusi tik ob
+        # sebi, sicer bi `> PREDOLG_KVIZ + 5` preživel.
+        snov(motor, slike, "snov-ena", vprasanj=1)
 
         pod = odjemalec.post(
             "/admin/quizzes/preview",
-            data={"vstop": "nova", "subject": "MAT", "stevilo": "10", "snov": idji[:3]},
+            data={"vstop": "nova", "subject": "MAT", "stevilo": "10", "snov": idji},
         )
         cez = odjemalec.post(
             "/admin/quizzes/preview",
-            data={"vstop": "nova", "subject": "MAT", "stevilo": "10", "snov": idji},
+            data={
+                "vstop": "nova",
+                "subject": "MAT",
+                "stevilo": "10",
+                "snov": [*idji, "snov-ena"],
+            },
         )
 
-        # Pri točno 30 opozorila ni, pri 40 je: meja je „več kot 30".
+        assert "Skupaj 30 " in pod.text
+        assert "Skupaj 31 " in cez.text
+        # Pri točno 30 opozorila ni, pri 31 je: meja je „več kot 30".
         assert "več kot 30" not in pod.text
         assert "več kot 30" in cez.text
 
@@ -1413,3 +1431,55 @@ class TestObjavaPreverjaVhod:
         assert odgovor.status_code == 404
         with Session(motor) as seja:
             assert seja.scalar(select(func.count()).select_from(Quiz)) == 0
+
+
+class TestVarovalkeBrezKlika:
+    """Varovalke na poteh, ki jih s klikom ni mogoce doseci.
+
+    Vse tri stojijo na skritih poljih obrazca. Do njih se pride z rocno
+    vtipkanim naslovom — in prav zato morajo imeti test: napacen popravek jih
+    odstrani, vmesnik pa razlike ne pokaze.
+    """
+
+    def test_dnevni_vstop_da_kviz_cez_vse_predmete_tudi_s_podtaknjenim_predmetom(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """`quizzes.subject` mora ostati `NULL`, ceprav obrazec nosi predmet.
+
+        Rocno vtipkan naslov `?vstop=danes&subject=MAT` da izbirnik, ki predmet
+        prenese naprej skozi skrita polja vse do objave. Brez varovalke
+        `None if vstop == VSTOP_DANES` bi nastal kviz z imenom „MAT — ..." in
+        `subject='MAT'`, ceprav vsebuje snov vseh predmetov (`ADR-016` B).
+        """
+        zdaj = datetime.now(UTC)
+        snov(motor, slike, UUID_ENA, subject="MAT", taken_at=zdaj)
+        snov(motor, slike, UUID_DVA, subject="GEO", taken_at=zdaj)
+
+        odgovor = odjemalec.post(
+            "/admin/quizzes",
+            data={
+                "vstop": "danes",
+                "subject": "MAT",
+                "ime": "",
+                "vprasanje": [f"{UUID_ENA}-v1", f"{UUID_DVA}-v1"],
+            },
+            follow_redirects=False,
+        )
+
+        assert odgovor.status_code == 303
+        quiz_id = odgovor.headers["location"].rsplit("/", 1)[-1]
+        with Session(motor) as seja:
+            kviz = seja.get(Quiz, quiz_id)
+            assert kviz is not None
+            assert kviz.subject is None
+            assert kviz.name == f"Vsi predmeti — {datum(zdaj)}"
+
+    def test_meji_dolzine_se_ujemata_s_sirino_stolpcev(self) -> None:
+        """Konstanti podvajata `String(...)` iz `app/models.py`.
+
+        Podvojena vrednost, ki je ne uveljavlja nic, tiho zdrsne narazen ob
+        prvi spremembi stolpca — in preverba, ki naj bi lovila razred napake,
+        ki ga zelena zbirka ne pokaze, bi bila sama izpostavljena istemu.
+        """
+        assert Quiz.name.type.length == NAJVEC_IME
+        assert Quiz.subject.type.length == NAJVEC_KODA

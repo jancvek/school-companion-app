@@ -676,15 +676,15 @@ class KviziRepository:
         — vprašanja se ne brišejo (`ADR-012`).
 
         **Podvojen identifikator je prav tako `None`.** Predogled ga ne more
-        proizvesti, spremenjen obrazec pa: brez te preverbe bi kviz dobil dve
-        enaki postavki in bi `V2-R04` isti odgovor štela dvakrat. Preverba
-        „koliko sem jih našel" tega sama ne ujame — podvojitev najdenih ne
-        zmanjša.
+        proizvesti, spremenjen obrazec pa: brez zavrnitve bi kviz dobil dve
+        enaki postavki in bi `V2-R04` isti odgovor štela dvakrat.
+
+        Oboje ujame **ena sama** primerjava. `najdena` je slovar, ključan po
+        `id`: manjkajoče vprašanje ga skrajša, podvojeno pa ga ne podaljša —
+        v obeh primerih je krajši od seznama, ki je prišel. Tu je stala še
+        ločena preverba s `set()`; bila je mrtva veja in je šla ven.
         """
         if not question_ids:
-            return None
-
-        if len(set(question_ids)) != len(question_ids):
             return None
 
         najdena = {
