@@ -1,0 +1,58 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}{{ kviz.ime }}{% endblock %}
+
+{% block vsebina %}
+  <h1>{{ kviz.ime }}</h1>
+  <p class="pod">
+    {{ kviz.koda }} · {{ kviz.vprasanj }}
+    {{ "vprašanje" if kviz.vprasanj == 1 else "vprašanj" }} ·
+    objavljen {{ kviz.nastal }}
+  </p>
+
+  {% if kviz.preklican %}
+    <p class="opozorilo">
+      <strong>Kviz je preklican {{ kviz.preklican_ob }}.</strong>
+      Nič ni izbrisano — vprašanja in odgovori spodaj ostajajo. Snov tega kviza
+      se v „Novi snovi" spet ponudi.
+    </p>
+  {% endif %}
+
+  <ol class="vprasanja">
+    {% for postavka in postavke %}
+      <li>
+        {# Besedilo je **zamrznjeno** ob objavi in se ne bere iz vprašanja:
+           prav v tem je pomen `docs/odlocitve/ADR-016` (E). Ponovna obdelava
+           snovi tega ne spremeni. #}
+        <p class="vprasanje">{{ postavka.vprasanje }}</p>
+        <p class="odgovor">{{ postavka.odgovor }}</p>
+        <p class="drobno">
+          {% if postavka.snov_id %}
+            <a href="/admin/materials/{{ postavka.snov_id }}">{{ postavka.izvor }}</a>
+          {% elif postavka.izvor %}
+            {# Snov je bila dokončno izbrisana. Vprašanje jo je preživelo in
+               še vedno pove, iz česa je (`ADR-012`); povezave ni kam dati. #}
+            {{ postavka.izvor }} — izvorne slike ni več na strežniku
+          {% else %}
+            izvor ni znan
+          {% endif %}
+        </p>
+      </li>
+    {% endfor %}
+  </ol>
+
+  {% if not kviz.preklican %}
+    {# `POST` in ne povezava, kot pri vsakem dejanju, ki spremeni stanje.
+       Vmesne potrditvene strani ni: preklic ničesar ne uniči, za razliko od
+       brisanja (`ADR-016` F). #}
+    <form method="post" action="/admin/quizzes/{{ kviz.id }}/cancel">
+      <button class="gumb" type="submit">Prekliči kviz</button>
+    </form>
+    <p class="drobno">
+      Kviz se umakne iz uporabe, a se ne izbriše. Njegova snov se v „Novi
+      snovi" spet ponudi.
+    </p>
+  {% endif %}
+
+  <a class="nazaj" href="/admin">← Nazaj na pregled</a>
+{% endblock %}

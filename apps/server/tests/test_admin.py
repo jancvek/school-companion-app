@@ -1179,6 +1179,11 @@ class TestPakiranje:
             "arhiviranje.html",
             "brisanje.html",
             "najdena-ni.html",
+            # V2-R01. Seznam je napisan na roko namenoma: nova predloga mora
+            # test podreti, da se nekdo vpraša, ali je res zajeta v paket.
+            "kvizi-izbirnik.html",
+            "kvizi-predogled.html",
+            "kviz.html",
         }
 
 

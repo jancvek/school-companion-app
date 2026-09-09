@@ -11,12 +11,9 @@ vrne v vrsto; ker to zavrže prejšnji rezultat, je `POST` in ne povezava
 (`docs/odlocitve/ADR-009`).
 """
 
-from datetime import UTC, datetime
-from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.exception_handlers import http_exception_handler
@@ -25,11 +22,14 @@ from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
-from app.db import MaterialsRepository
-from app.dependencies import daj_nastavitve, daj_repozitorij
+from app.casi import cas, cas_ali_prazno
+from app.db import KviziRepository, MaterialsRepository
+from app.dependencies import daj_nastavitve, daj_repozitorij, daj_repozitorij_kvizov
 from app.models import STATUS_V_OBDELAVI, Material
+from app.routers.kvizi import seznam_kvizov
 from app.settings import Settings
 from app.storage import je_znotraj, pobrisi_sliko, velikost_slike
+from app.strani import daj_predloge, ni_dovoljeno, ni_najdeno
 from app.subjects import PREDMETI, oznaka_predmeta, oznaka_statusa, poisci_predmet
 
 #: Predpona vseh poti operaterske strani.
@@ -43,65 +43,6 @@ router = APIRouter(prefix=PREDPONA)
 #: delovno mapo, bi pomenila, da se strežnik obnaša različno glede na to, od
 #: kod je pognan (odločitev 2 v `docs/plan/V1-R04.md`).
 MAPA_PREDLOG = Path(__file__).resolve().parent.parent / "templates"
-
-#: Ime časovnega pasu, v katerem operater bere ure.
-#:
-#: V bazi je vse v UTC. Stran, ki bi kazala UTC, bi ob vsakem posnetku
-#: zahtevala računanje na pamet — in prav ura posnetka je podatek, po katerem
-#: operater sliko prepozna.
-#:
-#: Pas je imenski in ne odmik, ker se odmik dvakrat na leto spremeni. Bazo
-#: pasov prinese sistem: v vsebniku `python:3.12-slim` je v `/usr/share/
-#: zoneinfo`, na Windows pa paket `tzdata`, ki ga zahteva že `psycopg`.
-#: Zato tu ni nove odvisnosti.
-DOMACI_PAS = "Europe/Ljubljana"
-
-
-@lru_cache(maxsize=1)
-def _pas() -> ZoneInfo:
-    """Časovni pas, poiskan ob prvi uporabi in nato zapomnjen.
-
-    Namenoma **ni** modulska konstanta: `ZoneInfo` brez baze pasov vrže
-    izjemo, in ta bi ob uvozu modula podrla celo aplikacijo — tudi
-    `GET /health` in `POST /materials`. Udobje pri prikazu ure ne sme biti
-    pogoj za življenje strežnika.
-    """
-    return ZoneInfo(DOMACI_PAS)
-
-
-def daj_predloge(request: Request) -> Jinja2Templates:
-    """Izrisovalnik predlog te aplikacije.
-
-    Iz `app.state` in ne iz modulske globale, iz istega razloga kot vse
-    ostalo v `app/dependencies.py`: vsak test dobi svojo, popolnoma ločeno
-    aplikacijo (odločitev iz plana, „`Jinja2Templates` v `app.state`").
-    """
-    predloge: Jinja2Templates = request.app.state.predloge
-    return predloge
-
-
-def _cas(trenutek: datetime) -> str:
-    """Trenutek iz baze v berljiv lokalni zapis.
-
-    Oblika je sestavljena ročno in ne s `strftime`: oznaki `%-d` in `%-m` (dan
-    in mesec brez vodilne ničle) na Windows ne obstajata, testi pa tečejo tam.
-
-    Čas brez podatka o pasu razumemo kot UTC. To ni teoretični robni primer:
-    Postgres v stolpcu `TIMESTAMPTZ` pas vrne, **SQLite pa ne** — vrne naiven
-    `datetime`. Brez te vrstice bi `astimezone` naiven čas razumel kot čas
-    strežnikovega pasu in ura bi bila v testih drugačna kot v produkciji.
-    Vsebinsko isto počne `v_utc` ob sprejemu, a iz drugega razloga: tam gre za
-    normalizacijo vnosa od zunaj, tu za razliko med gonilnikoma.
-    """
-    if trenutek.tzinfo is None:
-        trenutek = trenutek.replace(tzinfo=UTC)
-    lokalni = trenutek.astimezone(_pas())
-    return f"{lokalni.day}. {lokalni.month}. {lokalni.year} ob {lokalni:%H:%M}"
-
-
-def _cas_ali_prazno(trenutek: datetime | None) -> str | None:
-    """Kot `_cas`, a prenese tudi „se še ni zgodilo"."""
-    return None if trenutek is None else _cas(trenutek)
 
 
 def _velikost_opis(bajti: int | None) -> str:
@@ -135,18 +76,18 @@ def _pogled(material: Material, images_dir: Path) -> dict[str, Any]:
         "id": material.id,
         "koda": material.subject,
         "oznaka": oznaka_predmeta(material.subject),
-        "cas": _cas(material.taken_at),
-        "prejeto": _cas(material.received_at),
+        "cas": cas(material.taken_at),
+        "prejeto": cas(material.received_at),
         "stanje": oznaka_statusa(material.status, material.readable),
         "pot": material.image_path,
         "velikost": velikost,
         "velikost_opis": _velikost_opis(velikost),
         "arhiviran": material.archived_at is not None,
-        "arhivirano_ob": _cas_ali_prazno(material.archived_at),
+        "arhivirano_ob": cas_ali_prazno(material.archived_at),
         # „Potrjeno" pomeni, da je telefon sporočil, da tega materiala pri
         # njem ni več. Dokler ni, dokončno brisanje ni dovoljeno.
         "potrjeno": material.device_deleted_at is not None,
-        "potrjeno_ob": _cas_ali_prazno(material.device_deleted_at),
+        "potrjeno_ob": cas_ali_prazno(material.device_deleted_at),
     }
 
 
@@ -212,38 +153,12 @@ def _pogled_podrobno(material: Material, images_dir: Path) -> dict[str, Any]:
     return pogled
 
 
-def _ni_najdeno(predloge: Jinja2Templates, request: Request, sporocilo: str) -> Response:
-    """404 kot stran, ne kot JSON.
-
-    Globalnega prestreznika za `HTTPException` namenoma ni: ta bi spremenil
-    tudi odgovore `POST /materials` iz JSON v HTML in podrl telefon
-    (odločitev 7 v `docs/plan/V1-R04.md`).
-    """
-    return predloge.TemplateResponse(
-        request, "najdena-ni.html", {"sporocilo": sporocilo}, status_code=404
-    )
-
-
 #: Pojasnilo, zakaj dokončnega brisanja (še) ni.
 ZADRZANO = (
     "Dokončno brisanje je mogoče šele, ko telefon potrdi, da te slike pri njem "
     "ni več. Dokler potrditve ni, bi slika na telefonu ostala za vedno. "
     "Sliko lahko medtem počistiš z diska — zapis, prepis in vprašanja ostanejo."
 )
-
-
-def _ni_dovoljeno(predloge: Jinja2Templates, request: Request, sporocilo: str) -> Response:
-    """409 kot stran, ne kot JSON.
-
-    Ni 404: zapis obstaja in operater ga vidi. Ni tiha preusmeritev: klik,
-    ki ne naredi ničesar in tega ne pove, je slabši od zavrnitve.
-    """
-    return predloge.TemplateResponse(
-        request,
-        "najdena-ni.html",
-        {"naslov": "Tega še ne gre", "sporocilo": sporocilo},
-        status_code=409,
-    )
 
 
 def _po_umiku(repozitorij: MaterialsRepository, koda: str) -> RedirectResponse:
@@ -270,9 +185,10 @@ def _po_umiku(repozitorij: MaterialsRepository, koda: str) -> RedirectResponse:
 def pregled(
     request: Request,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    kvizi: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov)],
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
 ) -> Response:
-    """Vsi predmeti s številom slik."""
+    """Vsi predmeti s številom slik in seznam kvizov (V2-R01)."""
     steviloma = repozitorij.stej_po_predmetih()
 
     vrstice = [
@@ -294,6 +210,10 @@ def pregled(
             "predmeti": vrstice,
             "skupaj": sum(steviloma.values()),
             "arhiviranih": repozitorij.stej_arhivirane(),
+            # Kviz je svoja os in ne del pregleda predmetov, zato svoj ključ in
+            # svoj razdelek. Oblika ene vrstice je last `routers/kvizi.py` —
+            # ta stran jo samo pokaže.
+            "kvizi": seznam_kvizov(kvizi),
         },
     )
 
@@ -337,7 +257,7 @@ def predmet(
     # Neznana koda brez ene same slike je tipkarska napaka v naslovu, ne prazen
     # predmet. Koda, ki slike ima, je veljavna, tudi če ni na seznamu.
     if not snovi and poisci_predmet(koda) is None:
-        return _ni_najdeno(
+        return ni_najdeno(
             predloge, request, f"Predmeta s kodo „{koda}“ ni ne na seznamu ne v bazi."
         )
 
@@ -363,7 +283,7 @@ def snov(
     """Podrobnosti ene slike."""
     material = repozitorij.poisci(material_id)
     if material is None:
-        return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
+        return ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
     return predloge.TemplateResponse(
         request, "snov.html", {"snov": _pogled_podrobno(material, nastavitve.images_dir)}
@@ -381,7 +301,7 @@ def slika(
     """Sama datoteka slike."""
     material = repozitorij.poisci(material_id)
     if material is None:
-        return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
+        return ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
     pot = Path(material.image_path)
 
@@ -389,7 +309,7 @@ def slika(
     # cena preverbe ena vrstica, cena napačne predpostavke pa branje poljubne
     # datoteke s strežnika (odločitev 8 v `docs/plan/V1-R04.md`).
     if not je_znotraj(nastavitve.images_dir, pot) or not pot.is_file():
-        return _ni_najdeno(predloge, request, "Slike tega zapisa na disku ni.")
+        return ni_najdeno(predloge, request, "Slike tega zapisa na disku ni.")
 
     return FileResponse(pot, media_type="image/jpeg")
 
@@ -405,7 +325,7 @@ def potrdi_arhiviranje(
     """Vmesni korak pred arhiviranjem. Sam ne spremeni ničesar."""
     material = repozitorij.poisci(material_id)
     if material is None:
-        return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
+        return ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
     return predloge.TemplateResponse(
         request, "arhiviranje.html", {"snov": _pogled(material, nastavitve.images_dir)}
@@ -448,10 +368,10 @@ def pocisti_sliko(
     """
     material = repozitorij.poisci(material_id)
     if material is None:
-        return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
+        return ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
     if material.archived_at is None:
-        return _ni_dovoljeno(
+        return ni_dovoljeno(
             predloge,
             request,
             "Sliko je mogoče počistiti šele, ko je zapis v arhivu.",
@@ -480,10 +400,10 @@ def potrdi_brisanje(
     """Vmesni korak pred dokončnim brisanjem. Sam ne spremeni ničesar."""
     material = repozitorij.poisci(material_id)
     if material is None:
-        return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
+        return ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
     if material.device_deleted_at is None:
-        return _ni_dovoljeno(predloge, request, ZADRZANO)
+        return ni_dovoljeno(predloge, request, ZADRZANO)
 
     return predloge.TemplateResponse(
         request, "brisanje.html", {"snov": _pogled_podrobno(material, nastavitve.images_dir)}
@@ -506,7 +426,7 @@ def izbrisi(
     """
     material = repozitorij.poisci(material_id)
     if material is not None and material.device_deleted_at is None:
-        return _ni_dovoljeno(predloge, request, ZADRZANO)
+        return ni_dovoljeno(predloge, request, ZADRZANO)
 
     # Najprej vrstica, nato datoteka — obratno kot pri sprejemu, in namenoma.
     # Vrstica brez datoteke je pokvarjen vnos, ki ga operater vidi; datoteka
@@ -551,7 +471,7 @@ def ponovno_obdelaj(
     """
     material = repozitorij.poisci(material_id)
     if material is None:
-        return _ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
+        return ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
     # Izid namenoma ne vpliva na odgovor. `False` pomeni, da je zapis že v
     # obdelavi; takrat je stran, na katero peljemo, prav tista, ki to pove.
