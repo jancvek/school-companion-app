@@ -543,10 +543,11 @@ def ponovno_obdelaj(
     """Vrne zapis v vrsto in s tem sproži ponovno obdelavo.
 
     Samo `POST`, nikoli navadna povezava — enako pravilo kot pri brisanju
-    (ADR-006). Dejanje je nepovratno: zavrže prejšnji prepis, povzetek,
-    revizijsko sled in vsa vprašanja (`docs/odlocitve/ADR-009`). Vmesne
-    potrditvene strani vseeno ni, ker za razliko od brisanja slika ostane in
-    se da obdelati znova.
+    (ADR-006). Dejanje je nepovratno: zavrže prejšnji prepis, povzetek in
+    revizijsko sled (`docs/odlocitve/ADR-009`), dosedanja vprašanja pa
+    **upokoji in ne izbriše** (`ADR-015`, ki nadomesti odločitev A1 iz
+    `ADR-009`). Vmesne potrditvene strani vseeno ni, ker za razliko od
+    brisanja slika ostane in se da obdelati znova.
     """
     material = repozitorij.poisci(material_id)
     if material is None:

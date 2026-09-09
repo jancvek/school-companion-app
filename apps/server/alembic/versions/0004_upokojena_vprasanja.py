@@ -38,11 +38,14 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Vrne shemo v stanje `0003_arhiv`.
 
-    **Upokojena vprašanja s tem spet postanejo veljavna.** Nobena vrstica se ne
-    izgubi — shema pred to migracijo pa razlike med veljavnim in upokojenim
-    vprašanjem ne zna zapisati, zato je ni kam shraniti. Za razliko od
-    `downgrade` v `0003_arhiv`, ki vrstice res pobriše, je ta poteza
-    povratna: ponoven `upgrade` stolpec vrne, a prazen.
+    **Podatek o upokojitvi se pri tem izgubi dokončno in tiho.** Nobena
+    vrstica ne izgine — za razliko od `downgrade` v `0003_arhiv`, ki sirote
+    res pobriše — vendar shema pred to migracijo razlike med veljavnim in
+    upokojenim vprašanjem ne zna zapisati in je ni kam shraniti. Ponoven
+    `upgrade` stolpec vrne prazen, torej so **vsa** nekdaj upokojena
+    vprašanja spet veljavna: sestavljalnik kvizov (`V2-R01`) bi jih ponudil,
+    kot da prejšnjih obdelav ni bilo. Vrnitev čez to migracijo je zato
+    smiselna samo nad bazo, v kateri se ponovna obdelava še ni zgodila.
 
     `batch_alter_table` tu ni potreben — `DROP COLUMN` na stolpcu brez
     omejitev zna tudi SQLite, ki ga poganjajo testi migracije.

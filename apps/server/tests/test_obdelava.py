@@ -11,11 +11,13 @@ svoji datoteki, ker so to koraki iste poti in se berejo skupaj.
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app import db
 from app.db import IzidObdelave, MaterialsRepository, VprasanjeZaZapis
 from app.models import (
     STATUS_NAPAKA,
@@ -465,8 +467,9 @@ class TestVrnitevVVrsto:
         """Serija se prepozna po skupnem `retired_at` in po ničemer drugem.
 
         Dodatnega stolpca za oznako serije `ADR-015` namenoma nima, zato je ta
-        enakost edino, kar serijo drži skupaj. Žig, izračunan v bazi za vsako
-        vrstico posebej, bi jo razbil na pet enočlanskih serij.
+        enakost edino, kar serijo drži skupaj. Upokojitev, ki bi tekla vrstico
+        za vrstico in vsakič vprašala za čas znova, bi eno serijo razbila na
+        pet enočlanskih in `V2-R04` bi jih štela kot pet obdelav.
         """
         zapisi(motor, slike)
         klicalec, _ = klicalec_vrne(uspesen_izid())
@@ -710,6 +713,92 @@ class TestZapisIzida:
         assert len(preberi(motor).veljavna_vprasanja) == 1
         assert stevilo_vprasanj(motor) == 2
         assert stevilo_upokojenih(motor) == 1
+
+    def test_upokojitev_in_nova_serija_sta_ena_transakcija(
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Če vstavljanje nove serije pade, se upokojitev ne obdrži.
+
+        Sicer bi obstajalo okno, v katerem ima material upokojena vprašanja in
+        nobenega veljavnega — in izbirnik `V2-R01` bi tako snov videl kot
+        „obdelana, a brez vprašanj" za vedno, brez načina, da se to popravi.
+        Zato `_upokoji_vprasanja` ne commita sam.
+
+        Napaka se vrine med upokojitev in vstavljanje tako, da drugi `uuid4`
+        vrže izjemo. Če bi bila upokojitev svoja transakcija, bi jo zapiranje
+        seje pustilo pri miru in vprašanje bi ostalo upokojeno.
+        """
+        zapisi(motor, slike)
+        prvi = IzidObdelave(
+            status=STATUS_PRIPRAVLJEN,
+            readable=True,
+            vprasanja=(VprasanjeZaZapis(question="V1?", answer="O1."),),
+        )
+        with tovarna_sej() as seja:
+            MaterialsRepository(seja).zapisi_izid(UUID_ENA, prvi)
+
+        pravi_uuid4 = db.uuid4
+        preostali = [1]
+
+        def pade_pri_drugem() -> Any:
+            if preostali:
+                preostali.pop()
+                return pravi_uuid4()
+            raise RuntimeError("Baza je med vstavljanjem odpovedala.")
+
+        monkeypatch.setattr(db, "uuid4", pade_pri_drugem)
+
+        drugi = IzidObdelave(
+            status=STATUS_PRIPRAVLJEN,
+            readable=True,
+            vprasanja=(
+                VprasanjeZaZapis(question="V2?", answer="O2."),
+                VprasanjeZaZapis(question="V3?", answer="O3."),
+            ),
+        )
+        with pytest.raises(RuntimeError):  # noqa: SIM117
+            with tovarna_sej() as seja:
+                MaterialsRepository(seja).zapisi_izid(UUID_ENA, drugi)
+
+        # Nič se ni premaknilo: prvo vprašanje je še vedno veljavno in samo.
+        material = preberi(motor)
+        assert len(material.veljavna_vprasanja) == 1
+        assert material.veljavna_vprasanja[0].question == "V1?"
+        assert stevilo_vprasanj(motor) == 1
+        assert stevilo_upokojenih(motor) == 0
+
+    def test_upokojitev_osvezi_ze_naloziene_predmete(
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
+    ) -> None:
+        """Bralec, ki vprašanja prebere pred upokojitvijo, ne sme videti starega stanja.
+
+        `UPDATE` gre mimo seje, zato bi predmeti `Question`, naloženi prej v
+        isti seji, brez sinhronizacije še vedno kazali `retired_at = None`.
+        Nad svežo bazo se to nikoli ne pokaže — material ima takrat eno samo
+        serijo in nihče je ne bere dvakrat. Prav tak razred napake `ADR-015`
+        našteva kot ceno te odločitve.
+        """
+        zapisi(motor, slike)
+        izid = IzidObdelave(
+            status=STATUS_PRIPRAVLJEN,
+            readable=True,
+            vprasanja=(VprasanjeZaZapis(question="V?", answer="O."),),
+        )
+        with tovarna_sej() as seja:
+            MaterialsRepository(seja).zapisi_izid(UUID_ENA, izid)
+
+        with tovarna_sej() as seja:
+            repozitorij = MaterialsRepository(seja)
+            material = repozitorij.poisci(UUID_ENA)
+            assert material is not None
+            # Bralec vprašanja prebere **pred** upokojitvijo in jih obdrži.
+            prebrana = list(material.veljavna_vprasanja)
+            assert [v.retired_at for v in prebrana] == [None]
+
+            repozitorij.vrni_v_vrsto(UUID_ENA)
+
+            assert prebrana[0].retired_at is not None
 
     def test_vprasanje_dobi_izvor_svojega_materiala(
         self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]

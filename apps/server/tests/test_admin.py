@@ -849,7 +849,7 @@ class TestDokoncnoBrisanje:
 
         besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}/delete").text
 
-        assert "5 veljavnih" in besedilo
+        assert "veljavnih: 5" in besedilo
 
     def test_potrditvena_stran_steje_tudi_upokojena(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -867,8 +867,8 @@ class TestDokoncnoBrisanje:
 
         besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}/delete").text
 
-        assert "3 veljavnih" in besedilo
-        assert "5 upokojenih" in besedilo
+        assert "veljavnih: 3" in besedilo
+        assert "upokojenih: 5" in besedilo
 
     def test_post_izbrise_vrstico_in_datoteko_ter_pelje_v_arhiv(
         self, odjemalec: TestClient, motor: Engine, slike: Path

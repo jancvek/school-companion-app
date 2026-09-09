@@ -166,13 +166,26 @@ Tabela `questions` (V1-R03):
 | `material_id` | `VARCHAR(36)` | tuji ključ na `materials.id`, `ON DELETE SET NULL`, indeksiran; `NULL`, ko je material dokončno izbrisan (V1-R07) |
 | `subject` | `VARCHAR(16)` | predmet materiala, prepisan ob nastanku (V1-R07) |
 | `material_taken_at` | `TIMESTAMPTZ` | čas posnetka materiala, prepisan ob nastanku (V1-R07) |
-| `position` | `INTEGER NOT NULL` | zaporedje znotraj materiala, od 1 |
+| `position` | `INTEGER NOT NULL` | zaporedje znotraj **serije**, od 1 |
 | `question` | `TEXT NOT NULL` | besedilo vprašanja |
 | `answer` | `TEXT NOT NULL` | pričakovan odgovor |
+| `retired_at` | `TIMESTAMPTZ` | kdaj je bilo vprašanje upokojeno; `NULL` = veljavno (V2-R05) |
 
-Vprašanja imajo svojo tabelo in ne polja JSON, ker bo `V1-R05` ocene težavnosti
-vezala na `question_id`. **Vprašanje ni trajno:** ponovna obdelava zavrže
-prejšnji izid skupaj z vsemi vprašanji materiala (`docs/odlocitve/ADR-009`).
+Vprašanja imajo svojo tabelo in ne polja JSON, ker bo `V2-R02` ocene težavnosti
+vezala na `question_id`.
+
+**Vprašanje je trajno.** Do V2-R05 ni bilo: ponovna obdelava je prejšnji izid
+zavrgla skupaj z vsemi vprašanji materiala. `docs/odlocitve/ADR-015` to
+nadomesti — dosedanja vprašanja dobijo `retired_at` in nova serija nastane
+poleg. **Brisanja vprašanj v strežniku ni nikjer več.** Ostali del prejšnjega
+izida (prepis, povzetek, revizijska sled) se še naprej prepiše, kot pravi
+`ADR-009`.
+
+`retired_at` je svoja os in ne novo stanje, po istem vzorcu kot
+`materials.archived_at` (`ADR-011`). „Vprašanja materiala" odslej povsod
+pomeni `retired_at IS NULL`; `position` je enolična znotraj serije in ne
+znotraj materiala, ker se z vsako obdelavo začne znova. Serija se prepozna po
+skupnem `retired_at` — dodatnega stolpca za oznako serije ni.
 
 **Vprašanje material preživi.** Do V1-R07 je bila kaskada nastavljena dvakrat
 (`ondelete="CASCADE"` v shemi in `cascade="all, delete-orphan"` v ORM);
@@ -181,9 +194,27 @@ jo bo V2 vezala nanj. Ob brisanju materiala ORM otrokom postavi
 `material_id = NULL` — tudi na SQLite, kjer tuji ključi privzeto niso
 uveljavljeni, zato testi še naprej dokazujejo isto kot produkcija.
 
-Posledica, ki se ne vidi sama od sebe: `material.questions.clear()` odslej
-vprašanj ne pobriše, ampak jih osiroti. Kjer jih je treba res pobrisati
-(ponovna obdelava po `ADR-009`), to počne `MaterialsRepository` izrecno.
+Zaradi obojega ima `Material` **tri** zveze na `questions` in nobene z imenom
+`questions`:
+
+| Zveza | Kaj vrne | Zakaj obstaja |
+|---|---|---|
+| `vsa_vprasanja` | veljavna in upokojena | Edina pisljiva. Nosi vstavljanje nove serije **in** ORM-jevo nuliranje `material_id` ob brisanju materiala — filtrirana zveza upokojenih ne bi videla in ta bi ostala z visečim ključem tam, kjer tuji ključ ni uveljavljen |
+| `veljavna_vprasanja` | `retired_at IS NULL` | To, kar `ADR-015` misli z „vprašanja materiala". Edina, ki jo bere vmesnik |
+| `upokojena_vprasanja` | `retired_at IS NOT NULL` | Števec na strani s podrobnostmi |
+
+Filtrirani sta `viewonly=True`; brez tega bi SQLAlchemy tri zveze nad istim
+tujim ključem razumel kot tri poti, ki si lastijo `material_id`. Zveza
+`questions` je bila **preimenovana in ne le filtrirana** namenoma: nevtralno
+zveneče ime je past, ker pozabljen filter nad svežo bazo ni viden — material
+ima takrat natanko eno serijo. Preimenovanje pomete čez bralce s `mypy`.
+
+Upokojitev opravi `MaterialsRepository._upokoji_vprasanja`: en `UPDATE ...
+WHERE material_id = ? AND retired_at IS NULL`, brez `commit` (klicatelj
+commita, da sta upokojitev in nova serija ena transakcija) in s
+`synchronize_session="fetch"`, da dobijo žig tudi predmeti, naloženi v isti
+seji pred stavkom.
+
 Denormalizirana `subject` in `material_taken_at` sta tam zato, da vprašanje
 brez materiala še vedno pove, iz katere snovi in katerega dne je.
 
@@ -195,6 +226,13 @@ na `SET NULL`. Na SQLite gre to skozi `op.batch_alter_table` s `copy_from`
 (tabela se prepiše na novo, ker `ALTER` tujega ključa tam ne obstaja), na
 Postgresu z navadnim `ALTER`. Ime starega ključa je dialektni privzetek
 (`questions_material_id_fkey`), novi je poimenovan.
+
+Migracija `0004_upokojena_vprasanja` doda `questions.retired_at`. Gol
+`ADD COLUMN`, `NULL`-abilen in brez privzetka: obstoječe vrstice ostanejo
+`NULL`, torej veljavne, in prepisa podatkov ni. Njen `downgrade` stolpec
+spusti — nobene vrstice ne izgubi, pač pa **dokončno izgubi podatek o
+upokojitvi**, zato je vrnitev čezenj smiselna samo nad bazo, v kateri se
+ponovna obdelava še ni zgodila.
 
 Migracije vodi **Alembic** (`apps/server/alembic/`). Prva migracija ustvari
 razširitev `vector` — vektorskih stolpcev še ni, iskanje po pomenu je V2.
@@ -272,6 +310,12 @@ Prehodi stanj:
 | `processing` | `new` | ob zagonu strežnika (obtičal zapis) ali če izida ni kam zapisati |
 | `ready` \| `failed` \| `new` | `new` | gumb „Pošlji v obdelavo" na admin strani |
 
+Gumb „Pošlji v obdelavo" zavrže prepis, povzetek in revizijsko sled, dosedanja
+vprašanja pa **upokoji** (`ADR-015`) — že takrat in ne šele ob novem izidu, ker
+bi snov sicer ves čas klica kazala stara vprašanja ob praznem prepisu. Stran s
+podrobnostmi zato pove, koliko upokojenih vprašanj snov ima; brez tega števila
+je razlika med „ni vprašanj" in „vsa so upokojena" nevidna.
+
 **Neberljiva slika ni peti status.** Klic je uspel in bil plačan, torej to ni
 napaka obdelave: zapis je `ready` s `readable=false`, brez prepisa in brez
 vprašanj. Razliko pokaže oznaka „obdelano — slika ni berljiva".
@@ -329,7 +373,7 @@ Strežniško izrisan HTML za lastnika sistema (`docs/00-namen.md`, vloga
 | `/admin/materials/{id}/purge-image` | POST | pobriše samo datoteko (V1-R07) |
 | `/admin/materials/{id}/delete` | GET | potrditvena stran za dokončno brisanje |
 | `/admin/materials/{id}/delete` | POST | dokončno izbriše in preusmeri (303) |
-| `/admin/materials/{id}/reprocess` | POST | vrne v vrsto in preusmeri (303) |
+| `/admin/materials/{id}/reprocess` | POST | vrne v vrsto, vprašanja upokoji, preusmeri (303) |
 
 Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Prijave ni** —
 meja je Tailscale; posledice, vključno s CSRF, so v `docs/odlocitve/ADR-006`.

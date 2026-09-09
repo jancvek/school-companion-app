@@ -300,15 +300,27 @@ def test_razveljavitev_prezivi_podatke(baza: str) -> None:
                     "VALUES ('v2', NULL, 1, 'Brez materiala?', 'Da.', 'MAT')"
                 )
             )
+            # Upokojeno vprašanje, da gre `downgrade` migracije `0004` res
+            # čez vrstico, ki ima stolpec napolnjen. Brez nje bi `DROP COLUMN`
+            # tekel nad samimi praznimi vrednostmi in ne bi dokazal ničesar.
+            povezava.execute(
+                text(
+                    "INSERT INTO questions "
+                    "(id, material_id, position, question, answer, subject, retired_at) "
+                    "VALUES ('v3', 'star', 1, 'Stara serija?', 'Da.', 'MAT', "
+                    "'2026-09-06 09:00:00')"
+                )
+            )
 
         command.downgrade(config, "0002_obdelava")
 
         with motor.connect() as povezava:
             preostala = povezava.execute(text("SELECT id FROM questions")).scalars().all()
 
-        # Vprašanje z materialom ostane, sirota gre — tako je zapisano v
-        # docstringu migracije in nikjer drugje to ni preverjeno.
-        assert preostala == ["v1"]
+        # Vprašanje z materialom ostane — tudi upokojeno, ki po `DROP COLUMN`
+        # od veljavnega ni več ločljivo. Sirota gre; tako je zapisano v
+        # docstringu migracije `0003_arhiv` in nikjer drugje to ni preverjeno.
+        assert preostala == ["v1", "v3"]
     finally:
         motor.dispose()
 

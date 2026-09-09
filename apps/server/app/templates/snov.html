@@ -65,9 +65,14 @@
         <form method="post" action="/admin/materials/{{ snov.id }}/reprocess">
           <button class="gumb gumb-obdelava" type="submit">Pošlji v obdelavo</button>
         </form>
+        {# Vprašanja so od V2-R05 izvzeta iz naštevanja zavrženega — gumb jih
+           upokoji in ne pobriše (`docs/odlocitve/ADR-015`). Stavek, ki bi tu
+           še vedno obljubljal brisanje, bi si nasprotoval z razdelkom o
+           upokojenih vprašanjih nižje na tej isti strani. #}
         <p class="drobno">
-          Zavrže dosedanji prepis, povzetek in vprašanja ter sproži nov klic
-          modela.
+          Zavrže dosedanji prepis in povzetek ter sproži nov klic modela.
+          Dosedanja vprašanja se ne izbrišejo, ampak upokojijo: ostanejo v
+          bazi, med vprašanja te snovi pa se ne štejejo več.
         </p>
       {% elif snov.arhiviran %}
         {# `ponovna_obdelava_mozna` je `false` iz dveh različnih razlogov.

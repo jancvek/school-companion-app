@@ -180,9 +180,19 @@ class MaterialsRepository:
         material nima nobenega veljavnega vprašanja — in `V2-R01` bi ga v
         izbirniku tako tudi videl.
 
-        Stavek gre mimo seje, zato so zbirke nato razveljavljene; sicer bi
-        `veljavna_vprasanja` še vedno vračala predmete, ki v bazi niso več
-        veljavni.
+        Stavek gre mimo seje, zato za sabo pospravi dvoje:
+
+        - `synchronize_session="fetch"` postavi `retired_at` tudi na predmetih
+          `Question`, ki so v tej seji že naloženi. Brez tega bi bralec, ki je
+          vprašanja prebral **pred** upokojitvijo in jih v isti seji uporablja
+          naprej — natanko to bo delal izbirnik `V2-R01` — na njih še vedno
+          videl `retired_at = None`, čeprav ima vrstica v bazi žig. To je isti
+          razred napake, ki ga sveža baza ne pokaže, pred katerim svari
+          `ADR-015`. Tu je `"fetch"` in ne `False` kot v `_posodobi`, ker ta
+          metoda dela v isti seji kot predmet, ki ga je klicatelj že prebral.
+        - `expire` razveljavi vse tri zbirke, ker se jim je spremenilo
+          članstvo; sicer bi `veljavna_vprasanja` še vedno vračala predmete,
+          ki v bazi niso več veljavni.
         """
         self.session.execute(
             update(Question)
@@ -191,7 +201,7 @@ class MaterialsRepository:
                 Question.retired_at.is_(None),
             )
             .values(retired_at=datetime.now(UTC))
-            .execution_options(synchronize_session=False)
+            .execution_options(synchronize_session="fetch")
         )
         self.session.expire(
             material, ["vsa_vprasanja", "veljavna_vprasanja", "upokojena_vprasanja"]
