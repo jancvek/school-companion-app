@@ -73,7 +73,10 @@
             <a href="/admin/quizzes/{{ kviz.id }}">
               <span>
                 <span class="koda">{{ kviz.ime }}</span>
+                {# Predmet in datum sta kriterij in ne okras: ime je
+                   prepisljivo, zato ju ob prepisanem imenu ne nosi nic. #}
                 <span class="stanje">
+                  {{ kviz.koda }} &middot; {{ kviz.nastal_datum }} &middot;
                   {% if kviz.preklican %}preklican{% else %}objavljen{% endif %}
                 </span>
               </span>

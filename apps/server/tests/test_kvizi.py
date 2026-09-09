@@ -8,12 +8,13 @@ razlog kot v `test_admin.py`.
 """
 
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, event, func, select
 from sqlalchemy.orm import Session
 
 from app.casi import dan_od_do, datum
@@ -1038,3 +1039,212 @@ class TestSlovenscina:
         )
 
         assert "Skupaj 2 vprašanji iz 1 snovi." in odgovor.text
+
+
+class TestPoizvedbe:
+    """Strani ne smejo delati poizvedbe na vrstico (N+1)."""
+
+    @staticmethod
+    def _stej(motor: Engine, klic: Callable[[], object]) -> int:
+        """Koliko stavkov je proti bazi opravil dani klic."""
+        stevec = 0
+
+        def zabelezi(*_args: object, **_kwargs: object) -> None:
+            nonlocal stevec
+            stevec += 1
+
+        event.listen(motor, "before_cursor_execute", zabelezi)
+        try:
+            klic()
+        finally:
+            event.remove(motor, "before_cursor_execute", zabelezi)
+        return stevec
+
+    def test_izbirnik_je_tri_poizvedbe_ne_glede_na_stevilo_snovi(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        for i in range(12):
+            snov(motor, slike, f"veliko-{i:02d}", vprasanj=5)
+
+        koliko = self._stej(motor, lambda: izbirnik(odjemalec))
+
+        # Ena za snovi, ena za stevila vprasanj, ena za "ze v kvizu".
+        assert koliko == 3
+
+    def test_stran_kviza_ne_bere_vprasanja_na_postavko(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Brez `selectinload` bi bilo poizvedb toliko kot postavk plus nekaj.
+        snov(motor, slike, UUID_ENA, vprasanj=10)
+        snov(motor, slike, UUID_DVA, vprasanj=10)
+        quiz_id = objavi(odjemalec, motor, [UUID_ENA, UUID_DVA], koliko=10)
+
+        koliko = self._stej(motor, lambda: odjemalec.get(f"/admin/quizzes/{quiz_id}"))
+
+        assert koliko <= 5, f"stran kviza je opravila {koliko} poizvedb"
+
+
+class TestPopravkiPoPregledu:
+    """Kar je nasel pregledovalec v fazi 7 in prej ni bilo dokazano."""
+
+    def test_danes_se_meri_po_taken_at_in_ne_po_received_at(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """`ADR-016` (B): danes je trenutek **posnetka**, ne prejema.
+
+        Prej tega ni dokazoval noben test: pomozna funkcija je `received_at`
+        nastavljala enako kot `taken_at`, zato je zamenjava stolpca v poizvedbi
+        pustila celo zbirko zeleno. Razlika se v resnici pokaze natanko pri
+        posnetku pozno zvecer, ki se prenese naslednji dan.
+        """
+        zdaj = datetime.now(UTC)
+        snov(motor, slike, UUID_ENA, taken_at=zdaj)
+        snov(motor, slike, UUID_DVA, taken_at=zdaj - timedelta(days=3))
+
+        # Starejsi posnetek je streznik prejel sele danes, danasnjega pa ze
+        # pred dnevi: stolpca sta zdaj v nasprotju in poizvedba mora izbrati
+        # pravega.
+        with Session(motor) as seja:
+            stara = seja.get(Material, UUID_DVA)
+            nova = seja.get(Material, UUID_ENA)
+            assert stara is not None
+            assert nova is not None
+            stara.received_at = zdaj
+            nova.received_at = zdaj - timedelta(days=3)
+            seja.commit()
+
+        besedilo = izbirnik(odjemalec, vstop="danes", subject=None)
+
+        assert UUID_ENA in besedilo
+        assert UUID_DVA not in besedilo
+
+    def test_predogled_nosi_izbor_nazaj_v_izbirnik(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Kriterij: ob vrnitvi je izbor tak, kot je bil.
+
+        Prej je bil pokrit samo `POST /new`, ki ga je test sestavil sam. Ce bi
+        predogled skrita polja izgubil, bi gumb v brskalniku poslal prazen
+        obrazec in izbor zavrgel, zbirka pa bi ostala zelena. Zato ta test
+        **prebere obrazec iz izrisanega predogleda** in ga poslje naprej
+        takega, kot bi ga poslal brskalnik.
+        """
+        snov(motor, slike, UUID_ENA)
+        snov(motor, slike, UUID_DVA)
+        snov(motor, slike, UUID_TRI)
+
+        predogled = odjemalec.post(
+            "/admin/quizzes/preview",
+            data={
+                "vstop": "nova",
+                "subject": "MAT",
+                "stevilo": "4",
+                "snov": [UUID_ENA, UUID_TRI],
+            },
+        )
+
+        obrazec = predogled.text[predogled.text.index('action="/admin/quizzes/new"') :]
+        izbrane = re.findall(r'name="snov" value="([^"]+)"', obrazec)
+        stevilo = re.search(r'name="stevilo" value="([^"]+)"', obrazec)
+        assert stevilo is not None
+        assert set(izbrane) == {UUID_ENA, UUID_TRI}
+
+        nazaj = odjemalec.post(
+            "/admin/quizzes/new",
+            data={
+                "vstop": "nova",
+                "subject": "MAT",
+                "stevilo": stevilo.group(1),
+                "snov": izbrane,
+            },
+        )
+
+        assert je_obkljukana(nazaj.text, UUID_ENA)
+        assert not je_obkljukana(nazaj.text, UUID_DVA)
+        assert je_obkljukana(nazaj.text, UUID_TRI)
+        assert 'value="4"' in nazaj.text
+
+    def test_seznam_pove_predmet_in_datum_tudi_ob_prepisanem_imenu(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Kriterij: seznam kvizov s predmetom, datumom, stevilom in stanjem.
+
+        Ime je prepisljivo, zato predmeta in datuma ne nosi. Prej ju vrstica ni
+        izpisala nikjer.
+        """
+        snov(motor, slike, UUID_ENA, subject="GEO")
+        objavi(
+            odjemalec, motor, [UUID_ENA], subject="GEO", ime="Ponavljanje pred testom"
+        )
+
+        besedilo = odjemalec.get("/admin").text
+        vrstica = besedilo[besedilo.index("Ponavljanje pred testom") :][:400]
+
+        assert "GEO" in vrstica
+        assert datum(datetime.now(UTC)) in vrstica
+        assert "objavljen" in vrstica
+
+    def test_izbirnik_pove_kodo_predmeta_v_vsaki_vrstici(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Pri dnevnem vstopu cez vse predmete je koda v vrstici edini nacin,
+        # da se snovi locijo med sabo.
+        zdaj = datetime.now(UTC)
+        snov(motor, slike, UUID_ENA, subject="MAT", taken_at=zdaj)
+        snov(motor, slike, UUID_DVA, subject="GEO", taken_at=zdaj)
+
+        besedilo = izbirnik(odjemalec, vstop="danes", subject=None)
+
+        assert '<span class="cas">MAT ' in besedilo
+        assert '<span class="cas">GEO ' in besedilo
+
+    def test_podvojeno_vprasanje_zavrne_objavo(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Sicer bi kviz dobil dve enaki postavki in bi `V2-R04` isti odgovor
+        # stela dvakrat.
+        snov(motor, slike, UUID_ENA)
+
+        odgovor = odjemalec.post(
+            "/admin/quizzes",
+            data={
+                "vstop": "nova",
+                "subject": "MAT",
+                "ime": "",
+                "vprasanje": [f"{UUID_ENA}-v1", f"{UUID_ENA}-v1"],
+            },
+        )
+
+        assert odgovor.status_code == 409
+        with Session(motor) as seja:
+            assert seja.scalar(select(func.count()).select_from(QuizItem)) == 0
+
+    def test_objava_brez_vprasanj_pove_kaj_je_narobe(self, odjemalec: TestClient) -> None:
+        odgovor = odjemalec.post(
+            "/admin/quizzes", data={"vstop": "nova", "subject": "MAT", "ime": ""}
+        )
+
+        assert odgovor.status_code == 409
+        assert "ni bilo izbrano nobeno" in odgovor.text
+
+    def test_nerazberljivo_stevilo_ne_vrne_surove_napake(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Merilo dokoncanosti: pod `/admin` ni surovega sistemskega besedila.
+
+        FastAPI bi ob polju tipa `int` vrnil 422 z angleskim JSON
+        (`Input should be a valid integer`). Do tega pride le z rocno vtipkanim
+        naslovom, a stran mora ostati stran.
+        """
+        snov(motor, slike, UUID_ENA)
+
+        odgovor = odjemalec.get(
+            "/admin/quizzes/new",
+            params={"vstop": "nova", "subject": "MAT", "stevilo": "abc"},
+        )
+
+        assert odgovor.status_code == 200
+        assert "text/html" in odgovor.headers["content-type"]
+        assert "Input should be" not in odgovor.text
+        # Pade nazaj na privzetek in to takoj pokaze v polju.
+        assert 'name="stevilo" value="3"' in odgovor.text

@@ -21,7 +21,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, selectinload, sessionmaker
 from sqlalchemy.sql import Update
 
 from app.models import (
@@ -674,8 +674,17 @@ class KviziRepository:
         `None` in ne krajši seznam: polovičen kviz je slabši od zavrnitve, ki jo
         operater vidi. Da se to sploh zgodi, mora nekdo spremeniti skrito polje
         — vprašanja se ne brišejo (`ADR-012`).
+
+        **Podvojen identifikator je prav tako `None`.** Predogled ga ne more
+        proizvesti, spremenjen obrazec pa: brez te preverbe bi kviz dobil dve
+        enaki postavki in bi `V2-R04` isti odgovor štela dvakrat. Preverba
+        „koliko sem jih našel" tega sama ne ujame — podvojitev najdenih ne
+        zmanjša.
         """
         if not question_ids:
+            return None
+
+        if len(set(question_ids)) != len(question_ids):
             return None
 
         najdena = {
@@ -684,7 +693,7 @@ class KviziRepository:
                 select(Question).where(Question.id.in_(question_ids))
             )
         }
-        if len(najdena) != len(set(question_ids)):
+        if len(najdena) != len(question_ids):
             return None
 
         return [najdena[question_id] for question_id in question_ids]
@@ -744,8 +753,18 @@ class KviziRepository:
         return [(kviz, koliko) for kviz, koliko in vrstice]
 
     def poisci(self, quiz_id: str) -> Quiz | None:
-        """Kviz z danim `id` ali `None`."""
-        return self.session.get(Quiz, quiz_id)
+        """Kviz z danim `id` ali `None`, s postavkami in njihovimi vprašanji.
+
+        `selectinload` in ne lena naložitev: stran kviza za vsako postavko
+        prebere še njeno vprašanje (izvor, povezava na snov). Pri kvizu s
+        tridesetimi postavkami — kar je po `PREDOLG_KVIZ` pričakovana zgornja
+        velikost — bi to pomenilo dvaintrideset poizvedb namesto treh.
+        """
+        return self.session.scalars(
+            select(Quiz)
+            .where(Quiz.id == quiz_id)
+            .options(selectinload(Quiz.postavke).selectinload(QuizItem.question))
+        ).one_or_none()
 
     def preklici(self, quiz_id: str) -> Quiz | None:
         """Prekliče kviz; vrne kviz ali `None`, če ga ni.

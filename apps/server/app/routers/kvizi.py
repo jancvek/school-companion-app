@@ -105,6 +105,26 @@ def _stevilo_v_mejah(stevilo: int) -> int:
     return max(NAJMANJ_VPRASANJ, min(stevilo, NAJVEC_VPRASANJ))
 
 
+def _prebrano_stevilo(vrednost: str) -> int:
+    """Polje „vprašanj na sliko" iz obrazca ali naslova.
+
+    Bere se kot niz in ne kot `int`, ker bi FastAPI ob nerazberljivi vrednosti
+    sam vrnil **422 s surovim angleškim JSON** (`Input should be a valid
+    integer`) — pod predpono `/admin`, kjer je vse ostalo slovensko in kjer
+    `CLAUDE.md` v merilu dokončanosti surovo sistemsko besedilo kot edino
+    vsebino prepoveduje. Prestreznik v `create_app` lovi samo
+    `StarletteHTTPException` in te napake ne pokrije.
+
+    Nerazberljiva vrednost pade nazaj na privzetek; polje na strani takoj
+    pokaže, kaj velja. Do tega pride le z ročno vtipkanim naslovom — polje v
+    obrazcu je `type="number"`.
+    """
+    try:
+        return _stevilo_v_mejah(int(vrednost))
+    except ValueError:
+        return PRIVZETO_STEVILO
+
+
 def _razlog(snov: SnovZaIzbor) -> str | None:
     """Zakaj snovi ni mogoče dati v kviz, ali `None`, kadar je mogoče.
 
@@ -270,7 +290,7 @@ def izbirnik(
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
     vstop: str = VSTOP_NOVA,
     subject: str | None = None,
-    stevilo: int = PRIVZETO_STEVILO,
+    stevilo: str = str(PRIVZETO_STEVILO),
 ) -> Response:
     """Izbirnik slik ob prihodu z enega od treh vstopov.
 
@@ -288,7 +308,7 @@ def izbirnik(
         nastavitve.images_dir,
         vstop=vstop,
         subject=subject,
-        stevilo=_stevilo_v_mejah(stevilo),
+        stevilo=_prebrano_stevilo(stevilo),
     )
 
 
@@ -300,7 +320,7 @@ def izbirnik_z_izborom(
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
     vstop: Annotated[str, Form()] = VSTOP_NOVA,
     subject: Annotated[str | None, Form()] = None,
-    stevilo: Annotated[int, Form()] = PRIVZETO_STEVILO,
+    stevilo: Annotated[str, Form()] = str(PRIVZETO_STEVILO),
     snov: Annotated[list[str] | None, Form()] = None,
 ) -> Response:
     """Izbirnik ob vrnitvi iz predogleda („Nazaj na izbor").
@@ -319,7 +339,7 @@ def izbirnik_z_izborom(
         nastavitve.images_dir,
         vstop=vstop,
         subject=subject,
-        stevilo=_stevilo_v_mejah(stevilo),
+        stevilo=_prebrano_stevilo(stevilo),
         izbrane=set(snov or []),
     )
 
@@ -332,7 +352,7 @@ def predogled(
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
     vstop: Annotated[str, Form()] = VSTOP_NOVA,
     subject: Annotated[str | None, Form()] = None,
-    stevilo: Annotated[int, Form()] = PRIVZETO_STEVILO,
+    stevilo: Annotated[str, Form()] = str(PRIVZETO_STEVILO),
     snov: Annotated[list[str] | None, Form()] = None,
 ) -> Response:
     """Predogled izbranih vprašanj. **Ničesar ne shrani** (`ADR-016` C).
@@ -345,7 +365,7 @@ def predogled(
     if napaka is not None:
         return napaka
 
-    koliko = _stevilo_v_mejah(stevilo)
+    koliko = _prebrano_stevilo(stevilo)
     izbrane = list(snov or [])
 
     skupine = [
@@ -442,13 +462,23 @@ def objavi(
     Neznan identifikator pomeni zavrnitev in ne krajši kviz — polovičen kviz,
     ki tega ne pove, je slabši od zavrnitve, ki jo operater vidi.
     """
-    vprasanja = repozitorij.vprasanja_po_idjih(list(vprasanje or []))
+    idji = list(vprasanje or [])
+    if not idji:
+        return ni_dovoljeno(
+            predloge,
+            request,
+            "Kviza ni bilo mogoče objaviti, ker ni bilo izbrano nobeno "
+            "vprašanje. Vrni se na izbor snovi in klikni „Sestavi“.",
+        )
+
+    vprasanja = repozitorij.vprasanja_po_idjih(idji)
     if vprasanja is None:
         return ni_dovoljeno(
             predloge,
             request,
-            "Kviza ni bilo mogoče objaviti: vsaj eno izmed izbranih vprašanj "
-            "ni več na voljo. Vrni se in sestavi izbor znova.",
+            "Kviza ni bilo mogoče objaviti: izbor vprašanj ni veljaven — "
+            "kakšnega vprašanja ni več ali pa se je katero ponovilo. Vrni se "
+            "in sestavi izbor znova.",
         )
 
     predmet = None if vstop == VSTOP_DANES else (subject or None)
@@ -470,6 +500,9 @@ def _pogled_kviza(kviz: Quiz, postavk: int) -> dict[str, Any]:
         "ime": kviz.name,
         "koda": kviz.subject or VSI_PREDMETI,
         "nastal": cas(kviz.created_at),
+        # Sam datum za seznam: tam je ura odveč, predmet in datum pa sta
+        # kriterij — ime je prepisljivo in ju ob prepisu ne nosi več.
+        "nastal_datum": datum(kviz.created_at),
         "vprasanj": postavk,
         "vprasanj_opis": _stevilo_z_besedo(postavk, VPRASANJA),
         "preklican": kviz.canceled_at is not None,
