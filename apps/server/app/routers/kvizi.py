@@ -72,6 +72,18 @@ PREDOLG_KVIZ = 30
 #: Ime, pod katerim nastopa kviz čez več predmetov.
 VSI_PREDMETI = "Vsi predmeti"
 
+#: Meji dolžine, ki morata biti **enaki širini stolpcev** v `app/models.py`
+#: (`Quiz.name` je `String(200)`, `Quiz.subject` `String(16)`).
+#:
+#: Preverba je tu in ne v `Form(max_length=…)` iz dveh razlogov: `Form` bi ob
+#: predolgem vnosu vrnil surov angleški 422 (isti razlog kot pri
+#: `_prebrano_stevilo`), predvsem pa tega ne sme ujeti šele baza. Testi tečejo
+#: nad SQLite, ki dolžine `VARCHAR` **ne uveljavlja**; na Postgresu bi bil
+#: predolg vnos `DataError` in operater bi dobil angleški „Internal Server
+#: Error". To je razred napake, ki ga zelena zbirka ne pokaže.
+NAJVEC_IME = 200
+NAJVEC_KODA = 16
+
 
 def _stevilo_z_besedo(koliko: int, oblike: tuple[str, str, str, str]) -> str:
     """Število z ustrezno sklonsko obliko samostalnika.
@@ -461,7 +473,33 @@ def objavi(
     Obrazec pove, **katera** vprašanja; kaj v njih piše, se prebere iz baze.
     Neznan identifikator pomeni zavrnitev in ne krajši kviz — polovičen kviz,
     ki tega ne pove, je slabši od zavrnitve, ki jo operater vidi.
+
+    Ta pot je edina, ki v bazo **piše**, zato vsakemu polju pogleda pod prste:
+    vstop, dolžino imena in dolžino kode predmeta. Prej tega ni delala, ker
+    vse troje pride iz skritih polj, ki jih je izrisal predogled — a skrito
+    polje ni varovalka, po istem pravilu kot gumb, ki ga stran ne izriše.
     """
+    napaka = _preveri_vstop(predloge, request, vstop, subject)
+    if napaka is not None:
+        return napaka
+
+    ime = ime.strip()
+    if len(ime) > NAJVEC_IME:
+        return ni_dovoljeno(
+            predloge,
+            request,
+            f"Ime kviza je predolgo: {len(ime)} znakov, največ jih sme biti "
+            f"{NAJVEC_IME}. Skrajšaj ga in poskusi znova.",
+        )
+
+    if subject is not None and len(subject) > NAJVEC_KODA:
+        return ni_dovoljeno(
+            predloge,
+            request,
+            "Koda predmeta je predolga. Kviz sestavi znova prek razdelka "
+            "Kvizi na pregledni strani.",
+        )
+
     idji = list(vprasanje or [])
     if not idji:
         return ni_dovoljeno(

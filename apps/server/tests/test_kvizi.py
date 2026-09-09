@@ -1248,3 +1248,168 @@ class TestPopravkiPoPregledu:
         assert "Input should be" not in odgovor.text
         # Pade nazaj na privzetek in to takoj pokaze v polju.
         assert 'name="stevilo" value="3"' in odgovor.text
+
+
+class TestPredogledJeZadnjaBeseda:
+    """Predogled je poizvedba, ki doloci, kaj bo zamrznjeno v kviz.
+
+    Prej so bili njegovi filtri nepokriti: `retired_at IS NULL` in
+    `archived_at IS NULL` v `KviziRepository.snovi_z_vprasanji` sta se dala
+    odstraniti, ne da bi kateri koli test padel. Testi izbirnika tega ne
+    ujamejo — izbirnik in predogled sta dve razlicni poizvedbi.
+    """
+
+    def test_predogled_ponudi_novo_serijo_in_ne_upokojene(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Po ponovni obdelavi predogled ponudi **novo** serijo.
+
+        Stara in nova serija imata obe `position` 1..n, zato ju ne loci
+        vrstni red, ampak samo `retired_at`. Brez tega filtra bi operater
+        potrdil staro vprasanje in objava bi ga po `ADR-018` brez ugovora
+        zamrznila v kviz.
+        """
+        snov(motor, slike, UUID_ENA, vprasanj=3)
+        upokoji(motor, UUID_ENA)
+        with Session(motor) as seja:
+            material = seja.get(Material, UUID_ENA)
+            assert material is not None
+            material.vsa_vprasanja.append(
+                Question(
+                    id=f"{UUID_ENA}-nov1",
+                    position=1,
+                    question="Vprasanje iz nove serije?",
+                    answer="Odgovor iz nove serije.",
+                    subject="MAT",
+                    material_taken_at=material.taken_at,
+                )
+            )
+            seja.commit()
+
+        odgovor = odjemalec.post(
+            "/admin/quizzes/preview",
+            data={"vstop": "nova", "subject": "MAT", "stevilo": "3", "snov": [UUID_ENA]},
+        )
+
+        assert "Vprasanje iz nove serije?" in odgovor.text
+        assert "Vprašanje 1 iz 3f2b?" not in odgovor.text
+        assert odgovor.text.count('name="vprasanje"') == 1
+
+    def test_snov_arhivirana_med_izborom_in_sestavi_izpade(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Arhiv velja tudi za pot predogleda, ne le za izbirnik.
+
+        Med izborom in klikom „Sestavi" mine nekaj sekund; v drugem zavihku
+        je snov lahko medtem sla v arhiv. Docstring metode to obljublja, prej
+        pa tega ni drzalo nic.
+        """
+        snov(motor, slike, UUID_ENA)
+        snov(motor, slike, UUID_DVA)
+        with Session(motor) as seja:
+            material = seja.get(Material, UUID_DVA)
+            assert material is not None
+            material.archived_at = datetime.now(UTC)
+            seja.commit()
+
+        odgovor = odjemalec.post(
+            "/admin/quizzes/preview",
+            data={
+                "vstop": "nova",
+                "subject": "MAT",
+                "stevilo": "3",
+                "snov": [UUID_ENA, UUID_DVA],
+            },
+        )
+
+        assert f'href="/admin/materials/{UUID_ENA}"' in odgovor.text
+        assert f'href="/admin/materials/{UUID_DVA}"' not in odgovor.text
+        assert odgovor.text.count('name="vprasanje"') == 3
+
+
+class TestObjavaPreverjaVhod:
+    """Objava je edina pot, ki pise v bazo, zato vsakemu polju pogleda pod prste."""
+
+    def test_predolgo_ime_ne_pride_do_baze(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """`Quiz.name` je `String(200)`.
+
+        SQLite dolzine `VARCHAR` ne uveljavlja, zato bi bil predolg vnos v
+        testih zelen in bi na Postgresu postal `DataError` -> angleski
+        „Internal Server Error". Preverba mora biti v kodi, ne v bazi.
+        """
+        snov(motor, slike, UUID_ENA)
+
+        odgovor = odjemalec.post(
+            "/admin/quizzes",
+            data={
+                "vstop": "nova",
+                "subject": "MAT",
+                "ime": "x" * 201,
+                "vprasanje": [f"{UUID_ENA}-v1"],
+            },
+        )
+
+        assert odgovor.status_code == 409
+        assert "predolgo" in odgovor.text
+        with Session(motor) as seja:
+            assert seja.scalar(select(func.count()).select_from(Quiz)) == 0
+
+    def test_ime_na_meji_je_se_sprejeto(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        snov(motor, slike, UUID_ENA)
+
+        odgovor = odjemalec.post(
+            "/admin/quizzes",
+            data={
+                "vstop": "nova",
+                "subject": "MAT",
+                "ime": "x" * 200,
+                "vprasanje": [f"{UUID_ENA}-v1"],
+            },
+            follow_redirects=False,
+        )
+
+        assert odgovor.status_code == 303
+
+    def test_predolga_koda_predmeta_ne_pride_do_baze(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # `Quiz.subject` je `String(16)`; isti razlog kot pri imenu.
+        snov(motor, slike, UUID_ENA)
+
+        odgovor = odjemalec.post(
+            "/admin/quizzes",
+            data={
+                "vstop": "nova",
+                "subject": "P" * 17,
+                "ime": "",
+                "vprasanje": [f"{UUID_ENA}-v1"],
+            },
+        )
+
+        assert odgovor.status_code == 409
+        with Session(motor) as seja:
+            assert seja.scalar(select(func.count()).select_from(Quiz)) == 0
+
+    def test_neznan_vstop_ne_ustvari_kviza(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Edina pot v modulu, ki vhodu iz obrazca prej ni pogledala pod prste.
+        snov(motor, slike, UUID_ENA)
+
+        odgovor = odjemalec.post(
+            "/admin/quizzes",
+            data={
+                "vstop": "izmisljen",
+                "subject": "MAT",
+                "ime": "",
+                "vprasanje": [f"{UUID_ENA}-v1"],
+            },
+        )
+
+        assert odgovor.status_code == 404
+        with Session(motor) as seja:
+            assert seja.scalar(select(func.count()).select_from(Quiz)) == 0

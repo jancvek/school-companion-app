@@ -46,9 +46,21 @@ Trije razlogi:
 
 Meja te odločitve: **velja samo za objavo po opravljenem predogledu.** Izbirnik
 in predogled upokojena vprašanja še naprej izločata; tam kontrolni seznam
-velja nespremenjen in to dokazujeta testa
-`test_upokojeno_vprasanje_ne_steje_za_bilo_v_kvizu` in
-`test_obdelana_snov_brez_veljavnih_vprasanj`.
+plana velja nespremenjen. Vsak od obeh ima svoj dokaz — prva različica tega
+ADR je za predogled imenovala testa, ki sta pokrivala samo izbirnik, in to je
+odkril drugi krog pregleda:
+
+| Kje | Poizvedba | Test |
+|---|---|---|
+| izbirnik — število vprašanj | `KviziRepository._stej_veljavna` | `test_obdelana_snov_brez_veljavnih_vprasanj` |
+| izbirnik — „bila v kvizu" | `KviziRepository._ze_v_kvizu` | `test_upokojeno_vprasanje_ne_steje_za_bilo_v_kvizu` |
+| **predogled** | `KviziRepository.snovi_z_vprasanji` | `test_predogled_ponudi_novo_serijo_in_ne_upokojene` |
+
+Zadnja vrstica je pomembnejša od prvih dveh: predogled je poizvedba, ki
+določa, kaj bo dejansko zamrznjeno v kviz. Če bi njen filter odpadel, bi
+predogled po ponovni obdelavi ponudil staro serijo — obe imata `position`
+1..n in med njima ne bi ločil nihče —, operater bi jo potrdil, objava pa bi
+jo po tej odločitvi brez ugovora sprejela.
 
 ## Kaj objava vseeno preverja
 
