@@ -218,6 +218,52 @@ def test_obstojeca_vprasanja_prezivijo_prepis_tabele(baza: str) -> None:
         motor.dispose()
 
 
+def test_obstojece_vprasanje_je_po_migraciji_veljavno(baza: str) -> None:
+    """Vrstica iz V1-R03 mora migracijo `0004` prestati kot **veljavno** vprašanje.
+
+    To je smisel tega, da je `retired_at` `NULL`-abilen brez privzetka:
+    `NULL` pomeni veljavno vprašanje (`docs/odlocitve/ADR-015`), zato obstoječih
+    vrstic ni treba nikamor prepisati. Če bi kdo stolpcu kdaj dal `NOT NULL` s
+    privzetkom „zdaj", bi migracija vsa dosedanja vprašanja tiho upokojila —
+    kviz `V2-R01` bi po namestitvi ostal brez vsebine in nihče ne bi vedel zakaj.
+    """
+    config = alembic_nastavitve(baza)
+    command.upgrade(config, "0003_arhiv")
+
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            povezava.execute(
+                text(
+                    "INSERT INTO materials "
+                    "(id, subject, taken_at, image_path, status, received_at) "
+                    "VALUES ('star', 'ZGO', '2026-09-01 08:00:00', "
+                    "'/data/images/star.jpg', 'ready', '2026-09-01 08:05:00')"
+                )
+            )
+            povezava.execute(
+                text(
+                    "INSERT INTO questions "
+                    "(id, material_id, position, question, answer, subject) "
+                    "VALUES ('v1', 'star', 1, 'Kdaj?', 'Leta 1991.', 'ZGO')"
+                )
+            )
+
+        command.upgrade(config, "head")
+
+        with motor.connect() as povezava:
+            vrstica = povezava.execute(
+                text("SELECT question, answer, retired_at FROM questions WHERE id = 'v1'")
+            ).one()
+
+        # Vsebina nedotaknjena, stolpec prazen — ne izmišljen.
+        assert vrstica.question == "Kdaj?"
+        assert vrstica.answer == "Leta 1991."
+        assert vrstica.retired_at is None
+    finally:
+        motor.dispose()
+
+
 def test_razveljavitev_prezivi_podatke(baza: str) -> None:
     """`downgrade` nad polno bazo, ne le nad prazno.
 
@@ -254,15 +300,27 @@ def test_razveljavitev_prezivi_podatke(baza: str) -> None:
                     "VALUES ('v2', NULL, 1, 'Brez materiala?', 'Da.', 'MAT')"
                 )
             )
+            # Upokojeno vprašanje, da gre `downgrade` migracije `0004` res
+            # čez vrstico, ki ima stolpec napolnjen. Brez nje bi `DROP COLUMN`
+            # tekel nad samimi praznimi vrednostmi in ne bi dokazal ničesar.
+            povezava.execute(
+                text(
+                    "INSERT INTO questions "
+                    "(id, material_id, position, question, answer, subject, retired_at) "
+                    "VALUES ('v3', 'star', 1, 'Stara serija?', 'Da.', 'MAT', "
+                    "'2026-09-06 09:00:00')"
+                )
+            )
 
         command.downgrade(config, "0002_obdelava")
 
         with motor.connect() as povezava:
             preostala = povezava.execute(text("SELECT id FROM questions")).scalars().all()
 
-        # Vprašanje z materialom ostane, sirota gre — tako je zapisano v
-        # docstringu migracije in nikjer drugje to ni preverjeno.
-        assert preostala == ["v1"]
+        # Vprašanje z materialom ostane — tudi upokojeno, ki po `DROP COLUMN`
+        # od veljavnega ni več ločljivo. Sirota gre; tako je zapisano v
+        # docstringu migracije `0003_arhiv` in nikjer drugje to ni preverjeno.
+        assert preostala == ["v1", "v3"]
     finally:
         motor.dispose()
 

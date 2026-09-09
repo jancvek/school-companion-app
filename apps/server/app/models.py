@@ -114,34 +114,79 @@ class Material(Base):
     #: Zakaj obdelava ni uspela. Slovensko, berljivo — ne gola sled izjeme.
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    #: Vprašanja tega materiala, po zaporedju.
+    # --- Vprašanja: tri zveze, ker „vprašanja materiala" ni eno samo ---
+    #
+    # Zveze `questions` namenoma **ni več** (bila je do V2-R05). Odkar
+    # `docs/odlocitve/ADR-015` pozna upokojena vprašanja, je nevtralno zveneče
+    # ime past: bralec, ki ga vzame brez razmisleka, dobi tudi upokojena in
+    # tega mu sveža baza nikoli ne pokaže — tam ima material natanko eno
+    # serijo. Zato ima vsaka od treh vlog svoje ime.
+
+    #: **Vsa** vprašanja, veljavna in upokojena. Ni za prikaz.
+    #:
+    #: Edina pisljiva zveza od treh. Nosi dvoje:
+    #:
+    #: 1. vstavljanje nove serije ob zapisu izida obdelave;
+    #: 2. ORM-jevo postavljanje `material_id = NULL` ob brisanju materiala.
+    #:
+    #: Točka 2 je razlog, da ta zveza sploh ostaja nefiltrirana. Filtrirana
+    #: zveza upokojenih vprašanj ob brisanju ne bi videla in ta bi ostala z
+    #: visečim `material_id`; na SQLite, kjer tuji ključi privzeto niso
+    #: uveljavljeni, bi bila taka napaka v testih zelena in bi se pokazala
+    #: šele na Postgresu (`docs/odlocitve/ADR-012`).
     #:
     #: **Brez kaskade brisanja.** Do V1-R07 sta tu stali dve mreži, ki sta
-    #: vprašanja pobrisali skupaj z materialom; `docs/odlocitve/ADR-012` ju
-    #: namenoma odstrani, ker mora vprašanje material preživeti. Ob brisanju
-    #: materiala ORM otrokom postavi `material_id = NULL` — tudi na SQLite,
-    #: kjer tuji ključi privzeto niso uveljavljeni, zato testi še naprej
-    #: dokazujejo isto kot produkcija.
-    #:
-    #: Posledica, ki se ne vidi sama od sebe: `questions.clear()` odslej
-    #: vprašanj ne pobriše, ampak jih osiroti. Kjer jih je treba res
-    #: pobrisati, to počne `MaterialsRepository` izrecno.
-    questions: Mapped[list["Question"]] = relationship(
+    #: vprašanja pobrisali skupaj z materialom; `ADR-012` ju je odstranil, ker
+    #: mora vprašanje material preživeti. Posledica, ki se ne vidi sama od
+    #: sebe: `clear()` odslej vprašanj ne pobriše, ampak jih osiroti.
+    vsa_vprasanja: Mapped[list["Question"]] = relationship(
         back_populates="material",
         order_by="Question.position",
+    )
+
+    #: Veljavna vprašanja materiala — to, kar `ADR-015` misli z „vprašanja
+    #: materiala". Zadnja serija, ki jo je vrnil model.
+    #:
+    #: `viewonly=True` ni okras: brez njega bi SQLAlchemy tri zveze nad istim
+    #: tujim ključem razumel kot tri poti, ki si lastijo `material_id`, in
+    #: opozoril na prekrivanje. Pisanje teče izključno skozi `vsa_vprasanja`
+    #: in skozi `MaterialsRepository`.
+    veljavna_vprasanja: Mapped[list["Question"]] = relationship(
+        primaryjoin=(
+            "and_(Material.id == Question.material_id, Question.retired_at.is_(None))"
+        ),
+        order_by="Question.position",
+        viewonly=True,
+    )
+
+    #: Upokojena vprašanja: serije prejšnjih obdelav te snovi.
+    #:
+    #: Urejena po `retired_at` in šele nato po `position`, ker je `position`
+    #: enolična znotraj **serije** in ne znotraj materiala (`ADR-015`) —
+    #: skupen `retired_at` je edino, po čemer se serija prepozna.
+    upokojena_vprasanja: Mapped[list["Question"]] = relationship(
+        primaryjoin=(
+            "and_(Material.id == Question.material_id,"
+            " Question.retired_at.is_not(None))"
+        ),
+        order_by="Question.retired_at, Question.position",
+        viewonly=True,
     )
 
 
 class Question(Base):
     """Eno vprašanje, ki ga je model sestavil iz ene snovi.
 
-    Lastna tabela in ne polje JSON na `materials`, ker bo `V1-R05` ocene
+    Lastna tabela in ne polje JSON na `materials`, ker bo `V2-R02` ocene
     težavnosti vezala na `question_id` — vprašanje mora imeti obstojen
     identifikator.
 
-    Vprašanje **ni trajno:** ponovna obdelava zavrže prejšnji rezultat skupaj
-    z vsemi vprašanji materiala. Glej `docs/odlocitve/ADR-009`, ki to zapiše
-    prav zato, da `V1-R05` tega ne odkrije naknadno v kodi.
+    **Vprašanje je trajno.** Do V2-R05 ni bilo: ponovna obdelava je prejšnji
+    rezultat zavrgla skupaj z vsemi vprašanji materiala (`ADR-009`, odločitev
+    A1). `docs/odlocitve/ADR-015` to nadomesti — brisanja ni več, staro
+    vprašanje dobi `retired_at`. Brez tega bi gumb „Pošlji v obdelavo" tiho
+    razbil objavljen kviz, ki na `question_id` kaže (`V2-R01`), in statistiko
+    čez leta, ki stoji na tem, da vprašanje ohrani identiteto (`V2-R04`).
     """
 
     __tablename__ = "questions"
@@ -175,8 +220,12 @@ class Question(Base):
         DateTime(timezone=True), nullable=True
     )
 
-    #: Zaporedna številka znotraj materiala (od 1). Vrstni red, v katerem jih
+    #: Zaporedna številka znotraj **serije** (od 1). Vrstni red, v katerem jih
     #: je vrnil model, je vrstni red, v katerem se pokažejo.
+    #:
+    #: Znotraj materiala enolična ni: druga obdelava iste snovi začne spet pri
+    #: 1. Enoličnost znotraj serije je dovolj, ker se serije nikoli ne
+    #: prikazujejo pomešane (`docs/odlocitve/ADR-015`).
     position: Mapped[int] = mapped_column(Integer, nullable=False)
 
     #: Besedilo vprašanja.
@@ -187,4 +236,19 @@ class Question(Base):
     #: novim klicem modela.
     answer: Mapped[str] = mapped_column(Text, nullable=False)
 
-    material: Mapped[Material | None] = relationship(back_populates="questions")
+    #: Kdaj je bilo vprašanje upokojeno; `NULL` pomeni **veljavno** vprašanje.
+    #:
+    #: Svoja os in ne novo stanje, po istem vzorcu kot `Material.archived_at`
+    #: (`docs/odlocitve/ADR-011`): upokojeno vprašanje je še vedno vprašanje,
+    #: le v novo serijo se ne uvršča.
+    #:
+    #: Vsa vprašanja ene serije dobijo **isti** žig — po njem se serija
+    #: prepozna in zato dodatnega stolpca za oznako serije ni. Upokojitev je
+    #: enosmerna: nazaj na `NULL` ne gre nikoli, in ročnega gumba zanjo ni,
+    #: ker je posledica ponovne obdelave in ne samostojno dejanje
+    #: (`docs/odlocitve/ADR-015`).
+    retired_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    material: Mapped[Material | None] = relationship(back_populates="vsa_vprasanja")

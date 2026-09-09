@@ -88,7 +88,10 @@ def obdelaj(
         material.input_tokens = 1500
         material.output_tokens = 2000
         material.error = error
-        material.questions = [
+        # `vsa_vprasanja` in ne `veljavna_vprasanja`: druga je `viewonly` in
+        # skoznjo se ne piše (`docs/odlocitve/ADR-015`). Nova vprašanja imajo
+        # `retired_at` prazen, torej so veljavna.
+        material.vsa_vprasanja = [
             Question(
                 id=f"{material_id}-v{i}",
                 position=i,
@@ -130,10 +133,77 @@ def cas_arhiviranja(motor: Engine, material_id: str = UUID_ENA) -> datetime | No
         return material.archived_at
 
 
+def dodaj_serijo(
+    motor: Engine,
+    material_id: str = UUID_ENA,
+    *,
+    koliko: int = 3,
+    oznaka: str = "b",
+) -> None:
+    """Doda zapisu novo serijo veljavnih vprašanj, oštevilčeno spet od 1.
+
+    Ločeno od `obdelaj`, ki zbirko **zamenja** in bi s tem prejšnjo serijo
+    osirotel. `position` se z vsako serijo začne znova — enolična je znotraj
+    serije in ne znotraj materiala (`docs/odlocitve/ADR-015`) — zato `oznaka`
+    loči `id` vrstic, ki bi si sicer bile enake.
+    """
+    with Session(motor) as seja:
+        material = seja.get(Material, material_id)
+        assert material is not None
+        for i in range(1, koliko + 1):
+            material.vsa_vprasanja.append(
+                Question(
+                    id=f"{material_id}-{oznaka}{i}",
+                    position=i,
+                    question=f"Vprašanje {oznaka}{i}?",
+                    answer=f"Odgovor {oznaka}{i}.",
+                )
+            )
+        seja.commit()
+
+
+def upokoji_vprasanja(
+    motor: Engine,
+    material_id: str = UUID_ENA,
+    *,
+    ob_casu: str = "2026-09-06T09:00:00+00:00",
+) -> None:
+    """Upokoji vsa veljavna vprašanja zapisa, kot bi to storila ponovna obdelava.
+
+    Neposredno v bazo in ne skozi `vrni_v_vrsto`: te strani berejo stanje, ne
+    poti, po kateri je stanje nastalo — isti razlog kot pri `zapisi` in
+    `obdelaj`.
+    """
+    with Session(motor) as seja:
+        material = seja.get(Material, material_id)
+        assert material is not None
+        for vprasanje in material.veljavna_vprasanja:
+            vprasanje.retired_at = datetime.fromisoformat(ob_casu)
+        seja.commit()
+
+
 def stevilo_vprasanj(motor: Engine) -> int:
-    """Koliko vrstic je v tabeli `questions`."""
+    """Koliko vrstic je v tabeli `questions` — veljavnih in upokojenih skupaj."""
     with Session(motor) as seja:
         return seja.scalar(select(func.count()).select_from(Question)) or 0
+
+
+def stevilo_veljavnih(motor: Engine) -> int:
+    """Koliko vrstic nima postavljenega `retired_at`.
+
+    Ločeno od `stevilo_vprasanj` zato, ker je od V2-R05 razlika med „vrstice
+    ni" in „vrstica je, a ni veljavna" celotna vsebina zahteve
+    (`docs/odlocitve/ADR-015`).
+    """
+    with Session(motor) as seja:
+        return (
+            seja.scalar(
+                select(func.count())
+                .select_from(Question)
+                .where(Question.retired_at.is_(None))
+            )
+            or 0
+        )
 
 
 def stevilo_vrstic(motor: Engine) -> int:
@@ -779,7 +849,26 @@ class TestDokoncnoBrisanje:
 
         besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}/delete").text
 
-        assert "Vprašanja (5) ostanejo" in besedilo
+        assert "veljavnih: 5" in besedilo
+
+    def test_potrditvena_stran_steje_tudi_upokojena(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Poved je o tem, kaj brisanje **pusti**, in po `ADR-012` ostane oboje.
+
+        Samo veljavna bi bila tu podcenjena številka: operater bi mislil, da
+        briše več, kot briše, in prav to zmoto naj bi ta stavek odpravil.
+        """
+        zapisi(motor, slike)
+        obdelaj(motor)
+        upokoji_vprasanja(motor)
+        dodaj_serijo(motor, koliko=3)
+        arhiviraj(motor, potrjeno=True)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}/delete").text
+
+        assert "veljavnih: 3" in besedilo
+        assert "upokojenih: 5" in besedilo
 
     def test_post_izbrise_vrstico_in_datoteko_ter_pelje_v_arhiv(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -1170,6 +1259,77 @@ class TestOblikovanje:
         assert oznaka_statusa("ready") == "obdelano"
 
 
+class TestPrikazUpokojenih:
+    """Kriterij V2-R05: razlika med „ni vprašanj" in „vsa so upokojena".
+
+    Brez tega razdelka je razlika nevidna — stran v obeh primerih kaže prazen
+    seznam, operater pa iz tega sklepa, da vprašanj ni bilo nikoli. Razdelek
+    zato ne visi v veji `ready`, ampak zunaj vseh vej po statusu: snov, ki je
+    bila pravkar poslana v ponovno obdelavo, je `new` in prav takrat je to
+    edino, kar o njenih vprašanjih sploh piše.
+    """
+
+    def test_stran_izrise_samo_veljavna_vprasanja(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Besedila upokojenih vprašanj na strani ni.
+
+        Pomešana med veljavna bi bila neopazna, ker se `position` z vsako
+        serijo začne znova (`docs/odlocitve/ADR-015`).
+        """
+        zapisi(motor, slike)
+        obdelaj(motor)
+        upokoji_vprasanja(motor)
+        dodaj_serijo(motor, koliko=9)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "Vprašanje b9?" in besedilo
+        assert "Odgovor b9." in besedilo
+        # Prva serija je upokojena; njeno besedilo ne sme priti na stran.
+        assert "Vprašanje 1?" not in besedilo
+        assert "Odgovor 1." not in besedilo
+
+    def test_stran_pove_koliko_vprasanj_je_upokojenih(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        obdelaj(motor)
+        upokoji_vprasanja(motor)
+        dodaj_serijo(motor, koliko=9)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "Upokojena vprašanja: 5" in besedilo
+
+    def test_snov_brez_zgodovine_razdelka_nima(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """„Ni vprašanj" — prva stran razlike."""
+        zapisi(motor, slike)
+        obdelaj(motor, readable=False, koliko_vprasanj=0)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "Upokojena vprašanja" not in besedilo
+
+    def test_snov_po_ponovni_obdelavi_razdelek_ima(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """„Vsa so upokojena" — druga stran razlike.
+
+        Zapis je po gumbu spet `new` in nima nobenega veljavnega vprašanja.
+        Prav ta primer je razlog, da razdelek stoji zunaj vej po statusu.
+        """
+        zapisi(motor, slike)
+        obdelaj(motor)
+
+        odjemalec.post(f"/admin/materials/{UUID_ENA}/reprocess")
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert "Upokojena vprašanja: 5" in besedilo
+
+
 class TestPrikazObdelave:
     """Stran s podrobnostmi mora pokazati izid obdelave (V1-R03)."""
 
@@ -1291,17 +1451,24 @@ class TestPonovnaObdelava:
             assert material is not None
             assert material.status == STATUS_NOV
 
-    def test_zavrze_prejsnji_rezultat_in_vprasanja(
+    def test_zavrze_prejsnji_rezultat_vprasanja_pa_upokoji(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
-        """ADR-009: material ima največ en niz vprašanj."""
+        """ADR-009 velja naprej za izid; za vprašanja ga nadomesti ADR-015.
+
+        Do V2-R05 je ta test zahteval prazno tabelo. Sprememba ni oslabitev,
+        ampak nova pogodba: gumb, ki vprašanje pobriše, bi razbil kviz, ki
+        nanj kaže (`V2-R01`), in statistiko čez leta (`V2-R04`).
+        """
         zapisi(motor, slike)
         obdelaj(motor)
         assert stevilo_vprasanj(motor) == 5
 
         odjemalec.post(f"/admin/materials/{UUID_ENA}/reprocess")
 
-        assert stevilo_vprasanj(motor) == 0
+        # Vseh pet vrstic ostane; nobena ni več veljavna.
+        assert stevilo_vprasanj(motor) == 5
+        assert stevilo_veljavnih(motor) == 0
         with Session(motor) as seja:
             material = seja.get(Material, UUID_ENA)
             assert material is not None
@@ -1424,6 +1591,38 @@ class TestBrisanjeZVprasanji:
             for vprasanje in seja.scalars(select(Question)):
                 assert vprasanje.material_id is None
 
+    def test_brisanje_pusti_tudi_upokojena_vprasanja(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """`ADR-012` ne pozna razlike med veljavnim in upokojenim vprašanjem.
+
+        Ta test je razlog, da zveza `Material.vsa_vprasanja` sploh obstaja:
+        nuliranje `material_id` ob brisanju opravi ORM prek nje, in filtrirana
+        zveza upokojenih vprašanj ne bi videla. Na SQLite tuji ključi privzeto
+        niso uveljavljeni, zato bi ta vrsta napake ostala zelena tu in se
+        pokazala šele na Postgresu.
+        """
+        pot = zapisi(motor, slike)
+        obdelaj(motor)
+        upokoji_vprasanja(motor)
+        dodaj_serijo(motor, koliko=9)
+        arhiviraj(motor, potrjeno=True)
+        assert stevilo_vprasanj(motor) == 14
+
+        odgovor = odjemalec.post(
+            f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False
+        )
+
+        assert odgovor.status_code == 303
+        assert stevilo_vrstic(motor) == 0
+        assert not pot.exists()
+        # Vseh štirinajst ostane, veljavnih in upokojenih enako.
+        assert stevilo_vprasanj(motor) == 14
+        assert stevilo_veljavnih(motor) == 9
+        with Session(motor) as seja:
+            for vprasanje in seja.scalars(select(Question)):
+                assert vprasanje.material_id is None
+
     def test_brisanje_ne_zamaje_vprasanj_drugega_materiala(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
@@ -1443,21 +1642,29 @@ class TestBrisanjeZVprasanji:
             ).all()
             assert len(sosedova) == 4
 
-    def test_ponovna_obdelava_vprasanja_se_vedno_zavrze(
+    def test_ponovna_obdelava_vprasanja_upokoji_in_jim_pusti_material(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
-        """Upokojevanje vprašanj je V2; do takrat velja `ADR-009`.
+        """Upokojitev ni osirotenje: material ostane, `retired_at` se postavi.
 
-        Brez tega testa bi odstranitev `delete-orphan` iz modela tiho
-        spremenila ponovno obdelavo iz brisanja v osirotenje — in vsak nov
-        klic bi za sabo puščal kup vprašanj brez materiala.
+        Do V2-R05 je ta test zahteval, da ponovna obdelava vprašanja pobriše —
+        varovalo, da odstranitev `delete-orphan` iz modela (`ADR-012`) brisanja
+        tiho ne spremeni v osirotenje. `ADR-015` brisanje odpravi, varovalo pa
+        ostane potrebno in se le obrne: vprašanje mora obdržati `material_id`,
+        sicer bi bila v bazi kopica vprašanj brez izvora, ki jih ni več mogoče
+        povezati s snovjo, iz katere so nastala.
         """
         zapisi(motor, slike)
         obdelaj(motor)
 
         odjemalec.post(f"/admin/materials/{UUID_ENA}/reprocess")
 
-        assert stevilo_vprasanj(motor) == 0
+        assert stevilo_vprasanj(motor) == 5
+        assert stevilo_veljavnih(motor) == 0
+        with Session(motor) as seja:
+            for vprasanje in seja.scalars(select(Question)):
+                assert vprasanje.material_id == UUID_ENA
+                assert vprasanje.retired_at is not None
 
 
 class TestSledJeVidnaTudiPriNapaki:

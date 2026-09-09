@@ -9,13 +9,15 @@ svoji datoteki, ker so to koraki iste poti in se berejo skupaj.
 """
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app import db
 from app.db import IzidObdelave, MaterialsRepository, VprasanjeZaZapis
 from app.models import (
     STATUS_NAPAKA,
@@ -73,14 +75,59 @@ def preberi(motor: Engine, material_id: str = UUID_ENA) -> Material:
     with Session(motor) as seja:
         material = seja.get(Material, material_id)
         assert material is not None
-        # Vprašanja se preberejo, dokler je seja odprta.
-        len(material.questions)
+        # Vse tri zbirke vprašanj se preberejo, dokler je seja odprta.
+        len(material.vsa_vprasanja)
+        len(material.veljavna_vprasanja)
+        len(material.upokojena_vprasanja)
         return material
 
 
 def stevilo_vprasanj(motor: Engine) -> int:
+    """Koliko vrstic je v tabeli `questions` — veljavnih in upokojenih skupaj."""
     with Session(motor) as seja:
         return seja.scalar(select(func.count()).select_from(Question)) or 0
+
+
+class UraKiTece:
+    """Nadomestek za `datetime`, ki ob **vsakem** klicu vrne drugačen čas.
+
+    Testi upokojitve ne smejo stati na sistemski uri. Na Windows ima
+    `time.time()` ločljivost okoli 16 ms, zato pet zaporednih klicev
+    `datetime.now(UTC)` vrne isto vrednost — in test, ki dokazuje „ena serija,
+    en žig", bi ostal zelen tudi nad implementacijo, ki čas vpraša za vsako
+    vrstico posebej. Ista ura pa dela obratno napako pri „dve seriji, dva
+    žiga": tam bi bila dva žiga lahko po nesreči enaka in test bi bil
+    občasno rdeč brez razloga.
+
+    Ta ura oboje odpravi: enakost žigov je odslej dokaz, da je bil čas
+    vprašan **enkrat**, in različnost je zajamčena, ne naključna.
+    """
+
+    def __init__(self, zacetek: datetime) -> None:
+        self._naslednji = zacetek
+
+    def now(self, tz: object | None = None) -> datetime:
+        vrni = self._naslednji
+        self._naslednji = self._naslednji + timedelta(seconds=1)
+        return vrni
+
+
+def stevilo_upokojenih(motor: Engine) -> int:
+    """Koliko vrstic ima postavljen `retired_at`.
+
+    Ločeno od `stevilo_vprasanj` zato, ker je od V2-R05 razlika med „vrstice
+    ni" in „vrstica je, a ni veljavna" celotna vsebina zahteve
+    (`docs/odlocitve/ADR-015`).
+    """
+    with Session(motor) as seja:
+        return (
+            seja.scalar(
+                select(func.count())
+                .select_from(Question)
+                .where(Question.retired_at.is_not(None))
+            )
+            or 0
+        )
 
 
 def uspesen_izid(*, readable: bool = True, koliko_vprasanj: int = 5) -> IzidKlica:
@@ -217,10 +264,11 @@ class TestSrecnaPot:
         obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
 
         material = preberi(motor)
-        assert [v.position for v in material.questions] == [1, 2, 3, 4, 5, 6, 7]
-        assert material.questions[0].question == "Vprašanje 1?"
-        assert material.questions[0].answer == "Odgovor 1."
-        assert len({v.id for v in material.questions}) == 7
+        veljavna = material.veljavna_vprasanja
+        assert [v.position for v in veljavna] == [1, 2, 3, 4, 5, 6, 7]
+        assert veljavna[0].question == "Vprašanje 1?"
+        assert veljavna[0].answer == "Odgovor 1."
+        assert len({v.id for v in veljavna}) == 7
 
     def test_neberljiva_slika_je_ready_brez_vprasanj(
         self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
@@ -234,7 +282,10 @@ class TestSrecnaPot:
         material = preberi(motor)
         assert material.status == STATUS_PRIPRAVLJEN
         assert material.readable is False
-        assert material.questions == []
+        assert material.veljavna_vprasanja == []
+        # Snov brez zgodovine: ni ne veljavnih ne upokojenih vprašanj. Prazen
+        # seznam sam po sebi ne pove, katero od obojega je (`ADR-015`).
+        assert material.upokojena_vprasanja == []
         # Sled se shrani tudi tu; brez nje ne bi vedeli, kaj je model vrnil.
         assert material.model == "gpt-4.1-2025-04-14"
         assert material.input_tokens == 1500
@@ -394,10 +445,21 @@ class TestVrstaSePremika:
 class TestVrnitevVVrsto:
     """`vrni_v_vrsto` — kar stoji za gumbom „Pošlji v obdelavo"."""
 
-    def test_zavrze_ves_prejsnji_izid(
+    def test_zavrze_ves_prejsnji_izid_vprasanja_pa_upokoji(
         self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
     ) -> None:
-        """ADR-009: material ima največ en niz vprašanj in nikoli tujega rezultata."""
+        """ADR-009 velja naprej za izid; za vprašanja ga nadomesti ADR-015.
+
+        Do V2-R05 je ta test zahteval, da vprašanja iz tabele **izginejo**. To
+        ni oslabitev testa, ampak sprememba pogodbe: `docs/odlocitve/ADR-015`
+        nadomesti odločitev A1 iz `ADR-009`, ker bo kviz `V2-R01` kazal na
+        `question_id` in bi ga gumb sicer tiho razbil.
+
+        Preostali del izida (prepis, povzetek, sled) se še naprej zavrže — in
+        prav to je razlog, da se vprašanja upokojijo že tu in ne šele ob novem
+        izidu: snov sicer ne bi smela kazati starih vprašanj ob praznem
+        prepisu.
+        """
         zapisi(motor, slike)
         klicalec, _ = klicalec_vrne(uspesen_izid())
         obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
@@ -417,8 +479,76 @@ class TestVrnitevVVrsto:
         assert material.input_tokens is None
         assert material.output_tokens is None
         assert material.error is None
-        # Vprašanja izginejo iz tabele, ne le iz zveze.
-        assert stevilo_vprasanj(motor) == 0
+        # Nobena vrstica ne izgine; vseh pet je samo še upokojenih.
+        assert stevilo_vprasanj(motor) == 5
+        assert stevilo_upokojenih(motor) == 5
+        assert material.veljavna_vprasanja == []
+        assert len(material.upokojena_vprasanja) == 5
+
+    def test_vsa_vprasanja_ene_serije_dobijo_isti_zig(
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Serija se prepozna po skupnem `retired_at` in po ničemer drugem.
+
+        Dodatnega stolpca za oznako serije `ADR-015` namenoma nima, zato je ta
+        enakost edino, kar serijo drži skupaj. Upokojitev, ki bi tekla vrstico
+        za vrstico in vsakič vprašala za čas znova, bi eno serijo razbila na
+        pet enočlanskih in `V2-R04` bi jih štela kot pet obdelav.
+
+        Ura je zamenjana z `UraKiTece` prav zato, da to trditev test res
+        dokaže: nad sistemsko uro bi bilo pet zaporednih klicev na Windows
+        nerazločljivih od enega samega.
+        """
+        zapisi(motor, slike)
+        klicalec, _ = klicalec_vrne(uspesen_izid())
+        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+
+        monkeypatch.setattr(db, "datetime", UraKiTece(datetime(2026, 9, 6, tzinfo=UTC)))
+        with tovarna_sej() as seja:
+            MaterialsRepository(seja).vrni_v_vrsto(UUID_ENA)
+
+        zigi = {v.retired_at for v in preberi(motor).upokojena_vprasanja}
+        assert len(zigi) == 1
+        assert zigi.pop() is not None
+
+    def test_druga_upokojitev_ne_premakne_ziga_prve(
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Vsaka serija ima svoj čas upokojitve; prejšnji se ne prepiše.
+
+        Pogoj `retired_at IS NULL` v `_upokoji_vprasanja` je edino, kar to
+        drži. Brez njega bi druga ponovna obdelava vse dosedanje serije zlepila
+        v eno in zgodovina obdelav te snovi bi izginila — isti razred napake
+        kot pri `arhiviraj`, ki časa arhiviranja tudi ne premakne.
+
+        Ura je zamenjana z `UraKiTece`, da je razlika med žigoma zajamčena.
+        Nad sistemsko uro bi bil ta test odvisen od tega, ali med obema
+        upokojitvama mine več kot en tik — na Windows okoli 16 ms.
+        """
+        monkeypatch.setattr(db, "datetime", UraKiTece(datetime(2026, 9, 6, tzinfo=UTC)))
+        zapisi(motor, slike)
+        prvi, _ = klicalec_vrne(uspesen_izid(koliko_vprasanj=5))
+        obdelaj_zapis(tovarna_sej, prvi, slike, UUID_ENA)
+        with tovarna_sej() as seja:
+            MaterialsRepository(seja).vrni_v_vrsto(UUID_ENA)
+        prva_serija = {v.id: v.retired_at for v in preberi(motor).upokojena_vprasanja}
+        assert len(prva_serija) == 5
+
+        drugi, _ = klicalec_vrne(uspesen_izid(koliko_vprasanj=3))
+        assert obdelaj_cakajoce(tovarna_sej, drugi, slike) == 1
+        with tovarna_sej() as seja:
+            MaterialsRepository(seja).vrni_v_vrsto(UUID_ENA)
+
+        assert stevilo_vprasanj(motor) == 8
+        assert stevilo_upokojenih(motor) == 8
+        po_drugi = {v.id: v.retired_at for v in preberi(motor).upokojena_vprasanja}
+        # Prva serija ima še vedno natanko svoj žig.
+        for id_vprasanja, zig in prva_serija.items():
+            assert po_drugi[id_vprasanja] == zig
+        # In serij je res dvoje, ne ena zlepljena.
+        assert len(set(po_drugi.values())) == 2
 
     def test_dela_tudi_iz_failed(
         self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
@@ -454,10 +584,20 @@ class TestVrnitevVVrsto:
     def test_po_vrnitvi_gre_zapis_znova_skozi_obdelavo(
         self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
     ) -> None:
-        """Cel krog: obdelan zapis se po gumbu obdela znova in dobi nova vprašanja."""
+        """Regresijski test iz kriterija V2-R05 — cel krog čez dve obdelavi.
+
+        Do V2-R05 je ta test zahteval, da je v tabeli po drugi obdelavi devet
+        vrstic. Zdaj jih je štirinajst in devet je veljavnih: `ADR-015` pravi,
+        da se stara serija upokoji in ne izbriše.
+
+        `ADR-015` ta test označi za obveznega in ne priporočenega. Je edini, ki
+        pozabljen filter `retired_at IS NULL` sploh lahko ujame — nad svežo
+        bazo ima material natanko eno serijo in tam je taka napaka nevidna.
+        """
         zapisi(motor, slike)
         klicalec, klicane = klicalec_vrne(uspesen_izid(koliko_vprasanj=5))
         obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+        stara = {v.id for v in preberi(motor).veljavna_vprasanja}
 
         with tovarna_sej() as seja:
             MaterialsRepository(seja).vrni_v_vrsto(UUID_ENA)
@@ -467,10 +607,68 @@ class TestVrnitevVVrsto:
 
         material = preberi(motor)
         assert material.status == STATUS_PRIPRAVLJEN
-        assert len(material.questions) == 9
-        # Stara vprašanja niso ostala poleg novih.
-        assert stevilo_vprasanj(motor) == 9
+        # Vrne se samo nova serija, oštevilčena od 1 naprej.
+        veljavna = material.veljavna_vprasanja
+        assert len(veljavna) == 9
+        assert [v.position for v in veljavna] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        assert stara.isdisjoint({v.id for v in veljavna})
+        # Stara serija je še v bazi, z `retired_at`.
+        assert stevilo_vprasanj(motor) == 14
+        assert stevilo_upokojenih(motor) == 5
+        assert {v.id for v in material.upokojena_vprasanja} == stara
         assert len(klicane) == 1
+
+    def test_neuspesna_ponovna_obdelava_vprasanj_ne_vrne(
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
+    ) -> None:
+        """Po neuspelem drugem klicu ostane snov brez veljavnih vprašanj.
+
+        Upokojitev se ne razveljavi. Tako je bilo tudi prej — brisanje je bilo
+        prav tako nepovratno — le da je zdaj prejšnja serija še vedno v bazi in
+        s tem kviz, ki nanjo kaže, nedotaknjen (`ADR-015`).
+        """
+        zapisi(motor, slike)
+        prvi, _ = klicalec_vrne(uspesen_izid(koliko_vprasanj=5))
+        obdelaj_zapis(tovarna_sej, prvi, slike, UUID_ENA)
+
+        with tovarna_sej() as seja:
+            MaterialsRepository(seja).vrni_v_vrsto(UUID_ENA)
+
+        def pade(pot: Path) -> IzidKlica:
+            raise NapakaObdelave("Storitev OpenAI ni odgovorila.")
+
+        assert obdelaj_cakajoce(tovarna_sej, pade, slike) == 1
+
+        material = preberi(motor)
+        assert material.status == STATUS_NAPAKA
+        assert material.veljavna_vprasanja == []
+        assert len(material.upokojena_vprasanja) == 5
+        assert stevilo_vprasanj(motor) == 5
+
+    def test_neberljiva_ponovna_obdelava_vprasanj_ne_vrne(
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
+    ) -> None:
+        """Enako, kadar je drugi klic uspel, a slika ni bila berljiva.
+
+        Zapis je `ready` in brez veljavnih vprašanj. Brez števca upokojenih bi
+        bila ta snov na admin strani videti enako kot snov, ki vprašanj ni
+        imela nikoli.
+        """
+        zapisi(motor, slike)
+        prvi, _ = klicalec_vrne(uspesen_izid(koliko_vprasanj=5))
+        obdelaj_zapis(tovarna_sej, prvi, slike, UUID_ENA)
+
+        with tovarna_sej() as seja:
+            MaterialsRepository(seja).vrni_v_vrsto(UUID_ENA)
+
+        drugi, _ = klicalec_vrne(uspesen_izid(readable=False))
+        assert obdelaj_cakajoce(tovarna_sej, drugi, slike) == 1
+
+        material = preberi(motor)
+        assert material.status == STATUS_PRIPRAVLJEN
+        assert material.readable is False
+        assert material.veljavna_vprasanja == []
+        assert len(material.upokojena_vprasanja) == 5
 
 
 class TestObnovitevObticalih:
@@ -524,10 +722,18 @@ class TestZapisIzida:
                 is False
             )
 
-    def test_ponoven_zapis_ne_podvoji_vprasanj(
+    def test_ponoven_zapis_ne_podvoji_veljavnih_vprasanj(
         self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
     ) -> None:
-        """Material ima ob vsakem trenutku največ en niz vprašanj (ADR-009)."""
+        """Material ima ob vsakem trenutku največ en niz **veljavnih** vprašanj.
+
+        Trditev iz `ADR-009` velja naprej; `ADR-015` ji je spremenil samo pomen
+        besede „veljaven". Do V2-R05 je ta test zahteval eno samo vrstico v
+        tabeli — zdaj sta dve in veljavna je ena.
+
+        Zapis izida upokoji tudi mimo gumba: ta pot lahko teče nad zapisom, ki
+        veljavna vprašanja že ima, in takrat mora pravilo držati enako.
+        """
         zapisi(motor, slike)
         izid = IzidObdelave(
             status=STATUS_PRIPRAVLJEN,
@@ -540,7 +746,95 @@ class TestZapisIzida:
         with tovarna_sej() as seja:
             MaterialsRepository(seja).zapisi_izid(UUID_ENA, izid)
 
+        assert len(preberi(motor).veljavna_vprasanja) == 1
+        assert stevilo_vprasanj(motor) == 2
+        assert stevilo_upokojenih(motor) == 1
+
+    def test_upokojitev_in_nova_serija_sta_ena_transakcija(
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Če vstavljanje nove serije pade, se upokojitev ne obdrži.
+
+        Sicer bi obstajalo okno, v katerem ima material upokojena vprašanja in
+        nobenega veljavnega — in izbirnik `V2-R01` bi tako snov videl kot
+        „obdelana, a brez vprašanj" za vedno, brez načina, da se to popravi.
+        Zato `_upokoji_vprasanja` ne commita sam.
+
+        Napaka se vrine med upokojitev in vstavljanje tako, da drugi `uuid4`
+        vrže izjemo. Če bi bila upokojitev svoja transakcija, bi jo zapiranje
+        seje pustilo pri miru in vprašanje bi ostalo upokojeno.
+        """
+        zapisi(motor, slike)
+        prvi = IzidObdelave(
+            status=STATUS_PRIPRAVLJEN,
+            readable=True,
+            vprasanja=(VprasanjeZaZapis(question="V1?", answer="O1."),),
+        )
+        with tovarna_sej() as seja:
+            MaterialsRepository(seja).zapisi_izid(UUID_ENA, prvi)
+
+        pravi_uuid4 = db.uuid4
+        preostali = [1]
+
+        def pade_pri_drugem() -> Any:
+            if preostali:
+                preostali.pop()
+                return pravi_uuid4()
+            raise RuntimeError("Baza je med vstavljanjem odpovedala.")
+
+        monkeypatch.setattr(db, "uuid4", pade_pri_drugem)
+
+        drugi = IzidObdelave(
+            status=STATUS_PRIPRAVLJEN,
+            readable=True,
+            vprasanja=(
+                VprasanjeZaZapis(question="V2?", answer="O2."),
+                VprasanjeZaZapis(question="V3?", answer="O3."),
+            ),
+        )
+        with pytest.raises(RuntimeError):  # noqa: SIM117
+            with tovarna_sej() as seja:
+                MaterialsRepository(seja).zapisi_izid(UUID_ENA, drugi)
+
+        # Nič se ni premaknilo: prvo vprašanje je še vedno veljavno in samo.
+        material = preberi(motor)
+        assert len(material.veljavna_vprasanja) == 1
+        assert material.veljavna_vprasanja[0].question == "V1?"
         assert stevilo_vprasanj(motor) == 1
+        assert stevilo_upokojenih(motor) == 0
+
+    def test_upokojitev_osvezi_ze_naloziene_predmete(
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
+    ) -> None:
+        """Bralec, ki vprašanja prebere pred upokojitvijo, ne sme videti starega stanja.
+
+        `UPDATE` gre mimo seje, zato bi predmeti `Question`, naloženi prej v
+        isti seji, brez sinhronizacije še vedno kazali `retired_at = None`.
+        Nad svežo bazo se to nikoli ne pokaže — material ima takrat eno samo
+        serijo in nihče je ne bere dvakrat. Prav tak razred napake `ADR-015`
+        našteva kot ceno te odločitve.
+        """
+        zapisi(motor, slike)
+        izid = IzidObdelave(
+            status=STATUS_PRIPRAVLJEN,
+            readable=True,
+            vprasanja=(VprasanjeZaZapis(question="V?", answer="O."),),
+        )
+        with tovarna_sej() as seja:
+            MaterialsRepository(seja).zapisi_izid(UUID_ENA, izid)
+
+        with tovarna_sej() as seja:
+            repozitorij = MaterialsRepository(seja)
+            material = repozitorij.poisci(UUID_ENA)
+            assert material is not None
+            # Bralec vprašanja prebere **pred** upokojitvijo in jih obdrži.
+            prebrana = list(material.veljavna_vprasanja)
+            assert [v.retired_at for v in prebrana] == [None]
+
+            repozitorij.vrni_v_vrsto(UUID_ENA)
+
+            assert prebrana[0].retired_at is not None
 
     def test_vprasanje_dobi_izvor_svojega_materiala(
         self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]

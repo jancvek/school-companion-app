@@ -176,10 +176,13 @@ def _pogled_podrobno(material: Material, images_dir: Path) -> dict[str, Any]:
             "surov_odgovor": material.raw_response,
             "vhodni_tokeni": _stevilo(material.input_tokens),
             "izhodni_tokeni": _stevilo(material.output_tokens),
+            # Samo veljavna. Upokojena imajo svoje število in svoj razdelek —
+            # pomešana med veljavna bi bila neopazna, ker se `position` z
+            # vsako serijo začne znova (`docs/odlocitve/ADR-015`).
             "vprasanja": [
                 {"stevilka": vprasanje.position, "vprasanje": vprasanje.question,
                  "odgovor": vprasanje.answer}
-                for vprasanje in material.questions
+                for vprasanje in material.veljavna_vprasanja
             ],
             # Sled se pokaže, kadar je karkoli od nje nastalo — tudi pri
             # `failed`, kjer je surov odgovor pogosto edino, kar pojasni zakaj.
@@ -199,7 +202,11 @@ def _pogled_podrobno(material: Material, images_dir: Path) -> dict[str, Any]:
             "ponovna_obdelava_mozna": (
                 material.status != STATUS_V_OBDELAVI and material.archived_at is None
             ),
-            "stevilo_vprasanj": len(material.questions),
+            "stevilo_vprasanj": len(material.veljavna_vprasanja),
+            # Brez tega števila je razlika med „ta snov nima vprašanj" in „vsa
+            # njena vprašanja so upokojena" nevidna — stran bi v obeh primerih
+            # kazala prazen seznam. To je kriterij V2-R05, ne stvar okusa.
+            "stevilo_upokojenih": len(material.upokojena_vprasanja),
         }
     )
     return pogled
@@ -536,10 +543,11 @@ def ponovno_obdelaj(
     """Vrne zapis v vrsto in s tem sproži ponovno obdelavo.
 
     Samo `POST`, nikoli navadna povezava — enako pravilo kot pri brisanju
-    (ADR-006). Dejanje je nepovratno: zavrže prejšnji prepis, povzetek,
-    revizijsko sled in vsa vprašanja (`docs/odlocitve/ADR-009`). Vmesne
-    potrditvene strani vseeno ni, ker za razliko od brisanja slika ostane in
-    se da obdelati znova.
+    (ADR-006). Dejanje je nepovratno: zavrže prejšnji prepis, povzetek in
+    revizijsko sled (`docs/odlocitve/ADR-009`), dosedanja vprašanja pa
+    **upokoji in ne izbriše** (`ADR-015`, ki nadomesti odločitev A1 iz
+    `ADR-009`). Vmesne potrditvene strani vseeno ni, ker za razliko od
+    brisanja slika ostane in se da obdelati znova.
     """
     material = repozitorij.poisci(material_id)
     if material is None:

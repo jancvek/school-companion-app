@@ -65,9 +65,14 @@
         <form method="post" action="/admin/materials/{{ snov.id }}/reprocess">
           <button class="gumb gumb-obdelava" type="submit">Pošlji v obdelavo</button>
         </form>
+        {# Vprašanja so od V2-R05 izvzeta iz naštevanja zavrženega — gumb jih
+           upokoji in ne pobriše (`docs/odlocitve/ADR-015`). Stavek, ki bi tu
+           še vedno obljubljal brisanje, bi si nasprotoval z razdelkom o
+           upokojenih vprašanjih nižje na tej isti strani. #}
         <p class="drobno">
-          Zavrže dosedanji prepis, povzetek in vprašanja ter sproži nov klic
-          modela.
+          Zavrže dosedanji prepis in povzetek ter sproži nov klic modela.
+          Dosedanja vprašanja se ne izbrišejo, ampak upokojijo: ostanejo v
+          bazi, med vprašanja te snovi pa se ne štejejo več.
         </p>
       {% elif snov.arhiviran %}
         {# `ponovna_obdelava_mozna` je `false` iz dveh različnih razlogov.
@@ -160,6 +165,23 @@
       {# `pre` in ne `p`: prepis nosi prelome vrstic s slike in prav ti so
          del tega, kar je bilo na strani. #}
       <pre class="besedilo">{{ snov.prepis }}</pre>
+    </section>
+  {% endif %}
+
+  {# **Zunaj vej po statusu**, ne znotraj `ready`. Snov, ki je bila poslana v
+     ponovno obdelavo, je `new` in nima nobenega veljavnega vprašanja; prav
+     takrat mora biti vidno, da prejšnja vprašanja obstajajo. Znotraj veje
+     `ready` bi bil ta razdelek natanko tam, kjer ga nihče ne potrebuje. #}
+  {% if snov.stevilo_upokojenih %}
+    <section class="izid">
+      <h2>Upokojena vprašanja: {{ snov.stevilo_upokojenih }}</h2>
+      {# Brez obljub o kvizu in ocenah: `V2-R01` in `V2-R02` sta še `Nova`,
+         besedilo pa opisuje, kako je zdaj. #}
+      <p class="drobno">
+        Toliko vprašanj je nastalo ob prejšnjih obdelavah te snovi. Ostanejo v
+        bazi in obdržijo svojo identiteto, med vprašanja te snovi pa se ne
+        štejejo več.
+      </p>
     </section>
   {% endif %}
 

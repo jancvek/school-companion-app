@@ -25,9 +25,18 @@
       {# Vprašanja material preživijo (`docs/odlocitve/ADR-012`). Brez tega
          stavka bi bilo brisanje videti nevarnejše, kot je — in po V2 bi
          operater mislil, da z njim briše tudi statistiko. #}
+      {# Obe števili, ne samo veljavna: poved je o tem, kaj brisanje **pusti**,
+         in po `ADR-012` ostane oboje. Samo veljavna bi bila tu podcenjena
+         številka in operater bi mislil, da briše več, kot briše. #}
+      {# Števili sta za dvopičjem in ne pred samostalnikom, ker slovenščina za
+         1, 2, 3–4 in 5+ zahteva štiri različne oblike („1 veljavno", „2
+         veljavni", „3 veljavna", „5 veljavnih"). „{{ n }} veljavnih" bi bilo
+         pri enem vprašanju napačno, sklanjatev v predlogi pa je več kode kot
+         vrednosti. #}
       <p class="drobno">
-        {% if snov.stevilo_vprasanj %}
-          Vprašanja ({{ snov.stevilo_vprasanj }}) ostanejo. Ohranijo predmet in
+        {% if snov.stevilo_vprasanj or snov.stevilo_upokojenih %}
+          Vprašanja ostanejo — veljavnih: {{ snov.stevilo_vprasanj }},
+          upokojenih: {{ snov.stevilo_upokojenih }}. Ohranijo predmet in
           čas posnetka te snovi, izgubijo pa povezavo na sliko.
         {% else %}
           Ta snov nima vprašanj.
