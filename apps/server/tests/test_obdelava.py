@@ -9,7 +9,7 @@ svoji datoteki, ker so to koraki iste poti in se berejo skupaj.
 """
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -86,6 +86,30 @@ def stevilo_vprasanj(motor: Engine) -> int:
     """Koliko vrstic je v tabeli `questions` — veljavnih in upokojenih skupaj."""
     with Session(motor) as seja:
         return seja.scalar(select(func.count()).select_from(Question)) or 0
+
+
+class UraKiTece:
+    """Nadomestek za `datetime`, ki ob **vsakem** klicu vrne drugačen čas.
+
+    Testi upokojitve ne smejo stati na sistemski uri. Na Windows ima
+    `time.time()` ločljivost okoli 16 ms, zato pet zaporednih klicev
+    `datetime.now(UTC)` vrne isto vrednost — in test, ki dokazuje „ena serija,
+    en žig", bi ostal zelen tudi nad implementacijo, ki čas vpraša za vsako
+    vrstico posebej. Ista ura pa dela obratno napako pri „dve seriji, dva
+    žiga": tam bi bila dva žiga lahko po nesreči enaka in test bi bil
+    občasno rdeč brez razloga.
+
+    Ta ura oboje odpravi: enakost žigov je odslej dokaz, da je bil čas
+    vprašan **enkrat**, in različnost je zajamčena, ne naključna.
+    """
+
+    def __init__(self, zacetek: datetime) -> None:
+        self._naslednji = zacetek
+
+    def now(self, tz: object | None = None) -> datetime:
+        vrni = self._naslednji
+        self._naslednji = self._naslednji + timedelta(seconds=1)
+        return vrni
 
 
 def stevilo_upokojenih(motor: Engine) -> int:
@@ -462,7 +486,8 @@ class TestVrnitevVVrsto:
         assert len(material.upokojena_vprasanja) == 5
 
     def test_vsa_vprasanja_ene_serije_dobijo_isti_zig(
-        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Serija se prepozna po skupnem `retired_at` in po ničemer drugem.
 
@@ -470,11 +495,16 @@ class TestVrnitevVVrsto:
         enakost edino, kar serijo drži skupaj. Upokojitev, ki bi tekla vrstico
         za vrstico in vsakič vprašala za čas znova, bi eno serijo razbila na
         pet enočlanskih in `V2-R04` bi jih štela kot pet obdelav.
+
+        Ura je zamenjana z `UraKiTece` prav zato, da to trditev test res
+        dokaže: nad sistemsko uro bi bilo pet zaporednih klicev na Windows
+        nerazločljivih od enega samega.
         """
         zapisi(motor, slike)
         klicalec, _ = klicalec_vrne(uspesen_izid())
         obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
 
+        monkeypatch.setattr(db, "datetime", UraKiTece(datetime(2026, 9, 6, tzinfo=UTC)))
         with tovarna_sej() as seja:
             MaterialsRepository(seja).vrni_v_vrsto(UUID_ENA)
 
@@ -483,7 +513,8 @@ class TestVrnitevVVrsto:
         assert zigi.pop() is not None
 
     def test_druga_upokojitev_ne_premakne_ziga_prve(
-        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
+        self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Vsaka serija ima svoj čas upokojitve; prejšnji se ne prepiše.
 
@@ -491,7 +522,12 @@ class TestVrnitevVVrsto:
         drži. Brez njega bi druga ponovna obdelava vse dosedanje serije zlepila
         v eno in zgodovina obdelav te snovi bi izginila — isti razred napake
         kot pri `arhiviraj`, ki časa arhiviranja tudi ne premakne.
+
+        Ura je zamenjana z `UraKiTece`, da je razlika med žigoma zajamčena.
+        Nad sistemsko uro bi bil ta test odvisen od tega, ali med obema
+        upokojitvama mine več kot en tik — na Windows okoli 16 ms.
         """
+        monkeypatch.setattr(db, "datetime", UraKiTece(datetime(2026, 9, 6, tzinfo=UTC)))
         zapisi(motor, slike)
         prvi, _ = klicalec_vrne(uspesen_izid(koliko_vprasanj=5))
         obdelaj_zapis(tovarna_sej, prvi, slike, UUID_ENA)

@@ -175,10 +175,12 @@
   {% if snov.stevilo_upokojenih %}
     <section class="izid">
       <h2>Upokojena vprašanja: {{ snov.stevilo_upokojenih }}</h2>
+      {# Brez obljub o kvizu in ocenah: `V2-R01` in `V2-R02` sta še `Nova`,
+         besedilo pa opisuje, kako je zdaj. #}
       <p class="drobno">
         Toliko vprašanj je nastalo ob prejšnjih obdelavah te snovi. Ostanejo v
-        bazi, ker se nanje vežejo kviz in ocene težavnosti, med vprašanja te
-        snovi pa se ne štejejo več.
+        bazi in obdržijo svojo identiteto, med vprašanja te snovi pa se ne
+        štejejo več.
       </p>
     </section>
   {% endif %}
