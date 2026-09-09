@@ -27,6 +27,7 @@ from app.models import (
     Quiz,
     QuizItem,
 )
+from app.routers.kvizi import VPRASANJA, _stevilo_z_besedo
 from tests.conftest import KLJUC
 
 #: Trije stabilni identifikatorji; testi jih berejo iz izrisane strani.
@@ -972,3 +973,68 @@ class TestBrezKljuca:
         )
 
         assert odgovor.status_code == 201
+
+
+class TestSlovenscina:
+    """Števila v vmesniku so zapisana slovensko, z dvojino."""
+
+    @pytest.mark.parametrize(
+        ("koliko", "pricakovano"),
+        [
+            (1, "1 vprašanje"),
+            (2, "2 vprašanji"),
+            (3, "3 vprašanja"),
+            (4, "4 vprašanja"),
+            (5, "5 vprašanj"),
+            (0, "0 vprašanj"),
+            # Ločnica teče po ostanku pri sto in ne po samem številu.
+            (101, "101 vprašanje"),
+            (102, "102 vprašanji"),
+            (111, "111 vprašanj"),
+        ],
+    )
+    def test_dvojina_in_mnozina(self, koliko: int, pricakovano: str) -> None:
+        assert _stevilo_z_besedo(koliko, VPRASANJA) == pricakovano
+
+    def test_izbirnik_pravilno_sklanja(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        snov(motor, slike, UUID_ENA, vprasanj=2)
+        snov(motor, slike, UUID_DVA, vprasanj=1)
+
+        besedilo = izbirnik(odjemalec)
+
+        assert "2 vprašanji" in besedilo
+        assert "1 vprašanje" in besedilo
+
+    def test_predogled_imenuje_obseg_in_ne_izbora(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Izpuščene se štejejo čez cel predmet oziroma dan, ne čez izbor.
+
+        Besedilo mora imenovati prav to: „tega predmeta" pri predmetnem vstopu
+        in „tega dne" pri dnevnem.
+        """
+        snov(motor, slike, UUID_ENA)
+        snov(motor, slike, UUID_DVA, status=STATUS_NOV, readable=None, vprasanj=0)
+
+        odgovor = odjemalec.post(
+            "/admin/quizzes/preview",
+            data={"vstop": "nova", "subject": "MAT", "stevilo": "3", "snov": [UUID_ENA]},
+        )
+
+        assert "1 snov tega predmeta" in odgovor.text
+        assert "izbora" not in odgovor.text
+
+    def test_predogled_uporabi_rodilnik_za_snovi(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Za predlogom *iz* gre rodilnik: „iz 1 snovi", nikoli „iz 1 snov".
+        snov(motor, slike, UUID_ENA, vprasanj=2)
+
+        odgovor = odjemalec.post(
+            "/admin/quizzes/preview",
+            data={"vstop": "nova", "subject": "MAT", "stevilo": "3", "snov": [UUID_ENA]},
+        )
+
+        assert "Skupaj 2 vprašanji iz 1 snovi." in odgovor.text

@@ -60,8 +60,7 @@
               <span class="opis">
                 <span class="cas">{{ snov.koda }} — {{ snov.cas }}</span>
                 {% if snov.izbirna %}
-                  <span class="stanje">{{ snov.vprasanj }}
-                    {{ "vprašanje" if snov.vprasanj == 1 else "vprašanj" }}</span>
+                  <span class="stanje">{{ snov.vprasanj }}</span>
                 {% else %}
                   <span class="stanje razlog">{{ snov.razlog }}</span>
                 {% endif %}

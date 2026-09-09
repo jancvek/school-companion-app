@@ -5,9 +5,7 @@
 {% block vsebina %}
   <h1>{{ kviz.ime }}</h1>
   <p class="pod">
-    {{ kviz.koda }} · {{ kviz.vprasanj }}
-    {{ "vprašanje" if kviz.vprasanj == 1 else "vprašanj" }} ·
-    objavljen {{ kviz.nastal }}
+    {{ kviz.koda }} · {{ kviz.vprasanj_opis }} · objavljen {{ kviz.nastal }}
   </p>
 
   {% if kviz.preklican %}

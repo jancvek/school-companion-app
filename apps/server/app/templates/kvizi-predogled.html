@@ -5,8 +5,10 @@
 {% block vsebina %}
   <h1>Predogled kviza</h1>
   <p class="pod">
-    Skupaj {{ skupaj }} {{ "vprašanje" if skupaj == 1 else "vprašanj" }}
-    iz {{ skupine|length }} {{ "snovi" if skupine|length == 1 else "snovi" }}.
+    {# „snovi“ je tu konstanta in ne sklanjana oblika: za predlogom *iz* gre
+       rodilnik, ta pa je pri tem samostalniku enak pri vsakem številu —
+       „iz 1 snovi“, „iz 2 snovi“, „iz 5 snovi“. #}
+    Skupaj {{ skupaj_opis }} iz {{ snovi }} snovi.
     <strong>Ta stran ničesar ne shrani.</strong>
   </p>
 
@@ -21,12 +23,17 @@
 
   {% if izpusceno %}
     {# Kriterij: predogled pove, koliko snovi izbranega predmeta oziroma dneva
-       je bilo izpuščene, ker še ni obdelana. Šteje se čez cel obseg vstopa in
-       ne čez izbor — vprašanje je „česa danes ne morem dati v kviz". #}
+       je bilo izpuščene, ker še ni obdelana. Šteje se čez **cel obseg vstopa**
+       in ne čez izbor — vprašanje je „česa danes ne morem dati v kviz" —, zato
+       besedilo imenuje predmet oziroma dan in ne izbora.
+
+       Oblika „Izpuščeno: N" in ne stavek s števnikom: zanikan stavek v
+       slovenščini zahteva rodilnik in bi se moral pregibati še po številu
+       („1 snovi ni bilo mogoče" proti „3 snovi ni bilo mogoče"). Oznaka s
+       številom je pravilna pri vsakem številu. #}
     <p class="opozorilo">
-      {{ izpusceno }} {{ "snov" if izpusceno == 1 else "snovi" }} tega
-      {{ "dne" if not skupine else "izbora" }} ni bilo mogoče uporabiti, ker
-      še ni obdelana, obdelava ni uspela ali slika ni berljiva.
+      Izpuščeno: {{ izpusceno_opis }}. Te snovi še niso obdelane, obdelava pri
+      njih ni uspela ali slika ni berljiva.
     </p>
   {% endif %}
 
@@ -72,7 +79,7 @@
 
       <button class="gumb gumb-obdelava" type="submit">Objavi</button>
       <p class="drobno">
-        Kviz in vseh {{ skupaj }} postavk nastane naenkrat. Postavke se
+        Kviz in vse njegove postavke ({{ skupaj }}) nastanejo naenkrat. Postavke se
         zamrznejo: poznejša ponovna obdelava ali brisanje snovi jih ne
         spremeni.
       </p>

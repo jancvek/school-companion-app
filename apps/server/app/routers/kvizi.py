@@ -73,6 +73,33 @@ PREDOLG_KVIZ = 30
 VSI_PREDMETI = "Vsi predmeti"
 
 
+def _stevilo_z_besedo(koliko: int, oblike: tuple[str, str, str, str]) -> str:
+    """Število z ustrezno sklonsko obliko samostalnika.
+
+    Slovenščina ima dvojino in je štirioblična: *1 vprašanje, 2 vprašanji,
+    3 vprašanja, 5 vprašanj*. Ločnica teče po ostanku pri deljenju s sto, ne
+    po samem številu — *101 vprašanje* in *102 vprašanji* sta pravilna.
+
+    Obstoječe strani (`predmeti.html`, `arhiv.html`) to poenostavljajo na dve
+    obliki in pišejo „2 slik". Tu tega vzorca ne prevzemam: gre za novo
+    besedilo, `CLAUDE.md` pa v merilu dokončanosti zahteva slovenščino. Starih
+    strani se ta zahteva ne dotika — popravek zanje je svoja postavka.
+    """
+    ostanek = koliko % 100
+    if ostanek == 1:
+        return f"{koliko} {oblike[0]}"
+    if ostanek == 2:
+        return f"{koliko} {oblike[1]}"
+    if ostanek in (3, 4):
+        return f"{koliko} {oblike[2]}"
+    return f"{koliko} {oblike[3]}"
+
+
+#: Oblike, ki jih potrebuje sestavljalnik.
+VPRASANJA = ("vprašanje", "vprašanji", "vprašanja", "vprašanj")
+SNOVI = ("snov", "snovi", "snovi", "snovi")
+
+
 def _stevilo_v_mejah(stevilo: int) -> int:
     """Vprašanj na sliko, omejeno na smiselno območje."""
     return max(NAJMANJ_VPRASANJ, min(stevilo, NAJVEC_VPRASANJ))
@@ -113,7 +140,7 @@ def _vrstica(snov: SnovZaIzbor, obkljukana: bool, images_dir: Path) -> dict[str,
         "id": snov.material.id,
         "koda": snov.material.subject,
         "cas": cas(snov.material.taken_at),
-        "vprasanj": snov.veljavnih_vprasanj,
+        "vprasanj": _stevilo_z_besedo(snov.veljavnih_vprasanj, VPRASANJA),
         "izbirna": snov.izbirna,
         "razlog": _razlog(snov),
         "obkljukana": obkljukana,
@@ -368,6 +395,14 @@ def predogled(
                 vprasanje.id for skupina in skupine for vprasanje in skupina.vprasanja
             ],
             "skupaj": skupaj,
+            "skupaj_opis": _stevilo_z_besedo(skupaj, VPRASANJA),
+            "snovi": len(skupine),
+            # Izpuščene se štejejo čez **cel obseg vstopa**, zato mora
+            # besedilo imenovati ta obseg in ne izbora.
+            "izpusceno_opis": (
+                f"{_stevilo_z_besedo(izpusceno, SNOVI)} "
+                f'{"tega dne" if vstop == VSTOP_DANES else "tega predmeta"}'
+            ),
             "predolg": skupaj > PREDOLG_KVIZ,
             "meja": PREDOLG_KVIZ,
             "izpusceno": izpusceno,
@@ -436,6 +471,7 @@ def _pogled_kviza(kviz: Quiz, postavk: int) -> dict[str, Any]:
         "koda": kviz.subject or VSI_PREDMETI,
         "nastal": cas(kviz.created_at),
         "vprasanj": postavk,
+        "vprasanj_opis": _stevilo_z_besedo(postavk, VPRASANJA),
         "preklican": kviz.canceled_at is not None,
         "preklican_ob": cas_ali_prazno(kviz.canceled_at),
     }
