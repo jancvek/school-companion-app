@@ -163,6 +163,21 @@
     </section>
   {% endif %}
 
+  {# **Zunaj vej po statusu**, ne znotraj `ready`. Snov, ki je bila poslana v
+     ponovno obdelavo, je `new` in nima nobenega veljavnega vprašanja; prav
+     takrat mora biti vidno, da prejšnja vprašanja obstajajo. Znotraj veje
+     `ready` bi bil ta razdelek natanko tam, kjer ga nihče ne potrebuje. #}
+  {% if snov.stevilo_upokojenih %}
+    <section class="izid">
+      <h2>Upokojena vprašanja: {{ snov.stevilo_upokojenih }}</h2>
+      <p class="drobno">
+        Toliko vprašanj je nastalo ob prejšnjih obdelavah te snovi. Ostanejo v
+        bazi, ker se nanje vežejo kviz in ocene težavnosti, med vprašanja te
+        snovi pa se ne štejejo več.
+      </p>
+    </section>
+  {% endif %}
+
   {% if snov.ima_sled %}
     {# Zloženo privzeto: to je gradivo za razhroščevanje, ne za vsakdanji
        pregled. `details` je HTML in ne JavaScript — stran ostane brez skript

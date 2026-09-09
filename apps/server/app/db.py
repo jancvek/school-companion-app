@@ -15,7 +15,6 @@ from sqlalchemy import (
     CursorResult,
     Engine,
     create_engine,
-    delete,
     func,
     select,
     update,
@@ -161,23 +160,42 @@ class MaterialsRepository:
         self.session.commit()
         return int(izid.rowcount)
 
-    def _zavrzi_vprasanja(self, material: Material) -> None:
-        """Pobriše vsa vprašanja danega materiala.
+    def _upokoji_vprasanja(self, material: Material) -> None:
+        """Upokoji vsa veljavna vprašanja danega materiala. **Nič ne pobriše.**
 
-        Odkar `Material.questions` nima več `delete-orphan`
-        (`docs/odlocitve/ADR-012`), bi `questions.clear()` vprašanjem samo
-        postavil `material_id = NULL` in za sabo pustil sirote. Brisanje je
-        zato izrecno in na enem mestu.
+        Do V2-R05 je ta metoda vprašanja izbrisala. `docs/odlocitve/ADR-015`
+        to nadomesti: kviz `V2-R01` kaže na `question_id` in statistika
+        `V2-R04` stoji na tem, da vprašanje ohrani identiteto čez ponovne
+        obdelave — brisanje bi oboje tiho razbilo.
 
-        Stavek gre mimo seje, zato je zbirka nato razveljavljena — sicer bi
-        `material.questions` še vedno vračal predmete, ki jih v bazi ni več.
+        Pogoj `retired_at IS NULL` ni okras: brez njega bi druga ponovna
+        obdelava premaknila žig prve serije in serije se ne bi več ločile.
+        Isti vzorec kot pri `arhiviraj` in `potrdi_brisanje`.
 
-        V V2 to postane upokojitev (`retired_at`), ne brisanje. Do takrat
-        ponovna obdelava vprašanja še vedno zavrže — kar je sprejemljivo
-        samo zato, ker statistike, ki bi jo to uničilo, še ni.
+        Vsa vprašanja ene serije dobijo **isti** žig, ker je izračunan enkrat
+        pred stavkom in ne v bazi.
+
+        **Brez `commit`.** Klicatelja commitata sama: upokojitev in vstavitev
+        nove serije morata biti ena transakcija, sicer obstaja trenutek, ko
+        material nima nobenega veljavnega vprašanja — in `V2-R01` bi ga v
+        izbirniku tako tudi videl.
+
+        Stavek gre mimo seje, zato so zbirke nato razveljavljene; sicer bi
+        `veljavna_vprasanja` še vedno vračala predmete, ki v bazi niso več
+        veljavni.
         """
-        self.session.execute(delete(Question).where(Question.material_id == material.id))
-        self.session.expire(material, ["questions"])
+        self.session.execute(
+            update(Question)
+            .where(
+                Question.material_id == material.id,
+                Question.retired_at.is_(None),
+            )
+            .values(retired_at=datetime.now(UTC))
+            .execution_options(synchronize_session=False)
+        )
+        self.session.expire(
+            material, ["vsa_vprasanja", "veljavna_vprasanja", "upokojena_vprasanja"]
+        )
 
     def seznam_novih(self) -> list[Material]:
         """Zapisi, ki čakajo na obdelavo, od najstarejšega naprej.
@@ -211,10 +229,14 @@ class MaterialsRepository:
     def zapisi_izid(self, material_id: str, izid: IzidObdelave) -> bool:
         """Zapiše izid obdelave in njegova vprašanja; vrne, ali je zapis obstajal.
 
-        Vprašanja se najprej pobrišejo in nato vpišejo na novo. Material ima s
-        tem ob vsakem trenutku največ en niz vprašanj — pravilo iz
-        `docs/odlocitve/ADR-009`, ki mora veljati tudi, če ta pot kdaj teče nad
-        zapisom, ki vprašanja že ima.
+        Dosedanja vprašanja se najprej upokojijo in nato vpiše nova serija.
+        Material ima s tem ob vsakem trenutku največ en niz **veljavnih**
+        vprašanj — pravilo iz `docs/odlocitve/ADR-009`, ki mu je `ADR-015`
+        spremenil samo pomen besede „veljaven", ne pa same trditve.
+
+        Upokojitev je tu in ne le v `vrni_v_vrsto` zato, da pravilo drži tudi,
+        če ta pot kdaj teče nad zapisom, ki veljavna vprašanja že ima — na
+        primer po dvojnem prevzemu ali ob ročnem klicu.
         """
         material = self.poisci(material_id)
         if material is None:
@@ -231,9 +253,9 @@ class MaterialsRepository:
         material.output_tokens = izid.output_tokens
         material.error = izid.error
 
-        self._zavrzi_vprasanja(material)
+        self._upokoji_vprasanja(material)
         for zaporedje, vprasanje in enumerate(izid.vprasanja, start=1):
-            material.questions.append(
+            material.vsa_vprasanja.append(
                 Question(
                     id=str(uuid4()),
                     position=zaporedje,
@@ -253,9 +275,16 @@ class MaterialsRepository:
     def vrni_v_vrsto(self, material_id: str) -> bool:
         """Vrne zapis v `new` in zavrže prejšnji izid; vrne, ali se je zgodilo.
 
-        Zavrže **vse**: prepis, povzetek, revizijsko sled, besedilo napake in
-        vsa vprašanja. Material tako nikoli ne kaže rezultata, ki ne pripada
-        njegovemu trenutnemu stanju (`docs/odlocitve/ADR-009`).
+        Zavrže prepis, povzetek, revizijsko sled in besedilo napake, vprašanja
+        pa **upokoji** — ta pot je edino mesto, kjer gumb „Pošlji v obdelavo"
+        kaj naredi, in `docs/odlocitve/ADR-015` pravi, da tam vprašanja
+        preživijo. Material tako še vedno nikoli ne kaže rezultata, ki ne
+        pripada njegovemu trenutnemu stanju (`ADR-009`).
+
+        Upokojitev je tu in ne šele ob zapisu novega izida zato, ker gumb
+        hkrati pobriše prepis. Sicer bi snov ves čas klica kazala stara
+        vprašanja ob praznem prepisu, `V2-R01` pa bi jih tisti čas ponudil v
+        kviz kot veljavna.
 
         Zapisa v `processing` se ne dotakne — tam pravkar teče klic in njegov
         izid bi po vrnitvi v vrsto prišel čez to, kar bi ta metoda počistila.
@@ -275,7 +304,7 @@ class MaterialsRepository:
         material.input_tokens = None
         material.output_tokens = None
         material.error = None
-        self._zavrzi_vprasanja(material)
+        self._upokoji_vprasanja(material)
 
         self.session.commit()
         return True
@@ -409,7 +438,10 @@ class MaterialsRepository:
         ker gumb, ki ga stran ne izriše, ni varovalka.
 
         Vprašanja se ob tem **ne** pobrišejo — ostanejo z `material_id`
-        `NULL` in svojim izvorom (`docs/odlocitve/ADR-012`).
+        `NULL` in svojim izvorom (`docs/odlocitve/ADR-012`). To velja za
+        veljavna **in upokojena**: nuliranje opravi ORM prek nefiltrirane
+        zveze `Material.vsa_vprasanja`, prav zato, da upokojena vprašanja ne
+        obtičijo z visečim `material_id` tam, kjer tuji ključ ni uveljavljen.
         """
         material = self.poisci(material_id)
         if material is None or material.device_deleted_at is None:
