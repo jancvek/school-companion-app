@@ -8,7 +8,8 @@
   <p class="pod">{{ okno }} · {{ skupaj.poskusov_opis }}</p>
 
   {{ deli.izbira_let(leta, neprebrano) }}
-  {{ deli.samoocena() }}
+  {# Predmeti so po urniku, ne po težavnosti. #}
+  {{ deli.samoocena(False) }}
   {{ deli.opombe(opombe) }}
 
   {% if not skupaj.poskusov %}

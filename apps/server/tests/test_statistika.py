@@ -21,7 +21,7 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, event, update
+from sqlalchemy import Engine, event, select, update
 from sqlalchemy.orm import Session
 
 from app.casi import (
@@ -31,7 +31,7 @@ from app.casi import (
     solsko_leto_od_do,
 )
 from app.db import MaterialsRepository, PoskusZaStatistiko
-from app.models import Material, Question, QuestionAttempt, QuizItem
+from app.models import Material, Question, QuestionAttempt, Quiz, QuizItem
 from app.statistika import (
     Razporeditev,
     je_pravilna,
@@ -68,13 +68,16 @@ def kviz_z_ocenami(
     *,
     koliko: int,
     kdaj: datetime = KDAJ,
-    subject: str = "MAT",
+    subject: str | None = "MAT",
+    vstop: str = "nova",
 ) -> str:
     """Objavi kviz in prvim `len(ocene)` postavkam pošlje poskuse po poti telefona.
 
     Ocen je lahko manj kot postavk — takrat kviz ostane napol rešen.
     """
-    quiz_id = objavi(odjemalec, motor, material_ids, koliko=koliko, subject=subject)
+    quiz_id = objavi(
+        odjemalec, motor, material_ids, koliko=koliko, subject=subject, vstop=vstop
+    )
     idji = postavke(motor, quiz_id)[: len(ocene)]
     if ocene:
         odgovor = poslji(
@@ -567,6 +570,42 @@ class TestOkno:
         assert "1 poskus" in novo
         assert "Lahko 1" in novo
 
+    def test_meja_leta_je_polodprta(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Poskus **točno** ob lokalni polnoči 1. 9. sodi v novo leto in ne v obe.
+
+        Samo 30 minut pred mejo in po njej ne loči `>=` od `>` in `<` od `<=`.
+        """
+        snov(motor, slike, UUID_ENA, vprasanj=1)
+        kviz_z_ocenami(
+            odjemalec,
+            motor,
+            [UUID_ENA],
+            ["tezko"],
+            koliko=1,
+            kdaj=datetime(2026, 8, 31, 22, 0, tzinfo=UTC),
+        )
+
+        assert "0 poskusov" in vrstica(
+            pregled(odjemalec, "?leto=2025"), '<span class="koda">MAT</span>'
+        )
+        assert "1 poskus" in vrstica(
+            pregled(odjemalec, "?leto=2026"), '<span class="koda">MAT</span>'
+        )
+
+    def test_leto_samo_s_poskusi_drugega_nacina_ni_ponujeno(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        snov(motor, slike, UUID_ENA, vprasanj=1)
+        quiz_id = kviz_z_ocenami(odjemalec, motor, [UUID_ENA], [], koliko=1)
+        [postavka] = postavke(motor, quiz_id)
+        vstavi_poskus(motor, postavka, mode="abc", kdaj=KDAJ.replace(year=TEKOCE - 3))
+
+        izbira = razdelek(pregled(odjemalec), 'class="izbira-let"', "</p>")
+
+        assert f"?leto={TEKOCE - 3}" not in izbira
+
     def test_vse_ima_vrstico_na_solsko_leto(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
@@ -697,6 +736,57 @@ class TestPredmeti:
             '<span class="koda">XXX</span>'
         )
         assert vprasanje(1) in predmet(odjemalec, "XXX")
+
+    def test_neznana_koda_samo_s_poskusi_drugega_nacina_je_404(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        snov(motor, slike, UUID_ENA, subject="XXX", vprasanj=1)
+        quiz_id = kviz_z_ocenami(odjemalec, motor, [UUID_ENA], [], koliko=1, subject="XXX")
+        [postavka] = postavke(motor, quiz_id)
+        vstavi_poskus(motor, postavka, mode="abc")
+
+        assert odjemalec.get("/admin/statistics/subjects/XXX").status_code == 404
+
+    def test_stran_predmeta_kaze_samo_ta_predmet(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        snov(motor, slike, UUID_ENA, vprasanj=1)
+        snov(motor, slike, UUID_DVA, subject="GEO", vprasanj=1)
+        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["lahko"], koliko=1)
+        kviz_z_ocenami(odjemalec, motor, [UUID_DVA], ["tezko"], koliko=1, subject="GEO")
+
+        mat = predmet(odjemalec, "MAT")
+
+        assert vprasanje(1) in mat
+        assert vprasanje(1, UUID_DVA) not in mat
+        assert "1 poskus" in razdelek(mat, '<p class="pod">', "</p>")
+        assert "Težko 1" not in razdelek(mat, "<h2>Snovi</h2>")
+        besedilo = pregled(odjemalec)
+        assert "Lahko 1" in vrstica(besedilo, '<span class="koda">MAT</span>')
+        assert "Težko 1" in vrstica(besedilo, '<span class="koda">GEO</span>')
+
+    def test_dnevni_kviz_steje_pod_predmetom_vprasanja(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Predmet seštevka je `questions.subject`, ne `quizzes.subject`.
+
+        Dnevni kviz predmeta nima; če bi ga statistika vzela iz kviza, bi
+        njegovi poskusi s strani predmetov tiho izginili.
+        """
+        snov(motor, slike, UUID_ENA, vprasanj=1)
+        kviz_z_ocenami(
+            odjemalec, motor, [UUID_ENA], ["tezko"], koliko=1, subject=None, vstop="danes"
+        )
+        with Session(motor) as seja:
+            assert seja.scalars(select(Quiz.subject)).one() is None
+
+        assert "1 poskus" in vrstica(pregled(odjemalec), '<span class="koda">MAT</span>')
+        assert vprasanje(1) in predmet(odjemalec)
+
+    def test_najtezje_zgoraj_samo_kjer_je_res(self, odjemalec: TestClient) -> None:
+        # Pregled je po urniku, stran predmeta po težavnosti.
+        assert "Najtežje je zgoraj" not in pregled(odjemalec)
+        assert "Najtežje je zgoraj" in predmet(odjemalec)
 
 
 class TestVidnost:

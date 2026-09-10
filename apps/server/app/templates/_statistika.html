@@ -22,11 +22,13 @@
   {% endif %}
 {% endmacro %}
 
-{% macro samoocena() %}
+{# `razvrsceno` samo tam, kjer je res: pregled po predmetih je po urniku in ne
+   po težavnosti, in trditev bi tam lagala. #}
+{% macro samoocena(razvrsceno=True) %}
   <p class="drobno">
     Ocene so Mašina samoocena po razkritju odgovora, ne preverjeno znanje.
     Pravilne so vse ocene razen „Nisem vedela“; težki sta „Nisem vedela“ in
-    „Težko“. Najtežje je zgoraj.
+    „Težko“.{% if razvrsceno %} Najtežje je zgoraj.{% endif %}
   </p>
 {% endmacro %}
 

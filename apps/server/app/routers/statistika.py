@@ -15,7 +15,7 @@ nobena pot s ključem je ne vrača.
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Request
@@ -33,7 +33,7 @@ from app.casi import (
 )
 from app.db import StatistikaRepository
 from app.dependencies import daj_repozitorij_statistike
-from app.models import OCENE, Material
+from app.models import OCENE, Material, Ocena
 from app.statistika import (
     Razdeljeno,
     Razporeditev,
@@ -263,7 +263,9 @@ def _vprasanje(statistika: StatistikaVprasanja, snovi: dict[str, Material]) -> d
         "zaporedje": [
             {
                 "datum": datum(vnos.answered_at),
-                "oznaka": OZNAKE_OCEN.get(vnos.ocena, vnos.ocena),  # type: ignore[call-overload]
+                # `cast` in ne nadomestna vrednost: `razdeli` je neprepoznane
+                # ocene že izločil, zato je tu vedno ena od štirih.
+                "oznaka": OZNAKE_OCEN[cast(Ocena, vnos.ocena)],
                 "quiz_id": vnos.quiz_id,
                 "kviz_ime": vnos.kviz_ime,
                 "preklican": vnos.kviz_preklican,
