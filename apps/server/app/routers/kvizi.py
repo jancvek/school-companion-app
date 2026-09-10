@@ -17,16 +17,26 @@ from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
 from app.besedilo import SNOVI, VPRASANJA, stevilo_z_besedo
-from app.casi import cas, cas_ali_prazno, dan_od_do, datum
+from app.casi import cas, cas_ali_prazno, dan_od_do, datum, trajanje
 from app.db import KviziRepository, SnovSVprasanji, SnovZaIzbor
 from app.dependencies import daj_nastavitve, daj_repozitorij_kvizov
-from app.models import STATUS_NAPAKA, STATUS_NOV, STATUS_V_OBDELAVI, Quiz
+from app.models import (
+    OCENE,
+    STATUS_NAPAKA,
+    STATUS_NOV,
+    STATUS_V_OBDELAVI,
+    Material,
+    Ocena,
+    QuestionAttempt,
+    Quiz,
+    QuizItem,
+)
 from app.settings import Settings
 from app.storage import je_znotraj, velikost_slike
 from app.strani import daj_predloge, ni_dovoljeno, ni_najdeno
@@ -84,6 +94,28 @@ VSI_PREDMETI = "Vsi predmeti"
 #: Error". To je razred napake, ki ga zelena zbirka ne pokaže.
 NAJVEC_IME = 200
 NAJVEC_KODA = 16
+
+#: Oznake štirih stopenj samoocene, kot jih vidi Maša na telefonu (`ADR-014`).
+#:
+#: Tu in ne v skupnem modulu: potrebuje jih samo ta usmerjevalnik. Vrstni red
+#: prikaza ni ta slovar, ampak `OCENE` iz `app/models.py` — od najtežje navzdol.
+OZNAKE_OCEN: dict[Ocena, str] = {
+    "nisem_vedela": "Nisem vedela",
+    "tezko": "Težko",
+    "srednje": "Srednje",
+    "lahko": "Lahko",
+}
+
+#: Ime skupine za postavko, ki v rešenem kvizu nima prepoznavne ocene.
+#:
+#: Ne bi smelo nastati — kviz je rešen šele, ko ima vsaka postavka poskus, in
+#: strežnik sprejme samo štiri kode. Skupina je tu zato, da postavka v takem
+#: primeru ne izpade **molče** iz rezultata.
+BREZ_OCENE = "Brez ocene"
+
+#: Kaj je za tisk obkljukano ob prvem prihodu. Namen zahteve: „natisniti samo
+#: tista, ki so bila težka".
+PRIVZETO_ZA_TISK: tuple[Ocena, ...] = ("nisem_vedela", "tezko")
 
 
 def _stevilo_v_mejah(stevilo: int) -> int:
@@ -536,23 +568,165 @@ def seznam_kvizov(repozitorij: KviziRepository) -> list[dict[str, Any]]:
     return [_pogled_kviza(kviz, postavk) for kviz, postavk in repozitorij.seznam()]
 
 
+def _skupine(
+    postavke: list[QuizItem], poskusi: dict[str, QuestionAttempt]
+) -> list[tuple[Ocena | None, list[tuple[QuizItem, QuestionAttempt | None]]]]:
+    """Postavke po oceni, od najtežje navzdol; znotraj skupine po `position`.
+
+    Vse štiri skupine so vedno tu, tudi prazne — kriterij zahteva „število v
+    vsaki skupini", in skupina, ki manjka, števila nima. Peta (`None`, „brez
+    ocene") je samo, kadar ni prazna; glej `BREZ_OCENE`.
+
+    Postavke pridejo iz `Quiz.postavke`, ki je že urejena po `position`, zato
+    je vrstni red znotraj skupine le ohranjen.
+    """
+    # Ključ je `str` in ne `Ocena`: `rating` je v bazi niz, in slovar mora znati
+    # povedati, da neke kode v njem ni.
+    po_oceni: dict[str, list[tuple[QuizItem, QuestionAttempt | None]]] = {
+        ocena: [] for ocena in OCENE
+    }
+    brez: list[tuple[QuizItem, QuestionAttempt | None]] = []
+    for postavka in postavke:
+        poskus = poskusi.get(postavka.id)
+        if poskus is not None and poskus.rating in po_oceni:
+            po_oceni[poskus.rating].append((postavka, poskus))
+        else:
+            brez.append((postavka, poskus))
+
+    skupine: list[tuple[Ocena | None, list[tuple[QuizItem, QuestionAttempt | None]]]] = [
+        (ocena, po_oceni[ocena]) for ocena in OCENE
+    ]
+    if brez:
+        skupine.append((None, brez))
+    return skupine
+
+
+def _opombe_izvora(postavka: QuizItem, snov: Material, images_dir: Path) -> list[str]:
+    """Kaj mora operater vedeti o izvorni snovi, preden klikne povezavo.
+
+    Samo v rezultatu (`docs/plan/V2-R03.md`, odločitev 3): stran nerešenega
+    kviza ostane, kakršna je bila, ker test iz `V2-R01` dokazuje, da je ponovna
+    obdelava ne spremeni.
+
+    Slika „na disku" pomeni isto kot v izbirniku — znotraj `images_dir` in
+    berljive velikosti.
+    """
+    opombe: list[str] = []
+    pot = Path(snov.image_path)
+    ima_sliko = je_znotraj(images_dir, pot) and velikost_slike(pot) is not None
+    if snov.archived_at is not None:
+        opombe.append(
+            "v arhivu" if ima_sliko else "v arhivu, slika počiščena — prepis je na strani snovi"
+        )
+    elif not ima_sliko:
+        opombe.append("slike ni na disku")
+
+    # Upokojeno vprašanje pomeni, da je bila snov po objavi ponovno obdelana:
+    # prepis na strani snovi je iz novejše obdelave in ni tisti, iz katerega je
+    # to vprašanje nastalo (`ADR-015`).
+    if postavka.question is not None and postavka.question.retired_at is not None:
+        opombe.append(
+            "snov je bila medtem ponovno obdelana — prepis na strani snovi je "
+            "novejši od tega vprašanja"
+        )
+    return opombe
+
+
+def _postavka_rezultata(
+    postavka: QuizItem,
+    poskus: QuestionAttempt | None,
+    snovi: dict[str, Material],
+    images_dir: Path,
+) -> dict[str, Any]:
+    """Ena postavka rešenega kviza, pripravljena za predlogo.
+
+    Besedilo je **zamrznjeno** iz postavke (`ADR-016` E). Številka je številka
+    v kvizu in ne mesto v skupini: po njej se da stran primerjati s telefonom.
+    """
+    vprasanje = postavka.question
+    snov = (
+        snovi.get(vprasanje.material_id)
+        if vprasanje is not None and vprasanje.material_id is not None
+        else None
+    )
+    return {
+        "stevilka": postavka.position,
+        "vprasanje": postavka.question_text,
+        "odgovor": postavka.answer_text,
+        # Snov, ki je v slovarju ni, je dokončno izbrisana — isto kot `NULL`.
+        "snov_id": snov.id if snov is not None else None,
+        "izvor": (
+            _izvor(vprasanje.subject, vprasanje.material_taken_at)
+            if vprasanje is not None
+            else None
+        ),
+        "opombe": _opombe_izvora(postavka, snov, images_dir) if snov is not None else [],
+        # Dve trajanji in ne eno (`ADR-019` D): razmislek pove, kako dolgo je
+        # iskala odgovor, ocena pa je mehki signal iz `ADR-014` — „Lahko"
+        # dve sekundi po razkritju.
+        "razmislek": trajanje(poskus.shown_at, poskus.revealed_at) if poskus else None,
+        "cas_ocene": trajanje(poskus.revealed_at, poskus.answered_at) if poskus else None,
+    }
+
+
+def _rezultat(
+    kviz: Quiz,
+    poskusi: dict[str, QuestionAttempt],
+    snovi: dict[str, Material],
+    images_dir: Path,
+) -> list[dict[str, Any]]:
+    """Skupine rezultata za predlogo, vsaka z oznako in sklanjanim številom."""
+    return [
+        {
+            "oznaka": OZNAKE_OCEN[ocena] if ocena is not None else BREZ_OCENE,
+            "stevilo_opis": stevilo_z_besedo(len(clani), VPRASANJA),
+            "postavke": [
+                _postavka_rezultata(postavka, poskus, snovi, images_dir)
+                for postavka, poskus in clani
+            ],
+        }
+        for ocena, clani in _skupine(kviz.postavke, poskusi)
+    ]
+
+
 @router.get("/{quiz_id}")
 def kviz(
     request: Request,
     quiz_id: str,
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     repozitorij: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov)],
+    nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
 ) -> Response:
-    """En kviz z vsemi postavkami.
+    """En kviz z vsemi postavkami; rešen kviz kot rezultat (V2-R03).
 
     Postavka pokaže svoje **zamrznjeno** besedilo in ne besedila vprašanja iz
     baze: prav v tem je pomen `ADR-016` (E). Povezava na izvorno snov je tam,
     kjer snov še obstaja; kadar je bila dokončno izbrisana, ostane vprašanje
     brez `material_id` in kviz to pove namesto da bi ponudil mrtvo povezavo.
+
+    **Rezultat ima samo rešen kviz** (`solved_at`), tudi preklican — preklic
+    ima prednost pri stanju, ne pri tem, ali se poskusi pokažejo
+    (`docs/plan/V2-R03.md`, odločitev 1). Nerešen kviz se izriše kot pred
+    V2-R03 in ne plača nobene poizvedbe več.
     """
     najden = repozitorij.poisci(quiz_id)
     if najden is None:
         return ni_najdeno(predloge, request, "Kviza s tem identifikatorjem ni.")
+
+    if najden.solved_at is not None:
+        return predloge.TemplateResponse(
+            request,
+            "kviz.html",
+            {
+                "kviz": _pogled_kviza(najden, len(najden.postavke)),
+                "rezultat": _rezultat(
+                    najden,
+                    repozitorij.poskusi_kviza(quiz_id),
+                    repozitorij.snovi_postavk(najden),
+                    nastavitve.images_dir,
+                ),
+            },
+        )
 
     postavke = [
         {
@@ -590,6 +764,80 @@ def _izvor(subject: str | None, taken_at: datetime | None) -> str | None:
     if taken_at is None:
         return subject
     return f"{subject or '?'} — {cas(taken_at)}"
+
+
+@router.get("/{quiz_id}/print")
+def tisk(
+    request: Request,
+    quiz_id: str,
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    repozitorij: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov)],
+    izbor: str | None = None,
+    ocena: Annotated[list[str] | None, Query()] = None,
+) -> Response:
+    """Stran za tisk: vprašanja brez odgovorov, prelom, ključ (V2-R03).
+
+    Tisk je tudi za **reševanje na papir**, zato del z vprašanji nima ne
+    odgovorov ne naslovov skupin po oceni — naslov „Nisem vedela" nad
+    vprašanjem bi Maši povedal, kaj je o njem mislila prvič. Vrstni red je vseeno
+    od najtežje navzdol, oštevilčenje pa znova od 1; ključ nosi iste številke.
+
+    `GET`, ker nič ne spremeni. Parameter `izbor` loči prvi prihod (velja
+    `PRIVZETO_ZA_TISK`) od obrazca, v katerem je vse odkljukano: obrazec brez
+    obkljukanega okenca ne pošlje nobene `ocena`, in brez `izbor` bi se tak
+    obrazec tiho vrnil v privzetek. Neznane kode se prezrejo.
+
+    Gumba „Natisni" ni: brez JavaScripta ga ni mogoče narediti (`ADR-006`).
+    """
+    najden = repozitorij.poisci(quiz_id)
+    if najden is None:
+        return ni_najdeno(predloge, request, "Kviza s tem identifikatorjem ni.")
+    if najden.solved_at is None:
+        return ni_dovoljeno(
+            predloge,
+            request,
+            "Kviz še ni rešen, zato vprašanj ni mogoče izbrati po oceni. Tisk bo "
+            "mogoč, ko Maša na telefonu oceni vsa vprašanja.",
+        )
+
+    zahtevane = set(ocena or [])
+    izbrane = (
+        [koda for koda in OCENE if koda in zahtevane]
+        if izbor is not None
+        else list(PRIVZETO_ZA_TISK)
+    )
+
+    skupine = _skupine(najden.postavke, repozitorij.poskusi_kviza(quiz_id))
+    za_tisk = [
+        postavka
+        for koda, clani in skupine
+        if koda in izbrane
+        for postavka, _poskus in clani
+    ]
+
+    return predloge.TemplateResponse(
+        request,
+        "kviz-tisk.html",
+        {
+            "kviz": _pogled_kviza(najden, len(najden.postavke)),
+            "ocene": [
+                {
+                    "koda": koda,
+                    "oznaka": OZNAKE_OCEN[koda],
+                    "stevilo_opis": stevilo_z_besedo(len(clani), VPRASANJA),
+                    "izbrana": koda in izbrane,
+                }
+                for koda, clani in skupine
+                if koda is not None
+            ],
+            "stevilo_opis": stevilo_z_besedo(len(za_tisk), VPRASANJA),
+            "vprasanja": [
+                {"stevilka": stevilka, "vprasanje": postavka.question_text,
+                 "odgovor": postavka.answer_text}
+                for stevilka, postavka in enumerate(za_tisk, start=1)
+            ],
+        },
+    )
 
 
 @router.post("/{quiz_id}/cancel")

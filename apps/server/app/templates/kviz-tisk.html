@@ -1,0 +1,73 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}{{ kviz.ime }} — tisk{% endblock %}
+
+{% block vsebina %}
+  {# Del za zaslon: izbor ocen in navodilo. V tisku ga ni (`ne-tiskaj`).
+     Obrazec je `GET`, ker nič ne spremeni; `izbor` loči prvi prihod od
+     obrazca, v katerem je vse odkljukano (`docs/plan/V2-R03.md`, odl. 7). #}
+  <div class="ne-tiskaj">
+    <h1>Tisk: {{ kviz.ime }}</h1>
+    <p class="pod">
+      Izberi ocene, ki naj pridejo na papir. Najprej so vprašanja brez
+      odgovorov, na novi strani pa ključ z istimi številkami.
+    </p>
+
+    <form method="get" action="/admin/quizzes/{{ kviz.id }}/print" class="vstopi">
+      <input type="hidden" name="izbor" value="1">
+      {% for ocena in ocene %}
+        <label>
+          <input type="checkbox" name="ocena" value="{{ ocena.koda }}"{% if ocena.izbrana %} checked{% endif %}>
+          {{ ocena.oznaka }} ({{ ocena.stevilo_opis }})
+        </label>
+      {% endfor %}
+      <button class="gumb gumb-obdelava" type="submit">Pokaži za tisk</button>
+    </form>
+
+    {% if vprasanja %}
+      <p class="drobno">
+        Za tisk: {{ stevilo_opis }}. Natisni s Ctrl+P (na Macu Cmd+P); glava,
+        izbor in povezave se na papir ne natisnejo.
+      </p>
+    {% else %}
+      <p class="opozorilo">
+        Izbranim ocenam ne ustreza nobeno vprašanje, zato ni kaj natisniti.
+        Obkljukaj še kakšno oceno in klikni „Pokaži za tisk".
+      </p>
+    {% endif %}
+    <a class="nazaj" href="/admin/quizzes/{{ kviz.id }}">← Nazaj na rezultat</a>
+  </div>
+
+  {% if vprasanja %}
+    {# Del za tisk. Brez naslovov skupin po oceni in brez odgovorov: tisk je
+       tudi za reševanje na papir (`docs/verzije/v2.md`, V2-R03). #}
+    <div class="tisk">
+      <h1>{{ kviz.ime }}</h1>
+      <p class="pod">Rešen {{ kviz.resen_datum }} · {{ stevilo_opis }}</p>
+
+      <ol class="tisk-vprasanja">
+        {% for vprasanje in vprasanja %}
+          <li value="{{ vprasanje.stevilka }}">
+            <p class="vprasanje">{{ vprasanje.vprasanje }}</p>
+            {# Prazen okvir za odgovor, napisan z roko. #}
+            <div class="prostor"></div>
+          </li>
+        {% endfor %}
+      </ol>
+
+      {# Ključ se začne na novem listu (`break-before: page`), da se
+         vprašanja rešujejo brez pogleda na odgovore. #}
+      <section class="kljuc">
+        <h2>Ključ — {{ kviz.ime }}</h2>
+        <ol class="vprasanja">
+          {% for vprasanje in vprasanja %}
+            <li value="{{ vprasanje.stevilka }}">
+              <p class="vprasanje">{{ vprasanje.vprasanje }}</p>
+              <p class="odgovor">{{ vprasanje.odgovor }}</p>
+            </li>
+          {% endfor %}
+        </ol>
+      </section>
+    </div>
+  {% endif %}
+{% endblock %}

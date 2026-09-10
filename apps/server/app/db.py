@@ -792,6 +792,49 @@ class KviziRepository:
             .options(selectinload(Quiz.postavke).selectinload(QuizItem.question))
         ).one_or_none()
 
+    # --- Rezultat (V2-R03) ---
+
+    def snovi_postavk(self, kviz: Quiz) -> dict[str, Material]:
+        """Snovi, iz katerih so vprašanja kviza, ključane po `id`. Ena poizvedba.
+
+        Rezultat pri vsaki postavki pove, ali je snov v arhivu in ali ima še
+        sliko — za to potrebuje vrstico `materials`. Branje prek
+        `postavka.question.material` bi bilo leno nalaganje na vsako postavko.
+
+        Ločeno od `poisci` in ne privzeto v njem: stran **nerešenega** kviza
+        snovi ne potrebuje in naj ne plača poizvedbe, ki je ne uporabi
+        (`docs/plan/V2-R03.md`, odločitev 5). Dokončno izbrisane snovi v slovarju
+        ni — vprašanje ima takrat `material_id` `NULL` (`ADR-012`).
+        """
+        idji = {
+            postavka.question.material_id
+            for postavka in kviz.postavke
+            if postavka.question is not None and postavka.question.material_id is not None
+        }
+        if not idji:
+            return {}
+
+        return {
+            snov.id: snov
+            for snov in self.session.scalars(select(Material).where(Material.id.in_(idji)))
+        }
+
+    def poskusi_kviza(self, quiz_id: str) -> dict[str, QuestionAttempt]:
+        """Poskusi kviza, ključani po postavki. Ena poizvedba.
+
+        Ključ je `quiz_item_id`, ker ima postavka največ en poskus — v shemi
+        (`UNIQUE`) in ne le po dogovoru (`docs/odlocitve/ADR-019` E). Rezultat
+        zato ne potrebuje pravila, kateri od dveh poskusov velja.
+        """
+        return {
+            poskus.quiz_item_id: poskus
+            for poskus in self.session.scalars(
+                select(QuestionAttempt)
+                .join(QuizItem, QuizItem.id == QuestionAttempt.quiz_item_id)
+                .where(QuizItem.quiz_id == quiz_id)
+            )
+        }
+
     def preklici(self, quiz_id: str) -> Quiz | None:
         """Prekliče kviz; vrne kviz ali `None`, če ga ni.
 

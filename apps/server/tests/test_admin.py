@@ -1185,6 +1185,8 @@ class TestPakiranje:
             "kvizi-izbirnik.html",
             "kvizi-predogled.html",
             "kviz.html",
+            # V2-R03.
+            "kviz-tisk.html",
         }
 
 

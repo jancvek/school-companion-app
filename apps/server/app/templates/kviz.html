@@ -23,6 +23,51 @@
     </p>
   {% endif %}
 
+  {% if rezultat %}
+    {# Rezultat ima samo rešen kviz (V2-R03), tudi preklican: preklic ima
+       prednost pri stanju zgoraj, poskusi pa so dejstvo in se pokažejo
+       (`docs/plan/V2-R03.md`, odločitev 1). #}
+    <p class="drobno">
+      Ocene so Mašina samoocena po razkritju odgovora, ne preverjeno znanje.
+      Najtežja vprašanja so zgoraj.
+    </p>
+    <p>
+      <a href="/admin/quizzes/{{ kviz.id }}/print">Natisni izbrana vprašanja s ključem</a>
+    </p>
+
+    {% for skupina in rezultat %}
+      <section class="skupina">
+        <h2>{{ skupina.oznaka }} · {{ skupina.stevilo_opis }}</h2>
+        {% if skupina.postavke %}
+          <ol class="vprasanja">
+            {% for postavka in skupina.postavke %}
+              {# `value` nosi številko v kvizu in ne mesto v skupini: po njej
+                 se da rezultat primerjati s telefonom. #}
+              <li value="{{ postavka.stevilka }}">
+                <p class="vprasanje">{{ postavka.vprasanje }}</p>
+                <p class="odgovor">{{ postavka.odgovor }}</p>
+                {% if postavka.razmislek %}
+                  <p class="drobno">
+                    razmislek {{ postavka.razmislek }} · ocena {{ postavka.cas_ocene }}
+                  </p>
+                {% endif %}
+                <p class="drobno">
+                  {% if postavka.snov_id %}
+                    <a href="/admin/materials/{{ postavka.snov_id }}">{{ postavka.izvor }} — slika in prepis</a>
+                    {% for opomba in postavka.opombe %} · {{ opomba }}{% endfor %}
+                  {% elif postavka.izvor %}
+                    {{ postavka.izvor }} — izvorne slike ni več na strežniku
+                  {% else %}
+                    izvor ni znan
+                  {% endif %}
+                </p>
+              </li>
+            {% endfor %}
+          </ol>
+        {% endif %}
+      </section>
+    {% endfor %}
+  {% else %}
   <ol class="vprasanja">
     {% for postavka in postavke %}
       <li>
@@ -45,6 +90,7 @@
       </li>
     {% endfor %}
   </ol>
+  {% endif %}
 
   {% if not kviz.preklican %}
     {# `POST` in ne povezava, kot pri vsakem dejanju, ki spremeni stanje.
