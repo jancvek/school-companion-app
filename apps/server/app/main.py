@@ -16,7 +16,7 @@ from sqlalchemy import Engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.db import naredi_motor, naredi_tovarno_sej
-from app.routers import admin, kvizi, materials, resevanje
+from app.routers import admin, kvizi, materials, resevanje, statistika
 from app.schemas import Zivost
 from app.security import ApiKeyMiddleware
 from app.settings import Settings
@@ -125,6 +125,10 @@ def create_app(
     # `/admin/quizzes/...` se z nobeno obstoječo potjo ne prekriva —
     # `admin` ima `/admin/materials/...` in `/admin/subjects/...`.
     app.include_router(kvizi.router)
+    # Statistika čez kvize (V2-R04), pod `/admin/statistics/...` — z nobeno
+    # obstoječo potjo se ne prekriva. Pod `/admin` in torej brez ključa:
+    # vidna je samo na operaterski strani (`docs/odlocitve/ADR-021` F).
+    app.include_router(statistika.router)
 
     # Napake pod `/admin` naj bodo stran, ne JSON. Prestreznik se za vse
     # ostale poti umakne privzetemu — glej `admin.prestrezi_napako`.

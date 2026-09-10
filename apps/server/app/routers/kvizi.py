@@ -40,7 +40,7 @@ from app.models import (
 from app.settings import Settings
 from app.storage import je_znotraj, velikost_slike
 from app.strani import daj_predloge, ni_dovoljeno, ni_najdeno
-from app.subjects import oznaka_predmeta
+from app.subjects import OZNAKE_OCEN, oznaka_predmeta
 
 #: Predpona poti sestavljalnika. Pod `/admin`, torej brez ključa (`ADR-006`).
 PREDPONA = "/admin/quizzes"
@@ -94,17 +94,6 @@ VSI_PREDMETI = "Vsi predmeti"
 #: Error". To je razred napake, ki ga zelena zbirka ne pokaže.
 NAJVEC_IME = 200
 NAJVEC_KODA = 16
-
-#: Oznake štirih stopenj samoocene, kot jih vidi Maša na telefonu (`ADR-014`).
-#:
-#: Tu in ne v skupnem modulu: potrebuje jih samo ta usmerjevalnik. Vrstni red
-#: prikaza ni ta slovar, ampak `OCENE` iz `app/models.py` — od najtežje navzdol.
-OZNAKE_OCEN: dict[Ocena, str] = {
-    "nisem_vedela": "Nisem vedela",
-    "tezko": "Težko",
-    "srednje": "Srednje",
-    "lahko": "Lahko",
-}
 
 #: Ime skupine za postavko, ki v rešenem kvizu nima prepoznavne ocene.
 #:

@@ -1,0 +1,56 @@
+{# Skupni deli obeh strani statistike (V2-R04). Makri in ne `include`: vsak
+   del dobi, kar potrebuje, kot argument, in ne bere spremenljivk strani, ki
+   ga vključi. Predloga ne računa in ne sklanja — vse pride pripravljeno iz
+   `app/routers/statistika.py`. #}
+
+{% macro izbira_let(leta, neprebrano) %}
+  <p class="izbira-let">
+    Obdobje:
+    {% for leto in leta %}
+      {% if leto.izbrano %}
+        <strong>{{ leto.oznaka }}</strong>
+      {% else %}
+        <a href="{{ leto.url }}">{{ leto.oznaka }}</a>
+      {% endif %}
+    {% endfor %}
+  </p>
+  {% if neprebrano %}
+    <p class="opozorilo">
+      Obdobja „{{ neprebrano }}“ ni mogoče prebrati, zato je prikazano tekoče
+      šolsko leto.
+    </p>
+  {% endif %}
+{% endmacro %}
+
+{% macro samoocena() %}
+  <p class="drobno">
+    Ocene so Mašina samoocena po razkritju odgovora, ne preverjeno znanje.
+    Pravilne so vse ocene razen „Nisem vedela“; težki sta „Nisem vedela“ in
+    „Težko“. Najtežje je zgoraj.
+  </p>
+{% endmacro %}
+
+{# Pas je slika, števila ob njem so podatek: pas brez števil ne bi povedal
+   ničesar bralniku zaslona ne papirju. #}
+{% macro pas(s) %}
+  <span class="razporeditev" aria-hidden="true">
+    {%- for ocena in s.ocene -%}
+      {%- if ocena.sirina -%}
+        <span class="pas-{{ loop.index0 }}" style="width: {{ ocena.sirina }}%"
+              title="{{ ocena.oznaka }}: {{ ocena.koliko }}"></span>
+      {%- endif -%}
+    {%- endfor -%}
+  </span>
+{% endmacro %}
+
+{% macro ocene(s) %}
+  {%- for ocena in s.ocene -%}
+    {{ ocena.oznaka }} {{ ocena.koliko }}{% if not loop.last %} · {% endif %}
+  {%- endfor -%}
+{% endmacro %}
+
+{% macro opombe(seznam) %}
+  {% for opomba in seznam %}
+    <p class="opozorilo">{{ opomba }}</p>
+  {% endfor %}
+{% endmacro %}

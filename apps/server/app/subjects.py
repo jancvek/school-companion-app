@@ -13,6 +13,8 @@ slik ne skrije.
 
 from typing import NamedTuple
 
+from app.models import Ocena
+
 
 class Predmet(NamedTuple):
     """Šolski predmet, kot ga pozna vmesnik."""
@@ -73,6 +75,20 @@ STATUSI: dict[str, str] = {
 #: obdelave. Razliko nosi polje `readable`, oznaka pa mora povedati oboje —
 #: „obdelano" samo bi bilo v tem primeru zavajajoče (`docs/plan/V1-R03.md`).
 STATUS_NEBERLJIVO = "obdelano — slika ni berljiva"
+
+
+#: Oznake štirih stopenj samoocene, kot jih vidi Maša na telefonu (`ADR-014`).
+#:
+#: Do V2-R04 so živele v `app/routers/kvizi.py`, ker jih je potreboval samo
+#: rezultat kviza. Odkar jih potrebuje še statistika, niso last nobenega od
+#: obeh usmerjevalnikov (`docs/01-arhitektura.md`). Vrstni red prikaza ni ta
+#: slovar, ampak `OCENE` iz `app/models.py` — od najtežje navzdol.
+OZNAKE_OCEN: dict[Ocena, str] = {
+    "nisem_vedela": "Nisem vedela",
+    "tezko": "Težko",
+    "srednje": "Srednje",
+    "lahko": "Lahko",
+}
 
 
 def oznaka_statusa(status: str, readable: bool | None = None) -> str:

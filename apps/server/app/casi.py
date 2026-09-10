@@ -113,6 +113,74 @@ def trajanje(od: datetime, do: datetime) -> str:
     return f"{sekunde} s"
 
 
+#: Imena mesecev v imenovalniku, od januarja. Za tabelo po mesecih (V2-R04).
+MESECI = (
+    "januar",
+    "februar",
+    "marec",
+    "april",
+    "maj",
+    "junij",
+    "julij",
+    "avgust",
+    "september",
+    "oktober",
+    "november",
+    "december",
+)
+
+#: Mesec, s katerim se začne šolsko leto (`docs/odlocitve/ADR-021` B).
+ZACETNI_MESEC = 9
+
+
+def solsko_leto(trenutek: datetime) -> int:
+    """Šolsko leto, ki mu trenutek pripada, kot leto začetka: 2026 je 2026/27.
+
+    Meja je 1. september ob **lokalni** polnoči, iz istega razloga kot pri
+    `dan_od_do`: poleti je to 31. avgusta ob 22:00 UTC, in ocena ob 23:30 po
+    domačem času 31. avgusta sodi v staro leto, ocena ob 00:30 1. septembra pa
+    v novo.
+    """
+    lokalni = v_domacem(trenutek)
+    return lokalni.year if lokalni.month >= ZACETNI_MESEC else lokalni.year - 1
+
+
+def solsko_leto_od_do(leto: int) -> tuple[datetime, datetime]:
+    """Meji šolskega leta `leto` v UTC, polodprto: `[1. 9. leto, 1. 9. leto+1)`.
+
+    Kot `dan_od_do` vrne par UTC trenutkov, ker repozitorij za časovne pasove ne
+    ve. `datetime` s `ZoneInfo` sam izbere pravi odmik za tisti dan, zato
+    poletnega časa ni treba obravnavati posebej.
+    """
+    zacetek = datetime(leto, ZACETNI_MESEC, 1, tzinfo=pas())
+    konec = datetime(leto + 1, ZACETNI_MESEC, 1, tzinfo=pas())
+    return zacetek.astimezone(UTC), konec.astimezone(UTC)
+
+
+def oznaka_solskega_leta(leto: int) -> str:
+    """Šolsko leto za prikaz: `2026/27`."""
+    return f"{leto}/{(leto + 1) % 100:02d}"
+
+
+def mesec(trenutek: datetime) -> tuple[int, int]:
+    """Koledarsko leto in mesec trenutka v domačem pasu."""
+    lokalni = v_domacem(trenutek)
+    return lokalni.year, lokalni.month
+
+
+def meseci_solskega_leta(leto: int) -> list[tuple[int, int]]:
+    """Dvanajst mesecev šolskega leta po vrsti, od septembra do avgusta."""
+    return [
+        (leto if st >= ZACETNI_MESEC else leto + 1, st)
+        for st in [*range(ZACETNI_MESEC, 13), *range(1, ZACETNI_MESEC)]
+    ]
+
+
+def oznaka_meseca(leto: int, st: int) -> str:
+    """Mesec za prikaz: `september 2026`."""
+    return f"{MESECI[st - 1]} {leto}"
+
+
 def dan_od_do(trenutek: datetime) -> tuple[datetime, datetime]:
     """Meji koledarskega dne, ki mu trenutek pripada, v UTC.
 

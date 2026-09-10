@@ -1,0 +1,55 @@
+{% extends "osnova.html" %}
+{% import "_statistika.html" as deli %}
+
+{% block naslov %}Statistika čez kvize{% endblock %}
+
+{% block vsebina %}
+  <h1>Statistika čez kvize</h1>
+  <p class="pod">{{ okno }} · {{ skupaj.poskusov_opis }}</p>
+
+  {{ deli.izbira_let(leta, neprebrano) }}
+  {{ deli.samoocena() }}
+  {{ deli.opombe(opombe) }}
+
+  {% if not skupaj.poskusov %}
+    <p class="opozorilo">V tem obdobju ni nobene ocene.</p>
+  {% endif %}
+
+  {# Vseh deset predmetov tudi brez ocen, kot na `/admin`: seznam naj ne
+     spreminja dolžine in naj pokaže, česa ni. #}
+  <div class="tabela-ovoj">
+    <table class="tabela">
+      <thead>
+        <tr>
+          <th>Predmet</th>
+          <th>Poskusov</th>
+          <th>Razporeditev</th>
+          <th>Pravilnih</th>
+          <th>Težkih</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for vrstica in predmeti %}
+          <tr class="{{ '' if vrstica.poskusov else 'prazen' }}">
+            <td>
+              {% if vrstica.url %}
+                <a href="{{ vrstica.url }}"><span class="koda">{{ vrstica.koda }}</span> — {{ vrstica.oznaka }}</a>
+              {% else %}
+                <span class="koda">{{ vrstica.koda }}</span> — {{ vrstica.oznaka }}
+              {% endif %}
+            </td>
+            <td>{{ vrstica.poskusov_opis }}</td>
+            <td>
+              {{ deli.pas(vrstica) }}
+              <span class="drobno">{{ deli.ocene(vrstica) }}</span>
+            </td>
+            <td>{{ vrstica.pravilnih }}</td>
+            <td>{{ vrstica.tezkih }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <a class="nazaj" href="/admin">← Nazaj na pregled</a>
+{% endblock %}

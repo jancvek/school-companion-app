@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session, selectinload, sessionmaker
 from sqlalchemy.sql import Update
 
 from app.models import (
+    NACIN_SAMOOCENA,
     STATUS_NOV,
     STATUS_PRIPRAVLJEN,
     STATUS_V_OBDELAVI,
@@ -519,6 +520,31 @@ class KvizZaTelefon:
 
     kviz: Quiz
     odgovorjene: frozenset[str]
+
+
+@dataclass(frozen=True)
+class PoskusZaStatistiko:
+    """En poskus z vsem, kar statistika potrebuje o njem (V2-R04).
+
+    Zamrznjena vrstica in ne predmeti ORM: statistika bere na tisoče poskusov,
+    in vsak dostop do `poskus.postavka.vprasanje` bi bil lena poizvedba.
+
+    Polja vprašanja so `None`, kadar postavka vprašanja nima — v praksi se to
+    ne zgodi (`ADR-012`, `ADR-015`), a poskus zato ne sme izpasti molče.
+    """
+
+    rating: str
+    answered_at: datetime
+    quiz_id: str
+    kviz_ime: str
+    kviz_preklican: bool
+    question_id: str | None
+    vprasanje: str | None
+    odgovor: str | None
+    subject: str | None
+    material_id: str | None
+    material_taken_at: datetime | None
+    upokojeno: bool
 
 
 @dataclass(frozen=True)
@@ -1025,4 +1051,153 @@ class KviziRepository:
             .where(Quiz.id.in_(reseni), Quiz.solved_at.is_(None))
             .values(solved_at=zdaj)
             .execution_options(synchronize_session="fetch")
+        )
+
+
+class StatistikaRepository:
+    """Branje dnevnika poskusov za statistiko čez kvize (V2-R04).
+
+    Svoj razred in ne metode na `KviziRepository`, iz istega razloga, kot je
+    `KviziRepository` ločen od `MaterialsRepository`: bere iste tabele, a
+    obstaja zaradi nečesa drugega. **Samo bere** — statistika nima števcev
+    (`docs/odlocitve/ADR-012`).
+
+    **Vsaka poizvedba šteje samo način `samoocena`.** Statistiki dveh načinov
+    se nikoli ne povprečita (`ADR-014`); danes drugega načina ni, zato bi bil
+    pozabljen pogoj neviden do dneva, ko bi prišel ABC.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    @staticmethod
+    def _pogoji(od: datetime | None, do: datetime | None) -> list[ColumnElement[bool]]:
+        """Način in okno po `answered_at`, polodprto `[od, do)`, meje v UTC.
+
+        `answered_at` je v bazi v UTC — `routers/resevanje.py` ga pred zapisom
+        pretvori —, zato primerjava drži tudi nad SQLite, ki pasu ne hrani.
+        """
+        pogoji: list[ColumnElement[bool]] = [QuestionAttempt.mode == NACIN_SAMOOCENA]
+        if od is not None:
+            pogoji.append(QuestionAttempt.answered_at >= od)
+        if do is not None:
+            pogoji.append(QuestionAttempt.answered_at < do)
+        return pogoji
+
+    def poskusi(
+        self,
+        od: datetime | None = None,
+        do: datetime | None = None,
+        subject: str | None = None,
+    ) -> list[PoskusZaStatistiko]:
+        """Poskusi v oknu, najstarejši prvi. **Ena poizvedba.**
+
+        `LEFT JOIN questions`, da poskus na postavki brez vprašanja ne izpade;
+        z `subject` pa takega poskusa ni, ker brez vprašanja predmeta ne pozna.
+
+        Preklican kviz ni izločen: ocena je dejstvo, preklic pove le, da je bil
+        kviz napačno sestavljen (`docs/odlocitve/ADR-021` E). Upokojeno
+        vprašanje ni izločeno: poskus nanj je Mašin odgovor (`ADR-021` D).
+        """
+        pogoji = self._pogoji(od, do)
+        if subject is not None:
+            pogoji.append(Question.subject == subject)
+
+        vrstice = self.session.execute(
+            select(
+                QuestionAttempt.rating,
+                QuestionAttempt.answered_at,
+                Quiz.id,
+                Quiz.name,
+                Quiz.canceled_at,
+                Question.id,
+                Question.question,
+                Question.answer,
+                Question.subject,
+                Question.material_id,
+                Question.material_taken_at,
+                Question.retired_at,
+            )
+            .select_from(QuestionAttempt)
+            .join(QuizItem, QuizItem.id == QuestionAttempt.quiz_item_id)
+            .join(Quiz, Quiz.id == QuizItem.quiz_id)
+            .outerjoin(Question, Question.id == QuizItem.question_id)
+            .where(*pogoji)
+            .order_by(QuestionAttempt.answered_at, QuestionAttempt.id)
+        ).tuples()
+
+        return [
+            PoskusZaStatistiko(
+                rating=rating,
+                answered_at=answered_at,
+                quiz_id=quiz_id,
+                kviz_ime=kviz_ime,
+                kviz_preklican=canceled_at is not None,
+                question_id=question_id,
+                vprasanje=vprasanje,
+                odgovor=odgovor,
+                subject=subject_vprasanja,
+                material_id=material_id,
+                material_taken_at=material_taken_at,
+                upokojeno=retired_at is not None,
+            )
+            for (
+                rating,
+                answered_at,
+                quiz_id,
+                kviz_ime,
+                canceled_at,
+                question_id,
+                vprasanje,
+                odgovor,
+                subject_vprasanja,
+                material_id,
+                material_taken_at,
+                retired_at,
+            ) in vrstice
+        ]
+
+    def casi_poskusov(self) -> list[datetime]:
+        """`answered_at` vseh poskusov, za izbiro šolskih let. Ena poizvedba.
+
+        Časi in ne leta: šolsko leto se določi v domačem pasu, tega pa baza ne
+        pozna (`app/casi.py`). En stolpec čez vse poskuse je pri tem obsegu
+        nekaj tisoč vrednosti na leto.
+        """
+        return list(
+            self.session.scalars(
+                select(QuestionAttempt.answered_at).where(*self._pogoji(None, None))
+            )
+        )
+
+    def snovi(self, material_ids: Iterable[str]) -> dict[str, Material]:
+        """Snovi po `id`, za oznako arhiva. Ena poizvedba, kot `snovi_postavk`.
+
+        Dokončno izbrisane snovi v slovarju ni — njena vprašanja imajo takrat
+        `material_id` `NULL` (`ADR-012`).
+        """
+        idji = set(material_ids)
+        if not idji:
+            return {}
+        return {
+            snov.id: snov
+            for snov in self.session.scalars(select(Material).where(Material.id.in_(idji)))
+        }
+
+    def ima_poskuse(self, subject: str) -> bool:
+        """Ali ima predmet kakšen poskus, v kateremkoli oknu.
+
+        Za kodo, ki je ni na seznamu desetih: brez poskusov je stran 404, s
+        poskusi pa mora obstajati — sicer bi se ocene predmeta s preimenovano
+        kodo tiho izgubile (isto pravilo kot `/admin`).
+        """
+        return (
+            self.session.scalars(
+                select(QuestionAttempt.id)
+                .join(QuizItem, QuizItem.id == QuestionAttempt.quiz_item_id)
+                .join(Question, Question.id == QuizItem.question_id)
+                .where(*self._pogoji(None, None), Question.subject == subject)
+                .limit(1)
+            ).first()
+            is not None
         )
