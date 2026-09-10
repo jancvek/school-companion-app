@@ -40,30 +40,54 @@ v kodi ali ob obnovitvi strežniške baze iz starejše kopije.
 
 ## Odločitev
 
-**Možnost 2.**
+**Možnost 2, z razbitjem zavrnjenega paketa na posamezne poskuse.**
 
 - **Trajna zavrnitev** je odgovor 4xx razen 408 in 429 — ista meja, kot jo
-  `ADR-004` določa za prenos slik. Takrat se poskusi paketa **ne** označijo za
-  prenesene in ostanejo za naslednji obhod; obhod pa gre naprej.
+  `ADR-004` določa za prenos slik.
+- **Zavrnjen paket se v istem obhodu pošlje znova, po en poskus.** Sprejeti se
+  označijo za prenesene; trajno zavrnjeni ostanejo nepreneseni za naslednji
+  obhod. Paket z enim samim poskusom se ne ponavlja — njegova zavrnitev je že
+  sodba o tem poskusu.
 - **Paketi so med sabo neodvisni.** Zavrnjen paket ne ustavi naslednjih paketov
-  istega obhoda.
+  istega obhoda, in obhod gre naprej do branja seznama.
 - **Omrežna napaka, potekel čas, 5xx, 408 in 429** obhod še naprej končajo
   pred branjem seznama, kot doslej: strežnik je nedosegljiv ali preobremenjen
   in branje seznama bi spodletelo ali ga dodatno obremenilo.
 - **Neuspeh branja seznama** obhod konča kot doslej.
 - `401` (napačen ključ) je trajna zavrnitev; seznam bo takrat zavrnjen enako
   in obhod se konča tam.
+- Če med pošiljanjem po en poskus strežnik postane nedosegljiv, se obhod konča
+  kot vsak drug: kar je bilo do takrat sprejeto, ostane označeno.
+
+## Popravek prve različice
+
+Prva različica tega ADR je izbrala možnost 2 **brez** razbitja paketa in o njej
+trdila, da zavrnjen poskus „ne blokira ničesar drugega". To ni držalo, kar je
+odkril pregled v tretjem krogu. Telefon pošlje najstarejših 500 neprenesenih
+poskusov v enem paketu, strežnik pa paket sprejme vsega ali nič
+(`resevanje.py`). Trajno zavrnjen poskus je zato vedno v prvem paketu, in vsak
+poskus, ki ga Maša da za njim, pade v isti zavrnjeni paket. Kvizi bi prihajali
+na telefon, ocene pa ne na strežnik — noben kviz ne bi bil več rešen in
+`V2-R03` bi ostala brez rezultatov.
+
+Lastnik se je za možnost 2 odločil na podlagi tega nepopolnega opisa. Ko je
+dobil pravega, je izbral razbitje paketa. Plan in ta ADR ostajata sled obeh
+korakov; velja besedilo zgoraj.
 
 ## Posledice
 
-- **Kaj to olajša:** napaka v enem poskusu ne odreže telefona od novih kvizov.
-  Nobeni drugi odločitvi ne nasprotuje: poskus se ne zavrže (`ADR-012`),
-  neprenesen poskus se ne pobriše nikoli (`ADR-019` C).
+- **Kaj to olajša:** napaka v enem poskusu ne odreže telefona od novih kvizov
+  in ne ustavi prenosa ostalih ocen. Nobeni drugi odločitvi ne nasprotuje:
+  poskus se ne zavrže (`ADR-012`), neprenesen poskus se ne pobriše nikoli
+  (`ADR-019` C), pogodba s strežnikom ostane ista.
 - **Kaj to oteži:**
-  - Zavrnjen poskus ostane na telefonu in se pošilja vsakih 5 minut, brez
-    vidne sledi. To ostaja znana omejitev; če se kdaj zgodi, je pravi popravek
+  - Zavrnjen poskus ostane na telefonu in se pošilja ob vsakem obhodu, brez
+    vidne sledi. Dokler obstaja, vsak obhod z novimi poskusi pošlje en
+    zavrnjen paket in nato še vsak poskus posebej — pri tem obsegu nekaj
+    zahtevkov. To ostaja znana omejitev; če se kdaj zgodi, je pravi popravek
     svoja zahteva (vidna sled ali popravek vzroka), ne tiho brisanje.
-  - Kviz, katerega poskusi so zavrnjeni, na strežniku ostane nerešen in se na
-    seznamu vrača; na telefonu pa ne čaka, ker ima lokalne poskuse.
+  - Kviz, ki mu pripada zavrnjen poskus, na strežniku ostane nerešen in se na
+    seznamu vrača. Na telefonu ne čaka, če ima poskus za vsako postavko;
+    napol rešen čaka naprej kot vsak drug.
 - **Na katere zahteve to odslej vpliva:** `V2-R02` (nov kriterij), `V2-R03` in
   `V2-R04` ne.
