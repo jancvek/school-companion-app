@@ -49,11 +49,22 @@ v kodi ali ob obnovitvi strežniške baze iz starejše kopije.
   Sprejeti se označijo za prenesene; trajno zavrnjeni ostanejo nepreneseni za
   naslednji obhod. Paket z enim samim poskusom se ne ponavlja — njegova
   zavrnitev je že sodba o tem poskusu.
-- **Razbija se samo ob `422`**, edinem odgovoru, s katerim strežnik sodi o
-  vsebini poskusov (neveljavna ocena, postavka, ki je ni). Ob drugih trajnih
-  zavrnitvah (401, 403, 404, 413 …) bi strežnik zavrnil vsak poskus enako;
-  poskusi takrat ostanejo, obhod pa gre brez ponavljanja naprej na seznam.
-  Tudi med pošiljanjem po en poskus zavrnitev, ki ni `422`, razbijanje ustavi.
+- **Razbija se samo ob `422`**, odgovoru na neveljavno vsebino paketa: slab
+  poskus (neveljavna ocena, postavka, ki je ni) ali neusklajena pogodba med
+  APK in strežnikom — v drugem primeru je zavrnjen vsak poskus. Ob 401, 403
+  ali 404 ne gre za vsebino in bi strežnik zavrnil vsak poskus enako; poskusi
+  takrat ostanejo, obhod pa gre brez ponavljanja naprej na seznam. Tudi med
+  pošiljanjem po en poskus zavrnitev, ki ni `422`, razbijanje ustavi.
+- **Posamič zavrnjen poskus si telefon zapomni za čas zagona aplikacije** in ga
+  do naslednjega zagona ne pošilja več. Enako velja za paket z enim samim
+  poskusom, zavrnjen s `422`. Pomnjenje je v pomnilniku in ne v bazi — isti
+  vzorec kot odmik pri prenosu slik (odločitev 14 v `docs/plan/V1-R02.md`):
+  ponoven zagon je znak, naj se poskusi znova. Ko je vzrok na strežniku
+  odpravljen, gredo zavrnjeni gor sami. Zavrnitve, ki niso `422`, se ne
+  zapomnijo, ker krivda ni v poskusu.
+- `413` strežnik ne vrača: paket je v shemi omejen na 1000 poskusov, telefon
+  jih pošlje največ 500, posrednika pred strežnikom ni. Če bi ga kdaj, bi
+  razbitje pomagalo; ta odločitev ga ne pokriva.
 - **Paketi so med sabo neodvisni.** Zavrnjen paket ne ustavi naslednjih paketov
   istega obhoda, in obhod gre naprej do branja seznama.
 - **Omrežna napaka, potekel čas, 5xx, 408 in 429** obhod še naprej končajo
@@ -85,7 +96,15 @@ poslal en paket in še vsak poskus posebej — do 501 zahtevek vsakih 5 minut,
 vsi z istim odgovorom —, opis stroškov pa je govoril o „nekaj zahtevkih".
 Lastnik je razbitje omejil na `422`.
 
-Plan in ta ADR ostajata sled vseh treh korakov; velja besedilo zgoraj.
+Tretja različica je trdila, da je `422` edini odgovor o vsebini poskusov in da
+razbitje stane „nekaj zahtevkov". Peti pregled je pokazal, da oboje ne drži:
+razbitje se sproži, kadar ima paket vsaj dva poskusa, ne le ob novih ocenah,
+zato bi z N obtičalimi poskusi vsak obhod poslal 1 + N zahtevkov, za vedno —
+ravno ob obnovitvi strežniške baze, ki jo kontekst navaja kot vzrok. Ob
+neusklajeni pogodbi pa FastAPI vrne `422` za vsak poskus, in vrsta bi rasla z
+vsako oceno. Lastnik je izbral pomnjenje zavrnjenih za čas zagona aplikacije.
+
+Plan in ta ADR ostajata sled vseh štirih korakov; velja besedilo zgoraj.
 
 ## Posledice
 
@@ -94,11 +113,13 @@ Plan in ta ADR ostajata sled vseh treh korakov; velja besedilo zgoraj.
   poskus se ne zavrže (`ADR-012`), neprenesen poskus se ne pobriše nikoli
   (`ADR-019` C), pogodba s strežnikom ostane ista.
 - **Kaj to oteži:**
-  - Zavrnjen poskus ostane na telefonu in se pošilja ob vsakem obhodu, brez
-    vidne sledi. Dokler obstaja, vsak obhod z novimi poskusi pošlje en
-    zavrnjen paket in nato še vsak poskus posebej — pri tem obsegu nekaj
-    zahtevkov. To ostaja znana omejitev; če se kdaj zgodi, je pravi popravek
-    svoja zahteva (vidna sled ali popravek vzroka), ne tiho brisanje.
+  - Zavrnjen poskus ostane na telefonu brez vidne sledi. **Stroški:** ob
+    vsakem zagonu aplikacije enkrat en zavrnjen paket in še vsak poskus
+    posebej (1 + N), nato do naslednjega zagona samo novi poskusi. Android
+    aplikacijo v ozadju pogosto ubije, zato se 1 + N ponovi ob vsakem
+    ponovnem zagonu — omejeno, ne pa nič. Ob neusklajeni pogodbi je N vsak
+    neprenesen poskus. To ostaja znana omejitev; če se kdaj zgodi, je pravi
+    popravek svoja zahteva (vidna sled ali popravek vzroka), ne tiho brisanje.
   - Kviz, ki mu pripada zavrnjen poskus, na strežniku ostane nerešen in se na
     seznamu vrača. Na telefonu ne čaka, če ima poskus za vsako postavko;
     napol rešen čaka naprej kot vsak drug.

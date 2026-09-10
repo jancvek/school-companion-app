@@ -701,10 +701,17 @@ ne: paket se v istem obhodu pošlje znova **po en poskus**, sprejeti se
 označijo, zavrnjeni ostanejo nepreneseni, naslednji paketi se pošljejo in
 seznam se prebere. Razbitje je nujno, ker strežnik paket sprejme vsega ali nič,
 telefon pa vedno pošlje najstarejše poskuse prve — en sam neveljaven poskus bi
-sicer ustavil prenos vseh ocen za njim. Razbija se **samo ob `422`**, edinem
-odgovoru, s katerim strežnik sodi o vsebini poskusov; ob 401, 403 ali 404 bi
-zavrnil vsak poskus enako, zato poskusi takrat ostanejo in obhod gre brez
-ponavljanja naprej. Paket z enim poskusom se ne ponavlja.
+sicer ustavil prenos vseh ocen za njim. Razbija se **samo ob `422`**, odgovoru
+na neveljavno vsebino paketa (slab poskus ali neusklajena pogodba med APK in
+strežnikom); ob 401, 403 ali 404 ne gre za vsebino, zato poskusi takrat
+ostanejo in obhod gre brez ponavljanja naprej. Paket z enim poskusom se ne
+ponavlja.
+
+Posamič zavrnjen poskus si `KviziProvider` **zapomni za čas zagona
+aplikacije** (množica v `useRef`, ne v bazi) in ga obhodi do naslednjega zagona
+ne pošiljajo več. Brez tega bi z N obtičalimi poskusi vsak obhod poslal 1 + N
+zahtevkov, za vedno. Ob novem zagonu se poskusijo znova — ko je vzrok na
+strežniku odpravljen, gredo gor sami. Isti vzorec kot odmik pri prenosu slik.
 Meja med začasnim in trajnim je ista kot pri prenosu slik (`ADR-004`).
 
 Nerazberljiv odgovor s seznamom kot celota **vrže** in ne vrne praznega
@@ -727,9 +734,11 @@ Zapuščen kviz se nadaljuje pri prvi neocenjeni postavki. Po zadnji oceni
 ### Znane omejitve
 
 - **Trajno zavrnjen poskus obtiči brez vidne sledi.** Ostane na telefonu in se
-  pošlje znova ob vsakem obhodu; ne ustavi ne novih kvizov ne ostalih ocen
-  (`ADR-020`). Dokler obstaja, vsak obhod z novimi poskusi pošlje en zavrnjen
-  paket in nato še vsak poskus posebej. Kviz, ki mu pripada, na strežniku
+  pošlje znova ob naslednjem zagonu aplikacije; ne ustavi ne novih kvizov ne
+  ostalih ocen (`ADR-020`). Stroški: ob vsakem zagonu enkrat en zavrnjen paket
+  in še vsak poskus posebej (1 + N), nato do naslednjega zagona nič. Android
+  aplikacijo v ozadju pogosto ubije, zato se to ponovi ob vsakem ponovnem
+  zagonu. Kviz, ki mu pripada, na strežniku
   ostane nerešen; na telefonu ne čaka, če ima poskus za vsako postavko.
   Nastane lahko samo ob napaki v kodi ali ob obnovitvi strežniške baze iz
   starejše kopije; pravi popravek bi bil svoja zahteva, ne tiho brisanje.
