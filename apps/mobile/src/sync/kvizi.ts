@@ -48,10 +48,11 @@ export type OdjemalecKvizov = {
 const ZACASNE_4XX = new Set([408, 429]);
 
 /**
- * Edini odgovor, s katerim strežnik sodi o **vsebini** poskusov (neveljavna
- * ocena, postavka, ki je ni). Samo takrat ima razbitje paketa smisel
- * (`docs/odlocitve/ADR-020`); ob 401, 403 ali 404 bi strežnik zavrnil vsak
- * poskus enako in razbitje bi bilo le nekaj sto zaman poslanih zahtevkov.
+ * Odgovor na neveljavno **vsebino** paketa: slab poskus (neveljavna ocena,
+ * postavka, ki je ni) ali neusklajena pogodba med APK in strežnikom — v drugem
+ * primeru je zavrnjen vsak poskus. Samo takrat ima razbitje paketa smisel
+ * (`docs/odlocitve/ADR-020`); ob 401, 403 ali 404 ne gre za vsebino in bi
+ * strežnik zavrnil vsak poskus enako.
  */
 const VSEBINSKA_ZAVRNITEV = 422;
 
@@ -96,13 +97,21 @@ export type IzidUsklajevanja = {
  *
  * `odprti` je kviz, ki ga Maša ta hip rešuje; ta ne izgine, tudi če ga strežnik
  * ne vrača več (`ADR-019` C).
+ *
+ * `zavrnjeni` so poskusi, ki jih je strežnik posamič zavrnil s `422`. Obhod jih
+ * ne pošilja, dokler množica živi — klicatelj jo hrani za čas zagona
+ * aplikacije (`ADR-020`). Brez tega bi vsak obhod z N obtičalimi poskusi
+ * poslal 1 + N zahtevkov, za vedno. Ob novem zagonu se poskusijo znova: ko je
+ * vzrok na strežniku odpravljen, gredo gor sami. Po isti logiki živi v
+ * pomnilniku odmik pri prenosu slik (odločitev 14 v `docs/plan/V1-R02.md`).
  */
 export async function uskladiKvize(
   db: MaterialsDatabase,
   odjemalec: OdjemalecKvizov,
   odprti: string | null = null,
+  zavrnjeni: Set<string> = new Set(),
 ): Promise<IzidUsklajevanja> {
-  const cakajoci = await neprenesenePoskuse(db);
+  const cakajoci = (await neprenesenePoskuse(db)).filter((poskus) => !zavrnjeni.has(poskus.id));
   let poslani = 0;
   for (let zacetek = 0; zacetek < cakajoci.length; zacetek += NAJVEC_V_PAKETU) {
     const paket = cakajoci.slice(zacetek, zacetek + NAJVEC_V_PAKETU);
@@ -111,7 +120,7 @@ export async function uskladiKvize(
     } catch (napaka) {
       if (!(napaka instanceof PaketZavrnjen)) throw napaka;
       if (napaka.status === VSEBINSKA_ZAVRNITEV) {
-        poslani += await posljiPosamicno(db, odjemalec, paket);
+        poslani += await posljiPosamicno(db, odjemalec, paket, zavrnjeni);
       }
       continue;
     }
@@ -141,8 +150,9 @@ export async function uskladiKvize(
  * sprejel (`docs/odlocitve/ADR-020`).
  *
  * Tako gre gor vse razen poskusa, ki ga strežnik zavrača — ta ostane
- * neprenesen. Paket z enim samim poskusom se ne ponavlja: njegova zavrnitev je
- * že sodba o tem poskusu.
+ * neprenesen in gre v `zavrnjeni`, da ga obhodi do naslednjega zagona ne
+ * pošiljajo več. Paket z enim samim poskusom se ne ponavlja: njegova
+ * zavrnitev je že sodba o tem poskusu, zato gre ta poskus v `zavrnjeni` takoj.
  *
  * Nedosegljiv strežnik sredi pošiljanja vrže naprej in konča obhod; kar je bilo
  * do takrat sprejeto, je že označeno.
@@ -151,8 +161,12 @@ async function posljiPosamicno(
   db: MaterialsDatabase,
   odjemalec: OdjemalecKvizov,
   paket: readonly Poskus[],
+  zavrnjeni: Set<string>,
 ): Promise<number> {
-  if (paket.length <= 1) return 0;
+  if (paket.length <= 1) {
+    for (const poskus of paket) zavrnjeni.add(poskus.id);
+    return 0;
+  }
 
   let sprejeti = 0;
   for (const poskus of paket) {
@@ -161,8 +175,10 @@ async function posljiPosamicno(
     } catch (napaka) {
       if (!(napaka instanceof PaketZavrnjen)) throw napaka;
       // Zavrnitev, ki ni o vsebini (npr. 401 sredi razbijanja), bi zadela
-      // vsak naslednji poskus enako — razbijanje se ustavi, poskusi ostanejo.
+      // vsak naslednji poskus enako — razbijanje se ustavi, poskusi ostanejo
+      // in se ne zapomnijo: krivda ni v njih.
       if (napaka.status !== VSEBINSKA_ZAVRNITEV) break;
+      zavrnjeni.add(poskus.id);
       continue;
     }
     await oznaciPrenesene(db, [poskus.id], new Date().toISOString());

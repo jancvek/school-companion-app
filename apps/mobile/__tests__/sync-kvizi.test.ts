@@ -239,7 +239,7 @@ describe('uskladiKvize', () => {
       expect(await neprenesenePoskuse(db)).toEqual([]);
     });
 
-    it.each([401, 403, 404, 413])(
+    it.each([401, 403, 404])(
       'zavrnitve %d ne razbije — obhod gre naprej brez ponavljanja',
       async (status) => {
         // Četrti pregled: ob napačnem ključu bi razbitje pomenilo do 501
@@ -272,6 +272,108 @@ describe('uskladiKvize', () => {
       expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(2);
       expect(await neprenesenePoskuse(db)).toHaveLength(3);
       expect(streznik.preberiKvize).toHaveBeenCalledTimes(1);
+    });
+
+    it('sprejeti pred zavrnitvijo, ki ni 422, ostane označen in štet', async () => {
+      // Peti pregled: `return 0` namesto `break` bi ostal zelen, `poslani`
+      // pa bi lagal.
+      await shraniKviz(db, kvizStreznika('k1', 3));
+      for (let i = 1; i <= 3; i += 1) await zapisiPoskus(db, poskus('k1', i));
+      const streznik = odjemalec([]);
+      streznik.posljiPoskuse
+        .mockRejectedValueOnce(new PaketZavrnjen(422))
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new PaketZavrnjen(401));
+
+      const izid = await uskladiKvize(db, streznik);
+
+      expect(izid.poslani).toBe(1);
+      expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(3);
+      expect((await neprenesenePoskuse(db)).map((p) => p.id)).toEqual(['k1-a2', 'k1-a3']);
+    });
+
+    describe('pomnjenje zavrnjenih za čas zagona', () => {
+      it('posamič zavrnjenega do naslednjega zagona ne pošilja več', async () => {
+        // Peti pregled: brez pomnjenja bi vsak obhod z N obtičalimi poslal
+        // 1 + N zahtevkov, za vedno — tudi brez nove ocene.
+        await shraniKviz(db, kvizStreznika('slab', 2));
+        await zapisiPoskus(db, poskus('slab', 1, { answered_at: '2026-09-10T14:00:00.000Z' }));
+        await zapisiPoskus(db, poskus('slab', 2, { answered_at: '2026-09-10T14:00:01.000Z' }));
+        await shraniKviz(db, kvizStreznika('k2', 1));
+        await zapisiPoskus(db, poskus('k2', 1));
+        const streznik = odjemalec([]);
+        streznik.posljiPoskuse.mockImplementation(async (paket: readonly Poskus[]) => {
+          if (paket.some((p) => p.quiz_id === 'slab')) throw new PaketZavrnjen(422);
+        });
+        const zagon = new Set<string>();
+
+        await uskladiKvize(db, streznik, null, zagon);
+        // Paket s tremi in trije posamični; dobri gre gor.
+        expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(4);
+        expect([...zagon].sort()).toEqual(['slab-a1', 'slab-a2']);
+
+        await uskladiKvize(db, streznik, null, zagon);
+        await uskladiKvize(db, streznik, null, zagon);
+
+        // Obhoda brez novih poskusov ne pošljeta ničesar, seznam pa bereta.
+        expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(4);
+        expect(streznik.preberiKvize).toHaveBeenCalledTimes(3);
+        expect((await neprenesenePoskuse(db)).map((p) => p.id)).toEqual(['slab-a1', 'slab-a2']);
+
+        // Nov zagon: prazna množica, zavrnjena se poskusita znova.
+        await uskladiKvize(db, streznik, null, new Set());
+        expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(7);
+      });
+
+      it('nov poskus gre gor, tudi ko so drugi zapomnjeni kot zavrnjeni', async () => {
+        await shraniKviz(db, kvizStreznika('slab', 1));
+        await zapisiPoskus(db, poskus('slab', 1));
+        const streznik = odjemalec([]);
+        streznik.posljiPoskuse.mockImplementation(async (paket: readonly Poskus[]) => {
+          streznik.poslani.push([...paket]);
+          if (paket.some((p) => p.quiz_id === 'slab')) throw new PaketZavrnjen(422);
+        });
+        const zagon = new Set<string>();
+        await uskladiKvize(db, streznik, null, zagon);
+
+        await shraniKviz(db, kvizStreznika('k2', 1));
+        await zapisiPoskus(db, poskus('k2', 1));
+        const izid = await uskladiKvize(db, streznik, null, zagon);
+
+        expect(izid.poslani).toBe(1);
+        expect(streznik.poslani.at(-1)?.map((p) => p.id)).toEqual(['k2-a1']);
+      });
+
+      it('enojni paket, zavrnjen s 422, se zapomni', async () => {
+        await shraniKviz(db, kvizStreznika('k1', 1));
+        await zapisiPoskus(db, poskus('k1', 1));
+        const streznik = odjemalec([]);
+        streznik.posljiPoskuse.mockRejectedValue(new PaketZavrnjen(422));
+        const zagon = new Set<string>();
+
+        await uskladiKvize(db, streznik, null, zagon);
+        await uskladiKvize(db, streznik, null, zagon);
+
+        expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(1);
+        expect(await neprenesenePoskuse(db)).toHaveLength(1);
+      });
+
+      it('zavrnitev, ki ni 422, se ne zapomni', async () => {
+        // Krivda ni v poskusu (npr. napačen ključ); ko je vzrok odpravljen,
+        // mora poskus iti gor v istem zagonu.
+        await shraniKviz(db, kvizStreznika('k1', 2));
+        await zapisiPoskus(db, poskus('k1', 1));
+        await zapisiPoskus(db, poskus('k1', 2));
+        const streznik = odjemalec([]);
+        streznik.posljiPoskuse.mockRejectedValue(new PaketZavrnjen(401));
+        const zagon = new Set<string>();
+
+        await uskladiKvize(db, streznik, null, zagon);
+        await uskladiKvize(db, streznik, null, zagon);
+
+        expect(zagon.size).toBe(0);
+        expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(2);
+      });
     });
 
     it('paketa z enim samim poskusom ne ponavlja', async () => {

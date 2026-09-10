@@ -80,6 +80,10 @@ export function KviziProvider({
   const [cakajocih, setCakajocih] = useState(0);
   const odprti = useRef<string | null>(null);
   const ponavljalnik = useRef<Ponavljalnik | null>(null);
+  // Poskusi, ki jih je strežnik posamič zavrnil s 422 — za čas zagona
+  // aplikacije, ne v bazi (`docs/odlocitve/ADR-020`). Ob novem zagonu se
+  // poskusijo znova.
+  const zavrnjeni = useRef<Set<string>>(new Set());
 
   const osvezi = useCallback(async () => {
     try {
@@ -95,7 +99,7 @@ export function KviziProvider({
 
     const nov = ustvariPonavljalnik({
       naloga: async () => {
-        await uskladiKvize(db, odjemalec, odprti.current);
+        await uskladiKvize(db, odjemalec, odprti.current, zavrnjeni.current);
         await osvezi();
       },
     });
