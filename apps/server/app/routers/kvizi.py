@@ -519,6 +519,11 @@ def _pogled_kviza(kviz: Quiz, postavk: int) -> dict[str, Any]:
         "vprasanj_opis": stevilo_z_besedo(postavk, VPRASANJA),
         "preklican": kviz.canceled_at is not None,
         "preklican_ob": cas_ali_prazno(kviz.canceled_at),
+        # Rešenost je svoja os (V2-R02). Preklican kviz je lahko tudi rešen
+        # (`ADR-019` C); katera ima prednost, odloči predloga.
+        "resen": kviz.solved_at is not None,
+        "resen_ob": cas_ali_prazno(kviz.solved_at),
+        "resen_datum": datum(kviz.solved_at) if kviz.solved_at is not None else None,
     }
 
 

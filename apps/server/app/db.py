@@ -30,6 +30,7 @@ from app.models import (
     STATUS_V_OBDELAVI,
     Material,
     Question,
+    QuestionAttempt,
     Quiz,
     QuizItem,
 )
@@ -508,6 +509,31 @@ class SnovSVprasanji:
     vprasanja: tuple[Question, ...]
 
 
+@dataclass(frozen=True)
+class KvizZaTelefon:
+    """Kviz, ki čaka na telefonu, in postavke, ki so že odgovorjene (V2-R02).
+
+    `odgovorjene` nosi `docs/odlocitve/ADR-019` (E): telefon po ponovni
+    namestitvi ve, katere postavke naj preskoči, in jih ne rešuje znova.
+    """
+
+    kviz: Quiz
+    odgovorjene: frozenset[str]
+
+
+@dataclass(frozen=True)
+class PoskusZaZapis:
+    """En poskus s telefona, preverjen in pripravljen za zapis."""
+
+    id: str
+    quiz_item_id: str
+    mode: str
+    rating: str
+    shown_at: datetime
+    revealed_at: datetime
+    answered_at: datetime
+
+
 class KviziRepository:
     """Operacije nad `quizzes` in `quiz_items` (V2-R01).
 
@@ -770,8 +796,8 @@ class KviziRepository:
         """Prekliče kviz; vrne kviz ali `None`, če ga ni.
 
         **Nič se ne pobriše** (`ADR-016` F): postavke ostanejo, kviz ostane,
-        samo `canceled_at` dobi žig. `V2-R02` bo preklicane kvize preprosto
-        nehala pošiljati na telefon.
+        samo `canceled_at` dobi žig. Na telefon se preklican kviz preprosto
+        neha pošiljati (`seznam_za_telefon`).
 
         Ponoven preklic časa **ne premakne**, iz istega razloga kot pri
         `arhiviraj` in `_upokoji_vprasanja`: čas je podatek o tem, kdaj se je
@@ -786,3 +812,169 @@ class KviziRepository:
             self.session.commit()
 
         return kviz
+
+    # --- Reševanje na telefonu (V2-R02) ---
+
+    def seznam_za_telefon(self) -> list[KvizZaTelefon]:
+        """Kvizi, ki čakajo na telefonu: nepreklicani in nerešeni, najstarejši prvi.
+
+        **Delovni seznam, ne odsek za kazalcem** — isti vzorec kot
+        `seznam_za_brisanje` (`docs/odlocitve/ADR-011`, `ADR-016` F). Seznam se
+        krajša sam, ko je kviz rešen ali preklican, zato telefonu ni treba
+        hraniti časa zadnje sinhronizacije.
+
+        Vsebina je **zamrznjeno besedilo postavk** in ne besedilo iz
+        `questions`: ponovna obdelava snovi objavljenega kviza ne spremeni
+        (`ADR-016` E).
+
+        Dve poizvedbi za postavke (`selectinload`) in ena za odgovorjene, ne
+        ena na kviz.
+        """
+        kvizi = list(
+            self.session.scalars(
+                select(Quiz)
+                .where(Quiz.canceled_at.is_(None), Quiz.solved_at.is_(None))
+                .order_by(Quiz.created_at)
+                .options(selectinload(Quiz.postavke))
+            )
+        )
+        if not kvizi:
+            return []
+
+        odgovorjene = set(
+            self.session.scalars(
+                select(QuestionAttempt.quiz_item_id)
+                .join(QuizItem, QuizItem.id == QuestionAttempt.quiz_item_id)
+                .where(QuizItem.quiz_id.in_([kviz.id for kviz in kvizi]))
+            )
+        )
+
+        return [
+            KvizZaTelefon(
+                kviz=kviz,
+                odgovorjene=frozenset(
+                    postavka.id for postavka in kviz.postavke if postavka.id in odgovorjene
+                ),
+            )
+            for kviz in kvizi
+        ]
+
+    def zapisi_poskuse(
+        self, poskusi: Sequence[PoskusZaZapis], _ponovitev: bool = False
+    ) -> int | None:
+        """Zapiše paket poskusov; vrne, koliko jih je bilo res zapisanih.
+
+        `None`, kadar se kateri poskus nanaša na postavko, ki je ni — takrat se
+        **ne zapiše nič** od paketa. Paket je vse ali nič: pol zapisanega
+        paketa bi telefon ob ponovitvi poslal še enkrat in to bi bilo sicer
+        neškodljivo, a nihče ne bi znal povedati, kaj je od prvega poskusa
+        ostalo.
+
+        Pravila za posamezen poskus:
+
+        - obstoječ `id` → preskoči (idempotentnost, `ADR-012`);
+        - postavka že ima poskus, tudi iz istega paketa → preskoči. **Prvi
+          zmaga** (`docs/odlocitve/ADR-019` E);
+        - sicer vstavi.
+
+        Poskusi preklicanega kviza se sprejmejo kot vsi drugi: dogodek je
+        dejstvo, zavrnjen poskus pa bi na telefonu obtičal za vedno
+        (`ADR-019` C).
+
+        Rešenost prizadetih kvizov se preveri **v isti transakciji**, da ni
+        trenutka, ko ima kviz vse poskuse, a ni rešen — in obratno.
+
+        Dva hkratna paketa za isto postavko bi se srečala na enoličnosti v
+        shemi. Takrat se transakcija ponovi enkrat: druga ponovitev vidi zapis
+        tekmeca in poskus preskoči, kot pravi „prvi zmaga".
+        """
+        if not poskusi:
+            return 0
+
+        postavke_idji = {poskus.quiz_item_id for poskus in poskusi}
+        kvizi_postavk = dict(
+            self.session.execute(
+                select(QuizItem.id, QuizItem.quiz_id).where(QuizItem.id.in_(postavke_idji))
+            )
+            .tuples()
+            .all()
+        )
+        if len(kvizi_postavk) != len(postavke_idji):
+            return None
+
+        znani_idji = set(
+            self.session.scalars(
+                select(QuestionAttempt.id).where(
+                    QuestionAttempt.id.in_([poskus.id for poskus in poskusi])
+                )
+            )
+        )
+        zasedene = set(
+            self.session.scalars(
+                select(QuestionAttempt.quiz_item_id).where(
+                    QuestionAttempt.quiz_item_id.in_(postavke_idji)
+                )
+            )
+        )
+
+        zdaj = datetime.now(UTC)
+        zapisani = 0
+        for poskus in poskusi:
+            if poskus.id in znani_idji or poskus.quiz_item_id in zasedene:
+                continue
+            self.session.add(
+                QuestionAttempt(
+                    id=poskus.id,
+                    quiz_item_id=poskus.quiz_item_id,
+                    mode=poskus.mode,
+                    rating=poskus.rating,
+                    shown_at=poskus.shown_at,
+                    revealed_at=poskus.revealed_at,
+                    answered_at=poskus.answered_at,
+                    received_at=zdaj,
+                )
+            )
+            znani_idji.add(poskus.id)
+            zasedene.add(poskus.quiz_item_id)
+            zapisani += 1
+
+        try:
+            # Seja ima `autoflush=False`; štetje spodaj mora vstavljeno videti.
+            self.session.flush()
+            self._oznaci_resene(set(kvizi_postavk.values()), zdaj)
+            self.session.commit()
+        except IntegrityError:
+            self.session.rollback()
+            if _ponovitev:
+                raise
+            return self.zapisi_poskuse(poskusi, _ponovitev=True)
+
+        return zapisani
+
+    def _oznaci_resene(self, quiz_ids: set[str], zdaj: datetime) -> None:
+        """Postavi `solved_at` kvizom, pri katerih ima vsaka postavka poskus.
+
+        Brez `commit` — klicatelj commita, da sta poskus in rešenost ena
+        transakcija. `WHERE solved_at IS NULL`, da ponovljen paket žiga ne
+        premakne: čas je podatek o tem, kdaj se je rešitev zgodila. Isti vzorec
+        kot `preklici` in `_upokoji_vprasanja`.
+
+        Rešenost se izpelje **neodvisno od preklica** (`ADR-019` C); katera os
+        ima prednost pri prikazu, je stvar prikaza.
+        """
+        vrstice = self.session.execute(
+            select(QuizItem.quiz_id, func.count(QuizItem.id), func.count(QuestionAttempt.id))
+            .outerjoin(QuestionAttempt, QuestionAttempt.quiz_item_id == QuizItem.id)
+            .where(QuizItem.quiz_id.in_(quiz_ids))
+            .group_by(QuizItem.quiz_id)
+        ).tuples()
+        reseni = [quiz_id for quiz_id, postavk, poskusov in vrstice if postavk == poskusov]
+        if not reseni:
+            return
+
+        self.session.execute(
+            update(Quiz)
+            .where(Quiz.id.in_(reseni), Quiz.solved_at.is_(None))
+            .values(solved_at=zdaj)
+            .execution_options(synchronize_session="fetch")
+        )

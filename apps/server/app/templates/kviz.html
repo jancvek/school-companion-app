@@ -14,6 +14,13 @@
       Nič ni izbrisano — vprašanja in odgovori spodaj ostajajo. Snov tega kviza
       se v „Novi snovi" spet ponudi.
     </p>
+  {# Preklic ima prednost pred rešenostjo (`ADR-019` C): preklican kviz, ki
+     ga je telefon medtem dokončal, je še vedno preklican. #}
+  {% elif kviz.resen %}
+    <p class="pod">
+      <strong>Kviz je rešen {{ kviz.resen_ob }}.</strong>
+      Maša je ocenila vsa vprašanja.
+    </p>
   {% endif %}
 
   <ol class="vprasanja">

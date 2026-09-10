@@ -77,7 +77,8 @@
                    prepisljivo, zato ju ob prepisanem imenu ne nosi nic. #}
                 <span class="stanje">
                   {{ kviz.koda }} &middot; {{ kviz.nastal_datum }} &middot;
-                  {% if kviz.preklican %}preklican{% else %}objavljen{% endif %}
+                  {# Preklic ima prednost pred rešenostjo (`ADR-019` C). #}
+                  {% if kviz.preklican %}preklican{% elif kviz.resen %}rešen {{ kviz.resen_datum }}{% else %}objavljen{% endif %}
                 </span>
               </span>
               <span class="stevec">{{ kviz.vprasanj }}</span>

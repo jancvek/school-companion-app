@@ -1,4 +1,5 @@
-"""Tabele `materials`, `questions`, `quizzes` in `quiz_items` na strežniku.
+"""Tabele `materials`, `questions`, `quizzes`, `quiz_items` in
+`question_attempts` na strežniku.
 
 Tipi so izbrani tako, da ista shema stoji nad Postgresom (produkcija) in nad
 SQLite (testi) — glej odločitev 2 v `docs/plan/V1-R02.md`. Zato `id` ni
@@ -7,8 +8,17 @@ kot ga je dobil.
 """
 
 from datetime import datetime
+from typing import Literal, get_args
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 #: Stanje ob prevzemu: slika je na disku, obdelave še ni bilo.
@@ -25,6 +35,17 @@ STATUS_PRIPRAVLJEN = "ready"
 #: Klic ni uspel ali odgovor ni bil po shemi. Razlog je v `error`. Iz tega
 #: stanja zapis vrne samo gumb „Pošlji v obdelavo".
 STATUS_NAPAKA = "failed"
+
+#: Način odgovarjanja. V V2 je edini samoocena (`docs/odlocitve/ADR-014`);
+#: stolpec `mode` je tam zato, da bi bila poznejša uvedba ABC čista migracija.
+Nacin = Literal["samoocena"]
+NACIN_SAMOOCENA: Nacin = "samoocena"
+
+#: Štiri stopnje samoocene, od najtežje navzdol (`ADR-014`). Prva je hkrati
+#: pravilnost, ostale tri težavnost. Pravilnost se **ne** shranjuje — izpelje se
+#: iz ocene, da bi drugačna izpeljava veljala tudi za nazaj.
+Ocena = Literal["nisem_vedela", "tezko", "srednje", "lahko"]
+OCENE: tuple[Ocena, ...] = get_args(Ocena)
 
 
 class Base(DeclarativeBase):
@@ -257,13 +278,11 @@ class Question(Base):
 class Quiz(Base):
     """En objavljen kviz: ime, predmet in čas nastanka.
 
-    **Kviz nima stolpca `status`.** Stanje se izpelje iz `canceled_at`, po
-    istem vzorcu, kot je arhiv svoja os in ne peto stanje v `ADR-011`.
-    Objavljen kviz je preprosto kviz, ki obstaja (`ADR-016` C).
-
-    `solved_at` tu **ni** in ni pozabljen: doda ga `V2-R02` skupaj s poskusi,
-    ki ga edini znajo napolniti (`docs/odlocitve/ADR-017` C). Stolpec, ki ga
-    nihče ne piše in ne bere, je ostanek generatorja.
+    **Kviz nima stolpca `status`.** Stanje se izpelje iz `canceled_at` in
+    `solved_at`, po istem vzorcu, kot je arhiv svoja os in ne peto stanje v
+    `ADR-011`. Objavljen kviz je preprosto kviz, ki obstaja (`ADR-016` C).
+    Osi sta neodvisni: preklican kviz je lahko tudi rešen (`ADR-019` C), in
+    takrat ima pri prikazu prednost preklic.
     """
 
     __tablename__ = "quizzes"
@@ -292,6 +311,16 @@ class Quiz(Base):
     #: mogoče sporočiti (`ADR-016` F, isti razlog kot `ADR-011`). Enosmerno:
     #: nazaj na `NULL` ne gre nikoli.
     canceled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    #: Kdaj je bil kviz rešen; `NULL` pomeni, da kakšna postavka še nima poskusa.
+    #:
+    #: Postavi ga **strežnik sam**, v isti transakciji kot poskus, ki zapolni
+    #: zadnjo postavko, in ga ne premakne nikoli več. Čas je strežnikov, ne
+    #: telefonov: ura telefona lahko laže, časi poskusov pa so zapisani vsak
+    #: pri svojem poskusu. Dodan v V2-R02 (`docs/odlocitve/ADR-017` C).
+    solved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
@@ -371,3 +400,52 @@ class QuizItem(Base):
     #: nulil `question_id` — vprašanja pa se ne brišejo (`ADR-012`). To bi bila
     #: mrtva pot z živimi posledicami; `Question` po V2-R05 ostane nedotaknjen.
     question: Mapped[Question | None] = relationship()
+
+
+class QuestionAttempt(Base):
+    """En odgovor na eno postavko kviza — dogodek, ne števec (`ADR-012`).
+
+    `id` generira **telefon**. Prenos s telefona je *at-least-once*: ponovljen
+    `INSERT` z istim `id` ne naredi nič, ponovljen `UPDATE stevec + 1` pa bi
+    podatke tiho pokvaril.
+
+    **Postavka ima največ en poskus** (`docs/odlocitve/ADR-019` E): drugi poskus
+    za isto postavko strežnik sprejme kot uspeh, a ga ne zapiše. Enoličnost je
+    v shemi in ne le v repozitoriju, da je ne more obiti nobena pot do baze.
+
+    Stolpca `question_id` tu **ni**: vprašanje je izpeljivo prek postavke
+    (`quiz_items.question_id`), podvojen ključ pa bi se lahko razšel.
+    """
+
+    __tablename__ = "question_attempts"
+    __table_args__ = (
+        UniqueConstraint("quiz_item_id", name="question_attempts_quiz_item_id_key"),
+    )
+
+    #: UUID, generiran na telefonu. Nosilec idempotentnosti.
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    #: Postavka, na katero je to odgovor.
+    #:
+    #: **Brez `ondelete`.** Poskus nosi statistiko, zato naj baza brisanje
+    #: kviza s poskusi raje zavrne, kot da jih vzame s sabo. Kvizov se sicer
+    #: ne briše (`ADR-016` F).
+    quiz_item_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("quiz_items.id"), nullable=False
+    )
+
+    #: Način odgovarjanja; zaenkrat vedno `samoocena` (`ADR-014`).
+    mode: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    #: Ena od `OCENE`. Surova ocena; pravilnost se izpelje, ne shrani.
+    rating: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    #: Kdaj je bilo vprašanje pokazano, kdaj razkrit odgovor in kdaj ocenjeno —
+    #: vse tri s telefona (`ADR-019` D). Razlike med njimi so zanesljivejše od
+    #: absolutnih vrednosti, ker se ura telefona lahko premakne.
+    shown_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revealed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    answered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    #: Kdaj je strežnik poskus prevzel.
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
