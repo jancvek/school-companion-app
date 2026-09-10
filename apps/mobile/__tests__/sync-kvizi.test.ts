@@ -132,6 +132,12 @@ describe('uskladiKvize', () => {
 
     expect(streznik.poslani).toEqual([[expect.objectContaining({ id: 'k1-a1' })]]);
     expect(await postavkeKviza(db, 'k1')).toEqual([]);
+    // Ko je gor, na telefonu ne ostane (`ADR-019` B).
+    const [{ koliko }] = await db.getAllAsync<{ koliko: number }>(
+      'SELECT COUNT(*) AS koliko FROM attempts',
+      [],
+    );
+    expect(koliko).toBe(0);
   });
 
   it('neuspeh prenosa pusti poskuse in seznama ne bere', async () => {

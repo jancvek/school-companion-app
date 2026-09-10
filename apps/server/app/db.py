@@ -881,8 +881,13 @@ class KviziRepository:
         dejstvo, zavrnjen poskus pa bi na telefonu obtičal za vedno
         (`ADR-019` C).
 
-        Rešenost prizadetih kvizov se preveri **v isti transakciji**, da ni
-        trenutka, ko ima kviz vse poskuse, a ni rešen — in obratno.
+        Rešenost prizadetih kvizov se preveri **v isti transakciji** kot
+        vstavljanje, da paket, ki zapolni zadnjo postavko, kviz tudi reši.
+        Meja te trditve: dva **hkratna** paketa za različni zadnji postavki
+        istega kviza drug drugega na Postgresu (READ COMMITTED) ne vidita, in
+        `solved_at` bi ostal prazen, dokler ne pride naslednji paket. Pri enem
+        telefonu z zaporo v ponavljalniku se to ne zgodi; zapisano je kot znana
+        omejitev v `docs/01-arhitektura.md`.
 
         Dva hkratna paketa za isto postavko bi se srečala na enoličnosti v
         shemi. Takrat se transakcija ponovi enkrat: druga ponovitev vidi zapis

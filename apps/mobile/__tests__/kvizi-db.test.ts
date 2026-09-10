@@ -192,6 +192,31 @@ describe('lokalni kvizi', () => {
       expect((await neprenesenePoskuse(db)).map((p) => p.id)).toEqual(['k1-a1']);
     });
 
+    it('poskus pobrisanega kviza gre, ko je prenesen', async () => {
+      // Kviz je šel pred prenosom poskusa (preklic). Poskus je ostal, da gre
+      // gor; ko je gor, ga nič več ne veže na telefon (`ADR-019` B).
+      await shraniKviz(db, kvizStreznika('k1', 3));
+      await zapisiPoskus(db, poskus('k1', 1));
+      await pobrisiKvizeRazen(db, []);
+      expect(await stej(db, 'attempts')).toBe(1);
+
+      await oznaciPrenesene(db, ['k1-a1'], '2026-09-10T16:00:00.000Z');
+      await pobrisiKvizeRazen(db, []);
+
+      expect(await stej(db, 'attempts')).toBe(0);
+    });
+
+    it('prenesenih poskusov kviza, ki je še na telefonu, ne pobriše', async () => {
+      await shraniKviz(db, kvizStreznika('k1', 2));
+      await zapisiPoskus(db, poskus('k1', 1));
+      await oznaciPrenesene(db, ['k1-a1'], '2026-09-10T16:00:00.000Z');
+
+      await pobrisiKvizeRazen(db, ['k1']);
+
+      expect(await stej(db, 'attempts')).toBe(1);
+      expect((await postavkeKviza(db, 'k1'))[0].odgovorjena).toBe(true);
+    });
+
     it('odprtega kviza ne pobriše', async () => {
       await shraniKviz(db, kvizStreznika('k1', 2));
 

@@ -98,6 +98,10 @@ export async function shraniKviz(db: MaterialsDatabase, kviz: KvizStreznika): Pr
  *   zaslon pod prsti;
  * - **neprenesen poskus se ne pobriše nikoli**, tudi ko njegovega kviza ni
  *   več. Na strežniku ga čaka sprejem, ne zavrnitev.
+ *
+ * Tak poskus, ki je medtem prenesen, pa gre ob naslednjem klicu: nobenega
+ * kviza več ne dokazuje in lokalna baza je delovni prostor, ne arhiv
+ * (`ADR-019` B). Brez tega bi ostal na telefonu za vedno.
  */
 export async function pobrisiKvizeRazen(
   db: MaterialsDatabase,
@@ -117,6 +121,16 @@ export async function pobrisiKvizeRazen(
     await db.runAsync('DELETE FROM quiz_items WHERE quiz_id = ?', [id]);
     await db.runAsync('DELETE FROM quizzes WHERE id = ?', [id]);
   }
+
+  // Preneseni poskusi kvizov, ki so šli, preden so bili poskusi preneseni.
+  // Poskusi kviza, ki je še na telefonu, ostanejo — ti dokazujejo, da je
+  // postavka odgovorjena (glej `oznaciPrenesene`).
+  await db.runAsync(
+    `DELETE FROM attempts
+      WHERE uploaded_at IS NOT NULL
+        AND quiz_id NOT IN (SELECT id FROM quizzes)`,
+    [],
+  );
 
   return zaBrisanje.length;
 }
