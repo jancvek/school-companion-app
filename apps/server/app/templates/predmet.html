@@ -6,7 +6,7 @@
   <h1>{{ koda }} — {{ oznaka }}</h1>
 
   {% if snovi %}
-    <p class="pod">{{ snovi|length }} {{ "slika" if snovi|length == 1 else "slik" }}, najnovejša prva.</p>
+    <p class="pod">{{ koliko_opis }}, najnovejša prva.</p>
     <ul class="mreza">
       {% for snov in snovi %}
         <li>

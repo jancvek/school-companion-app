@@ -10,6 +10,7 @@ bi ob spremembi prenosa padel iz razloga, ki s to zahtevo nima zveze.
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
@@ -1698,3 +1699,81 @@ class TestSledJeVidnaTudiPriNapaki:
         assert "Surov odgovor modela" in besedilo
         assert "gpt-4.1-2025-04-14" in besedilo
         assert "1500" in besedilo
+
+
+class TestSlovenskaStevila:
+    """Strani izpisujejo števila slik slovensko, z dvojino.
+
+    Do tega popravka so vse tri pisale „2 slik". Napaka je bila vidna vsak dan
+    in je ni ujel noben test — nobena trditev se besedila ni dotaknila.
+    """
+
+    def test_pregled_sesteje_cez_predmete(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, UUID_ENA, subject="MAT")
+        zapisi(motor, slike, UUID_DVA, subject="SLJ")
+
+        besedilo = odjemalec.get("/admin").text
+
+        assert "Skupaj 2 sliki v uporabi" in besedilo
+        assert "2 slik " not in besedilo
+
+    def test_pregled_pri_eni_sliki(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, UUID_ENA)
+
+        assert "Skupaj 1 slika v uporabi" in odjemalec.get("/admin").text
+
+    @pytest.mark.parametrize(
+        ("koliko", "pricakovano"),
+        [(1, "1 slika,"), (2, "2 sliki,"), (3, "3 slike,"), (5, "5 slik,")],
+    )
+    def test_seznam_predmeta_sklanja(
+        self,
+        odjemalec: TestClient,
+        motor: Engine,
+        slike: Path,
+        koliko: int,
+        pricakovano: str,
+    ) -> None:
+        # Dvojina (2) in mala mnozina (3) sta obliki, ki ju je stara koda
+        # pisala napacno; 1 in 5 sta bili pravilni ze prej.
+        for i in range(koliko):
+            zapisi(motor, slike, f"slika-{i:02d}", subject="MAT")
+
+        besedilo = odjemalec.get("/admin/subjects/MAT").text
+
+        assert f"{pricakovano} najnovejša prva." in besedilo
+
+    def test_arhiv_sklanja(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, UUID_ENA)
+        zapisi(motor, slike, UUID_DVA)
+        arhiviraj(motor, UUID_ENA)
+        arhiviraj(motor, UUID_DVA, arhivirano="2026-09-06T10:00:00+00:00")
+
+        besedilo = odjemalec.get("/admin/archive").text
+
+        assert "2 sliki, najnovejše arhivirana prva" in besedilo
+
+    def test_v_predlogah_ni_vec_dvooblicnega_sklanjanja(self) -> None:
+        """Vzorec `{{ "x" if n == 1 else "y" }}` je bil sam vir napake.
+
+        Test je nad datotekami in ne nad izrisom: nova predloga bi ga sicer
+        lahko prinesla nazaj in nihce ne bi opazil, dokler ne bi kdo prebral
+        „2 slik" na zaslonu.
+        """
+        from app.routers.admin import MAPA_PREDLOG
+
+        najdeno = [
+            pot.name
+            # `rglob` in ne `glob`: mapa je danes ravna, ob prvi podmapi
+            # predlog pa bi varovalka tiho nehala varovati.
+            for pot in sorted(MAPA_PREDLOG.rglob("*.html"))
+            if "== 1 else" in pot.read_text(encoding="utf-8")
+        ]
+
+        assert najdeno == []

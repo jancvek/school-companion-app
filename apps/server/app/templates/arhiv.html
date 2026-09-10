@@ -7,8 +7,7 @@
 
   {% if snovi %}
     <p class="pod">
-      {{ snovi|length }} {{ "slika" if snovi|length == 1 else "slik" }},
-      najnovejše arhivirana prva. Prepis in vprašanja teh snovi ostajajo.
+      {{ koliko_opis }}, najnovejše arhivirana prva. Prepis in vprašanja teh snovi ostajajo.
     </p>
     <ul class="mreza">
       {% for snov in snovi %}

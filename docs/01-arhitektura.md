@@ -81,13 +81,18 @@ logika testljiva brez naprave.
 | `app/subjects.py` | predmeti in slovenske oznake stanj |
 | `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01) |
 | `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01) |
+| `app/besedilo.py` | slovenske oblike števil (dvojina) |
 
-`app/casi.py` in `app/strani.py` sta nastala v V2-R01 kot **izvlečka iz**
-`app/routers/admin.py`, ne kot novi plasti. Razlog je krožni uvoz: `kvizi`
-potrebuje `daj_predloge` in obe strani z napako, `admin` pa seznam kvizov —
-če bi oboje ostalo v `admin.py`, bi krog `admin → kvizi → admin` padel ob
-uvozu. Odslej velja: kar potrebujeta **oba** usmerjevalnika, ni last
-nobenega od njiju in ima javno ime, brez podčrtaja.
+`app/casi.py`, `app/strani.py` in `app/besedilo.py` niso nove plasti, ampak
+**izvlečki** iz usmerjevalnikov. Prva dva sta nastala v V2-R01 zaradi krožnega
+uvoza: `kvizi` potrebuje `daj_predloge` in obe strani z napako, `admin` pa
+seznam kvizov — če bi oboje ostalo v `admin.py`, bi krog `admin → kvizi →
+admin` padel ob uvozu. Tretji je prišel s popravkom dvojine, ko je isto
+jezikovno pravilo potreboval še `admin`.
+
+Odslej velja: **kar potrebujeta oba usmerjevalnika, ni last nobenega od njiju**
+in ima javno ime, brez podčrtaja. Podčrtaj pomeni „ne uvažaj tega od zunaj",
+in uvoz od zunaj je prav razlog, da tak modul obstaja.
 
 Delitev med `obdelava.py` in `worker.py` je namenska: poslovna logika ne ve za
 `asyncio`, zato je testljiva brez zaganjanja zanke. Delitev med `vision.py` in
@@ -559,10 +564,38 @@ vsebuje kodo predmeta („MAT — 9. 9. 2026"), zgoraj pa bi ta koda postala prv
 pojavitev na strani in podrla test, ki po vrstnem redu pojavitev dokazuje, da
 so predmeti našteti po urniku in ne po abecedi.
 
-Števila v besedilu sestavljalnika so zapisana s slovensko **dvojino**
-(„2 vprašanji", ne „2 vprašanj"); `_stevilo_z_besedo` je štirioblična in loči
-po ostanku pri sto. Starejše strani (`predmeti.html`, `arhiv.html`) tega še ne
-delajo in pišejo „2 slik" — v vmesniku sta zato dva standarda hkrati.
+Števila v besedilu so zapisana s slovensko **dvojino** („2 vprašanji", ne
+„2 vprašanj"). To zna `stevilo_z_besedo` iz `app/besedilo.py`; velja za vse
+strani, tudi starejše. Glej razdelek „Slovenske oblike števil" spodaj.
+
+## Slovenske oblike števil
+
+Slovenščina je pri števnikih **štirioblična** in ima dvojino: *1 slika,
+2 sliki, 3 slike, 5 slik*. `stevilo_z_besedo` (`app/besedilo.py`) to zna;
+oblike so **podatek in ne koda** — vsak samostalnik je četverica na enem mestu
+(`SLIKE`, `VPRASANJA`, `SNOVI`).
+
+**Ločnica teče po ostanku pri deljenju s sto, ne po zadnji števki.** To ni
+mikrooptimizacija, ampak edini način, da sta 21 in 101 obravnavana različno,
+čeprav se obe končata z 1: *enaindvajset* se konča z „dvajset" in zahteva
+rodilnik množine („21 slik"), *sto ena* pa z „ena" in zahteva ednino
+(„101 slika", kot v „101 dalmatinec"). Zato tudi „111 slik" — ostanek je 11.
+
+**Sklanja usmerjevalnik, ne predloga.** Predloga dobi gotov niz, isto pravilo
+kot pri `_pogled`: „predloga ne računa in ne oblikuje".
+
+Funkcija pozna število, ne sklona. Kjer besedilo zahteva rodilnik („iz N
+snovi"), je oblika pri vsakem številu ista in se zapiše kot konstanta v
+predlogi.
+
+Dve mesti sklanjatve **namenoma ne uporabljata**: `snov.html` („Upokojena
+vprašanja: 3") in `brisanje.html` („veljavnih: 3, upokojenih: 5"). Oblika z
+dvopičjem je pravilna pri vsakem številu; menjava bi bila okus in ne popravek.
+
+Da se dvoobličnost ne prikrade nazaj, jo lovi test nad **datotekami** predlog
+in ne nad izrisom: vzorec `{{ "…" if … == 1 else "…" }}` v nobeni predlogi ne
+sme obstajati. Prav ta vzorec je bil vir napake, ki je bila vsak dan vidna in
+je noben test ni ujel.
 
 ## Arhiv in brisanje na telefonu (V1-R07)
 

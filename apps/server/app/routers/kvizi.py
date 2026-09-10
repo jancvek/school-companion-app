@@ -22,6 +22,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
+from app.besedilo import SNOVI, VPRASANJA, stevilo_z_besedo
 from app.casi import cas, cas_ali_prazno, dan_od_do, datum
 from app.db import KviziRepository, SnovSVprasanji, SnovZaIzbor
 from app.dependencies import daj_nastavitve, daj_repozitorij_kvizov
@@ -85,33 +86,6 @@ NAJVEC_IME = 200
 NAJVEC_KODA = 16
 
 
-def _stevilo_z_besedo(koliko: int, oblike: tuple[str, str, str, str]) -> str:
-    """Število z ustrezno sklonsko obliko samostalnika.
-
-    Slovenščina ima dvojino in je štirioblična: *1 vprašanje, 2 vprašanji,
-    3 vprašanja, 5 vprašanj*. Ločnica teče po ostanku pri deljenju s sto, ne
-    po samem številu — *101 vprašanje* in *102 vprašanji* sta pravilna.
-
-    Obstoječe strani (`predmeti.html`, `arhiv.html`) to poenostavljajo na dve
-    obliki in pišejo „2 slik". Tu tega vzorca ne prevzemam: gre za novo
-    besedilo, `CLAUDE.md` pa v merilu dokončanosti zahteva slovenščino. Starih
-    strani se ta zahteva ne dotika — popravek zanje je svoja postavka.
-    """
-    ostanek = koliko % 100
-    if ostanek == 1:
-        return f"{koliko} {oblike[0]}"
-    if ostanek == 2:
-        return f"{koliko} {oblike[1]}"
-    if ostanek in (3, 4):
-        return f"{koliko} {oblike[2]}"
-    return f"{koliko} {oblike[3]}"
-
-
-#: Oblike, ki jih potrebuje sestavljalnik.
-VPRASANJA = ("vprašanje", "vprašanji", "vprašanja", "vprašanj")
-SNOVI = ("snov", "snovi", "snovi", "snovi")
-
-
 def _stevilo_v_mejah(stevilo: int) -> int:
     """Vprašanj na sliko, omejeno na smiselno območje."""
     return max(NAJMANJ_VPRASANJ, min(stevilo, NAJVEC_VPRASANJ))
@@ -172,7 +146,7 @@ def _vrstica(snov: SnovZaIzbor, obkljukana: bool, images_dir: Path) -> dict[str,
         "id": snov.material.id,
         "koda": snov.material.subject,
         "cas": cas(snov.material.taken_at),
-        "vprasanj": _stevilo_z_besedo(snov.veljavnih_vprasanj, VPRASANJA),
+        "vprasanj": stevilo_z_besedo(snov.veljavnih_vprasanj, VPRASANJA),
         "izbirna": snov.izbirna,
         "razlog": _razlog(snov),
         "obkljukana": obkljukana,
@@ -427,12 +401,12 @@ def predogled(
                 vprasanje.id for skupina in skupine for vprasanje in skupina.vprasanja
             ],
             "skupaj": skupaj,
-            "skupaj_opis": _stevilo_z_besedo(skupaj, VPRASANJA),
+            "skupaj_opis": stevilo_z_besedo(skupaj, VPRASANJA),
             "snovi": len(skupine),
             # Izpuščene se štejejo čez **cel obseg vstopa**, zato mora
             # besedilo imenovati ta obseg in ne izbora.
             "izpusceno_opis": (
-                f"{_stevilo_z_besedo(izpusceno, SNOVI)} "
+                f"{stevilo_z_besedo(izpusceno, SNOVI)} "
                 f'{"tega dne" if vstop == VSTOP_DANES else "tega predmeta"}'
             ),
             "predolg": skupaj > PREDOLG_KVIZ,
@@ -542,7 +516,7 @@ def _pogled_kviza(kviz: Quiz, postavk: int) -> dict[str, Any]:
         # kriterij — ime je prepisljivo in ju ob prepisu ne nosi več.
         "nastal_datum": datum(kviz.created_at),
         "vprasanj": postavk,
-        "vprasanj_opis": _stevilo_z_besedo(postavk, VPRASANJA),
+        "vprasanj_opis": stevilo_z_besedo(postavk, VPRASANJA),
         "preklican": kviz.canceled_at is not None,
         "preklican_ob": cas_ali_prazno(kviz.canceled_at),
     }
