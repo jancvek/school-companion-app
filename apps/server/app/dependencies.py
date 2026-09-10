@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from fastapi import Request
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db import KviziRepository, MaterialsRepository
+from app.db import KviziRepository, MaterialsRepository, StatistikaRepository
 from app.settings import Settings
 
 
@@ -37,3 +37,10 @@ def daj_repozitorij_kvizov(request: Request) -> Iterator[KviziRepository]:
     tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
     with tovarna() as seja:
         yield KviziRepository(seja)
+
+
+def daj_repozitorij_statistike(request: Request) -> Iterator[StatistikaRepository]:
+    """Kot `daj_repozitorij`, a za statistiko čez kvize (V2-R04). Samo bere."""
+    tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
+    with tovarna() as seja:
+        yield StatistikaRepository(seja)

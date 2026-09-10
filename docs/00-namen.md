@@ -65,6 +65,8 @@ samopreverjanje iz dejanske snovi, ki jo je Maša tisti dan imela pri pouku.
 - Ni večuporabniška platforma — ena družina, en API ključ, brez
   prijave/registracije uporabnikov.
 - Ni objavljena na Google Play — distribucija samo prek EAS Build APK.
-- Ni orodje za analitiko ali poročanje staršem ali šoli.
+- Ni orodje za poročanje šoli ali tretjim. Pregled ocen čez kvize (V2-R04) je
+  lastnikov delovni pripomoček za pogovor z Mašo — brez izvoza, brez PDF in
+  brez knjižnice za grafe (`docs/odlocitve/ADR-021` A).
 - Ni zamenjava za zvezek — dopolnjuje ga, ne nadomešča papirnega
   zapisovanja.

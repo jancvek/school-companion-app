@@ -20,6 +20,7 @@ Oblike = tuple[str, str, str, str]
 SLIKE: Oblike = ("slika", "sliki", "slike", "slik")
 VPRASANJA: Oblike = ("vprašanje", "vprašanji", "vprašanja", "vprašanj")
 SNOVI: Oblike = ("snov", "snovi", "snovi", "snovi")
+POSKUSI: Oblike = ("poskus", "poskusa", "poskusi", "poskusov")
 
 
 def stevilo_z_besedo(koliko: int, oblike: Oblike) -> str:

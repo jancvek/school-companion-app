@@ -175,6 +175,28 @@
     .prostor { height: 4.5rem; margin-top: 0.4rem; border-bottom: 1px solid var(--rob); }
     .kljuc { margin-top: 2.5rem; }
     .kljuc h2 { font-size: 1.1rem; }
+    /* --- V2-R04 --- */
+    .tabela-ovoj { overflow-x: auto; }
+    .tabela { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+    .tabela th, .tabela td {
+      text-align: left; vertical-align: top;
+      padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--rob);
+    }
+    .tabela th { color: var(--zamolklo); font-size: 0.85rem; font-weight: 600; }
+    .tabela tr.prazen td { color: var(--zamolklo); }
+    .tabela a { color: var(--besedilo); }
+    .izbira-let { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 0 0 1rem; }
+    .razporeditev {
+      display: inline-flex; vertical-align: middle; width: 9rem; height: 0.7rem;
+      border: 1px solid var(--rob); border-radius: 3px; overflow: hidden;
+      background: var(--ozadje);
+    }
+    .razporeditev span { display: block; height: 100%; }
+    .pas-0 { background: var(--nevarno); }
+    .pas-1 { background: #d08a4a; }
+    .pas-2 { background: #c9b458; }
+    .pas-3 { background: var(--poudarek); }
+    .zaporedje span { white-space: nowrap; }
     /* Papir: brez glave, obrazca in povezav; ključ na svojem listu. */
     @media print {
       header, .ne-tiskaj { display: none; }

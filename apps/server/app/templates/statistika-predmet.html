@@ -1,0 +1,144 @@
+{% extends "osnova.html" %}
+{% import "_statistika.html" as deli %}
+
+{% block naslov %}Statistika — {{ koda }}{% endblock %}
+
+{% macro vprasanja(seznam) %}
+  <ol class="vprasanja">
+    {% for v in seznam %}
+      <li>
+        <p class="vprasanje">{{ v.vprasanje }}</p>
+        <p class="odgovor">{{ v.odgovor }}</p>
+        <p class="drobno">
+          {% if v.snov_id %}
+            <a href="/admin/materials/{{ v.snov_id }}">{{ v.izvor }}</a>
+          {% else %}
+            {{ v.izvor }}
+          {% endif %}
+          {% for oznaka in v.oznake %} · {{ oznaka }}{% endfor %}
+        </p>
+        <p class="drobno">
+          {{ v.poskusov_opis }} · pravilnih {{ v.pravilnih }} · težkih {{ v.tezkih }}
+        </p>
+        <p class="drobno">{{ deli.pas(v) }} {{ deli.ocene(v) }}</p>
+        {# Zaporedje ocen po času (`ADR-021` B): iz njega se vidi, ali se je
+           vprašanja naučila — razvrstitev po deležu tega ne pokaže. #}
+        <p class="drobno zaporedje">
+          {% for vnos in v.zaporedje %}
+            <span>
+              {{ vnos.datum }} <strong>{{ vnos.oznaka }}</strong>
+              (<a href="/admin/quizzes/{{ vnos.quiz_id }}">{{ vnos.kviz_ime }}</a>{% if vnos.preklican %}, preklican kviz{% endif %})
+            </span>{% if not loop.last %} → {% endif %}
+          {% endfor %}
+        </p>
+      </li>
+    {% endfor %}
+  </ol>
+{% endmacro %}
+
+{% block vsebina %}
+  <h1>{{ koda }} — {{ oznaka }}</h1>
+  <p class="pod">{{ okno }} · {{ skupaj.poskusov_opis }}</p>
+
+  {{ deli.izbira_let(leta, neprebrano) }}
+  {{ deli.samoocena() }}
+  {{ deli.opombe(opombe) }}
+
+  {% if not skupaj.poskusov %}
+    <p class="opozorilo">V tem obdobju pri tem predmetu ni nobene ocene.</p>
+  {% else %}
+    <p>
+      {{ deli.pas(skupaj) }}
+      {{ deli.ocene(skupaj) }} · pravilnih {{ skupaj.pravilnih }} · težkih {{ skupaj.tezkih }}
+    </p>
+
+    <section class="izid">
+      <h2>{{ "Po mesecih" if po_mesecih else "Po šolskih letih" }}</h2>
+      {# Prazni meseci ostanejo vidni z ničlo — stran mora pokazati, česa ni. #}
+      <div class="tabela-ovoj">
+        <table class="tabela">
+          <thead>
+            <tr>
+              <th>{{ "Mesec" if po_mesecih else "Šolsko leto" }}</th>
+              <th>Poskusov</th>
+              <th>Razporeditev</th>
+              <th>Pravilnih</th>
+              <th>Težkih</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for vrstica in casovnica %}
+              <tr class="{{ '' if vrstica.poskusov else 'prazen' }}">
+                <td>{{ vrstica.oznaka }}</td>
+                <td>{{ vrstica.poskusov_opis }}</td>
+                <td>
+                  {{ deli.pas(vrstica) }}
+                  <span class="drobno">{{ deli.ocene(vrstica) }}</span>
+                </td>
+                <td>{{ vrstica.pravilnih }}</td>
+                <td>{{ vrstica.tezkih }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <h2>Snovi</h2>
+      <div class="tabela-ovoj">
+        <table class="tabela">
+          <thead>
+            <tr>
+              <th>Snov</th>
+              <th>Vprašanj</th>
+              <th>Poskusov</th>
+              <th>Razporeditev</th>
+              <th>Pravilnih</th>
+              <th>Težkih</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for snov in snovi %}
+              <tr>
+                <td>
+                  {% if snov.id %}
+                    <a href="/admin/materials/{{ snov.id }}">{{ snov.izvor }}</a>
+                  {% else %}
+                    {{ snov.izvor }}
+                  {% endif %}
+                  {% for oznaka in snov.oznake %} · {{ oznaka }}{% endfor %}
+                </td>
+                <td>{{ snov.vprasanj_opis }}</td>
+                <td>{{ snov.poskusov_opis }}</td>
+                <td>
+                  {{ deli.pas(snov) }}
+                  <span class="drobno">{{ deli.ocene(snov) }}</span>
+                </td>
+                <td>{{ snov.pravilnih }}</td>
+                <td>{{ snov.tezkih }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {# Dva razdelka (`ADR-021` C): en sam poskus je že rezultat kviza in še
+         ni „vztrajno", zato je pod večkrat postavljenimi. #}
+      <h2 id="veckrat">Postavljena večkrat · {{ veckrat_opis }}</h2>
+      {% if veckrat %}
+        {{ vprasanja(veckrat) }}
+      {% else %}
+        <p class="drobno">
+          Nobeno vprašanje v tem obdobju ni bilo postavljeno več kot enkrat.
+          Isto vprašanje pride znova, kadar snov z „Ročno izbiro“ vzameš v nov kviz.
+        </p>
+      {% endif %}
+
+      <h2 id="enkrat">Postavljena enkrat · {{ enkrat_opis }}</h2>
+      {% if enkrat %}
+        {{ vprasanja(enkrat) }}
+      {% endif %}
+    </section>
+  {% endif %}
+
+  <a class="nazaj" href="{{ nazaj }}">← Vsi predmeti</a>
+{% endblock %}
