@@ -31,8 +31,12 @@
       {# Števili sta za dvopičjem in ne pred samostalnikom, ker slovenščina za
          1, 2, 3–4 in 5+ zahteva štiri različne oblike („1 veljavno", „2
          veljavni", „3 veljavna", „5 veljavnih"). „{{ n }} veljavnih" bi bilo
-         pri enem vprašanju napačno, sklanjatev v predlogi pa je več kode kot
-         vrednosti. #}
+         pri enem vprašanju napačno.
+
+         Prvotna utemeljitev je bila, da je sklanjatev v predlogi več kode kot
+         vrednosti. To od V2-R01 ne drži več — `app/besedilo.py` to zna in je
+         preizkušen. Oblika z dvopičjem vseeno **ostane**: pravilna je pri
+         vsakem številu, menjava bi bila okus in ne popravek. #}
       <p class="drobno">
         {% if snov.stevilo_vprasanj or snov.stevilo_upokojenih %}
           Vprašanja ostanejo — veljavnih: {{ snov.stevilo_vprasanj }},

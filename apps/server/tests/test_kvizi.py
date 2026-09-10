@@ -28,13 +28,7 @@ from app.models import (
     Quiz,
     QuizItem,
 )
-from app.routers.kvizi import (
-    NAJVEC_IME,
-    NAJVEC_KODA,
-    PRIVZETO_STEVILO,
-    VPRASANJA,
-    _stevilo_z_besedo,
-)
+from app.routers.kvizi import NAJVEC_IME, NAJVEC_KODA, PRIVZETO_STEVILO
 from tests.conftest import KLJUC
 
 #: Trije stabilni identifikatorji; testi jih berejo iz izrisane strani.
@@ -995,25 +989,12 @@ class TestBrezKljuca:
 
 
 class TestSlovenscina:
-    """Števila v vmesniku so zapisana slovensko, z dvojino."""
+    """Števila na straneh sestavljalnika so zapisana slovensko, z dvojino.
 
-    @pytest.mark.parametrize(
-        ("koliko", "pricakovano"),
-        [
-            (1, "1 vprašanje"),
-            (2, "2 vprašanji"),
-            (3, "3 vprašanja"),
-            (4, "4 vprašanja"),
-            (5, "5 vprašanj"),
-            (0, "0 vprašanj"),
-            # Ločnica teče po ostanku pri sto in ne po samem številu.
-            (101, "101 vprašanje"),
-            (102, "102 vprašanji"),
-            (111, "111 vprašanj"),
-        ],
-    )
-    def test_dvojina_in_mnozina(self, koliko: int, pricakovano: str) -> None:
-        assert _stevilo_z_besedo(koliko, VPRASANJA) == pricakovano
+    Enotski testi same funkcije so v `test_besedilo.py`, odkar ima svoj
+    modul. Tu ostane, kar je posebej za sestavljalnik: da je pravi niz res
+    prišel na pravo stran.
+    """
 
     def test_izbirnik_pravilno_sklanja(
         self, odjemalec: TestClient, motor: Engine, slike: Path

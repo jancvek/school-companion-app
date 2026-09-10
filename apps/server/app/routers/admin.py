@@ -22,6 +22,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
+from app.besedilo import SLIKE, stevilo_z_besedo
 from app.casi import cas, cas_ali_prazno
 from app.db import KviziRepository, MaterialsRepository
 from app.dependencies import daj_nastavitve, daj_repozitorij, daj_repozitorij_kvizov
@@ -208,7 +209,9 @@ def pregled(
         "predmeti.html",
         {
             "predmeti": vrstice,
-            "skupaj": sum(steviloma.values()),
+            # Gotov niz in ne število: predloga ne računa in ne sklanja, isto
+            # pravilo kot pri `_pogled`.
+            "skupaj_opis": stevilo_z_besedo(sum(steviloma.values()), SLIKE),
             "arhiviranih": repozitorij.stej_arhivirane(),
             # Kviz je svoja os in ne del pregleda predmetov, zato svoj ključ in
             # svoj razdelek. Oblika ene vrstice je last `routers/kvizi.py` —
@@ -235,7 +238,10 @@ def arhiv(
     return predloge.TemplateResponse(
         request,
         "arhiv.html",
-        {"snovi": [_pogled(snov, nastavitve.images_dir) for snov in snovi]},
+        {
+            "koliko_opis": stevilo_z_besedo(len(snovi), SLIKE),
+            "snovi": [_pogled(snov, nastavitve.images_dir) for snov in snovi],
+        },
     )
 
 
@@ -267,6 +273,7 @@ def predmet(
         {
             "koda": koda,
             "oznaka": oznaka_predmeta(koda),
+            "koliko_opis": stevilo_z_besedo(len(snovi), SLIKE),
             "snovi": [_pogled(snov, nastavitve.images_dir) for snov in snovi],
         },
     )
