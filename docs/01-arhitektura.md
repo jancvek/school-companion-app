@@ -20,8 +20,8 @@
 
 | Modul | Odgovornost | Datoteke |
 |---|---|---|
-| `apps/mobile` | Kamera, izbira predmeta, lokalna baza, zgodovina, upload worker, brisanje arhiviranih snovi | `apps/mobile/` (od V1-R01; upload worker od V1-R02; brisanje od V1-R07) |
-| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju, arhiv, sestavljalnik kvizov | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03; arhiv od V1-R07; kvizi od V2-R01) |
+| `apps/mobile` | Kamera, izbira predmeta, lokalna baza, zgodovina, upload worker, brisanje arhiviranih snovi, reševanje kvizov | `apps/mobile/` (od V1-R01; upload worker od V1-R02; brisanje od V1-R07; kvizi od V2-R02) |
+| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju, arhiv, sestavljalnik kvizov, poskusi reševanja | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03; arhiv od V1-R07; kvizi od V2-R01; poskusi od V2-R02) |
 
 Ločena mapi namenoma ne delita orodij za monorepo (npr. Turborepo) — gre za
 dva jezika (TypeScript / Python) brez skupne kode, zato vsaka živi s svojim
@@ -33,15 +33,15 @@ običajnim orodjem (`npm`/`package.json` v `apps/mobile`,
 | Mapa | Odgovornost |
 |---|---|
 | `app/` | zasloni; usmerjanje je datotečno (`expo-router`) |
-| `src/constants/` | seznam desetih predmetov (`{ value, label }`) |
+| `src/constants/` | seznam desetih predmetov (`{ value, label }`); od V2-R02 še štiri ocene samoocene (`ocene.ts`) |
 | `src/config/` | kar pride v aplikacijo ob gradnji: naslov strežnika, API ključ in oznaka gradnje |
-| `src/db/` | verzionirana shema (migracije) in poizvedbe nad tabelo `materials` |
-| `src/sync/` | prenos na strežnik: en prenos, čakalna vrsta, priklop na življenjski cikel; od V1-R07 tudi brisanje snovi, ki so na strežniku arhivirane. **Edina mapa v aplikaciji z omrežnim klicem.** |
+| `src/db/` | verzionirana shema (migracije) in poizvedbe nad tabelo `materials`; od V2-R02 še nad tabelami kvizov (`kvizi.ts`) |
+| `src/sync/` | prenos na strežnik: en prenos, čakalna vrsta, priklop na življenjski cikel; od V1-R07 tudi brisanje snovi, ki so na strežniku arhivirane; od V2-R02 usklajevanje kvizov in poskusov (`kvizi.ts`, `use-kvizi.tsx`) in skupni klic s časovno omejitvijo (`http.ts`). **Edina mapa v aplikaciji z omrežnim klicem.** |
 | `src/photos/` | stiskanje slike in zapis v `documentDirectory/photos/` |
 | `src/materials/` | shranjevanje posnetka: najprej datoteka, nato vrstica |
 | `src/capture/` | stanje zaslona s kamero (kamera ↔ predogled) |
 | `src/ui/` | skupni gradniki in barve |
-| `src/types.ts` | tip `Material` (ena vrstica tabele `materials`) |
+| `src/types.ts` | tip `Material` (ena vrstica tabele `materials`); od V2-R02 še kviz, postavka, poskus in ocena |
 | `plugins/` | Expo config plugini — koda, ki teče **ob gradnji**, ne v aplikaciji |
 | `__tests__/` | enotski in komponentni testi |
 
@@ -71,15 +71,16 @@ logika testljiva brez naprave.
 | `app/routers/materials.py` | `POST /materials` — prevzem slike s telefona |
 | `app/routers/admin.py` | operaterska stran: predmeti, snov, arhiv, brisanje |
 | `app/routers/kvizi.py` | sestavljalnik kvizov pod `/admin/quizzes` (V2-R01) |
+| `app/routers/resevanje.py` | poti telefona za kvize: `GET /quizzes/pending`, `POST /quiz-attempts` (V2-R02) |
 | `app/db.py` | motor, seje ter `MaterialsRepository` in `KviziRepository` — edina pot do baze |
-| `app/models.py` | tabele `materials`, `questions`, `quizzes` in `quiz_items` |
+| `app/models.py` | tabele `materials`, `questions`, `quizzes`, `quiz_items` in `question_attempts` |
 | `app/storage.py` | zapis, meja mape in brisanje slik na disku |
 | `app/vision.py` | **edini modul, ki uvaža `openai`**: prompt, shema odgovora, klic |
 | `app/obdelava.py` | kaj se zgodi z enim zapisom: prevzem, klic, zapis izida. Sinhron |
 | `app/worker.py` | časovnik: obhodi v presledkih, zagon in ustavitev. Brez poslovne logike |
 | `app/settings.py` | nastavitve iz okolja |
 | `app/subjects.py` | predmeti in slovenske oznake stanj |
-| `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01) |
+| `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02) |
 | `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01) |
 | `app/besedilo.py` | slovenske oblike števil (dvojina) |
 
@@ -117,7 +118,8 @@ Tabela `materials`:
 | `sync_error` | `TEXT` | zakaj zadnji poskus ni uspel (V1-R02) |
 
 V1-R07 lokalne sheme **ni** spremenila: telefon o arhivu ne hrani ničesar,
-ker delovni seznam pride vsakič v celoti s strežnika. `SHEMA_VERZIJA` ostaja 1.
+ker delovni seznam pride vsakič v celoti s strežnika. `SHEMA_VERZIJA` je takrat
+ostala 1; na 2 jo je dvignila V2-R02 s tabelami kvizov (spodaj).
 
 Indeks `materials_subject_taken_at (subject, taken_at DESC)` — zgodovina bere
 po predmetu in po času navzdol. Čakalna vrsta bere obratno (`taken_at ASC`),
@@ -131,7 +133,7 @@ vrne samo gumb „Poskusi znova". Glej `docs/odlocitve/ADR-004`.
 #### Migracije lokalne sheme
 
 Shema je verzionirana prek `PRAGMA user_version` (`src/db/migrations.ts`);
-trenutna verzija je **1**. `CREATE TABLE IF NOT EXISTS` obstoječi tabeli
+trenutna verzija je **2**. `CREATE TABLE IF NOT EXISTS` obstoječi tabeli
 novega stolpca ne doda in tega ne javi, zato bi se brez migracij telefon z
 zapisi iz V1-R01 tiho pokvaril, testi nad svežo bazo pa bi bili zeleni.
 
@@ -146,6 +148,30 @@ Dve pravili, ki veljata odslej:
 V1-R01 in se ne dopolnjuje. Test migracije teče nad njeno dobesedno kopijo v
 `__tests__/test-database.ts`, ne nad shemo iz kode — sicer bi migracijo
 preverjal nad tem, kar sam ustvari.
+
+Isto velja za migracijo 2: `CREATE_KVIZI_TABLES_SQL` v `src/db/kvizi.ts` je
+zamrznjena, test pa teče nad `SHEMA_VERZIJE_1` — dobesedno kopijo baze po
+migraciji 1, z vrsticami, kakršna je na Mašinem telefonu pred V2-R02.
+
+#### Tabele kvizov (migracija 2, V2-R02)
+
+| Tabela | Stolpci | Opomba |
+|---|---|---|
+| `quizzes` | `id`, `name`, `created_at` | kviz s strežnika; vsebina je zamrznjena in se ne prepisuje |
+| `quiz_items` | `id`, `quiz_id`, `position`, `question_text`, `answer_text`, `answered_on_server` | indeks `(quiz_id, position)`; `answered_on_server` je 1, kadar je postavka odgovorjena že na strežniku (`ADR-019` E) |
+| `attempts` | `id`, `quiz_id`, `quiz_item_id` (`UNIQUE`), `mode`, `rating`, `shown_at`, `revealed_at`, `answered_at`, `uploaded_at` | poskus = dogodek; `uploaded_at` je `NULL`, dokler ni prenesen |
+
+**Stanje kviza se ne shranjuje, izpelje se.** Postavka je odgovorjena, če ima
+lokalni poskus ali `answered_on_server = 1`; kviz čaka, dokler ima vsaj eno
+neodgovorjeno postavko. To pravilo živi v eni poizvedbi (`cakajociKvizi`), ki
+jo bereta števec na domači strani in seznam kvizov.
+
+`attempts` **nima tujega ključa** na `quizzes`: kviz se lahko pobriše
+(preklic, `ADR-019` C), preden so njegovi poskusi preneseni. Prenesen poskus
+dobi `uploaded_at` in se ne pobriše takoj — dokazuje, da je postavka
+odgovorjena, dokler strežnik kviza ne neha vračati. Pobriše se skupaj s svojim
+kvizom, ali ob prvem naslednjem usklajevanju, če je kviz šel pred prenosom.
+**Neprenesen poskus se ne pobriše nikoli.**
 
 ### Strežnik — PostgreSQL
 
@@ -245,6 +271,7 @@ Tabela `quizzes` (V2-R01):
 | `subject` | `VARCHAR(16)` | koda predmeta; `NULL` = kviz čez več predmetov |
 | `created_at` | `TIMESTAMPTZ NOT NULL` | čas objave — osnutkov ni, zato je to hkrati čas nastanka |
 | `canceled_at` | `TIMESTAMPTZ` | kdaj je bil preklican; `NULL` = objavljen |
+| `solved_at` | `TIMESTAMPTZ` | kdaj je bil rešen; `NULL` = kakšna postavka še nima poskusa (V2-R02) |
 
 Tabela `quiz_items` (V2-R01):
 
@@ -257,14 +284,20 @@ Tabela `quiz_items` (V2-R01):
 | `question_text` | `TEXT NOT NULL` | kopija besedila vprašanja ob objavi |
 | `answer_text` | `TEXT NOT NULL` | kopija odgovora ob objavi |
 
-**Kviz nima stolpca `status`.** Stanje se izpelje iz `canceled_at`, po istem
-vzorcu, kot sta arhiv (`ADR-011`) in upokojitev (`ADR-015`) svoji osi in ne
-novo stanje. Objavljen kviz je preprosto kviz, ki obstaja.
+**Kviz nima stolpca `status`.** Stanje se izpelje iz `canceled_at` in
+`solved_at`, po istem vzorcu, kot sta arhiv (`ADR-011`) in upokojitev
+(`ADR-015`) svoji osi in ne novo stanje. Objavljen kviz je preprosto kviz, ki
+obstaja.
 
-**`solved_at` v shemi še ni.** `ADR-016` ga je predvidel, `ADR-017` (C) pa
-odložil na `V2-R02`, ki ga bo skupaj s poskusi tudi edina znala napolniti.
-Stolpec, ki ga nihče ne piše in ne bere, je ostanek generatorja — isti
-argument, s katerim je `ADR-016` (D) zavrnil tabelo `quiz_sources`.
+**Osi sta neodvisni.** Preklican kviz je lahko tudi rešen — telefon je poskuse
+zanj morda dal, preden je izvedel za preklic, in strežnik jih sprejme
+(`ADR-019` C). Pri prikazu ima **preklic prednost**: seznam na `/admin` in stran
+kviza takrat kažeta „preklican".
+
+`solved_at` je prišel z V2-R02 in ne z V2-R01, ker ga je edina znala napolniti
+(`ADR-017` C). Postavi ga **strežnik sam**, v isti transakciji kot poskus, ki
+zapolni zadnjo postavko, in ga ne premakne nikoli več. Čas je strežnikov:
+časi s telefona so zapisani pri vsakem poskusu posebej.
 
 **Postavka zamrzne dvoje.** `question_id` nosi identiteto, ki jo bo
 potrebovala `V2-R04`; `question_text` in `answer_text` nosita berljivost, ko
@@ -288,6 +321,29 @@ Zveza `QuizItem.question` je **enosmerna**: `Question` povratne nima. Povratna
 bi ORM-ju dala pot, po kateri bi ob brisanju vprašanja nulil `question_id` —
 vprašanja pa se ne brišejo, zato bi bila to mrtva pot z živimi posledicami.
 
+Tabela `question_attempts` (V2-R02):
+
+| Stolpec | Tip | Opomba |
+|---|---|---|
+| `id` | `VARCHAR(36) PRIMARY KEY` | UUID, generiran **na telefonu**; nosilec idempotentnosti |
+| `quiz_item_id` | `VARCHAR(36) NOT NULL` | tuji ključ na `quiz_items.id`, **brez `ondelete`**; `UNIQUE` |
+| `mode` | `VARCHAR(16) NOT NULL` | način odgovarjanja; zaenkrat vedno `samoocena` (`ADR-014`) |
+| `rating` | `VARCHAR(16) NOT NULL` | `nisem_vedela`, `tezko`, `srednje` ali `lahko` |
+| `shown_at`, `revealed_at`, `answered_at` | `TIMESTAMPTZ NOT NULL` | pokazano, razkrit odgovor, ocenjeno — s telefona (`ADR-019` D) |
+| `received_at` | `TIMESTAMPTZ NOT NULL` | kdaj je strežnik poskus prevzel |
+
+**Poskus je dogodek, ne števec** (`ADR-012`): ena vrstica na odgovor, ponovljen
+prenos istega `id` ne naredi nič. **Pravilnost se ne shranjuje** — izpelje se iz
+ocene, da bi drugačna izpeljava veljala tudi za nazaj (`ADR-014`).
+
+**Postavka ima največ en poskus** (`ADR-019` E). Enoličnost je v shemi in ne le
+v repozitoriju; drugi poskus za isto postavko strežnik sprejme kot uspeh, a ga
+ne zapiše. `question_id` tu ni, ker je izpeljiv prek `quiz_items.question_id`.
+
+Tuji ključ na postavko je **brez kaskade in brez `SET NULL`**: poskus nosi
+statistiko, zato naj baza brisanje kviza s poskusi raje zavrne, kot da jih
+vzame s sabo. `quiz_items → quizzes` ostaja edina kaskada v shemi.
+
 
 Migracija `0003_arhiv` prevesi tuji ključ `questions.material_id` s `CASCADE`
 na `SET NULL`. Na SQLite gre to skozi `op.batch_alter_table` s `copy_from`
@@ -308,6 +364,12 @@ ne prepisovati ne polniti. Njen `downgrade` obe tabeli spusti — in s tem
 **dokončno izgubi vse kvize**, za razliko od `downgrade` v `0004`, ki
 izgubi le podatek o upokojitvi. Vrstni red je obrnjen (najprej otrok),
 sicer bi tuji ključ na Postgresu brisanje `quizzes` zavrnil.
+
+Migracija `0006_poskusi` doda `quizzes.solved_at` (gol `ADD COLUMN`,
+`NULL`-abilen) in ustvari `question_attempts`. Obstoječi kvizi ostanejo
+nerešeni, kar je res. Njen `downgrade` tabelo in stolpec spusti in s tem
+**dokončno izgubi vse poskuse in podatek o rešenosti**; kvizi ostanejo, a bi
+jih ponoven `upgrade` naredil nerešene in telefon bi jih prenesel znova.
 
 Migracije vodi **Alembic** (`apps/server/alembic/`). Prva migracija ustvari
 razširitev `vector` — vektorskih stolpcev še ni, iskanje po pomenu je V2.
@@ -597,6 +659,78 @@ in ne nad izrisom: vzorec `{{ "…" if … == 1 else "…" }}` v nobeni predlogi
 sme obstajati. Prav ta vzorec je bil vir napake, ki je bila vsak dan vidna in
 je noben test ni ujel.
 
+## Kvizi na telefonu (V2-R02)
+
+Telefon dobi kviz kot **zaprt objekt s celotno vsebino** in ga reši brez
+omrežja. Splošne sinhronizacije vprašanj ni (`ADR-016`, posledice).
+
+### Pogodba
+
+| Pot | Kaj |
+|---|---|
+| `GET /quizzes/pending` | **celoten delovni seznam** nepreklicanih in nerešenih kvizov, najstarejši prvi, s postavkami; besedilo je zamrznjeno iz `quiz_items`, ne iz `questions`; pri vsaki postavki `answered` |
+| `POST /quiz-attempts` | paket do 1000 poskusov; odgovor `200` z `recorded` = koliko jih je bilo res zapisanih |
+
+Obe poti zahtevata API ključ — nista pod `/admin` in izvzetje (`ADR-006`) se ni
+razširilo. Vzorec je isti kot pri arhivu: brez kazalca in brez časa zadnje
+sinhronizacije (`ADR-011`). Kviz, ki ga na seznamu ni več, je rešen ali
+preklican.
+
+**Paket je vse ali nič.** Neveljavna ocena ali način, čas brez pasu,
+identifikator, ki ni UUID, ali postavka, ki je ni, dajo `422` in v bazi ne
+nastane nič. Ponovljen paket in drugi poskus za isto postavko pa **nista**
+napaka: `200` z `recorded: 0`. Telefon ju šteje za uspeh, sicer bi po `ADR-004`
+obtičal.
+
+Časi v odgovoru nosijo izrecen pas UTC (`casi.utc`): SQLite vrne naiven čas,
+ki bi ga telefon sicer prebral kot svoj lokalni.
+
+### Usklajevanje na telefonu
+
+En obhod (`src/sync/kvizi.ts`): **najprej poskusi gor, nato seznam dol.** Ker
+strežnik kviz reši v isti transakciji kot zadnji poskus, je seznam, prebran
+po prenosu, že brez pravkar rešenega kviza. Nato se novi kvizi shranijo, pri
+obstoječih se posodobi samo `answered_on_server`, lokalni kvizi, ki jih na
+seznamu ni, pa se pobrišejo — **razen kviza, ki je ta hip odprt** (`ADR-019` C).
+
+Nerazberljiv odgovor s seznamom kot celota **vrže** in ne vrne praznega
+seznama: prazen seznam bi obhod razumel kot „nič več ne čaka" in bi pobrisal
+tudi napol rešene kvize.
+
+Ritem ima svoj ponudnik `KviziProvider` (`src/sync/use-kvizi.tsx`) in ne
+`SyncProvider`: ob zagonu, ob vrnitvi v ospredje, vsakih 5 minut (ponavljalnik
+iz `izbrisi.ts`) in takoj po zadnji oceni kviza. Samo v ospredju.
+
+### Zasloni
+
+Domača stran ima tretji gumb **„Kvizi"**, ki je vedno viden; kadar kaj čaka,
+nosi število („Kvizi · 2") in poudarjen rob. Seznam (`app/kvizi/index.tsx`)
+kaže čakajoče kvize, najstarejše prve. Reševanje (`app/kvizi/[id].tsx`):
+vprašanje → *Pokaži odgovor* → ena od štirih ocen, ki je hkrati „naprej".
+Zapuščen kviz se nadaljuje pri prvi neocenjeni postavki. Po zadnji oceni
+„Kviz je končan", **brez številk ocen** — rezultat je lastnikov (`ADR-019` B).
+
+### Znane omejitve
+
+- **Trajno zavrnjen paket ustavi tudi dostavo novih kvizov.** Obhod se ob
+  neuspešnem prenosu poskusov konča, preden prebere seznam. Pri `422` se to
+  ponavlja vsakih 5 minut, poskusi ostanejo na telefonu, novi kvizi pa ne
+  pridejo — brez vidne sledi. Nastane lahko samo ob napaki v kodi ali ob
+  obnovitvi strežniške baze iz starejše kopije. Odkril pregled V2-R02; odprto
+  za odločitev lastnika.
+- **Hkratna paketa na strežniku.** Dva hkratna paketa za različni zadnji
+  postavki istega kviza drug drugega na Postgresu ne vidita, in `solved_at`
+  ostane prazen do naslednjega paketa. Pri enem telefonu z zaporo v
+  ponavljalniku se to ne zgodi. Ponovitev ob `IntegrityError` (tekma za isto
+  postavko) s testom ni pokrita.
+- **`sprozi` med tekočim obhodom ne naredi nič.** Če zadnja ocena pade med
+  obhod, gredo poskusi gor v naslednjem obhodu, ne takoj. Podatek se ne izgubi.
+- **Odprti kviz se prebere ob začetku obhoda.** Kviz, odprt med obhodom, ki je
+  že v teku, se lahko lokalno pobriše, če ga strežnik ne vrača več (preklic).
+  Zaslon dela naprej iz pomnilnika, poskusi se zapišejo in prenesejo.
+- **`shraniKviz` ni ena transakcija.** Prekinitev sredi shranjevanja pusti kviz
+  z manj postavkami; naslednji obhod doda manjkajoče in kviz spet čaka.
+
 ## Arhiv in brisanje na telefonu (V1-R07)
 
 Gumb na strani s podrobnostmi **arhivira** in ne briše. Arhiviran zapis izgine
@@ -657,6 +791,8 @@ sicer bi manjkajoča baza pasov podrla tudi `GET /health` in `POST /materials`.
 
 V1-R02 telefonu ni dodala nobene odvisnosti — prenos teče prek
 `expo-file-system`, nastavitve pa prek `expo-constants`, oba že iz V1-R01.
+Tudi V2-R02 ni dodala nobene, ne telefonu ne strežniku: UUID poskusa pride iz
+`expo-crypto`, ki je v projektu od V1-R01.
 
 ### `apps/server` (Python 3.12)
 
@@ -690,6 +826,13 @@ del Node.js in ne nova odvisnost.
 
 Da se aplikacija res prevede (ne samo tipno preveri), pomaga
 `npx expo export -p android`.
+
+**Tipizirane poti** (`experiments.typedRoutes` v `app.json`) pridejo iz
+`.expo/types/router.d.ts`, ki je git-ignoriran in ga ustvari Metro. Zastarela
+lokalna datoteka podre `typecheck` ob vsakem novem zaslonu, čeprav je koda
+pravilna — svež klon je nima in je čist. Znova jo ustvari
+`npx expo customize tsconfig.json` (ali `npm start`); nobene sledene datoteke
+ob tem ne spremeni. Odkrito v V2-R02.
 
 Naslov strežnika in API ključ prideta v aplikacijo **ob gradnji**, iz
 spremenljivk okolja `SERVER_BASE_URL` in `SERVER_API_KEY` (Expo naloži `.env`
