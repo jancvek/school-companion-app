@@ -84,6 +84,35 @@ def cas_ali_prazno(trenutek: datetime | None) -> str | None:
     return None if trenutek is None else cas(trenutek)
 
 
+def trajanje(od: datetime, do: datetime) -> str:
+    """Čas med dvema trenutkoma, za prikaz: `14 s`, `2 min 5 s`, `1 h 3 min`.
+
+    Za trajanje odgovora na rezultatu kviza (V2-R03). Oba konca prideta s
+    telefona (`docs/odlocitve/ADR-019` D); razlika med njima je zanesljivejša od
+    absolutnih vrednosti, ne pa nezmotljiva — premik ure telefona med
+    prikazom in oceno da **negativno** razliko. Ta ni podatek, ampak znak, da
+    podatka ni, zato je izpis „—" in ne „-3 s".
+
+    Naiven čas (SQLite) se razume kot UTC, kot v `v_domacem`. Brez tega bi
+    odštevanje naivnega in pasovnega trenutka vrglo `TypeError` — v testih
+    drugače kot v produkciji, kjer Postgres vrne oba s pasom.
+
+    Sekunde se režejo navzdol: 59,9 s je še „59 s", ne „1 min 0 s".
+    """
+    razlika = utc(do) - utc(od)
+    if razlika < timedelta(0):
+        return "—"
+
+    sekunde = int(razlika.total_seconds())
+    ure, ostanek = divmod(sekunde, 3600)
+    minute, sekunde = divmod(ostanek, 60)
+    if ure:
+        return f"{ure} h {minute} min"
+    if minute:
+        return f"{minute} min {sekunde} s"
+    return f"{sekunde} s"
+
+
 def dan_od_do(trenutek: datetime) -> tuple[datetime, datetime]:
     """Meji koledarskega dne, ki mu trenutek pripada, v UTC.
 
