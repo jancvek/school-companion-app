@@ -239,6 +239,41 @@ describe('uskladiKvize', () => {
       expect(await neprenesenePoskuse(db)).toEqual([]);
     });
 
+    it.each([401, 403, 404, 413])(
+      'zavrnitve %d ne razbije — obhod gre naprej brez ponavljanja',
+      async (status) => {
+        // Četrti pregled: ob napačnem ključu bi razbitje pomenilo do 501
+        // zaman poslan zahtevek vsakih 5 minut (`ADR-020`, razbija se samo ob 422).
+        await shraniKviz(db, kvizStreznika('k1', 3));
+        for (let i = 1; i <= 3; i += 1) await zapisiPoskus(db, poskus('k1', i));
+        const streznik = odjemalec([kvizStreznika('k1', 3)]);
+        streznik.posljiPoskuse.mockRejectedValue(new PaketZavrnjen(status));
+
+        const izid = await uskladiKvize(db, streznik);
+
+        expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(1);
+        expect(streznik.preberiKvize).toHaveBeenCalledTimes(1);
+        expect(izid.poslani).toBe(0);
+        expect(await neprenesenePoskuse(db)).toHaveLength(3);
+      },
+    );
+
+    it('zavrnitev, ki ni 422, ustavi razbijanje', async () => {
+      await shraniKviz(db, kvizStreznika('k1', 3));
+      for (let i = 1; i <= 3; i += 1) await zapisiPoskus(db, poskus('k1', i));
+      const streznik = odjemalec([]);
+      streznik.posljiPoskuse
+        .mockRejectedValueOnce(new PaketZavrnjen(422))
+        .mockRejectedValueOnce(new PaketZavrnjen(401));
+
+      await uskladiKvize(db, streznik);
+
+      // Paket in prvi posamični; ostala dva se ne pošljeta.
+      expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(2);
+      expect(await neprenesenePoskuse(db)).toHaveLength(3);
+      expect(streznik.preberiKvize).toHaveBeenCalledTimes(1);
+    });
+
     it('paketa z enim samim poskusom ne ponavlja', async () => {
       await shraniKviz(db, kvizStreznika('k1', 1));
       await zapisiPoskus(db, poskus('k1', 1));

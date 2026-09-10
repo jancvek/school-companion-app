@@ -48,6 +48,14 @@ export type OdjemalecKvizov = {
 const ZACASNE_4XX = new Set([408, 429]);
 
 /**
+ * Edini odgovor, s katerim strežnik sodi o **vsebini** poskusov (neveljavna
+ * ocena, postavka, ki je ni). Samo takrat ima razbitje paketa smisel
+ * (`docs/odlocitve/ADR-020`); ob 401, 403 ali 404 bi strežnik zavrnil vsak
+ * poskus enako in razbitje bi bilo le nekaj sto zaman poslanih zahtevkov.
+ */
+const VSEBINSKA_ZAVRNITEV = 422;
+
+/**
  * Strežnik je paket poskusov **trajno** zavrnil (4xx razen 408 in 429).
  *
  * Svoj razred, ker ga `uskladiKvize` obravnava drugače od nedosegljivega
@@ -78,9 +86,9 @@ export type IzidUsklajevanja = {
  *
  * - **strežnik je nedosegljiv** (omrežje, potekel čas, 5xx, 408, 429) — obhod
  *   se konča, preden se seznam sploh prebere; branje bi spodletelo enako;
- * - **strežnik je paket trajno zavrnil** (`PaketZavrnjen`) — paket se pošlje
- *   znova po en poskus (`posljiPosamicno`), obhod pa gre naprej: naslednji
- *   paketi se pošljejo in seznam se prebere. Sicer bi en sam neveljaven
+ * - **strežnik je paket trajno zavrnil** (`PaketZavrnjen`) — ob `422` se paket
+ *   pošlje znova po en poskus (`posljiPosamicno`), obhod pa gre v vsakem
+ *   primeru naprej: naslednji paketi se pošljejo in seznam se prebere. Sicer bi en sam neveljaven
  *   poskus za vedno odrezal telefon od novih kvizov, strežnik pa od vseh ocen,
  *   ki so prišle za njim — paket je na strežniku vse ali nič.
  *
@@ -102,7 +110,9 @@ export async function uskladiKvize(
       await odjemalec.posljiPoskuse(paket);
     } catch (napaka) {
       if (!(napaka instanceof PaketZavrnjen)) throw napaka;
-      poslani += await posljiPosamicno(db, odjemalec, paket);
+      if (napaka.status === VSEBINSKA_ZAVRNITEV) {
+        poslani += await posljiPosamicno(db, odjemalec, paket);
+      }
       continue;
     }
     await oznaciPrenesene(
@@ -149,8 +159,11 @@ async function posljiPosamicno(
     try {
       await odjemalec.posljiPoskuse([poskus]);
     } catch (napaka) {
-      if (napaka instanceof PaketZavrnjen) continue;
-      throw napaka;
+      if (!(napaka instanceof PaketZavrnjen)) throw napaka;
+      // Zavrnitev, ki ni o vsebini (npr. 401 sredi razbijanja), bi zadela
+      // vsak naslednji poskus enako — razbijanje se ustavi, poskusi ostanejo.
+      if (napaka.status !== VSEBINSKA_ZAVRNITEV) break;
+      continue;
     }
     await oznaciPrenesene(db, [poskus.id], new Date().toISOString());
     sprejeti += 1;
