@@ -170,7 +170,8 @@ jo bereta števec na domači strani in seznam kvizov.
 (preklic, `ADR-019` C), preden so njegovi poskusi preneseni. Prenesen poskus
 dobi `uploaded_at` in se ne pobriše takoj — dokazuje, da je postavka
 odgovorjena, dokler strežnik kviza ne neha vračati. Pobriše se skupaj s svojim
-kvizom, ali ob prvem naslednjem usklajevanju, če je kviz šel pred prenosom.
+kvizom; če je kviz šel že pred prenosom (preklic), pa v istem obhodu, v katerem
+je prenesen — `oznaciPrenesene` teče pred `pobrisiKvizeRazen`.
 **Neprenesen poskus se ne pobriše nikoli.**
 
 ### Strežnik — PostgreSQL

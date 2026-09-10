@@ -234,7 +234,8 @@ export async function neprenesenePoskuse(db: MaterialsDatabase): Promise<Poskus[
  *
  * Označi in ne pobriše: poskus je dokaz, da je postavka odgovorjena. Če bi šel
  * takoj, bi med uspešnim prenosom in neuspešnim branjem seznama kviz za hip
- * spet čakal in Maša bi ga reševala znova. Pobriše se skupaj s kvizom.
+ * spet čakal in Maša bi ga reševala znova. Pobriše ga `pobrisiKvizeRazen`:
+ * skupaj s kvizom, ali — kadar kviza lokalno ni več — v istem obhodu.
  */
 export async function oznaciPrenesene(
   db: MaterialsDatabase,
