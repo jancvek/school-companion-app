@@ -78,10 +78,11 @@ export type IzidUsklajevanja = {
  *
  * - **strežnik je nedosegljiv** (omrežje, potekel čas, 5xx, 408, 429) — obhod
  *   se konča, preden se seznam sploh prebere; branje bi spodletelo enako;
- * - **strežnik je paket trajno zavrnil** (`PaketZavrnjen`) — poskusi paketa
- *   ostanejo nepreneseni, obhod pa gre naprej: naslednji paketi se pošljejo in
- *   seznam se prebere. Sicer bi en sam neveljaven poskus za vedno odrezal
- *   telefon od novih kvizov.
+ * - **strežnik je paket trajno zavrnil** (`PaketZavrnjen`) — paket se pošlje
+ *   znova po en poskus (`posljiPosamicno`), obhod pa gre naprej: naslednji
+ *   paketi se pošljejo in seznam se prebere. Sicer bi en sam neveljaven
+ *   poskus za vedno odrezal telefon od novih kvizov, strežnik pa od vseh ocen,
+ *   ki so prišle za njim — paket je na strežniku vse ali nič.
  *
  * V nobeni veji se poskus **ne izgubi** (`ADR-012`).
  *
@@ -100,8 +101,9 @@ export async function uskladiKvize(
     try {
       await odjemalec.posljiPoskuse(paket);
     } catch (napaka) {
-      if (napaka instanceof PaketZavrnjen) continue;
-      throw napaka;
+      if (!(napaka instanceof PaketZavrnjen)) throw napaka;
+      poslani += await posljiPosamicno(db, odjemalec, paket);
+      continue;
     }
     await oznaciPrenesene(
       db,
@@ -122,6 +124,38 @@ export async function uskladiKvize(
   );
 
   return { poslani, naStrezniku: kvizi.length, pobrisani };
+}
+
+/**
+ * Zavrnjen paket pošlje znova, po en poskus; vrne, koliko jih je strežnik
+ * sprejel (`docs/odlocitve/ADR-020`).
+ *
+ * Tako gre gor vse razen poskusa, ki ga strežnik zavrača — ta ostane
+ * neprenesen. Paket z enim samim poskusom se ne ponavlja: njegova zavrnitev je
+ * že sodba o tem poskusu.
+ *
+ * Nedosegljiv strežnik sredi pošiljanja vrže naprej in konča obhod; kar je bilo
+ * do takrat sprejeto, je že označeno.
+ */
+async function posljiPosamicno(
+  db: MaterialsDatabase,
+  odjemalec: OdjemalecKvizov,
+  paket: readonly Poskus[],
+): Promise<number> {
+  if (paket.length <= 1) return 0;
+
+  let sprejeti = 0;
+  for (const poskus of paket) {
+    try {
+      await odjemalec.posljiPoskuse([poskus]);
+    } catch (napaka) {
+      if (napaka instanceof PaketZavrnjen) continue;
+      throw napaka;
+    }
+    await oznaciPrenesene(db, [poskus.id], new Date().toISOString());
+    sprejeti += 1;
+  }
+  return sprejeti;
 }
 
 function jeNiz(vrednost: unknown): vrednost is string {
