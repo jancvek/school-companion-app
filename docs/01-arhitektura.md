@@ -21,7 +21,7 @@
 | Modul | Odgovornost | Datoteke |
 |---|---|---|
 | `apps/mobile` | Kamera, izbira predmeta, lokalna baza, zgodovina, upload worker, brisanje arhiviranih snovi, reševanje kvizov | `apps/mobile/` (od V1-R01; upload worker od V1-R02; brisanje od V1-R07; kvizi od V2-R02) |
-| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju, arhiv, sestavljalnik kvizov, poskusi reševanja | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03; arhiv od V1-R07; kvizi od V2-R01; poskusi od V2-R02) |
+| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju, arhiv, sestavljalnik kvizov, poskusi reševanja, rezultat in tisk | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03; arhiv od V1-R07; kvizi od V2-R01; poskusi od V2-R02; rezultat od V2-R03) |
 
 Ločena mapi namenoma ne delita orodij za monorepo (npr. Turborepo) — gre za
 dva jezika (TypeScript / Python) brez skupne kode, zato vsaka živi s svojim
@@ -70,7 +70,7 @@ logika testljiva brez naprave.
 | `app/main.py` | tovarna aplikacije, življenjski cikel (zagon in ustavitev obdelave) |
 | `app/routers/materials.py` | `POST /materials` — prevzem slike s telefona |
 | `app/routers/admin.py` | operaterska stran: predmeti, snov, arhiv, brisanje |
-| `app/routers/kvizi.py` | sestavljalnik kvizov pod `/admin/quizzes` (V2-R01) |
+| `app/routers/kvizi.py` | sestavljalnik kvizov pod `/admin/quizzes` (V2-R01); rezultat rešenega kviza in stran za tisk (V2-R03) |
 | `app/routers/resevanje.py` | poti telefona za kvize: `GET /quizzes/pending`, `POST /quiz-attempts` (V2-R02) |
 | `app/db.py` | motor, seje ter `MaterialsRepository` in `KviziRepository` — edina pot do baze |
 | `app/models.py` | tabele `materials`, `questions`, `quizzes`, `quiz_items` in `question_attempts` |
@@ -80,7 +80,7 @@ logika testljiva brez naprave.
 | `app/worker.py` | časovnik: obhodi v presledkih, zagon in ustavitev. Brez poslovne logike |
 | `app/settings.py` | nastavitve iz okolja |
 | `app/subjects.py` | predmeti in slovenske oznake stanj |
-| `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02) |
+| `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03) |
 | `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01) |
 | `app/besedilo.py` | slovenske oblike števil (dvojina) |
 
@@ -516,7 +516,8 @@ Strežniško izrisan HTML za lastnika sistema (`docs/00-namen.md`, vloga
 | `/admin/quizzes/new` | POST | isti izbirnik ob vrnitvi iz predogleda, z ohranjenim izborom (V2-R01) |
 | `/admin/quizzes/preview` | POST | predogled izbranih vprašanj; **ničesar ne shrani** (V2-R01) |
 | `/admin/quizzes` | POST | objavi kviz in vse postavke v eni transakciji, preusmeri (303) (V2-R01) |
-| `/admin/quizzes/{id}` | GET | kviz s postavkami (V2-R01) |
+| `/admin/quizzes/{id}` | GET | kviz s postavkami (V2-R01); rešen kviz kot rezultat v skupinah po oceni (V2-R03) |
+| `/admin/quizzes/{id}/print` | GET | stran za tisk rešenega kviza: vprašanja brez odgovorov, prelom, ključ; izbor ocen z obrazcem `GET` (V2-R03) |
 | `/admin/quizzes/{id}/cancel` | POST | prekliče kviz, preusmeri (303) (V2-R01) |
 
 Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Prijave ni** —
@@ -659,6 +660,76 @@ Da se dvoobličnost ne prikrade nazaj, jo lovi test nad **datotekami** predlog
 in ne nad izrisom: vzorec `{{ "…" if … == 1 else "…" }}` v nobeni predlogi ne
 sme obstajati. Prav ta vzorec je bil vir napake, ki je bila vsak dan vidna in
 je noben test ni ujel.
+
+## Rezultat kviza in tisk (V2-R03)
+
+**Rezultat ima samo rešen kviz** (`solved_at`), tudi preklican: preklic ima
+prednost pri **stanju** (`ADR-019` C) in opozorilo ostane na vrhu, poskusi pa
+so dejstvo in se pokažejo pod njim. Nerešen kviz — tudi napol ocenjen — se
+izriše natanko tako kot pred V2-R03 in ne plača nobene poizvedbe več.
+
+Rezultat je na **isti** strani kviza (`/admin/quizzes/{id}`) in ne na svoji
+poti. Postavke so v štirih skupinah v vrstnem redu `OCENE` (od najtežje
+navzdol), znotraj skupine po `position`. Skupina je vidna tudi prazna, s
+številom 0 — kriterij zahteva „število v vsaki skupini". Peta skupina „Brez
+ocene" nastane samo, kadar ni prazna: rešen kviz ima poskus pri vsaki postavki
+in strežnik sprejme samo štiri kode, a postavka z nepoznano oceno ne sme iz
+rezultata izpasti molče. Številka pri vprašanju je **številka v kvizu**
+(`<li value>`), ne mesto v skupini.
+
+Nad skupinami stoji stavek, da so ocene Mašina samoocena in ne preverjeno
+znanje (`ADR-014`: kjer se prikaže, mora biti jasno, čigava trditev je).
+
+**Trajanje** sta dve števili (`ADR-019` D): *razmislek* (pokazano → razkrit
+odgovor) in *ocena* (razkrit odgovor → ocenjeno). Izračuna ju `casi.trajanje`;
+negativna razlika (premik ure telefona) je „—", naiven čas iz SQLite se razume
+kot UTC.
+
+**Izvor** ima v rezultatu več stanj kot na strani nerešenega kviza: snov v
+arhivu, arhiv s počiščeno sliko, aktivna snov brez slike na disku (isto pravilo
+kot v izbirniku: `je_znotraj` in `velikost_slike`) in upokojeno vprašanje —
+takrat je prepis na strani snovi novejši od vprašanja. Te oznake so **samo v
+rezultatu**: stran nerešenega kviza se ne sme spremeniti, ker test iz V2-R01
+dokazuje, da je ponovna obdelava ne spremeni (`prej == potem`).
+
+Rešen kviz je **pet poizvedb** ne glede na dolžino: kviz, postavke, vprašanja,
+snovi (`KviziRepository.snovi_postavk`, ena poizvedba po `id`) in poskusi
+(`poskusi_kviza`, ključani po postavki — postavka ima največ en poskus).
+
+**Tisk** (`/admin/quizzes/{id}/print`) je tudi za reševanje na papir:
+
+- del z vprašanji je **brez odgovorov in brez naslovov skupin** (naslov
+  „Nisem vedela" bi Maši povedal, kaj je prvič mislila), s praznim okvirjem za
+  odgovor; vrstni red od najtežje navzdol, oštevilčeno znova od 1;
+- ključ (`.kljuc`) se začne na novem listu (`break-before: page`) in nosi iste
+  številke, vprašanje in odgovor;
+- besedilo je zamrznjeno iz postavk, kot povsod (`ADR-016` E).
+
+Izbor ocen je obrazec `GET` s kljukicami `ocena` in skritim poljem `izbor=1`.
+Brez `izbor` velja privzetek (*Nisem vedela*, *Težko*); s `izbor` in brez
+nobene `ocena` je izbor prazen in stran pove, da ni kaj natisniti. Skrito polje
+je nujno — obrazec brez obkljukanega okenca ne pošlje ničesar in bi se sicer
+tiho vrnil v privzetek. Test to dokazuje tako, da obrazec prebere **iz
+izrisa** in ga pošlje, ne z ročno sestavljenim naslovom. Nerešen kviz je 409.
+
+Gumba „Natisni" ni — brez JavaScripta ga ni. Stran naroči Ctrl+P. Slog za tisk
+je `@media print` v `osnova.html`: skrije glavo in vse z razredom
+`ne-tiskaj` (obrazec, navodilo, povezavo nazaj).
+
+**Slog v `osnova.html` je del vsake izrisane strani**, tudi njegovi komentarji.
+Testi, ki trdijo, da neke besede na strani ni, jo vidijo tudi v `<style>`:
+komentar z besedo „izbora" je med izvedbo podrl nepovezan test predogleda.
+Komentarji v slogu osnove naj zato ne uporabljajo besed iz vmesnika.
+
+### Znane omejitve
+
+- **Postavitve na papirju testi ne dokažejo** — samo, da pravila obstajajo.
+  Prelom pred ključem, višina okvirja za odgovor in skrita glava se preverijo v
+  predogledu tiskanja brskalnika.
+- **Vprašanj iz skupine „Brez ocene" ni mogoče natisniti** — obrazec ponudi
+  samo štiri ocene. Taka skupina nastane le ob ročno spremenjeni bazi.
+- **`?ocena=…` brez `izbor`** (ročno vtipkan naslov) se prezre in velja
+  privzetek. Obrazec `izbor` pošlje vedno.
 
 ## Kvizi na telefonu (V2-R02)
 
