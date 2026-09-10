@@ -344,6 +344,25 @@ describe('uskladiKvize', () => {
         expect(streznik.poslani.at(-1)?.map((p) => p.id)).toEqual(['k2-a1']);
       });
 
+      it('poskus, ki med razbijanjem dobi odgovor, ki ni 422, se ne zapomni', async () => {
+        // Šesti pregled: brez tega testa bi `zavrnjeni.add` pred `break`
+        // ostal zelen, poskus pa bi do naslednjega zagona obtičal zaradi
+        // napake, ki ni njegova (npr. zamenjan ključ sredi obhoda).
+        await shraniKviz(db, kvizStreznika('k1', 2));
+        await zapisiPoskus(db, poskus('k1', 1));
+        await zapisiPoskus(db, poskus('k1', 2));
+        const streznik = odjemalec([]);
+        streznik.posljiPoskuse
+          .mockRejectedValueOnce(new PaketZavrnjen(422))
+          .mockRejectedValueOnce(new PaketZavrnjen(401));
+        const zagon = new Set<string>();
+
+        await uskladiKvize(db, streznik, null, zagon);
+
+        expect(zagon.size).toBe(0);
+        expect(await neprenesenePoskuse(db)).toHaveLength(2);
+      });
+
       it('enojni paket, zavrnjen s 422, se zapomni', async () => {
         await shraniKviz(db, kvizStreznika('k1', 1));
         await zapisiPoskus(db, poskus('k1', 1));

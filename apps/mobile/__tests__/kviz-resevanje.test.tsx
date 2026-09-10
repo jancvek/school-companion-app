@@ -202,7 +202,8 @@ describe('reševanje kviza', () => {
     });
 
     expect(await postavkeKviza(db, 'k1')).toHaveLength(2);
-    unmount();
+    // `await`, sicer se test konča pred odmontiranjem in ponavljalnik ostane živ.
+    await unmount();
   });
 
   it('gumbi ob spodnjem robu upoštevajo varno območje', async () => {

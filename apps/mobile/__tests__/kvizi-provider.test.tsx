@@ -1,4 +1,4 @@
-import { render, waitFor } from '@testing-library/react-native';
+import { act, render, waitFor } from '@testing-library/react-native';
 import { AppState, Text, type AppStateStatus } from 'react-native';
 
 import { shraniKviz, zapisiPoskus } from '@/db/kvizi';
@@ -16,6 +16,9 @@ import { createTestDatabase } from './test-database';
  * Pomnjenje zavrnjenih poskusov živi v ponudniku. Enotski testi v
  * `sync-kvizi.test.ts` množico podajo sami in zato ne vidijo, ali jo ponudnik
  * res ohrani med obhodi — ponudnik, ki bi vsakič podal novo, bi bil tam zelen.
+ *
+ * **Vsak izris se na koncu odmontira.** Ponudnik razporedi 5-minutni časovnik;
+ * test, ki ga pusti živega, jestu ne da končati (šesti pregled V2-R02).
  */
 
 jest.mock('expo-sqlite', () => require('./screen-mocks').expoSqliteMock());
@@ -24,8 +27,11 @@ let db: ReturnType<typeof createTestDatabase>;
 let prvotnoStanje: string;
 let poslusalci: ((stanje: AppStateStatus) => void)[];
 
-function sporociStanje(stanje: AppStateStatus): void {
-  for (const poslusalec of [...poslusalci]) poslusalec(stanje);
+/** Sporoči novo stanje vsem prijavljenim poslušalcem, znotraj `act`. */
+async function sporociStanje(stanje: AppStateStatus): Promise<void> {
+  await act(async () => {
+    for (const poslusalec of [...poslusalci]) poslusalec(stanje);
+  });
 }
 
 beforeEach(async () => {
@@ -77,19 +83,28 @@ it('zavrnjene poskuse si zapomni med obhodi in jih ob novem zagonu poskusi znova
   const streznik = zavracajoc();
 
   const prvi = await izrisi(streznik);
-  // Prvi obhod: paket z dvema in oba posamič.
-  await waitFor(() => expect(streznik.preberiKvize).toHaveBeenCalledTimes(1));
-  expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(3);
+  try {
+    // Prvi obhod: paket z dvema in oba posamič.
+    await waitFor(() => expect(streznik.preberiKvize).toHaveBeenCalledTimes(1));
+    expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(3);
 
-  // Vrnitev v ospredje sproži nov obhod v istem zagonu.
-  sporociStanje('background');
-  sporociStanje('active');
-  await waitFor(() => expect(streznik.preberiKvize).toHaveBeenCalledTimes(2));
-  expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(3);
+    // Vrnitev v ospredje sproži nov obhod v istem zagonu.
+    await sporociStanje('background');
+    await sporociStanje('active');
+    await waitFor(() => expect(streznik.preberiKvize).toHaveBeenCalledTimes(2));
+    expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(3);
+  } finally {
+    // `await`: odmontiranje je v tej različici knjižnice asinhrono. Brez njega
+    // se prekriva z naslednjim izrisom in ponavljalnik se ne ustavi.
+    await prvi.unmount();
+  }
 
   // Nov zagon aplikacije: nov ponudnik, prazna množica.
-  prvi.unmount();
-  await izrisi(streznik);
-  await waitFor(() => expect(streznik.preberiKvize).toHaveBeenCalledTimes(3));
-  expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(6);
+  const drugi = await izrisi(streznik);
+  try {
+    await waitFor(() => expect(streznik.preberiKvize).toHaveBeenCalledTimes(3));
+    expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(6);
+  } finally {
+    await drugi.unmount();
+  }
 });
