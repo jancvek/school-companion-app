@@ -1187,6 +1187,10 @@ class TestPakiranje:
             "kviz.html",
             # V2-R03.
             "kviz-tisk.html",
+            # V2-R04.
+            "statistika.html",
+            "statistika-predmet.html",
+            "_statistika.html",
         }
 
 
