@@ -46,9 +46,9 @@ v kodi ali ob obnovitvi strežniške baze iz starejše kopije.
 - **Trajna zavrnitev** je odgovor 4xx razen 408 in 429 — ista meja, kot jo
   `ADR-004` določa za prenos slik.
 - **Paket, zavrnjen s `422`, se v istem obhodu pošlje znova, po en poskus.**
-  Sprejeti se označijo za prenesene; trajno zavrnjeni ostanejo nepreneseni za
-  naslednji obhod. Paket z enim samim poskusom se ne ponavlja — njegova
-  zavrnitev je že sodba o tem poskusu.
+  Sprejeti se označijo za prenesene; zavrnjeni ostanejo nepreneseni — kdaj se
+  pošljejo znova, pove točka o pomnjenju spodaj. Paket z enim samim poskusom
+  se ne ponavlja — njegova zavrnitev je že sodba o tem poskusu.
 - **Razbija se samo ob `422`**, odgovoru na neveljavno vsebino paketa: slab
   poskus (neveljavna ocena, postavka, ki je ni) ali neusklajena pogodba med
   APK in strežnikom — v drugem primeru je zavrnjen vsak poskus. Ob 401, 403
@@ -60,8 +60,11 @@ v kodi ali ob obnovitvi strežniške baze iz starejše kopije.
   poskusom, zavrnjen s `422`. Pomnjenje je v pomnilniku in ne v bazi — isti
   vzorec kot odmik pri prenosu slik (odločitev 14 v `docs/plan/V1-R02.md`):
   ponoven zagon je znak, naj se poskusi znova. Ko je vzrok na strežniku
-  odpravljen, gredo zavrnjeni gor sami. Zavrnitve, ki niso `422`, se ne
-  zapomnijo, ker krivda ni v poskusu.
+  odpravljen, gredo zavrnjeni gor sami ob naslednjem zagonu — ta je lahko čez
+  več dni, če Android aplikacije v ozadju ne ubije, in Maša ga sproži samo s
+  prisilnim zaprtjem aplikacije. Zavrnitve, ki niso `422` (401, 403, 404), se
+  ne zapomnijo, ker krivda ni v poskusu: taki poskusi gredo znova ob vsakem
+  obhodu, v enem paketu — en zahtevek na paket.
 - `413` strežnik ne vrača: paket je v shemi omejen na 1000 poskusov, telefon
   jih pošlje največ 500, posrednika pred strežnikom ni. Če bi ga kdaj, bi
   razbitje pomagalo; ta odločitev ga ne pokriva.
@@ -113,13 +116,19 @@ Plan in ta ADR ostajata sled vseh štirih korakov; velja besedilo zgoraj.
   poskus se ne zavrže (`ADR-012`), neprenesen poskus se ne pobriše nikoli
   (`ADR-019` C), pogodba s strežnikom ostane ista.
 - **Kaj to oteži:**
-  - Zavrnjen poskus ostane na telefonu brez vidne sledi. **Stroški:** ob
-    vsakem zagonu aplikacije enkrat en zavrnjen paket in še vsak poskus
-    posebej (1 + N), nato do naslednjega zagona samo novi poskusi. Android
-    aplikacijo v ozadju pogosto ubije, zato se 1 + N ponovi ob vsakem
-    ponovnem zagonu — omejeno, ne pa nič. Ob neusklajeni pogodbi je N vsak
-    neprenesen poskus. To ostaja znana omejitev; če se kdaj zgodi, je pravi
-    popravek svoja zahteva (vidna sled ali popravek vzroka), ne tiho brisanje.
+  - Zavrnjen poskus ostane na telefonu brez vidne sledi. **Stroški ob `422`:**
+    ob vsakem zagonu aplikacije enkrat vsak paket in še vsak poskus posebej —
+    za N obtičalih ceil(N/500) + N zahtevkov, pri tem obsegu praktično 1 + N —,
+    nato do naslednjega zagona samo novi poskusi. Ob neusklajeni pogodbi je
+    zavrnjen tudi vsak nov poskus: k novih ocen v enem obhodu stane 1 + k
+    zahtevkov (en sam nov poskus en zahtevek), N pa raste z vsako oceno. Val
+    ob zagonu je zato vse večji; obhod medtem drži zaporo in branje seznama
+    kvizov se zamakne (vsak zahtevek ima 30 s omejitve). Android aplikacijo v
+    ozadju pogosto ubije, zato se to ponovi ob vsakem ponovnem zagonu —
+    omejeno, ne pa nič. **Ob 401, 403 ali 404** se nič ne zapomni: vsak obhod
+    pošlje en zahtevek na paket. To ostaja znana omejitev; če se kdaj zgodi, je
+    pravi popravek svoja zahteva (vidna sled ali popravek vzroka), ne tiho
+    brisanje.
   - Kviz, ki mu pripada zavrnjen poskus, na strežniku ostane nerešen in se na
     seznamu vrača. Na telefonu ne čaka, če ima poskus za vsako postavko;
     napol rešen čaka naprej kot vsak drug.

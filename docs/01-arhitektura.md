@@ -707,12 +707,14 @@ strežnikom); ob 401, 403 ali 404 ne gre za vsebino, zato poskusi takrat
 ostanejo in obhod gre brez ponavljanja naprej. Paket z enim poskusom se ne
 ponavlja.
 
-Posamič zavrnjen poskus si `KviziProvider` **zapomni za čas zagona
-aplikacije** (množica v `useRef`, ne v bazi) in ga obhodi do naslednjega zagona
-ne pošiljajo več. Brez tega bi z N obtičalimi poskusi vsak obhod poslal 1 + N
-zahtevkov, za vedno. Ob novem zagonu se poskusijo znova — ko je vzrok na
-strežniku odpravljen, gredo gor sami. Isti vzorec kot odmik pri prenosu slik.
-Meja med začasnim in trajnim je ista kot pri prenosu slik (`ADR-004`).
+Poskus, ki ga strežnik posamič zavrne s `422`, si `KviziProvider` **zapomni
+za čas zagona aplikacije** (množica v `useRef`, ne v bazi) in ga obhodi do
+naslednjega zagona ne pošiljajo več. Brez tega bi z N obtičalimi poskusi vsak
+obhod poslal 1 + N zahtevkov, za vedno. Ob novem zagonu se poskusijo znova —
+ko je vzrok na strežniku odpravljen, gredo gor sami. Isti vzorec kot odmik pri
+prenosu slik. Poskusi, zavrnjeni z 401, 403 ali 404, se ne zapomnijo in gredo
+znova ob vsakem obhodu, v enem paketu. Meja med začasnim in trajnim je ista
+kot pri prenosu slik (`ADR-004`).
 
 Nerazberljiv odgovor s seznamom kot celota **vrže** in ne vrne praznega
 seznama: prazen seznam bi obhod razumel kot „nič več ne čaka" in bi pobrisal
@@ -733,12 +735,15 @@ Zapuščen kviz se nadaljuje pri prvi neocenjeni postavki. Po zadnji oceni
 
 ### Znane omejitve
 
-- **Trajno zavrnjen poskus obtiči brez vidne sledi.** Ostane na telefonu in se
-  pošlje znova ob naslednjem zagonu aplikacije; ne ustavi ne novih kvizov ne
-  ostalih ocen (`ADR-020`). Stroški: ob vsakem zagonu enkrat en zavrnjen paket
-  in še vsak poskus posebej (1 + N), nato do naslednjega zagona nič. Android
-  aplikacijo v ozadju pogosto ubije, zato se to ponovi ob vsakem ponovnem
-  zagonu. Kviz, ki mu pripada, na strežniku
+- **Trajno zavrnjen poskus obtiči brez vidne sledi.** Ne ustavi ne novih
+  kvizov ne ostalih ocen (`ADR-020`). Poskus, zavrnjen s `422`, ostane na
+  telefonu in se pošlje znova ob naslednjem zagonu aplikacije — ta je lahko
+  čez več dni, če je Android ne ubije. Stroški: ob vsakem zagonu enkrat
+  ceil(N/500) + N zahtevkov (praktično 1 + N), nato do naslednjega zagona samo
+  novi poskusi. Ob neusklajeni pogodbi APK in strežnika je zavrnjen vsak
+  poskus: N raste z vsako oceno, val ob zagonu je vse večji in branje seznama
+  se medtem zamakne. Poskus, zavrnjen z 401, 403 ali 404, se pošlje znova ob
+  vsakem obhodu (en zahtevek na paket). Kviz, ki mu pripada, na strežniku
   ostane nerešen; na telefonu ne čaka, če ima poskus za vsako postavko.
   Nastane lahko samo ob napaki v kodi ali ob obnovitvi strežniške baze iz
   starejše kopije; pravi popravek bi bil svoja zahteva, ne tiho brisanje.
