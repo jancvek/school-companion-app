@@ -21,7 +21,7 @@
 | Modul | Odgovornost | Datoteke |
 |---|---|---|
 | `apps/mobile` | Kamera, izbira predmeta, lokalna baza, zgodovina, upload worker, brisanje arhiviranih snovi, reševanje kvizov | `apps/mobile/` (od V1-R01; upload worker od V1-R02; brisanje od V1-R07; kvizi od V2-R02) |
-| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju, arhiv, sestavljalnik kvizov, poskusi reševanja, rezultat in tisk | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03; arhiv od V1-R07; kvizi od V2-R01; poskusi od V2-R02; rezultat od V2-R03) |
+| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju, arhiv, sestavljalnik kvizov, poskusi reševanja, rezultat in tisk, statistika čez kvize | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03; arhiv od V1-R07; kvizi od V2-R01; poskusi od V2-R02; rezultat od V2-R03; statistika od V2-R04) |
 
 Ločena mapi namenoma ne delita orodij za monorepo (npr. Turborepo) — gre za
 dva jezika (TypeScript / Python) brez skupne kode, zato vsaka živi s svojim
@@ -72,15 +72,17 @@ logika testljiva brez naprave.
 | `app/routers/admin.py` | operaterska stran: predmeti, snov, arhiv, brisanje |
 | `app/routers/kvizi.py` | sestavljalnik kvizov pod `/admin/quizzes` (V2-R01); rezultat rešenega kviza in stran za tisk (V2-R03) |
 | `app/routers/resevanje.py` | poti telefona za kvize: `GET /quizzes/pending`, `POST /quiz-attempts` (V2-R02) |
-| `app/db.py` | motor, seje ter `MaterialsRepository` in `KviziRepository` — edina pot do baze |
+| `app/routers/statistika.py` | statistika čez kvize pod `/admin/statistics` (V2-R04) |
+| `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository` in `StatistikaRepository` (V2-R04, samo bere) — edina pot do baze |
 | `app/models.py` | tabele `materials`, `questions`, `quizzes`, `quiz_items` in `question_attempts` |
 | `app/storage.py` | zapis, meja mape in brisanje slik na disku |
 | `app/vision.py` | **edini modul, ki uvaža `openai`**: prompt, shema odgovora, klic |
 | `app/obdelava.py` | kaj se zgodi z enim zapisom: prevzem, klic, zapis izida. Sinhron |
 | `app/worker.py` | časovnik: obhodi v presledkih, zagon in ustavitev. Brez poslovne logike |
+| `app/statistika.py` | pravila štetja statistike: razporeditev, izpeljava pravilnosti, razvrstitev, meseci (V2-R04). Brez FastAPI in brez seje |
 | `app/settings.py` | nastavitve iz okolja |
-| `app/subjects.py` | predmeti in slovenske oznake stanj |
-| `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03) |
+| `app/subjects.py` | predmeti, slovenske oznake stanj in oznake ocen (`OZNAKE_OCEN`, tu od V2-R04) |
+| `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03); šolsko leto in meseci (V2-R04) |
 | `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01) |
 | `app/besedilo.py` | slovenske oblike števil (dvojina) |
 
@@ -300,8 +302,8 @@ kviza takrat kažeta „preklican".
 zapolni zadnjo postavko, in ga ne premakne nikoli več. Čas je strežnikov:
 časi s telefona so zapisani pri vsakem poskusu posebej.
 
-**Postavka zamrzne dvoje.** `question_id` nosi identiteto, ki jo bo
-potrebovala `V2-R04`; `question_text` in `answer_text` nosita berljivost, ko
+**Postavka zamrzne dvoje.** `question_id` nosi identiteto, na kateri stoji
+statistika čez kvize (`V2-R04`); `question_text` in `answer_text` nosita berljivost, ko
 bo izvorna snov dokončno izbrisana in bo `questions.material_id` `NULL`
 (`ADR-016` E). Ponovna obdelava ali brisanje snovi objavljenega kviza zato ne
 spremenita.
@@ -519,6 +521,8 @@ Strežniško izrisan HTML za lastnika sistema (`docs/00-namen.md`, vloga
 | `/admin/quizzes/{id}` | GET | kviz s postavkami (V2-R01); rešen kviz kot rezultat v skupinah po oceni (V2-R03) |
 | `/admin/quizzes/{id}/print` | GET | stran za tisk rešenega kviza: vprašanja brez odgovorov, prelom, ključ; izbor ocen z obrazcem `GET` (V2-R03) |
 | `/admin/quizzes/{id}/cancel` | POST | prekliče kviz, preusmeri (303) (V2-R01) |
+| `/admin/statistics` | GET | statistika čez kvize po predmetih; okno `?leto=2026` ali `?leto=vse` (V2-R04) |
+| `/admin/statistics/subjects/{koda}` | GET | statistika predmeta: po mesecih, snovi, vprašanja od najtežjega (V2-R04) |
 
 Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Prijave ni** —
 meja je Tailscale; posledice, vključno s CSRF, so v `docs/odlocitve/ADR-006`.
@@ -637,7 +641,7 @@ strani, tudi starejše. Glej razdelek „Slovenske oblike števil" spodaj.
 Slovenščina je pri števnikih **štirioblična** in ima dvojino: *1 slika,
 2 sliki, 3 slike, 5 slik*. `stevilo_z_besedo` (`app/besedilo.py`) to zna;
 oblike so **podatek in ne koda** — vsak samostalnik je četverica na enem mestu
-(`SLIKE`, `VPRASANJA`, `SNOVI`).
+(`SLIKE`, `VPRASANJA`, `SNOVI`, `POSKUSI`).
 
 **Ločnica teče po ostanku pri deljenju s sto, ne po zadnji števki.** To ni
 mikrooptimizacija, ampak edini način, da sta 21 in 101 obravnavana različno,
@@ -730,6 +734,70 @@ Komentarji v slogu osnove naj zato ne uporabljajo besed iz vmesnika.
   samo štiri ocene. Taka skupina nastane le ob ročno spremenjeni bazi.
 - **`?ocena=…` brez `izbor`** (ročno vtipkan naslov) se prezre in velja
   privzetek. Obrazec `izbor` pošlje vedno.
+
+## Statistika čez kvize (V2-R04)
+
+Dve strani pod `/admin`: pregled po predmetih (`/admin/statistics`) in stran
+predmeta (`/admin/statistics/subjects/{koda}`) s tabelo po mesecih, seznamom
+snovi in seznamom vprašanj. Snov svoje strani nima — vrstica snovi vodi na
+obstoječo stran snovi. Pravila so v `docs/odlocitve/ADR-021`.
+
+**Nič se ne shranjuje.** Vse se izračuna ob branju iz `question_attempts`
+(`ADR-012`); statistika ne prinese nobene tabele, stolpca ne migracije.
+Pravilnost se izpelje na enem mestu, `statistika.je_pravilna` (`ADR-014`).
+
+**Kaj šteje:** vsak poskus z `mode = 'samoocena'` — tudi iz preklicanega kviza
+(`ADR-021` E), iz napol rešenega kviza, na upokojeno vprašanje (z oznako,
+`ADR-021` D) ter iz arhivirane ali dokončno izbrisane snovi. Postavka brez
+poskusa ne šteje. Poskus brez vprašanja in poskus z neprepoznano oceno ne
+gresta v razporeditev, a ju stran omeni s številom. Filter načina je v skupnem
+`StatistikaRepository._pogoji`, da ga nobena poizvedba ne pozabi.
+
+**Predmet je `questions.subject`**, ne `quizzes.subject`: dnevni kviz predmeta
+nima.
+
+**Okno** je šolsko leto (parameter `leto`: `2026` za 2026/27 ali `vse`),
+privzeto tekoče. Meja je lokalna polnoč 1. 9., polodprto — poleti je to 31. 8.
+ob 22:00 UTC (`casi.solsko_leto`, `solsko_leto_od_do`). Parameter se bere kot
+niz; nerazberljiva vrednost ali leto zunaj 2000–2100 pade na tekoče leto in
+stran to pove. Časovna os je `answered_at` v domačem pasu.
+
+**Razvrstitev** (`ADR-021` C): dva razdelka, „Postavljena večkrat" (≥ 2
+poskusa) in „Postavljena enkrat"; znotraj po deležu *Nisem vedela* + *Težko*
+padajoče, nato po številu poskusov, nato novejši zadnji poskus prvi, nato
+`id`. Snovi so po istem ključu. Pregled po predmetih je po urniku, zato stavek
+„Najtežje je zgoraj" stoji samo na strani predmeta. Pri vprašanju je zaporedje
+ocen z datumi in povezavami na kvize.
+
+**Odstotki** se zaokrožajo na celo število, polovica navzgor, v celoštevilski
+aritmetiki (`statistika.odstotek`) — Pythonov `round` zaokroža bančno.
+
+**Seštevanje je v Pythonu in ne v `GROUP BY`**: razvrstitev v mesece v domačem
+pasu ni prenosljiva med SQLite in Postgresom. Stran predmeta je tri poizvedbe
+ne glede na dolžino (poskusi, snovi, časi za izbiro let), pri kodi, ki je ni
+na seznamu desetih, še četrta. Pravila štetja v `app/statistika.py` so čiste
+funkcije brez seje, po delitvi `obdelava.py` / `worker.py`.
+
+**`OZNAKE_OCEN` živi v `app/subjects.py`**: potrebujeta ga rezultat kviza in
+statistika, zato ni last nobenega usmerjevalnika.
+
+Pas razporeditve je slika (širina v odstotkih, brez JavaScripta); števila ob
+njem so podatek.
+
+Test „samo pod `/admin`" bere poti iz `app.openapi()["paths"]` in ne iz
+`app.routes`: FastAPI 0.14x vključene usmerjevalnike v `app.routes` hrani kot
+`_IncludedRouter` brez poti.
+
+### Znane omejitve
+
+- **Razdelek „Postavljena večkrat" bo sprva kratek.** Isto vprašanje pride
+  znova le prek *Ročne izbire* ali dnevnega vstopa (`ADR-016` D).
+- **Ponovna obdelava pretrga zgodovino vprašanja** — nova serija je nova
+  identiteta (`ADR-021` D). Seštevek snovi se ne pretrga.
+- **Stran predmeta bo čez leto dolga.** Popravek, če bo potreben, je
+  ostranjevanje, ne tiho krajšanje.
+- **Mašin telefon je v omrežju Tailscale** in bi `/admin` lahko odprl, kot
+  velja za ves `/admin` od V1-R04 (`ADR-021` F, `ADR-006`).
 
 ## Kvizi na telefonu (V2-R02)
 
