@@ -16,7 +16,7 @@ from sqlalchemy import Engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.db import naredi_motor, naredi_tovarno_sej
-from app.routers import admin, kvizi, materials
+from app.routers import admin, kvizi, materials, resevanje
 from app.schemas import Zivost
 from app.security import ApiKeyMiddleware
 from app.settings import Settings
@@ -117,6 +117,8 @@ def create_app(
     )
 
     app.include_router(materials.router)
+    # Poti telefona za kvize (V2-R02). Niso pod `/admin`, zato zahtevajo ključ.
+    app.include_router(resevanje.router)
     app.include_router(admin.router)
     # Za `admin.router` in ne pred njim: `kvizi` doda poti pod isto
     # predpono `/admin`, zato je vrstni red registracije viden navzven.

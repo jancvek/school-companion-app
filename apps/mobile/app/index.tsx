@@ -3,19 +3,22 @@ import { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { opisVerzije } from '@/config/verzija';
+import { useKvizi } from '@/sync/use-kvizi';
 import { useSync } from '@/sync/use-sync';
 import { theme } from '@/ui/theme';
 
 export default function HomeScreen() {
   const router = useRouter();
   const { nastavljen, povzetek, osvezi } = useSync();
+  const { cakajocih, osvezi: osveziKvize } = useKvizi();
 
-  // Števci se osvežijo ob vsakem prihodu na zaslon — po slikanju je to edini
-  // trenutek, ko jih uporabnica pogleda.
+  // Števci se osvežijo ob vsakem prihodu na zaslon — po slikanju in po kvizu
+  // je to edini trenutek, ko jih uporabnica pogleda.
   useFocusEffect(
     useCallback(() => {
       void osvezi();
-    }, [osvezi]),
+      void osveziKvize();
+    }, [osvezi, osveziKvize]),
   );
 
   return (
@@ -40,6 +43,24 @@ export default function HomeScreen() {
         onPress={() => router.push('/zgodovina')}
       >
         <Text style={styles.buttonLabel}>Zgodovina</Text>
+      </Pressable>
+
+      {/* Vedno viden; kadar kaj čaka, nosi število in poudarjen rob (V2-R02).
+          Število pride iz lokalne baze, zato je pravo tudi brez omrežja. */}
+      <Pressable
+        accessibilityRole="button"
+        testID="gumb-kvizi"
+        style={({ pressed }) => [
+          styles.button,
+          styles.buttonSecondary,
+          cakajocih > 0 && styles.buttonOznacen,
+          pressed && styles.buttonPressed,
+        ]}
+        onPress={() => router.push('/kvizi')}
+      >
+        <Text style={styles.buttonLabel}>
+          {cakajocih > 0 ? `Kvizi · ${cakajocih}` : 'Kvizi'}
+        </Text>
       </Pressable>
 
       <StanjePrenosa nastavljen={nastavljen} pending={povzetek.pending} failed={povzetek.failed} />
@@ -114,6 +135,10 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.border,
+  },
+  buttonOznacen: {
+    borderWidth: 2,
+    borderColor: theme.accent,
   },
   buttonPressed: {
     opacity: 0.7,

@@ -13,6 +13,7 @@ se izvede samo nad Postgresom. Prav zato ostane `CREATE EXTENSION` **edino**,
 """
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from alembic.config import Config
@@ -54,7 +55,9 @@ def test_migracija_ustvari_tabelo_materials(baza: str) -> None:
         motor.dispose()
 
 
-@pytest.mark.parametrize("tabela", ["materials", "questions", "quizzes", "quiz_items"])
+@pytest.mark.parametrize(
+    "tabela", ["materials", "questions", "quizzes", "quiz_items", "question_attempts"]
+)
 def test_migrirana_shema_se_ujema_z_modeli(baza: str, tabela: str) -> None:
     """Če se model in migracija razideta, mora to javiti test, ne namestitev.
 
@@ -260,6 +263,112 @@ def test_obstojece_vprasanje_je_po_migraciji_veljavno(baza: str) -> None:
         assert vrstica.question == "Kdaj?"
         assert vrstica.answer == "Leta 1991."
         assert vrstica.retired_at is None
+    finally:
+        motor.dispose()
+
+
+def _vstavi_kviz(povezava: Any) -> None:
+    """Kviz z eno postavko, kot ga je pustila `0005_kvizi`."""
+    povezava.execute(
+        text(
+            "INSERT INTO quizzes (id, name, subject, created_at) "
+            "VALUES ('k1', 'MAT — 9. 9. 2026', 'MAT', '2026-09-09 08:00:00')"
+        )
+    )
+    povezava.execute(
+        text(
+            "INSERT INTO quiz_items (id, quiz_id, question_id, position, "
+            "question_text, answer_text) "
+            "VALUES ('p1', 'k1', NULL, 1, 'Kdaj?', 'Leta 1991.')"
+        )
+    )
+
+
+def test_obstojeci_kviz_prezivi_migracijo_poskusov(baza: str) -> None:
+    """Kviz iz V2-R01 mora migracijo `0006` prestati kot **nerešen**.
+
+    To je smisel tega, da je `solved_at` `NULL`-abilen brez privzetka: kviz,
+    ki ga nihče ni rešil, ne sme po namestitvi veljati za rešenega — sicer ga
+    telefon nikoli ne bi dobil.
+    """
+    config = alembic_nastavitve(baza)
+    command.upgrade(config, "0005_kvizi")
+
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            _vstavi_kviz(povezava)
+
+        command.upgrade(config, "head")
+
+        with motor.connect() as povezava:
+            kviz = povezava.execute(
+                text("SELECT name, solved_at, canceled_at FROM quizzes WHERE id = 'k1'")
+            ).one()
+            postavka = povezava.execute(
+                text("SELECT question_text FROM quiz_items WHERE id = 'p1'")
+            ).one()
+
+        assert kviz.name == "MAT — 9. 9. 2026"
+        assert kviz.solved_at is None
+        assert kviz.canceled_at is None
+        assert postavka.question_text == "Kdaj?"
+        assert "question_attempts" in inspect(motor).get_table_names()
+    finally:
+        motor.dispose()
+
+
+def test_poskus_je_enolicen_na_postavko_in_brez_kaskade(baza: str) -> None:
+    """`ADR-019` E v shemi, ne le v repozitoriju; tuji ključ brez `ondelete`.
+
+    Poskus nosi statistiko (`ADR-012`), zato baza brisanja kviza s poskusi ne
+    sme tiho izvesti. Kot pri `test_vprasanja_kazejo_na_material` se tu bere
+    shema, ker SQLite brez `PRAGMA foreign_keys=ON` ključev ne uveljavlja.
+    """
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    motor = create_engine(baza)
+    try:
+        pregled = inspect(motor)
+        [kljuc] = pregled.get_foreign_keys("question_attempts")
+        assert kljuc["referred_table"] == "quiz_items"
+        assert kljuc["constrained_columns"] == ["quiz_item_id"]
+        assert not kljuc["options"].get("ondelete")
+
+        enolicni = [u["column_names"] for u in pregled.get_unique_constraints("question_attempts")]
+        assert ["quiz_item_id"] in enolicni
+    finally:
+        motor.dispose()
+
+
+def test_razveljavitev_poskusov_ohrani_kvize(baza: str) -> None:
+    """`downgrade` čez `0006` nad bazo s poskusom: kvizi ostanejo, poskusov ni."""
+    config = alembic_nastavitve(baza)
+    command.upgrade(config, "head")
+
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            _vstavi_kviz(povezava)
+            povezava.execute(
+                text(
+                    "INSERT INTO question_attempts (id, quiz_item_id, mode, rating, "
+                    "shown_at, revealed_at, answered_at, received_at) "
+                    "VALUES ('a1', 'p1', 'samoocena', 'lahko', '2026-09-10 15:00:00', "
+                    "'2026-09-10 15:00:07', '2026-09-10 15:00:09', '2026-09-10 15:05:00')"
+                )
+            )
+            povezava.execute(
+                text("UPDATE quizzes SET solved_at = '2026-09-10 15:05:00' WHERE id = 'k1'")
+            )
+
+        command.downgrade(config, "0005_kvizi")
+
+        pregled = inspect(motor)
+        assert "question_attempts" not in pregled.get_table_names()
+        assert "solved_at" not in {s["name"] for s in pregled.get_columns("quizzes")}
+        with motor.connect() as povezava:
+            assert povezava.execute(text("SELECT id FROM quizzes")).scalars().all() == ["k1"]
     finally:
         motor.dispose()
 

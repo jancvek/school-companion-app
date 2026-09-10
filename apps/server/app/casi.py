@@ -39,6 +39,17 @@ def pas() -> ZoneInfo:
     return ZoneInfo(DOMACI_PAS)
 
 
+def utc(trenutek: datetime) -> datetime:
+    """Trenutek iz baze z izrecnim pasom UTC.
+
+    Za odgovore telefonu (V2-R02): naiven čas, kakršnega vrne SQLite, bi se v
+    JSON zapisal brez pasu, telefon pa bi ga prebral kot svoj lokalni čas.
+    """
+    if trenutek.tzinfo is None:
+        return trenutek.replace(tzinfo=UTC)
+    return trenutek.astimezone(UTC)
+
+
 def v_domacem(trenutek: datetime) -> datetime:
     """Trenutek iz baze, pretvorjen v domači pas.
 

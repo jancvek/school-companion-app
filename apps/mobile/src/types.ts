@@ -31,3 +31,67 @@ export type SyncPovzetek = {
   synced: number;
   failed: number;
 };
+
+/**
+ * Štiri stopnje samoocene (`docs/odlocitve/ADR-014`). Prva je hkrati
+ * pravilnost, ostale tri težavnost. Kode so iste kot na strežniku.
+ */
+export type Ocena = 'nisem_vedela' | 'tezko' | 'srednje' | 'lahko';
+
+/** Način odgovarjanja; v V2 je edini samoocena (`ADR-014`). */
+export type Nacin = 'samoocena';
+
+/** Kviz, kot ga pošlje strežnik (`GET /quizzes/pending`). */
+export type KvizStreznika = {
+  id: string;
+  name: string;
+  /** Čas objave, ISO 8601 z pasom. */
+  created_at: string;
+  items: {
+    id: string;
+    position: number;
+    question: string;
+    answer: string;
+    /** Postavka na strežniku že ima poskus (`ADR-019` E). */
+    answered: boolean;
+  }[];
+};
+
+/** Kviz, ki čaka na reševanje, s številom postavk in odgovorjenih. */
+export type KvizNaSeznamu = {
+  id: string;
+  name: string;
+  created_at: string;
+  vprasanj: number;
+  odgovorjenih: number;
+};
+
+/** Ena postavka lokalnega kviza, z izpeljanim podatkom, ali je odgovorjena. */
+export type PostavkaKviza = {
+  id: string;
+  quiz_id: string;
+  position: number;
+  question_text: string;
+  answer_text: string;
+  /** Ima lokalni poskus ali je bila odgovorjena že na strežniku. */
+  odgovorjena: boolean;
+};
+
+/**
+ * En odgovor na eno postavko — dogodek (`ADR-012`). Imena polj so enaka imenom
+ * stolpcev lokalne tabele `attempts`.
+ */
+export type Poskus = {
+  /** UUID, generiran na telefonu; nosilec idempotentnosti. */
+  id: string;
+  quiz_id: string;
+  quiz_item_id: string;
+  mode: Nacin;
+  rating: Ocena;
+  /** Trije žigi, ISO 8601 v UTC (`ADR-019` D). */
+  shown_at: string;
+  revealed_at: string;
+  answered_at: string;
+  /** Kdaj ga je strežnik sprejel; `null`, dokler ni prenesen. */
+  uploaded_at: string | null;
+};

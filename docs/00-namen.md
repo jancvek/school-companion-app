@@ -34,7 +34,8 @@ samopreverjanje iz dejanske snovi, ki jo je Maša tisti dan imela pri pouku.
 | Prepis (`transcript`) | Dobesedno besedilo, ki ga vision model prebere s slike |
 | Povzetek (`summary`) | Dva do štirje stavki o vsebini ene snovi, da je snov prepoznavna brez branja celega prepisa |
 | Berljivost (`readable`) | Ali je model s slike sploh znal brati. Neberljiva slika je obdelana, a brez prepisa in vprašanj |
-| Kviz | 5–10 vprašanj in odgovorov, ki jih AI sestavi iz ene snovi |
+| Vprašanja snovi | 5–10 vprašanj in odgovorov, ki jih AI sestavi iz ene snovi (V1-R03) |
+| Kviz | Nabor vprašanj z odgovori iz ene ali več snovi, ki ga lastnik sestavi in objavi na admin strani (V2-R01); Maša ga reši na telefonu in vsako vprašanje oceni (V2-R02). Rešen je, ko ima vsako vprašanje oceno |
 | Težavnost | Ocena, ki jo Maša izbere po razkritju odgovora: *nisem vedela / težko / srednje / lahko*. Prva stopnja pove tudi, da odgovora ni vedela; ostale tri so težavnost. Štiri stopnje in ne tri — glej `docs/odlocitve/ADR-014` |
 
 ## Načela, ki veljajo povsod

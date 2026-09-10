@@ -11,10 +11,11 @@
  * nova migracija.
  */
 
+import { CREATE_KVIZI_TABLES_SQL } from './kvizi';
 import { CREATE_MATERIALS_TABLE_SQL, type MaterialsDatabase } from './materials';
 
 /** Verzija sheme, ki jo pričakuje ta različica aplikacije. */
-export const SHEMA_VERZIJA = 1;
+export const SHEMA_VERZIJA = 2;
 
 type Migracija = {
   /** Verzija, ki velja, ko se ta korak konča. */
@@ -49,6 +50,15 @@ const MIGRACIJE: Migracija[] = [
         if (obstojeci.has(ime)) continue;
         await db.execAsync(`ALTER TABLE materials ADD COLUMN ${definicija}`);
       }
+    },
+  },
+  {
+    // Kvizi, postavke in poskusi (V2-R02). Samo nove tabele; `materials` se
+    // ne dotakne. `IF NOT EXISTS` naredi korak ponovljiv, če se aplikacija
+    // ubije med ustvarjanjem tabel in nastavitvijo `user_version`.
+    doVerzije: 2,
+    async izvedi(db) {
+      await db.execAsync(CREATE_KVIZI_TABLES_SQL);
     },
   },
 ];

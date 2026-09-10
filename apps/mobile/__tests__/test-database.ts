@@ -58,3 +58,17 @@ CREATE TABLE IF NOT EXISTS materials (
 CREATE INDEX IF NOT EXISTS materials_subject_taken_at
   ON materials (subject, taken_at DESC);
 `;
+
+/**
+ * Baza, kakršna je na telefonu po migraciji 1 (V1-R02 do V2-R01) — **dobesedna
+ * kopija, ki se ne posodablja**, iz istega razloga kot `SHEMA_V1_R01`.
+ *
+ * To je stanje, v katerem je Mašin telefon danes: migracija 2 (V2-R02) mora
+ * iti čezenj brez izgube posnetkov.
+ */
+export const SHEMA_VERZIJE_1 = `${SHEMA_V1_R01}
+ALTER TABLE materials ADD COLUMN sync_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE materials ADD COLUMN last_attempt_at TEXT;
+ALTER TABLE materials ADD COLUMN sync_error TEXT;
+PRAGMA user_version = 1;
+`;
