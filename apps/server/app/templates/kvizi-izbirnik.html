@@ -1,0 +1,97 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}{{ naslov }}{% endblock %}
+
+{% block vsebina %}
+  <h1>{{ naslov }}</h1>
+  <p class="pod">
+    {% if cez_vse_predmete %}
+      Današnja snov, čez vse predmete.
+    {% else %}
+      {{ subject }} — {{ oznaka }}. Vsa snov tega predmeta, najnovejša prva.
+    {% endif %}
+  </p>
+
+  {# Sporočilo se pokaže samo ob vrnitvi s praznim izborom. Prazen izbor ni
+     napaka strežnika, zato ne `napaka`, ampak `opozorilo`. #}
+  {% if sporocilo %}
+    <p class="opozorilo">{{ sporocilo }}</p>
+  {% endif %}
+
+  {% if snovi %}
+    {# En sam obrazec za oboje: „Sestavi" pelje v predogled, „Nazaj na izbor"
+       iz predogleda pripelje sem in obkljuka isto. Brez JavaScripta je to
+       navaden `POST` s ponovljenim poljem `snov`. #}
+    <form method="post" action="/admin/quizzes/preview">
+      <input type="hidden" name="vstop" value="{{ vstop }}">
+      {% if subject %}<input type="hidden" name="subject" value="{{ subject }}">{% endif %}
+
+      <p class="drobno">
+        <label>
+          Vprašanj na sliko:
+          <input type="number" name="stevilo" value="{{ stevilo }}"
+                 min="{{ najmanj }}" max="{{ najvec }}" class="stevilka">
+        </label>
+        Vzame se prvih toliko vprašanj; če jih je manj, se vzame, kar je.
+      </p>
+
+      <ul class="izbirnik">
+        {% for snov in snovi %}
+          {# Neizbirna snov ostane v seznamu, le brez kljukice in z razlogom.
+             Molčeč izpust bi pomenil kviz iz polovice dneva brez sledi, da
+             manjka pol (`docs/odlocitve/ADR-016` G). #}
+          <li class="{{ '' if snov.izbirna else 'neizbirna' }}">
+            <label>
+              {% if snov.izbirna %}
+                <input type="checkbox" name="snov" value="{{ snov.id }}"
+                       {% if snov.obkljukana %}checked{% endif %}>
+              {% else %}
+                <span class="brez-kljukice" aria-hidden="true"></span>
+              {% endif %}
+
+              {% if snov.ima_sliko %}
+                {# Isti `loading="lazy"` kot na strani predmeta: brez njega bi
+                   seznam celega predmeta prenesel desetine megabajtov. #}
+                <img src="/admin/materials/{{ snov.id }}/image" alt="" loading="lazy">
+              {% else %}
+                <span class="brez-slike">slike na disku ni</span>
+              {% endif %}
+
+              <span class="opis">
+                <span class="cas">{{ snov.koda }} — {{ snov.cas }}</span>
+                {% if snov.izbirna %}
+                  <span class="stanje">{{ snov.vprasanj }}</span>
+                {% else %}
+                  <span class="stanje razlog">{{ snov.razlog }}</span>
+                {% endif %}
+              </span>
+            </label>
+          </li>
+        {% endfor %}
+      </ul>
+
+      {% if izbirnih %}
+        <button class="gumb gumb-obdelava" type="submit">Sestavi</button>
+        <p class="drobno">
+          Predogled ničesar ne shrani. Kviz nastane šele z gumbom „Objavi".
+        </p>
+      {% else %}
+        <p class="opozorilo">
+          Nobene od teh snovi še ni mogoče dati v kviz. Razlog je pri vsaki
+          zapisan zgoraj.
+        </p>
+      {% endif %}
+    </form>
+  {% else %}
+    <p class="opozorilo">
+      {% if cez_vse_predmete %}
+        Danes ni nobene posnete snovi. Kviza za danes torej ni iz česa
+        sestaviti — poskusi „Nova snov" in zajemi zaostanek.
+      {% else %}
+        Za ta predmet na strežniku ni nobene nearhivirane slike.
+      {% endif %}
+    </p>
+  {% endif %}
+
+  <a class="nazaj" href="/admin">← Nazaj na pregled</a>
+{% endblock %}

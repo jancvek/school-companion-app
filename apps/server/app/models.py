@@ -1,4 +1,4 @@
-"""Tabeli `materials` in `questions` na strežniku.
+"""Tabele `materials`, `questions`, `quizzes` in `quiz_items` na strežniku.
 
 Tipi so izbrani tako, da ista shema stoji nad Postgresom (produkcija) in nad
 SQLite (testi) — glej odločitev 2 v `docs/plan/V1-R02.md`. Zato `id` ni
@@ -252,3 +252,122 @@ class Question(Base):
     )
 
     material: Mapped[Material | None] = relationship(back_populates="vsa_vprasanja")
+
+
+class Quiz(Base):
+    """En objavljen kviz: ime, predmet in čas nastanka.
+
+    **Kviz nima stolpca `status`.** Stanje se izpelje iz `canceled_at`, po
+    istem vzorcu, kot je arhiv svoja os in ne peto stanje v `ADR-011`.
+    Objavljen kviz je preprosto kviz, ki obstaja (`ADR-016` C).
+
+    `solved_at` tu **ni** in ni pozabljen: doda ga `V2-R02` skupaj s poskusi,
+    ki ga edini znajo napolniti (`docs/odlocitve/ADR-017` C). Stolpec, ki ga
+    nihče ne piše in ne bere, je ostanek generatorja.
+    """
+
+    __tablename__ = "quizzes"
+
+    #: UUID, generiran **na strežniku** — kviz nastane tu, ne na telefonu.
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    #: Ime za prikaz. Sestavi se samodejno (`MAT — 9. 9. 2026`), operater pa ga
+    #: v obrazcu lahko prepiše.
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    #: Koda predmeta ali `NULL` za kviz čez več predmetov.
+    #:
+    #: `NULL` ni „neznano": pomeni, da je kviz nastal iz vstopa „Kaj smo se
+    #: danes učili", ki po `ADR-016` (B) namenoma ne izbira predmeta.
+    subject: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    #: Kdaj je bil kviz objavljen. Osnutkov ni — predogled ničesar ne shrani
+    #: (`ADR-016` C), zato je čas nastanka hkrati čas objave.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    #: Kdaj je bil kviz preklican; `NULL` pomeni veljaven, objavljen kviz.
+    #:
+    #: Preklic in ne brisanje: zapis, ki ga je telefon morda že prenesel, mora
+    #: imeti stanje, ki ga je mogoče sinhronizirati — izbrisane vrstice ni
+    #: mogoče sporočiti (`ADR-016` F, isti razlog kot `ADR-011`). Enosmerno:
+    #: nazaj na `NULL` ne gre nikoli.
+    canceled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    #: Postavke kviza, urejene po zaporedju v kvizu.
+    #:
+    #: **Edina kaskada brisanja v shemi.** Postavka brez kviza nima pomena, za
+    #: razliko od vprašanja brez materiala, ki nosi statistiko in mora preživeti
+    #: (`ADR-012`). Kvizov se sicer ne briše — kaskada je tu zato, da shema
+    #: pove resnico, ne zato, da bi jo kdo uporabljal.
+    postavke: Mapped[list["QuizItem"]] = relationship(
+        back_populates="quiz",
+        order_by="QuizItem.position",
+        cascade="all, delete-orphan",
+    )
+
+
+class QuizItem(Base):
+    """Eno vprašanje, zamrznjeno v kviz.
+
+    **Dve ravni obrambe** za kriterij „objavljen kviz zamrzne svoje postavke"
+    (`ADR-016` E):
+
+    1. `question_id` nosi **identiteto** — `V2-R04` bo ocene čez leta vezala
+       nanjo, kar je mogoče šele, odkar vprašanje ob ponovni obdelavi ne izgine
+       (`ADR-015`).
+    2. `question_text` in `answer_text` nosita **berljivost** — kviz izpred let
+       mora biti berljiv tudi, ko je bila izvorna snov dokončno izbrisana in je
+       `questions.material_id` `NULL` (`ADR-012`).
+
+    Stolpca `material_id` tu namenoma ni: pot do snovi gre prek vprašanja, ki
+    denormalizirana `subject` in `material_taken_at` nosi s sabo že od V1-R07
+    (`docs/odlocitve/ADR-017` B).
+    """
+
+    __tablename__ = "quiz_items"
+
+    #: UUID, generiran na strežniku.
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    quiz_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("quizzes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    #: Vprašanje, iz katerega je postavka nastala.
+    #:
+    #: `NULL`-abilen zaradi `ON DELETE SET NULL`. V praksi se to ne zgodi —
+    #: vprašanja se od `ADR-012` in `ADR-015` ne brišejo nikjer več — a shema
+    #: mora povedati isto kot tuji ključ. Če bi se kdaj zgodilo, kviz izgubi
+    #: ključ in ne postavke: besedilo je zamrznjeno v njej.
+    question_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("questions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    #: Zaporedna številka **čez cel kviz**, od 1.
+    #:
+    #: Za razliko od `Question.position`, ki je enolična znotraj serije enega
+    #: materiala. Kviz je en dokument in ga bo `V2-R03` tako tudi natisnil.
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    #: Kopija besedila vprašanja ob objavi.
+    question_text: Mapped[str] = mapped_column(Text, nullable=False)
+
+    #: Kopija pričakovanega odgovora ob objavi.
+    answer_text: Mapped[str] = mapped_column(Text, nullable=False)
+
+    quiz: Mapped[Quiz] = relationship(back_populates="postavke")
+
+    #: Zveza je **enosmerna**: `Question` povratne nima.
+    #:
+    #: Povratna zveza bi ORM-ju dala pot, po kateri bi ob brisanju vprašanja
+    #: nulil `question_id` — vprašanja pa se ne brišejo (`ADR-012`). To bi bila
+    #: mrtva pot z živimi posledicami; `Question` po V2-R05 ostane nedotaknjen.
+    question: Mapped[Question | None] = relationship()

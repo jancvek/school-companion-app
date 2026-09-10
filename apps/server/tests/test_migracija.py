@@ -54,7 +54,7 @@ def test_migracija_ustvari_tabelo_materials(baza: str) -> None:
         motor.dispose()
 
 
-@pytest.mark.parametrize("tabela", ["materials", "questions"])
+@pytest.mark.parametrize("tabela", ["materials", "questions", "quizzes", "quiz_items"])
 def test_migrirana_shema_se_ujema_z_modeli(baza: str, tabela: str) -> None:
     """Če se model in migracija razideta, mora to javiti test, ne namestitev.
 

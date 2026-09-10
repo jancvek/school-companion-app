@@ -29,4 +29,65 @@
       </li>
     {% endfor %}
   </ul>
+
+  {# **Pod** seznamom predmetov in ne nad njim. Ime kviza vsebuje kodo predmeta
+     („MAT — 9. 9. 2026"), zgoraj pa bi ta koda postala prva pojavitev na
+     strani in podrla test, ki po vrstnem redu pojavitev dokazuje, da so
+     predmeti našteti po urniku in ne po abecedi. #}
+  <section class="izid">
+    <h2>Kvizi</h2>
+
+    {# Trije vstopi v **isti** izbirnik (`docs/odlocitve/ADR-016` A). Predmetna
+       dva sta gumba istega obrazca, ker si delita izbiro predmeta; dnevni je
+       navadna povezava, ker predmeta ne izbira (`ADR-017` A).
+
+       Obrazec je `GET`: nič ne spremeni, zato mora biti izbirnik dosegljiv
+       tudi z osvežitvijo in iz zgodovine brskalnika. #}
+    <form method="get" action="/admin/quizzes/new" class="vstopi">
+      <label>
+        Predmet:
+        <select name="subject">
+          {% for vrstica in predmeti %}
+            <option value="{{ vrstica.koda }}">{{ vrstica.koda }} — {{ vrstica.oznaka }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="gumb gumb-obdelava" type="submit" name="vstop" value="nova">
+        Nova snov
+      </button>
+      <button class="gumb gumb-obdelava" type="submit" name="vstop" value="rocna">
+        Ročna izbira
+      </button>
+    </form>
+    <p class="drobno">
+      „Nova snov" obkljuka vso snov predmeta, ki še ni bila v kvizu.
+      „Ročna izbira" pokaže isto, a ne obkljuka nič.
+      <a href="/admin/quizzes/new?vstop=danes">Kaj smo se danes učili</a> gre
+      čez vse predmete in obkljuka današnjo snov.
+    </p>
+
+    {% if kvizi %}
+      <ul class="predmeti">
+        {% for kviz in kvizi %}
+          <li>
+            <a href="/admin/quizzes/{{ kviz.id }}">
+              <span>
+                <span class="koda">{{ kviz.ime }}</span>
+                {# Predmet in datum sta kriterij in ne okras: ime je
+                   prepisljivo, zato ju ob prepisanem imenu ne nosi nic. #}
+                <span class="stanje">
+                  {{ kviz.koda }} &middot; {{ kviz.nastal_datum }} &middot;
+                  {% if kviz.preklican %}preklican{% else %}objavljen{% endif %}
+                </span>
+              </span>
+              <span class="stevec">{{ kviz.vprasanj }}</span>
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      {# Brez kod predmetov v tem besedilu — glej opombo nad razdelkom. #}
+      <p class="drobno">Objavljenega kviza še ni.</p>
+    {% endif %}
+  </section>
 {% endblock %}

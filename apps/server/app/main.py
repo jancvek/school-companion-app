@@ -16,7 +16,7 @@ from sqlalchemy import Engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.db import naredi_motor, naredi_tovarno_sej
-from app.routers import admin, materials
+from app.routers import admin, kvizi, materials
 from app.schemas import Zivost
 from app.security import ApiKeyMiddleware
 from app.settings import Settings
@@ -118,6 +118,11 @@ def create_app(
 
     app.include_router(materials.router)
     app.include_router(admin.router)
+    # Za `admin.router` in ne pred njim: `kvizi` doda poti pod isto
+    # predpono `/admin`, zato je vrstni red registracije viden navzven.
+    # `/admin/quizzes/...` se z nobeno obstoječo potjo ne prekriva —
+    # `admin` ima `/admin/materials/...` in `/admin/subjects/...`.
+    app.include_router(kvizi.router)
 
     # Napake pod `/admin` naj bodo stran, ne JSON. Prestreznik se za vse
     # ostale poti umakne privzetemu — glej `admin.prestrezi_napako`.

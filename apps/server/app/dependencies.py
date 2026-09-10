@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from fastapi import Request
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db import MaterialsRepository
+from app.db import KviziRepository, MaterialsRepository
 from app.settings import Settings
 
 
@@ -24,3 +24,16 @@ def daj_repozitorij(request: Request) -> Iterator[MaterialsRepository]:
     tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
     with tovarna() as seja:
         yield MaterialsRepository(seja)
+
+
+def daj_repozitorij_kvizov(request: Request) -> Iterator[KviziRepository]:
+    """Kot `daj_repozitorij`, a za `quizzes` in `quiz_items` (V2-R01).
+
+    Svoja seja in ne deljena z `MaterialsRepository`: strani, ki potrebujeta
+    oboje (`/admin` in izbira predmeta), s tem odpreta dve **bralni** seji na
+    zahtevo. To ni težava pravilnosti — pisanje teče izključno skozi ta
+    repozitorij in je zato ena seja in ena transakcija.
+    """
+    tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
+    with tovarna() as seja:
+        yield KviziRepository(seja)

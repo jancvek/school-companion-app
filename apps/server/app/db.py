@@ -5,13 +5,14 @@ tako testi tečejo nad SQLite v pomnilniku, produkcija pa nad Postgresom, in
 oboje skozi isto kodo.
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import uuid4
 
 from sqlalchemy import (
+    ColumnElement,
     CursorResult,
     Engine,
     create_engine,
@@ -20,14 +21,17 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, selectinload, sessionmaker
 from sqlalchemy.sql import Update
 
 from app.models import (
     STATUS_NOV,
+    STATUS_PRIPRAVLJEN,
     STATUS_V_OBDELAVI,
     Material,
     Question,
+    Quiz,
+    QuizItem,
 )
 
 
@@ -460,3 +464,325 @@ class MaterialsRepository:
         self.session.delete(material)
         self.session.commit()
         return material
+
+
+@dataclass(frozen=True)
+class SnovZaIzbor:
+    """Ena vrstica izbirnika slik (V2-R01).
+
+    Repozitorij vrne **dejstva**, ne besedila: ali je snov izbirna, zna povedati
+    domena, ime razloga v slovenščini pa je stvar vmesnika.
+    """
+
+    material: Material
+
+    #: Koliko **veljavnih** vprašanj snov ima (`retired_at IS NULL`).
+    veljavnih_vprasanj: int
+
+    #: Ali je katero od njenih veljavnih vprašanj v nepreklicanem kvizu.
+    #:
+    #: Upokojena vprašanja se ne štejejo: ponovno obdelana snov se v „Novi
+    #: snovi" spet ponudi (`docs/odlocitve/ADR-017` B).
+    ze_v_kvizu: bool
+
+    @property
+    def izbirna(self) -> bool:
+        """Ali je snov mogoče dati v kviz.
+
+        Trije pogoji iz `ADR-016` (G) hkrati: obdelava je uspela, model je s
+        slike znal brati in kaj veljavnega je ostalo. Snov, ki tega ne izpolni,
+        se v izbirniku vseeno **pokaže** — z razlogom, ne izpuščena.
+        """
+        return (
+            self.material.status == STATUS_PRIPRAVLJEN
+            and self.material.readable is True
+            and self.veljavnih_vprasanj > 0
+        )
+
+
+@dataclass(frozen=True)
+class SnovSVprasanji:
+    """Snov in vprašanja, ki bi šla iz nje v kviz. Za predogled."""
+
+    material: Material
+    vprasanja: tuple[Question, ...]
+
+
+class KviziRepository:
+    """Operacije nad `quizzes` in `quiz_items` (V2-R01).
+
+    Svoj razred in ne metode na `MaterialsRepository`: poizvedba izbirnika sicer
+    bere `materials` in `questions`, a obstaja zaradi kvizov.
+    `MaterialsRepository` ostane to, kar je bil, in ne postane predal za vse.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    # --- Izbirnik ---
+
+    def snovi_za_izbor(
+        self,
+        subject: str | None = None,
+        od: datetime | None = None,
+        do: datetime | None = None,
+    ) -> list[SnovZaIzbor]:
+        """Snovi za izbirnik, najnovejša prva.
+
+        `subject` omeji na en predmet (predmetna vstopa), `od`/`do` na en dan
+        (dnevni vstop, polodprt interval). Vstopi se razlikujejo tudi po obsegu
+        seznama in ne le po obkljukanju — `docs/odlocitve/ADR-017` (A).
+
+        **Arhivirana snov se ne vrne nikoli.** Arhiv pomeni pospravljeno;
+        vprašanja arhiv preživijo zaradi statistike, ne zato, da bi jih še
+        kvizirali (`ADR-016` G).
+
+        Vrstni red je `taken_at DESC`, kot povsod v `/admin` — in ker kriterij
+        pravi „po snovi (kot v izbirniku)", je to hkrati vrstni red postavk
+        objavljenega kviza.
+
+        **Tri poizvedbe, nikoli N+1.** Branje števila vprašanj na vsako sliko
+        posebej bi pri seznamu celega predmeta pomenilo sto poizvedb na stran;
+        `ADR-017` (A) pove, zakaj je ta seznam dolg.
+        """
+        # Izrecna oznaka tipa: brez nje mypy tip seznama sklepa iz prvega
+        # elementa (`BinaryExpression`) in zavrne `==`, ki vrne širši
+        # `ColumnElement`.
+        pogoji: list[ColumnElement[bool]] = [Material.archived_at.is_(None)]
+        if subject is not None:
+            pogoji.append(Material.subject == subject)
+        if od is not None:
+            pogoji.append(Material.taken_at >= od)
+        if do is not None:
+            pogoji.append(Material.taken_at < do)
+
+        snovi = list(
+            self.session.scalars(
+                select(Material).where(*pogoji).order_by(Material.taken_at.desc())
+            )
+        )
+        if not snovi:
+            return []
+
+        idji = [snov.id for snov in snovi]
+        steviloma = self._stej_veljavna(idji)
+        v_kvizu = self._ze_v_kvizu(idji)
+
+        return [
+            SnovZaIzbor(
+                material=snov,
+                veljavnih_vprasanj=steviloma.get(snov.id, 0),
+                ze_v_kvizu=snov.id in v_kvizu,
+            )
+            for snov in snovi
+        ]
+
+    def _stej_veljavna(self, material_ids: Sequence[str]) -> dict[str, int]:
+        """Koliko veljavnih vprašanj ima katera snov. Ena poizvedba za vse."""
+        vrstice = self.session.execute(
+            select(Question.material_id, func.count())
+            .where(
+                Question.material_id.in_(material_ids),
+                Question.retired_at.is_(None),
+            )
+            .group_by(Question.material_id)
+        ).all()
+        return {material_id: koliko for material_id, koliko in vrstice if material_id}
+
+    def _ze_v_kvizu(self, material_ids: Sequence[str]) -> set[str]:
+        """Katere od danih snovi so že bile v kvizu.
+
+        „Bila v kvizu" pomeni dvoje hkrati (`docs/odlocitve/ADR-017` B):
+
+        - kviz **ni preklican** — preklican kviz ni bil pravi, zato se njegova
+          snov spet ponudi (`ADR-016` B);
+        - vprašanje je **veljavno** — po ponovni obdelavi so stara vprašanja
+          upokojena in snov ima novo serijo, ki v kvizu še ni bila.
+
+        Pot do snovi gre prek vprašanja in ne prek stolpca na postavki:
+        `quiz_items` svojega `material_id` nima in ga po `ADR-017` (B) tudi ne
+        potrebuje.
+        """
+        return set(
+            self.session.scalars(
+                select(Question.material_id)
+                .join(QuizItem, QuizItem.question_id == Question.id)
+                .join(Quiz, Quiz.id == QuizItem.quiz_id)
+                .where(
+                    Question.material_id.in_(material_ids),
+                    Question.retired_at.is_(None),
+                    Quiz.canceled_at.is_(None),
+                )
+                .distinct()
+            )
+        )
+
+    # --- Predogled ---
+
+    def snovi_z_vprasanji(
+        self, material_ids: Iterable[str], koliko: int
+    ) -> list[SnovSVprasanji]:
+        """Izbrane snovi s prvimi `koliko` veljavnimi vprašanji vsake.
+
+        **Prvih N po `position`, brez naključja** (`ADR-016` D). Če jih je manj
+        od `koliko`, se vzame, kar je — snov s tremi vprašanji ni napaka.
+
+        Vrstni red snovi je `taken_at DESC` in se **ne** povzame po vrstnem redu
+        v obrazcu: brskalniku verjamemo, katere snovi so izbrane, ne pa, v
+        katerem vrstnem redu naj bodo. Snov, ki je medtem šla v arhiv, izpade.
+
+        Dve poizvedbi, ne ena na snov.
+        """
+        idji = list(material_ids)
+        if not idji:
+            return []
+
+        snovi = list(
+            self.session.scalars(
+                select(Material)
+                .where(Material.id.in_(idji), Material.archived_at.is_(None))
+                .order_by(Material.taken_at.desc())
+            )
+        )
+        if not snovi:
+            return []
+
+        po_snovi: dict[str, list[Question]] = {snov.id: [] for snov in snovi}
+        vprasanja = self.session.scalars(
+            select(Question)
+            .where(
+                Question.material_id.in_(po_snovi.keys()),
+                Question.retired_at.is_(None),
+            )
+            .order_by(Question.material_id, Question.position)
+        )
+        for vprasanje in vprasanja:
+            if vprasanje.material_id is not None:
+                po_snovi[vprasanje.material_id].append(vprasanje)
+
+        return [
+            SnovSVprasanji(material=snov, vprasanja=tuple(po_snovi[snov.id][:koliko]))
+            for snov in snovi
+        ]
+
+    def vprasanja_po_idjih(self, question_ids: Sequence[str]) -> list[Question] | None:
+        """Vprašanja v **danem** vrstnem redu, ali `None`, če katerega ni.
+
+        Vrstni red je tu vrstni red iz obrazca in ne iz baze: predogled je
+        tisti, ki je zaporedje določil, in objavi se, kar je bilo videno.
+
+        `None` in ne krajši seznam: polovičen kviz je slabši od zavrnitve, ki jo
+        operater vidi. Da se to sploh zgodi, mora nekdo spremeniti skrito polje
+        — vprašanja se ne brišejo (`ADR-012`).
+
+        **Podvojen identifikator je prav tako `None`.** Predogled ga ne more
+        proizvesti, spremenjen obrazec pa: brez zavrnitve bi kviz dobil dve
+        enaki postavki in bi `V2-R04` isti odgovor štela dvakrat.
+
+        Oboje ujame **ena sama** primerjava. `najdena` je slovar, ključan po
+        `id`: manjkajoče vprašanje ga skrajša, podvojeno pa ga ne podaljša —
+        v obeh primerih je krajši od seznama, ki je prišel. Tu je stala še
+        ločena preverba s `set()`; bila je mrtva veja in je šla ven.
+        """
+        if not question_ids:
+            return None
+
+        najdena = {
+            vprasanje.id: vprasanje
+            for vprasanje in self.session.scalars(
+                select(Question).where(Question.id.in_(question_ids))
+            )
+        }
+        if len(najdena) != len(question_ids):
+            return None
+
+        return [najdena[question_id] for question_id in question_ids]
+
+    # --- Objava in življenje kviza ---
+
+    def objavi(
+        self, ime: str, subject: str | None, vprasanja: Sequence[Question]
+    ) -> Quiz:
+        """Ustvari kviz in vse njegove postavke **v eni transakciji**.
+
+        En `commit` na koncu in ne eden na postavko: kriterij zahteva, da
+        delnega kviza ni. Ob napaki med potjo se ne zapiše nič.
+
+        Besedilo se prepiše **iz vprašanj v bazi**, nikoli iz obrazca — obrazec
+        pove, katera vprašanja, ne kaj v njih piše. Od tega trenutka je postavka
+        neodvisna od vprašanja: ponovna obdelava ali dokončno brisanje snovi je
+        ne spremenita (`ADR-016` E).
+        """
+        kviz = Quiz(
+            id=str(uuid4()),
+            name=ime,
+            subject=subject,
+            created_at=datetime.now(UTC),
+        )
+        for zaporedje, vprasanje in enumerate(vprasanja, start=1):
+            kviz.postavke.append(
+                QuizItem(
+                    id=str(uuid4()),
+                    question_id=vprasanje.id,
+                    position=zaporedje,
+                    question_text=vprasanje.question,
+                    answer_text=vprasanje.answer,
+                )
+            )
+
+        self.session.add(kviz)
+        self.session.commit()
+        return kviz
+
+    def seznam(self) -> list[tuple[Quiz, int]]:
+        """Vsi kvizi s številom postavk, najnovejši prvi.
+
+        `outerjoin` in ne `join`: kviza brez postavk ni mogoče objaviti, a če bi
+        kdaj nastal, naj ga seznam pokaže z ničlo in ne skrije.
+
+        Štetje v isti poizvedbi in ne prek `len(kviz.postavke)` — sicer bi
+        seznam desetih kvizov prebral vse njihove postavke, da bi izpisal deset
+        številk. `GROUP BY` po primarnem ključu je dovolj tudi na Postgresu.
+        """
+        vrstice = self.session.execute(
+            select(Quiz, func.count(QuizItem.id))
+            .outerjoin(QuizItem, QuizItem.quiz_id == Quiz.id)
+            .group_by(Quiz.id)
+            .order_by(Quiz.created_at.desc())
+        ).all()
+        return [(kviz, koliko) for kviz, koliko in vrstice]
+
+    def poisci(self, quiz_id: str) -> Quiz | None:
+        """Kviz z danim `id` ali `None`, s postavkami in njihovimi vprašanji.
+
+        `selectinload` in ne lena naložitev: stran kviza za vsako postavko
+        prebere še njeno vprašanje (izvor, povezava na snov). Pri kvizu s
+        tridesetimi postavkami — kar je po `PREDOLG_KVIZ` pričakovana zgornja
+        velikost — bi to pomenilo dvaintrideset poizvedb namesto treh.
+        """
+        return self.session.scalars(
+            select(Quiz)
+            .where(Quiz.id == quiz_id)
+            .options(selectinload(Quiz.postavke).selectinload(QuizItem.question))
+        ).one_or_none()
+
+    def preklici(self, quiz_id: str) -> Quiz | None:
+        """Prekliče kviz; vrne kviz ali `None`, če ga ni.
+
+        **Nič se ne pobriše** (`ADR-016` F): postavke ostanejo, kviz ostane,
+        samo `canceled_at` dobi žig. `V2-R02` bo preklicane kvize preprosto
+        nehala pošiljati na telefon.
+
+        Ponoven preklic časa **ne premakne**, iz istega razloga kot pri
+        `arhiviraj` in `_upokoji_vprasanja`: čas je podatek o tem, kdaj se je
+        odločitev zgodila, in drugi klik na osveženi strani ga ne sme prepisati.
+        """
+        kviz = self.poisci(quiz_id)
+        if kviz is None:
+            return None
+
+        if kviz.canceled_at is None:
+            kviz.canceled_at = datetime.now(UTC)
+            self.session.commit()
+
+        return kviz

@@ -21,7 +21,7 @@
 | Modul | Odgovornost | Datoteke |
 |---|---|---|
 | `apps/mobile` | Kamera, izbira predmeta, lokalna baza, zgodovina, upload worker, brisanje arhiviranih snovi | `apps/mobile/` (od V1-R01; upload worker od V1-R02; brisanje od V1-R07) |
-| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju, arhiv | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03; arhiv od V1-R07) |
+| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju, arhiv, sestavljalnik kvizov | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03; arhiv od V1-R07; kvizi od V2-R01) |
 
 Ločena mapi namenoma ne delita orodij za monorepo (npr. Turborepo) — gre za
 dva jezika (TypeScript / Python) brez skupne kode, zato vsaka živi s svojim
@@ -69,15 +69,25 @@ logika testljiva brez naprave.
 |---|---|
 | `app/main.py` | tovarna aplikacije, življenjski cikel (zagon in ustavitev obdelave) |
 | `app/routers/materials.py` | `POST /materials` — prevzem slike s telefona |
-| `app/routers/admin.py` | operaterska stran |
-| `app/db.py` | motor, seje in `MaterialsRepository` — edina pot do baze |
-| `app/models.py` | tabeli `materials` in `questions` |
+| `app/routers/admin.py` | operaterska stran: predmeti, snov, arhiv, brisanje |
+| `app/routers/kvizi.py` | sestavljalnik kvizov pod `/admin/quizzes` (V2-R01) |
+| `app/db.py` | motor, seje ter `MaterialsRepository` in `KviziRepository` — edina pot do baze |
+| `app/models.py` | tabele `materials`, `questions`, `quizzes` in `quiz_items` |
 | `app/storage.py` | zapis, meja mape in brisanje slik na disku |
 | `app/vision.py` | **edini modul, ki uvaža `openai`**: prompt, shema odgovora, klic |
 | `app/obdelava.py` | kaj se zgodi z enim zapisom: prevzem, klic, zapis izida. Sinhron |
 | `app/worker.py` | časovnik: obhodi v presledkih, zagon in ustavitev. Brez poslovne logike |
 | `app/settings.py` | nastavitve iz okolja |
 | `app/subjects.py` | predmeti in slovenske oznake stanj |
+| `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01) |
+| `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01) |
+
+`app/casi.py` in `app/strani.py` sta nastala v V2-R01 kot **izvlečka iz**
+`app/routers/admin.py`, ne kot novi plasti. Razlog je krožni uvoz: `kvizi`
+potrebuje `daj_predloge` in obe strani z napako, `admin` pa seznam kvizov —
+če bi oboje ostalo v `admin.py`, bi krog `admin → kvizi → admin` padel ob
+uvozu. Odslej velja: kar potrebujeta **oba** usmerjevalnika, ni last
+nobenega od njiju in ima javno ime, brez podčrtaja.
 
 Delitev med `obdelava.py` in `worker.py` je namenska: poslovna logika ne ve za
 `asyncio`, zato je testljiva brez zaganjanja zanke. Delitev med `vision.py` in
@@ -221,6 +231,59 @@ brez materiala še vedno pove, iz katere snovi in katerega dne je.
 `id` je `VARCHAR` in ne `UUID`, čas pa `DateTime(timezone=True)`, ker mora ista
 shema stati nad Postgresom (produkcija) in nad SQLite (testi).
 
+Tabela `quizzes` (V2-R01):
+
+| Stolpec | Tip | Opomba |
+|---|---|---|
+| `id` | `VARCHAR(36) PRIMARY KEY` | UUID, generiran **na strežniku** |
+| `name` | `VARCHAR(200) NOT NULL` | sestavi se samodejno (`MAT — 9. 9. 2026`), operater ga sme prepisati |
+| `subject` | `VARCHAR(16)` | koda predmeta; `NULL` = kviz čez več predmetov |
+| `created_at` | `TIMESTAMPTZ NOT NULL` | čas objave — osnutkov ni, zato je to hkrati čas nastanka |
+| `canceled_at` | `TIMESTAMPTZ` | kdaj je bil preklican; `NULL` = objavljen |
+
+Tabela `quiz_items` (V2-R01):
+
+| Stolpec | Tip | Opomba |
+|---|---|---|
+| `id` | `VARCHAR(36) PRIMARY KEY` | UUID, generiran na strežniku |
+| `quiz_id` | `VARCHAR(36) NOT NULL` | tuji ključ na `quizzes.id`, `ON DELETE CASCADE`, indeksiran |
+| `question_id` | `VARCHAR(36)` | tuji ključ na `questions.id`, `ON DELETE SET NULL`, indeksiran |
+| `position` | `INTEGER NOT NULL` | zaporedje **čez cel kviz**, od 1 |
+| `question_text` | `TEXT NOT NULL` | kopija besedila vprašanja ob objavi |
+| `answer_text` | `TEXT NOT NULL` | kopija odgovora ob objavi |
+
+**Kviz nima stolpca `status`.** Stanje se izpelje iz `canceled_at`, po istem
+vzorcu, kot sta arhiv (`ADR-011`) in upokojitev (`ADR-015`) svoji osi in ne
+novo stanje. Objavljen kviz je preprosto kviz, ki obstaja.
+
+**`solved_at` v shemi še ni.** `ADR-016` ga je predvidel, `ADR-017` (C) pa
+odložil na `V2-R02`, ki ga bo skupaj s poskusi tudi edina znala napolniti.
+Stolpec, ki ga nihče ne piše in ne bere, je ostanek generatorja — isti
+argument, s katerim je `ADR-016` (D) zavrnil tabelo `quiz_sources`.
+
+**Postavka zamrzne dvoje.** `question_id` nosi identiteto, ki jo bo
+potrebovala `V2-R04`; `question_text` in `answer_text` nosita berljivost, ko
+bo izvorna snov dokončno izbrisana in bo `questions.material_id` `NULL`
+(`ADR-016` E). Ponovna obdelava ali brisanje snovi objavljenega kviza zato ne
+spremenita.
+
+**`quiz_items` nima stolpca `material_id`.** Pot do snovi gre prek
+`question_id → questions.material_id`, kar vzdrži, ker se vprašanja nikoli ne
+brišejo, po brisanju materiala pa je snov razpoznavna iz denormaliziranih
+`questions.subject` in `questions.material_taken_at` (`ADR-017` B). Isti par
+stolpcev odgovori na vprašanje „iz katere snovi je to vprašanje", ko materiala
+ni več.
+
+**Tuji ključ `quiz_items → quizzes` je edina kaskada brisanja v shemi.**
+Postavka brez kviza nima pomena, za razliko od vprašanja brez materiala, ki
+nosi statistiko in mora preživeti (`ADR-012`). Kvizov se sicer ne briše —
+kaskada je tam zato, da shema pove resnico, ne zato, da bi jo kdo uporabljal.
+
+Zveza `QuizItem.question` je **enosmerna**: `Question` povratne nima. Povratna
+bi ORM-ju dala pot, po kateri bi ob brisanju vprašanja nulil `question_id` —
+vprašanja pa se ne brišejo, zato bi bila to mrtva pot z živimi posledicami.
+
+
 Migracija `0003_arhiv` prevesi tuji ključ `questions.material_id` s `CASCADE`
 na `SET NULL`. Na SQLite gre to skozi `op.batch_alter_table` s `copy_from`
 (tabela se prepiše na novo, ker `ALTER` tujega ključa tam ne obstaja), na
@@ -233,6 +296,13 @@ Migracija `0004_upokojena_vprasanja` doda `questions.retired_at`. Gol
 spusti — nobene vrstice ne izgubi, pač pa **dokončno izgubi podatek o
 upokojitvi**, zato je vrnitev čezenj smiselna samo nad bazo, v kateri se
 ponovna obdelava še ni zgodila.
+
+Migracija `0005_kvizi` ustvari `quizzes` in `quiz_items` ter oba indeksa.
+Nobenega obstoječega stolpca se ne dotakne, zato obstoječih vrstic ni treba
+ne prepisovati ne polniti. Njen `downgrade` obe tabeli spusti — in s tem
+**dokončno izgubi vse kvize**, za razliko od `downgrade` v `0004`, ki
+izgubi le podatek o upokojitvi. Vrstni red je obrnjen (najprej otrok),
+sicer bi tuji ključ na Postgresu brisanje `quizzes` zavrnil.
 
 Migracije vodi **Alembic** (`apps/server/alembic/`). Prva migracija ustvari
 razširitev `vector` — vektorskih stolpcev še ni, iskanje po pomenu je V2.
@@ -374,6 +444,12 @@ Strežniško izrisan HTML za lastnika sistema (`docs/00-namen.md`, vloga
 | `/admin/materials/{id}/delete` | GET | potrditvena stran za dokončno brisanje |
 | `/admin/materials/{id}/delete` | POST | dokončno izbriše in preusmeri (303) |
 | `/admin/materials/{id}/reprocess` | POST | vrne v vrsto, vprašanja upokoji, preusmeri (303) |
+| `/admin/quizzes/new` | GET | izbirnik slik za enega od treh vstopov (V2-R01) |
+| `/admin/quizzes/new` | POST | isti izbirnik ob vrnitvi iz predogleda, z ohranjenim izborom (V2-R01) |
+| `/admin/quizzes/preview` | POST | predogled izbranih vprašanj; **ničesar ne shrani** (V2-R01) |
+| `/admin/quizzes` | POST | objavi kviz in vse postavke v eni transakciji, preusmeri (303) (V2-R01) |
+| `/admin/quizzes/{id}` | GET | kviz s postavkami (V2-R01) |
+| `/admin/quizzes/{id}/cancel` | POST | prekliče kviz, preusmeri (303) (V2-R01) |
 
 Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Prijave ni** —
 meja je Tailscale; posledice, vključno s CSRF, so v `docs/odlocitve/ADR-006`.
@@ -408,6 +484,85 @@ si nasprotujeta in izbrana je bila stran, ki obstaja.
 datoteka.** Vrstica brez datoteke je pokvarjen vnos, ki ga operater vidi;
 datoteka brez vrstice je nevidna sirota, ki stane samo prostor. Isto pravilo
 velja na telefonu.
+
+## Sestavljalnik kvizov (V2-R01)
+
+Trije vstopi v razdelku „Kvizi" na `/admin` vodijo v **isti** izbirnik slik
+(`ADR-016` A). Razlikujejo se po dvojem — po obsegu seznama in po tem, kaj je
+vnaprej obkljukano; `ADR-016` je predvidel samo drugo, `ADR-017` (A) je prvo
+dodal, ker bi dnevni vstop sicer naštel celotno zgodovino vseh predmetov, da
+bi obkljukal tri današnje slike.
+
+| Vstop | Kaj seznam našteje | Kaj je obkljukano |
+|---|---|---|
+| *Nova snov* | vsa nearhivirana snov izbranega predmeta | tista, ki še ni bila v kvizu |
+| *Ročna izbira* | vsa nearhivirana snov izbranega predmeta | nič |
+| *Kaj smo se danes učili* | današnja nearhivirana snov, čez vse predmete | vsa našteta |
+
+„Danes" pomeni `taken_at` (trenutek posnetka, ne prejema) v pasu
+`Europe/Ljubljana`, od polnoči do polnoči, polodprto. Meja se izračuna v
+usmerjevalniku (`app/casi.py:dan_od_do`) in se repozitoriju poda kot par UTC
+trenutkov — ta za časovne pasove ne ve.
+
+**„Bila v kvizu" pomeni: kakšno njeno veljavno vprašanje je v nepreklicanem
+kvizu.** Oba pogoja štejeta (`ADR-017` B): preklican kviz ni bil pravi, zato
+se njegova snov spet ponudi, ponovno obdelana snov pa ima novo serijo, ki v
+kvizu še ni bila. Poizvedba gre prek `quiz_items → questions.material_id`;
+tabele `quiz_sources` ni in po `ADR-016` (D) ne bo, dokler ne bo naključnega
+izbora.
+
+Izbirnik so **tri poizvedbe** ne glede na dolžino seznama: ena za snovi, ena
+za števila veljavnih vprašanj (`GROUP BY material_id`), ena za množico snovi,
+ki so že v kvizu. Sličice se nalagajo z `loading="lazy"`, kot na strani
+predmeta. Seznam predmeta bo čez šolsko leto dolg nekaj sto vrstic; če to
+kdaj postane neuporabno, je pravi popravek ostranjevanje in ne tiho krajšanje
+(`ADR-017` A).
+
+**Snov brez veljavnih vprašanj je vidna, a neizbirna, z razlogom** — molčeč
+izpust bi pomenil kviz iz polovice dneva brez sledi, da manjka pol
+(`ADR-016` G). Razlogov je **pet**, ne štirje: kriterij našteje „še v
+obdelavi", „obdelava ni uspela" in „slika ni berljiva", stanje pa dopušča še
+„obdelano, a brez veljavnih vprašanj" — to je snov, ki je bila poslana v
+ponovno obdelavo in ima vsa vprašanja upokojena.
+
+**Predogled ničesar ne shrani** (`ADR-016` C). Izbor potuje skozi skrita polja
+obrazca, zapis v bazi nastane šele ob „Objavi", v eni transakciji. Osnutkov
+zato ni in seznam kvizov kaže samo kvize. Cena je, da zaprt zavihek med
+predogledom pomeni izgubljen izbor.
+
+Predogled nosi **dva** obrazca: „Objavi" nosi identifikatorje vprašanj (objavi
+se natanko to, kar je bilo videno), „Nazaj na izbor" pa izbor snovi in število
+vprašanj na sliko, da je ob vrnitvi izbor tak, kot je bil.
+
+**Objava je edina pot, ki v bazo piše, zato vsakemu polju pogleda pod prste:**
+vstop mora biti eden od treh, ime sme meriti 200 znakov in koda predmeta 16
+(natanko širina stolpcev), identifikatorji morajo obstajati in se ne smejo
+ponoviti. Besedilo se prepiše **iz baze** in nikoli iz obrazca. Preverbi
+dolžine sta v kodi in ne prepuščeni bazi, ker testi tečejo nad SQLite, ki
+dolžine `VARCHAR` ne uveljavlja — na Postgresu bi bil predolg vnos `DataError`
+in operater bi dobil angleški „Internal Server Error".
+
+Upokojitve objava **ne** preverja: vprašanje, ki je bilo upokojeno med
+predogledom in klikom na „Objavi", se vseeno objavi. Razlogi so v `ADR-018`.
+
+Polje „vprašanj na sliko" (privzeto 3, meji 1 in 10) se bere kot **niz** in ne
+kot `int`: `int` bi ob nerazberljivi vrednosti dal surov angleški 422, pod
+predpono, kjer je vse ostalo slovensko. Nerazberljiva vrednost pade na
+privzetek in polje to takoj pokaže.
+
+**Vrstni red registracije poti je viden navzven:** `GET /admin/quizzes/new`
+mora biti registriran pred `GET /admin/quizzes/{quiz_id}`, sicer FastAPI „new"
+prebere kot identifikator kviza.
+
+Razdelek s kvizi na `/admin` stoji **pod** seznamom predmetov. Ime kviza
+vsebuje kodo predmeta („MAT — 9. 9. 2026"), zgoraj pa bi ta koda postala prva
+pojavitev na strani in podrla test, ki po vrstnem redu pojavitev dokazuje, da
+so predmeti našteti po urniku in ne po abecedi.
+
+Števila v besedilu sestavljalnika so zapisana s slovensko **dvojino**
+(„2 vprašanji", ne „2 vprašanj"); `_stevilo_z_besedo` je štirioblična in loči
+po ostanku pri sto. Starejše strani (`predmeti.html`, `arhiv.html`) tega še ne
+delajo in pišejo „2 slik" — v vmesniku sta zato dva standarda hkrati.
 
 ## Arhiv in brisanje na telefonu (V1-R07)
 
