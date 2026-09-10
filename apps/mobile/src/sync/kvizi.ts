@@ -41,9 +41,29 @@ export type OdjemalecKvizov = {
   preberiKvize(): Promise<KvizStreznika[]>;
 };
 
+/**
+ * Kode, ki so 4xx, a pomenijo „poskusi kasneje", ne „ne bo šlo" — ista meja
+ * kot pri prenosu slik (`ADR-004`, `upload.ts`).
+ */
+const ZACASNE_4XX = new Set([408, 429]);
+
+/**
+ * Strežnik je paket poskusov **trajno** zavrnil (4xx razen 408 in 429).
+ *
+ * Svoj razred, ker ga `uskladiKvize` obravnava drugače od nedosegljivega
+ * strežnika: obhod gre naprej in seznam kvizov se vseeno prebere
+ * (`docs/odlocitve/ADR-020`).
+ */
+export class PaketZavrnjen extends Error {
+  constructor(readonly status: number) {
+    super(`Strežnik je vrnil ${status}.`);
+    this.name = 'PaketZavrnjen';
+  }
+}
+
 /** Kar se je v enem obhodu zgodilo. */
 export type IzidUsklajevanja = {
-  /** Koliko poskusov je šlo na strežnik. */
+  /** Koliko poskusov je strežnik sprejel. Zavrnjeni tu niso šteti. */
   poslani: number;
   /** Koliko kvizov je na seznamu strežnika. */
   naStrezniku: number;
@@ -54,10 +74,16 @@ export type IzidUsklajevanja = {
 /**
  * En obhod usklajevanja.
  *
- * Napaka pri prenosu poskusov obhod konča, preden se seznam sploh prebere:
- * strežnik je nedosegljiv ali je paket zavrnil, in poskusi ostanejo
- * nepreneseni za naslednji obhod. **Ne izgubijo se** — tudi 422 jih ne pobriše
- * (glej tveganja v `docs/plan/V2-R02.md`).
+ * Neuspeh pri prenosu poskusov ima dve veji (`docs/odlocitve/ADR-020`):
+ *
+ * - **strežnik je nedosegljiv** (omrežje, potekel čas, 5xx, 408, 429) — obhod
+ *   se konča, preden se seznam sploh prebere; branje bi spodletelo enako;
+ * - **strežnik je paket trajno zavrnil** (`PaketZavrnjen`) — poskusi paketa
+ *   ostanejo nepreneseni, obhod pa gre naprej: naslednji paketi se pošljejo in
+ *   seznam se prebere. Sicer bi en sam neveljaven poskus za vedno odrezal
+ *   telefon od novih kvizov.
+ *
+ * V nobeni veji se poskus **ne izgubi** (`ADR-012`).
  *
  * `odprti` je kviz, ki ga Maša ta hip rešuje; ta ne izgine, tudi če ga strežnik
  * ne vrača več (`ADR-019` C).
@@ -68,14 +94,21 @@ export async function uskladiKvize(
   odprti: string | null = null,
 ): Promise<IzidUsklajevanja> {
   const cakajoci = await neprenesenePoskuse(db);
+  let poslani = 0;
   for (let zacetek = 0; zacetek < cakajoci.length; zacetek += NAJVEC_V_PAKETU) {
     const paket = cakajoci.slice(zacetek, zacetek + NAJVEC_V_PAKETU);
-    await odjemalec.posljiPoskuse(paket);
+    try {
+      await odjemalec.posljiPoskuse(paket);
+    } catch (napaka) {
+      if (napaka instanceof PaketZavrnjen) continue;
+      throw napaka;
+    }
     await oznaciPrenesene(
       db,
       paket.map((poskus) => poskus.id),
       new Date().toISOString(),
     );
+    poslani += paket.length;
   }
 
   const kvizi = await odjemalec.preberiKvize();
@@ -88,7 +121,7 @@ export async function uskladiKvize(
     odprti,
   );
 
-  return { poslani: cakajoci.length, naStrezniku: kvizi.length, pobrisani };
+  return { poslani, naStrezniku: kvizi.length, pobrisani };
 }
 
 function jeNiz(vrednost: unknown): vrednost is string {
@@ -190,6 +223,9 @@ export function ustvariOdjemalcaKvizov(
         casovnaOmejitevMs,
       );
       if (!odgovor.ok) {
+        const trajno =
+          odgovor.status >= 400 && odgovor.status < 500 && !ZACASNE_4XX.has(odgovor.status);
+        if (trajno) throw new PaketZavrnjen(odgovor.status);
         throw new Error(`Strežnik je vrnil ${odgovor.status}.`);
       }
     },

@@ -10,6 +10,7 @@ import type { Zahteva } from '@/sync/http';
 import {
   kviziIzOdgovora,
   NAJVEC_V_PAKETU,
+  PaketZavrnjen,
   uskladiKvize,
   ustvariOdjemalcaKvizov,
   type OdjemalecKvizov,
@@ -164,6 +165,99 @@ describe('uskladiKvize', () => {
     // Poskus je prenesen, a še na telefonu — postavka je odgovorjena.
     expect(await neprenesenePoskuse(db)).toEqual([]);
     expect(await cakajociKvizi(db)).toEqual([]);
+  });
+
+  describe('trajno zavrnjen paket (ADR-020)', () => {
+    it('ne ustavi prenosa novih kvizov', async () => {
+      // Brez ADR-020 bi en neveljaven poskus za vedno odrezal telefon od
+      // novih kvizov: vsak obhod bi se končal pred branjem seznama.
+      await shraniKviz(db, kvizStreznika('k1', 2));
+      await zapisiPoskus(db, poskus('k1', 1));
+      const streznik = odjemalec([kvizStreznika('k1', 2), kvizStreznika('nov', 1)]);
+      streznik.posljiPoskuse.mockRejectedValue(new PaketZavrnjen(422));
+
+      const izid = await uskladiKvize(db, streznik);
+
+      expect(streznik.preberiKvize).toHaveBeenCalledTimes(1);
+      expect((await cakajociKvizi(db)).map((k) => k.id)).toContain('nov');
+      expect(izid.poslani).toBe(0);
+    });
+
+    it('zavrnjenih poskusov ne označi za prenesene in jih ne pobriše', async () => {
+      await shraniKviz(db, kvizStreznika('k1', 2));
+      await zapisiPoskus(db, poskus('k1', 1));
+      const streznik = odjemalec([]);
+      streznik.posljiPoskuse.mockRejectedValue(new PaketZavrnjen(422));
+
+      await uskladiKvize(db, streznik);
+      await uskladiKvize(db, streznik);
+
+      // Kviza ni več na seznamu, poskus pa ostane in se pošilja znova.
+      expect(await postavkeKviza(db, 'k1')).toEqual([]);
+      expect((await neprenesenePoskuse(db)).map((p) => p.id)).toEqual(['k1-a1']);
+      expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(2);
+    });
+
+    it('ne ustavi naslednjih paketov istega obhoda', async () => {
+      const postavk = NAJVEC_V_PAKETU + 1;
+      await shraniKviz(db, kvizStreznika('k1', postavk));
+      for (let i = 1; i <= postavk; i += 1) await zapisiPoskus(db, poskus('k1', i));
+      const streznik = odjemalec([kvizStreznika('k1', postavk)]);
+      streznik.posljiPoskuse.mockRejectedValueOnce(new PaketZavrnjen(422));
+
+      const izid = await uskladiKvize(db, streznik);
+
+      expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(2);
+      expect(izid.poslani).toBe(1);
+      expect(await neprenesenePoskuse(db)).toHaveLength(NAJVEC_V_PAKETU);
+    });
+
+    it.each([
+      [422, true],
+      [401, true],
+      [404, true],
+      [408, false],
+      [429, false],
+      [500, false],
+      [503, false],
+    ])('odgovor %d je trajna zavrnitev: %p', async (status, trajno) => {
+      const klic: Zahteva = jest.fn(async () => ({
+        ok: false,
+        status,
+        json: async () => ({}),
+      }));
+
+      const napaka = await ustvariOdjemalcaKvizov(NASTAVITVE, klic)
+        .posljiPoskuse([poskus('k1', 1)])
+        .catch((e: unknown) => e);
+
+      expect(napaka).toBeInstanceOf(Error);
+      expect(napaka instanceof PaketZavrnjen).toBe(trajno);
+    });
+
+    it('s pravim odjemalcem: ob 422 se seznam prebere, ob 429 ne', async () => {
+      await shraniKviz(db, kvizStreznika('k1', 1));
+      await zapisiPoskus(db, poskus('k1', 1));
+
+      for (const [status, seznamPrebran] of [
+        [422, true],
+        [429, false],
+      ] as const) {
+        const klic = jest.fn(async (url: string) =>
+          url.endsWith('/quiz-attempts')
+            ? { ok: false, status, json: async () => ({}) }
+            : { ok: true, status: 200, json: async () => ({ quizzes: [kvizStreznika('k1', 1)] }) },
+        );
+        const streznik = ustvariOdjemalcaKvizov(NASTAVITVE, klic as unknown as Zahteva);
+
+        const obhod = uskladiKvize(db, streznik);
+        if (seznamPrebran) await expect(obhod).resolves.toBeDefined();
+        else await expect(obhod).rejects.toThrow('429');
+
+        const branja = klic.mock.calls.filter(([url]) => url.endsWith('/quizzes/pending'));
+        expect(branja).toHaveLength(seznamPrebran ? 1 : 0);
+      }
+    });
   });
 
   it('veliko poskusov razdeli v pakete', async () => {
