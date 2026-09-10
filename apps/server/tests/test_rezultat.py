@@ -11,6 +11,7 @@ import re
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlencode
 
 import pytest
 from fastapi.testclient import TestClient
@@ -224,6 +225,17 @@ class TestSkupine:
         assert "Odgovor 1." in besedilo
         assert "PODTAKNJENO" not in besedilo
 
+    def test_resen_nepreklican_kviz_se_da_preklicati(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Odločitev 2 v planu: rezultat gumba za preklic ne skrije."""
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+
+        besedilo = stran(odjemalec, quiz_id)
+
+        assert "Prekliči kviz" in besedilo
+        assert f'action="/admin/quizzes/{quiz_id}/cancel"' in besedilo
+
     def test_pove_da_je_samoocena(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
@@ -365,6 +377,21 @@ class TestIzvor:
 
         assert "slike ni na disku" in besedilo
         assert "v arhivu" not in besedilo
+
+    def test_slika_zunaj_mape_slik_ni_na_disku(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, tmp_path: Path
+    ) -> None:
+        """Isto pravilo kot v izbirniku: datoteka zunaj `images_dir` ne šteje."""
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+        zunaj = tmp_path / "zunaj.jpg"
+        zunaj.write_bytes(b"slika")
+        with Session(motor) as seja:
+            seja.execute(
+                update(Material).where(Material.id == UUID_ENA).values(image_path=str(zunaj))
+            )
+            seja.commit()
+
+        assert "slike ni na disku" in stran(odjemalec, quiz_id)
 
     def test_dokoncno_izbrisana_snov(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -549,6 +576,64 @@ class TestTisk:
         assert '<div class="ne-tiskaj">' in besedilo
         assert "Ctrl+P" in besedilo
         assert "<script" not in besedilo.lower()
+
+    @staticmethod
+    def _poslji_obrazec(
+        odjemalec: TestClient, besedilo: str, obkljukaj: set[str]
+    ) -> str:
+        """Pošlje obrazec za izbor ocen, kot bi ga brskalnik.
+
+        Vse — cilj, skrita polja, imena in vrednosti kljukic — se prebere iz
+        **izrisa** in ne vtipka v test. Sicer bi test preverjal pot z URL-jem,
+        ki ga je sestavil sam, obrazec pa bi se lahko pokvaril neopazno
+        (pregled V2-R03, K1).
+        """
+        blok = besedilo[besedilo.index('<form method="get"') :]
+        blok = blok[: blok.index("</form>")]
+        akcija = re.search(r'action="([^"]+)"', blok)
+        assert akcija is not None
+
+        polja: list[tuple[str, str]] = []
+        for vnos in re.findall(r"<input ([^>]*)>", blok):
+            atributi = dict(re.findall(r'(\w+)="([^"]*)"', vnos))
+            skrito = atributi.get("type") == "hidden"
+            obkljukano = (
+                atributi.get("type") == "checkbox" and atributi["value"] in obkljukaj
+            )
+            if skrito or obkljukano:
+                polja.append((atributi["name"], atributi["value"]))
+
+        # Tako, kot brskalnik zapiše obrazec `GET`: polja v naslovu, po vrsti.
+        odgovor = odjemalec.get(f"{akcija.group(1)}?{urlencode(polja)}")
+        assert odgovor.status_code == 200, odgovor.text
+        return odgovor.text
+
+    def test_obrazec_posreduje_izbrano_oceno(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE)
+
+        besedilo = self._poslji_obrazec(odjemalec, tisk(odjemalec, quiz_id), {"lahko"})
+        papir = del_za_tisk(besedilo)
+
+        assert vprasanje(1) in papir
+        for i in (2, 3, 4, 5):
+            assert vprasanje(i) not in papir
+
+    def test_obrazec_brez_kljukic_ni_privzetek(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Odkljukano vse mora ostati odkljukano, ne se vrniti v privzetek."""
+        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE)
+
+        besedilo = self._poslji_obrazec(odjemalec, tisk(odjemalec, quiz_id), set())
+
+        assert 'class="tisk"' not in besedilo
+        assert "ni kaj natisniti" in besedilo
+        assert not any(
+            self._obkljukana(besedilo, koda)
+            for koda in ("nisem_vedela", "tezko", "srednje", "lahko")
+        )
 
     def test_papir_nosi_ime_kviza(
         self, odjemalec: TestClient, motor: Engine, slike: Path
