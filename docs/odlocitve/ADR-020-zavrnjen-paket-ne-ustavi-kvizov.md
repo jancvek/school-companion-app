@@ -29,7 +29,8 @@ v kodi ali ob obnovitvi strežniške baze iz starejše kopije.
    vse nadaljnje kvize, brez sledi — škoda je nesorazmerna z vzrokom.
 2. **Ob trajni zavrnitvi poskuse obdrži, seznam pa vseeno preberi.** Omrežna
    napaka in 5xx obhod še naprej končata. Za: zavrnjen poskus ne izgubi
-   ničesar in ne blokira ničesar drugega; meja med začasnim in trajnim je že
+   ničesar in ne blokira ničesar drugega (brez razbitja paketa to ne drži —
+   glej „Popravek prve različice"); meja med začasnim in trajnim je že
    določena v `ADR-004`. Proti: zavrnjen poskus še vedno obtiči brez sledi in
    se pošilja znova ob vsakem obhodu.
 3. **Stanje `failed` za poskuse z vidno oznako.** Za: sled je vidna. Proti:
@@ -44,10 +45,15 @@ v kodi ali ob obnovitvi strežniške baze iz starejše kopije.
 
 - **Trajna zavrnitev** je odgovor 4xx razen 408 in 429 — ista meja, kot jo
   `ADR-004` določa za prenos slik.
-- **Zavrnjen paket se v istem obhodu pošlje znova, po en poskus.** Sprejeti se
-  označijo za prenesene; trajno zavrnjeni ostanejo nepreneseni za naslednji
-  obhod. Paket z enim samim poskusom se ne ponavlja — njegova zavrnitev je že
-  sodba o tem poskusu.
+- **Paket, zavrnjen s `422`, se v istem obhodu pošlje znova, po en poskus.**
+  Sprejeti se označijo za prenesene; trajno zavrnjeni ostanejo nepreneseni za
+  naslednji obhod. Paket z enim samim poskusom se ne ponavlja — njegova
+  zavrnitev je že sodba o tem poskusu.
+- **Razbija se samo ob `422`**, edinem odgovoru, s katerim strežnik sodi o
+  vsebini poskusov (neveljavna ocena, postavka, ki je ni). Ob drugih trajnih
+  zavrnitvah (401, 403, 404, 413 …) bi strežnik zavrnil vsak poskus enako;
+  poskusi takrat ostanejo, obhod pa gre brez ponavljanja naprej na seznam.
+  Tudi med pošiljanjem po en poskus zavrnitev, ki ni `422`, razbijanje ustavi.
 - **Paketi so med sabo neodvisni.** Zavrnjen paket ne ustavi naslednjih paketov
   istega obhoda, in obhod gre naprej do branja seznama.
 - **Omrežna napaka, potekel čas, 5xx, 408 in 429** obhod še naprej končajo
@@ -71,8 +77,15 @@ na telefon, ocene pa ne na strežnik — noben kviz ne bi bil več rešen in
 `V2-R03` bi ostala brez rezultatov.
 
 Lastnik se je za možnost 2 odločil na podlagi tega nepopolnega opisa. Ko je
-dobil pravega, je izbral razbitje paketa. Plan in ta ADR ostajata sled obeh
-korakov; velja besedilo zgoraj.
+dobil pravega, je izbral razbitje paketa.
+
+Druga različica je razbijala ob **vsaki** trajni zavrnitvi. Četrti pregled je
+pokazal, da bi ob napačnem ključu (401) ali manjkajoči poti (404) vsak obhod
+poslal en paket in še vsak poskus posebej — do 501 zahtevek vsakih 5 minut,
+vsi z istim odgovorom —, opis stroškov pa je govoril o „nekaj zahtevkih".
+Lastnik je razbitje omejil na `422`.
+
+Plan in ta ADR ostajata sled vseh treh korakov; velja besedilo zgoraj.
 
 ## Posledice
 

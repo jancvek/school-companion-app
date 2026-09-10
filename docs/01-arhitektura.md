@@ -701,7 +701,10 @@ ne: paket se v istem obhodu pošlje znova **po en poskus**, sprejeti se
 označijo, zavrnjeni ostanejo nepreneseni, naslednji paketi se pošljejo in
 seznam se prebere. Razbitje je nujno, ker strežnik paket sprejme vsega ali nič,
 telefon pa vedno pošlje najstarejše poskuse prve — en sam neveljaven poskus bi
-sicer ustavil prenos vseh ocen za njim. Paket z enim poskusom se ne ponavlja.
+sicer ustavil prenos vseh ocen za njim. Razbija se **samo ob `422`**, edinem
+odgovoru, s katerim strežnik sodi o vsebini poskusov; ob 401, 403 ali 404 bi
+zavrnil vsak poskus enako, zato poskusi takrat ostanejo in obhod gre brez
+ponavljanja naprej. Paket z enim poskusom se ne ponavlja.
 Meja med začasnim in trajnim je ista kot pri prenosu slik (`ADR-004`).
 
 Nerazberljiv odgovor s seznamom kot celota **vrže** in ne vrne praznega
