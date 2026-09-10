@@ -1770,7 +1770,9 @@ class TestSlovenskaStevila:
 
         najdeno = [
             pot.name
-            for pot in sorted(MAPA_PREDLOG.glob("*.html"))
+            # `rglob` in ne `glob`: mapa je danes ravna, ob prvi podmapi
+            # predlog pa bi varovalka tiho nehala varovati.
+            for pot in sorted(MAPA_PREDLOG.rglob("*.html"))
             if "== 1 else" in pot.read_text(encoding="utf-8")
         ]
 

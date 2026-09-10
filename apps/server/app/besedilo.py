@@ -1,8 +1,9 @@
 """Slovenske oblike števil za operatersko stran.
 
-Do V2-R01 je vmesnik sklanjal na dva načina hkrati: novi strani sestavljalnika
-sta pisali „2 vprašanji", starejše pa „2 slik". Drugo je napačno —
-slovenščina je pri števnikih **štirioblična** in ima dvojino.
+Od V2-R01 do tega popravka je vmesnik sklanjal na dva načina hkrati: strani
+sestavljalnika so pisale „2 vprašanji", starejše pa „2 slik". Drugo je
+napačno — slovenščina je pri števnikih **štirioblična** in ima dvojino. Pred
+V2-R01 je bil način en sam, in ta napačen.
 
 Ta modul je tretji po `app/casi.py` in `app/strani.py` in stoji na istem
 načelu: kar potrebujeta oba usmerjevalnika, ni last nobenega od njiju in ima
