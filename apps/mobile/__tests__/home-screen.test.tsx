@@ -38,11 +38,23 @@ beforeEach(() => {
 });
 
 describe('domača stran', () => {
-  it('ponuja natanko gumba „Slikaj snov" in „Zgodovina"', async () => {
+  it('ponuja natanko gumbe „Slikaj snov", „Zgodovina" in „Kvizi"', async () => {
+    // Do V2-R02 sta bila gumba dva (kriterij V1-R01); V2-R02 izrecno doda
+    // tretjega. Sprememba pogodbe, ne oslabitev: zdaj je preštet vsak gumb.
     await render(<HomeScreen />);
 
     expect(screen.getByText('Slikaj snov')).toBeTruthy();
     expect(screen.getByText('Zgodovina')).toBeTruthy();
+    expect(screen.getByText('Kvizi')).toBeTruthy();
+    expect(screen.getAllByRole('button')).toHaveLength(3);
+  });
+
+  it('„Kvizi" pelje na seznam kvizov', async () => {
+    await render(<HomeScreen />);
+
+    await fireEvent.press(screen.getByText('Kvizi'));
+
+    expect(usmerjevalnik.stanje.router.push).toHaveBeenCalledWith('/kvizi');
   });
 
   it('„Slikaj snov" pelje na izbiro predmeta za slikanje', async () => {

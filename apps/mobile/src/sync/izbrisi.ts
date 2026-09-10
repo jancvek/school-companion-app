@@ -17,6 +17,10 @@ import { deleteById, findById, type MaterialsDatabase } from '../db/materials';
 import { removePhoto } from '../photos/store';
 import type { ServerConfig } from '../config/server';
 import type { Material } from '../types';
+import { poslji, type Zahteva } from './http';
+
+// `Zahteva` je do V2-R02 živela tu; obstoječi uvozniki jo dobijo od tu naprej.
+export type { Zahteva } from './http';
 
 /** Kako pogosto preverjamo, ali je kaj za pobrisati. */
 export const INTERVAL_MS = 5 * 60_000;
@@ -124,52 +128,6 @@ export async function preveriIzbrisane(
   }
 
   return povzetek;
-}
-
-/** Kar potrebujemo od `fetch`; v testih se podtakne. */
-export type Zahteva = (
-  url: string,
-  moznosti: {
-    method: string;
-    headers: Record<string, string>;
-    body?: string;
-    signal: AbortSignal;
-  },
-) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
-
-/**
- * Klic s časovno omejitvijo, ki se **vedno** konča.
- *
- * Omejitev je izpeljana dvojno, enako kot pri prenosu (`upload.ts`):
- * `signal` prekine sam klic, `Promise.race` pa poskrbi, da se ta funkcija
- * konča tudi, če bi `fetch` signal prezrl. Brez druge polovice bi viseč klic
- * pustil zaporo v `ustvariPonavljalnik` postavljeno in preverjanje arhiva bi
- * bilo do ponovnega zagona aplikacije mrtvo.
- */
-async function poslji(
-  zahteva: Zahteva,
-  url: string,
-  moznosti: { method: string; headers: Record<string, string>; body?: string },
-  casovnaOmejitevMs: number,
-): Promise<{ ok: boolean; status: number; json(): Promise<unknown> }> {
-  const nadzor = new AbortController();
-  let ura: ReturnType<typeof setTimeout> | undefined;
-
-  const potek = new Promise<never>((_resolve, reject) => {
-    ura = setTimeout(() => {
-      nadzor.abort();
-      reject(new Error('Strežnik se ni odzval pravočasno.'));
-    }, casovnaOmejitevMs);
-  });
-
-  try {
-    return await Promise.race([
-      zahteva(url, { ...moznosti, signal: nadzor.signal }),
-      potek,
-    ]);
-  } finally {
-    if (ura !== undefined) clearTimeout(ura);
-  }
 }
 
 /** Ali je odgovor seznam nizov; strežniku ne verjamemo na besedo. */
