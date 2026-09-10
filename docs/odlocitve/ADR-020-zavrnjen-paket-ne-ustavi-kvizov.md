@@ -61,8 +61,9 @@ v kodi ali ob obnovitvi strežniške baze iz starejše kopije.
   vzorec kot odmik pri prenosu slik (odločitev 14 v `docs/plan/V1-R02.md`):
   ponoven zagon je znak, naj se poskusi znova. Ko je vzrok na strežniku
   odpravljen, gredo zavrnjeni gor sami ob naslednjem zagonu — ta je lahko čez
-  več dni, če Android aplikacije v ozadju ne ubije, in Maša ga sproži samo s
-  prisilnim zaprtjem aplikacije. Zavrnitve, ki niso `422` (401, 403, 404), se
+  več dni, če Android aplikacije v ozadju ne ubije. Nov zagon sprožijo tudi
+  prisilno zaprtje aplikacije, ponovni zagon telefona in namestitev novega
+  APK. Zavrnitve, ki niso `422` (401, 403, 404), se
   ne zapomnijo, ker krivda ni v poskusu: taki poskusi gredo znova ob vsakem
   obhodu, v enem paketu — en zahtevek na paket.
 - `413` strežnik ne vrača: paket je v shemi omejen na 1000 poskusov, telefon
@@ -118,8 +119,9 @@ Plan in ta ADR ostajata sled vseh štirih korakov; velja besedilo zgoraj.
 - **Kaj to oteži:**
   - Zavrnjen poskus ostane na telefonu brez vidne sledi. **Stroški ob `422`:**
     ob vsakem zagonu aplikacije enkrat vsak paket in še vsak poskus posebej —
-    za N obtičalih ceil(N/500) + N zahtevkov, pri tem obsegu praktično 1 + N —,
-    nato do naslednjega zagona samo novi poskusi. Ob neusklajeni pogodbi je
+    za N obtičalih največ ceil(N/500) + N zahtevkov; paket z enim samim
+    poskusom se ne razbija, zato en obtičal poskus stane en zahtevek —, nato
+    do naslednjega zagona samo novi poskusi. Ob neusklajeni pogodbi je
     zavrnjen tudi vsak nov poskus: k novih ocen v enem obhodu stane 1 + k
     zahtevkov (en sam nov poskus en zahtevek), N pa raste z vsako oceno. Val
     ob zagonu je zato vse večji; obhod medtem drži zaporo in branje seznama

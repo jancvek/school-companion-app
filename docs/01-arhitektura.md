@@ -738,15 +738,18 @@ Zapuščen kviz se nadaljuje pri prvi neocenjeni postavki. Po zadnji oceni
 - **Trajno zavrnjen poskus obtiči brez vidne sledi.** Ne ustavi ne novih
   kvizov ne ostalih ocen (`ADR-020`). Poskus, zavrnjen s `422`, ostane na
   telefonu in se pošlje znova ob naslednjem zagonu aplikacije — ta je lahko
-  čez več dni, če je Android ne ubije. Stroški: ob vsakem zagonu enkrat
-  ceil(N/500) + N zahtevkov (praktično 1 + N), nato do naslednjega zagona samo
-  novi poskusi. Ob neusklajeni pogodbi APK in strežnika je zavrnjen vsak
-  poskus: N raste z vsako oceno, val ob zagonu je vse večji in branje seznama
-  se medtem zamakne. Poskus, zavrnjen z 401, 403 ali 404, se pošlje znova ob
-  vsakem obhodu (en zahtevek na paket). Kviz, ki mu pripada, na strežniku
-  ostane nerešen; na telefonu ne čaka, če ima poskus za vsako postavko.
-  Nastane lahko samo ob napaki v kodi ali ob obnovitvi strežniške baze iz
-  starejše kopije; pravi popravek bi bil svoja zahteva, ne tiho brisanje.
+  čez več dni, če je Android ne ubije. Stroški: ob vsakem zagonu enkrat vsak
+  paket in še vsak poskus posebej — za N obtičalih največ ceil(N/500) + N
+  zahtevkov, en sam obtičal poskus pa en zahtevek —, nato do naslednjega
+  zagona samo novi poskusi. Ob neusklajeni pogodbi APK in strežnika je zavrnjen
+  vsak poskus: N raste z vsako oceno, val ob zagonu je vse večji in branje
+  seznama se medtem zamakne. Poskus, zavrnjen z 401, 403 ali 404, se pošlje
+  znova ob vsakem obhodu (en zahtevek na paket). Kviz, ki mu pripada zavrnjen
+  poskus, na strežniku ostane nerešen; na telefonu ne čaka, če ima poskus za
+  vsako postavko. Trajna zavrnitev nastane ob napaki v kodi, ob obnovitvi
+  strežniške baze iz starejše kopije, ob neusklajeni pogodbi APK in strežnika
+  ali ob zamenjanem ključu; pravi popravek bi bil svoja zahteva, ne tiho
+  brisanje.
 - **Hkratna paketa na strežniku.** Dva hkratna paketa za različni zadnji
   postavki istega kviza drug drugega na Postgresu ne vidita, in `solved_at`
   ostane prazen do naslednjega paketa. Pri enem telefonu z zaporo v
