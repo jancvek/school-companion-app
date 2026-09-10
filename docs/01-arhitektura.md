@@ -694,6 +694,13 @@ po prenosu, že brez pravkar rešenega kviza. Nato se novi kvizi shranijo, pri
 obstoječih se posodobi samo `answered_on_server`, lokalni kvizi, ki jih na
 seznamu ni, pa se pobrišejo — **razen kviza, ki je ta hip odprt** (`ADR-019` C).
 
+Neuspeh pri prenosu poskusov ima dve veji (`ADR-020`). Nedosegljiv strežnik
+(omrežje, potekel čas, 5xx, 408, 429) obhod konča pred branjem seznama.
+**Trajna zavrnitev** paketa (4xx razen 408 in 429, v kodi `PaketZavrnjen`) pa
+ne: poskusi paketa ostanejo nepreneseni, naslednji paketi se pošljejo in
+seznam se prebere. Sicer bi en sam neveljaven poskus za vedno odrezal telefon
+od novih kvizov. Meja je ista kot pri prenosu slik (`ADR-004`).
+
 Nerazberljiv odgovor s seznamom kot celota **vrže** in ne vrne praznega
 seznama: prazen seznam bi obhod razumel kot „nič več ne čaka" in bi pobrisal
 tudi napol rešene kvize.
@@ -713,12 +720,11 @@ Zapuščen kviz se nadaljuje pri prvi neocenjeni postavki. Po zadnji oceni
 
 ### Znane omejitve
 
-- **Trajno zavrnjen paket ustavi tudi dostavo novih kvizov.** Obhod se ob
-  neuspešnem prenosu poskusov konča, preden prebere seznam. Pri `422` se to
-  ponavlja vsakih 5 minut, poskusi ostanejo na telefonu, novi kvizi pa ne
-  pridejo — brez vidne sledi. Nastane lahko samo ob napaki v kodi ali ob
-  obnovitvi strežniške baze iz starejše kopije. Odkril pregled V2-R02; odprto
-  za odločitev lastnika.
+- **Trajno zavrnjen poskus obtiči brez vidne sledi.** Ostane na telefonu in se
+  pošlje znova ob vsakem obhodu; novih kvizov ne ustavi (`ADR-020`). Kviz, ki
+  mu pripada, na strežniku ostane nerešen. Nastane lahko samo ob napaki v kodi
+  ali ob obnovitvi strežniške baze iz starejše kopije; pravi popravek bi bil
+  svoja zahteva, ne tiho brisanje.
 - **Hkratna paketa na strežniku.** Dva hkratna paketa za različni zadnji
   postavki istega kviza drug drugega na Postgresu ne vidita, in `solved_at`
   ostane prazen do naslednjega paketa. Pri enem telefonu z zaporo v
