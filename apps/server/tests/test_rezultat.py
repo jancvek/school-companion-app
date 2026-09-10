@@ -635,6 +635,24 @@ class TestTisk:
             for koda in ("nisem_vedela", "tezko", "srednje", "lahko")
         )
 
+    def test_tisk_bere_zamrznjeno_besedilo(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Vprašanja in ključ iz postavke, ne iz `questions` (`ADR-016` E)."""
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+        with Session(motor) as seja:
+            najdeno = seja.get(Question, f"{UUID_ENA}-v1")
+            assert najdeno is not None
+            najdeno.question = "PODTAKNJENO VPRAŠANJE"
+            najdeno.answer = "PODTAKNJEN ODGOVOR"
+            seja.commit()
+
+        papir = del_za_tisk(tisk(odjemalec, quiz_id))
+
+        assert vprasanje(1) in papir
+        assert "Odgovor 1." in papir
+        assert "PODTAKNJEN" not in papir
+
     def test_papir_nosi_ime_kviza(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
