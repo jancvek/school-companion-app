@@ -15,7 +15,6 @@ dokumentu, vprašaj — ne ugibaj.
 | `docs/plan/VN-Rxx.md` | Plan za posamezno zahtevo. Nastane v fazi 4, commita se. |
 | `docs/odlocitve/ADR-xxx.md` | Zapis vsake pomembnejše odločitve iz debate. |
 | `docs/02-izkusnje.md` | Pasti, ki so nas že stale časa (orodja, gradnja, okolje). Bere se ob potrebi, ne ob vsaki zahtevi. |
-| `docs/03-obratovanje.md` | Kako sistem teče: kopije, obnovitev, nadzor, kaj preveriti, ko kaj ne dela. |
 
 **`01-arhitektura.md` pove samo, kako je zdaj** — stack, moduli, shema, pogodbe,
 znane omejitve. Cilj je ≤ 400 vrstic. Odstavki „zakaj je tako" in „kaj se je
@@ -302,10 +301,6 @@ napaka po fazi 9b, ne nova zahteva.
 - **Brez ostankov generatorjev.** Kar je pustil `create-*` in se ne uporablja,
   gre ven.
 - **Delovni imenik je čist** in vse je commitano na veji zahteve.
-- **Kar ni mogoče ponovno ustvariti, je zajeto v kopijo.** Če zahteva doda
-  podatke, ki jih ni mogoče znova dobiti (ocene, prepisi, slike), pove, kako
-  jih zajame varnostna kopija iz `docs/03-obratovanje.md`. Brez tega zahteva ni
-  dokončana.
 
 Seznam raste iz izkušenj: ko se kaj pokaže kot ponavljajoča se napaka, sodi
 sem, ne v kriterije ene zahteve.

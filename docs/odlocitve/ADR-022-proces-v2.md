@@ -3,8 +3,7 @@
 - **Datum:** 2026-09-11
 - **Nastalo pri:** celostni pregled projekta po V2-R04 (zunaj zahteve)
 - **Status:** Predlog — velja, ko ga lastnik potrdi z mergem te veje
-- **Spreminja:** `CLAUDE.md` (§0, faza 1, faza 4, faza 7, faza 9b, §1b, nov
-  §1c), `docs/plan/PREDLOGA.md`; predlaga spremembe `.claude/commands/zahteva.md`
+- **Spreminja:** `CLAUDE.md` (§0, faza 1, faza 4, faza 7, faza 9b, nov §1c), `docs/plan/PREDLOGA.md`; predlaga spremembe `.claude/commands/zahteva.md`
   in `.claude/agents/pregledovalec.md` (glej Dodatek — teh datotek model po
   trdem robu 4 ne spreminja)
 
@@ -28,8 +27,6 @@ mestih:
   je bil na strani telefona; nihče ni vprašal, ali je pogodba
   (`POST /quiz-attempts` vse ali nič) prava. Proces je dober pri „ali je
   narejeno prav" in slabši pri „ali delamo pravo stvar".
-- Kar ni zahteva `VN-Rxx`, nima poti do izvedbe: varnostna kopija, nadzor
-  `/health`, Docker po ponovnem zagonu. Zato nič od tega ne obstaja.
 - ADR-010 (cleartext) je nastal, ker se preizkus na napravi z APK iz veje
   ni zgodil pred mergem.
 
@@ -48,11 +45,14 @@ mestih:
    izvedbi ali v odločitvi.
 6. **Predloga plana** se skrči na odločitve, meje, kaj lahko podre in teste;
    koraki samo pri visokem tveganju.
-7. **Merilo dokončanosti** dobi vrstico: podatki, ki jih ni mogoče ponovno
-   ustvariti, so zajeti v kopijo (`docs/03-obratovanje.md` — nastane s prvo
-   zahtevo, ki to potrebuje, tj. z varnostno kopijo).
-8. **Faza 9b:** sprememba vedenja na telefonu se ne merga brez preizkusa z
+7. **Faza 9b:** sprememba vedenja na telefonu se ne merga brez preizkusa z
    APK iz veje.
+
+## Kar ta ADR izrecno ne ureja
+
+Obratovanje (varnostna kopija, nadzor `/health`, zagon Dockerja po ponovnem
+zagonu stroja) je lastnik ob sprejemu **zavestno pustil zunaj**. Proces zanj
+ne dobi ne datoteke ne merila. Če se to kdaj spremeni, je to nova zahteva.
 
 ## Kaj ostane
 
