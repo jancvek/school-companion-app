@@ -14,8 +14,23 @@ dokumentu, vprašaj — ne ugibaj.
 | `docs/verzije/vN.md` | Zahteve za verzijo N, z ID-ji `VN-Rxx`. |
 | `docs/plan/VN-Rxx.md` | Plan za posamezno zahtevo. Nastane v fazi 4, commita se. |
 | `docs/odlocitve/ADR-xxx.md` | Zapis vsake pomembnejše odločitve iz debate. |
+| `docs/02-izkusnje.md` | Pasti, ki so nas že stale časa (orodja, gradnja, okolje). Bere se ob potrebi, ne ob vsaki zahtevi. |
+| `docs/03-obratovanje.md` | Kako sistem teče: kopije, obnovitev, nadzor, kaj preveriti, ko kaj ne dela. |
+
+**`01-arhitektura.md` pove samo, kako je zdaj** — stack, moduli, shema, pogodbe,
+znane omejitve. Cilj je ≤ 400 vrstic. Odstavki „zakaj je tako" in „kaj se je
+takrat zgodilo" ne sodijo vanjo: če je bila to odločitev, gre v ADR; če je bila
+past, gre v `02-izkusnje.md`. Dokument, ki ga vsaka seja prebere v celoti, mora
+ostati kratek.
+
+Vsaka zahteva v `docs/verzije/vN.md` ima vrstico **Podlaga:** s seznamom
+ADR-jev, na katerih stoji. To je vhod za fazo 1 — brez nje model bere vse ali
+nič.
 
 Statusi zahteve: `Nova` → `Planirano` → `V delu` → `V pregledu` → `Zaključeno`.
+**Status se ne commita sam.** Spremeni se v istem commitu kot vsebina, ki ga
+povzroči: `Planirano` s planom, `V delu` s prvim commitom izvedbe, `V pregledu`
+z zadnjim testom, `Zaključeno` z dokumentacijo.
 
 ---
 
@@ -26,8 +41,11 @@ Ne nadaljuješ sam.
 
 ### Faza 1 — Razumevanje 🛑
 
-Preberi zahtevo, `docs/00-namen.md`, `docs/01-arhitektura.md`, prejšnje
-verzijske datoteke in `docs/odlocitve/`. Nato preveri, ali je zahteva enoumna.
+Preberi zahtevo, `docs/00-namen.md`, `docs/01-arhitektura.md`,
+`docs/verzije/vN.md` tekoče verzije in ADR-je, ki jih zahteva navaja pod
+**Podlaga**. Ostale ADR-je preleti **po naslovih** (`ls docs/odlocitve`) in
+odpri le tiste, ki se zahteve očitno tičejo. Planov v `docs/plan/` ne beri —
+so zapis za človeka, ne vhod za model. Nato preveri, ali je zahteva enoumna.
 
 Vprašaj me, če velja karkoli od tega:
 
@@ -92,7 +110,8 @@ Posodobi status zahteve na `Planirano`.
 
 ### Faza 4 — Vpliv in plan 🛑 (če plan zahteva odločitev)
 
-Napiši `docs/plan/VN-Rxx.md` po `docs/plan/PREDLOGA.md` in ga commitaj:
+Najprej se odloči po lestvici spodaj, ali plan sploh nastane kot datoteka.
+Če nastane, ga napiši po `docs/plan/PREDLOGA.md` in commitaj:
 
 ```powershell
 git add docs/plan/VN-Rxx.md docs/verzije/
@@ -105,9 +124,11 @@ videti, kaj je bilo takrat dogovorjeno.
 Odloči se sam po tej lestvici:
 
 - **Nizko tveganje** (znotraj obstoječih vzorcev, brez nove odvisnosti, brez
-  migracije sheme, brez spremembe javnega vmesnika, ≲ 3 datoteke) → nadaljuj
-  brez čakanja.
-- **Vse ostalo** → 🛑 povej, da je plan commitan, in počakaj na moj "gremo".
+  migracije sheme, brez spremembe javnega vmesnika, ≲ 3 datoteke) → **kratka
+  pot** (§1c): plan je nekaj vrstic v poročilu, ne datoteka; nadaljuj brez
+  čakanja.
+- **Vse ostalo** → napiši `docs/plan/VN-Rxx.md`, ga commitaj, 🛑 povej, da je
+  plan commitan, in počakaj na moj "gremo".
 
 Če nisi prepričan, v katero skupino spada, spada v drugo.
 
@@ -155,6 +176,12 @@ nesledene datoteke** — ne samo diff proti `main`.
 
 - `VRNI V POPRAVEK` → popravi kritične točke, nazaj na fazo 6, pokliči ga znova.
   Njegovih pripomb ne zavračaj brez utemeljitve; če se ne strinjaš, povej meni.
+- **Tretjič isto mesto → nazaj v fazo 2.** Če pregledovalec tretjič vrne isto
+  mesto (isti ADR, ista funkcija, isti robni primer), popravka ne pišeš več.
+  Ustavi se in vprašaj: *je napaka v izvedbi ali v odločitvi, ki jo izvedba
+  varuje?* Predlagaj vsaj eno alternativo, ki spremeni **odločitev**, ne kode
+  (npr. pogodbo med telefonom in strežnikom). Trije popravki iste odločitve so
+  znak, da je bila odločitev napačna, ne izvedba.
 - `PRIPRAVLJENO ZA ČLOVEŠKI PREGLED` → naprej.
 
 ### Faza 8 — Zaključni dostavek
@@ -209,7 +236,10 @@ Nato **končaj obrat.** Jaz pregledam in preizkusim.
 
 ### Faza 9b — Sprejem 🛑
 
-Zdaj preizkusim sam. Kar najdem, ne gre samodejno ne v to zahtevo ne v novo —
+Zdaj preizkusim sam. **Zahteva, ki spremeni vedenje na telefonu, se ne merga,
+dokler ni preizkušena na napravi z APK iz te veje** — ne z razvojno gradnjo.
+Razvojna gradnja ne pokaže razreda napak, ki nastanejo ob gradnji
+(`docs/odlocitve/ADR-010`). Kar najdem, ne gre samodejno ne v to zahtevo ne v novo —
 najprej ga uvrstiva. Ločnica ni velikost, ampak **ali obstoječi dogovor kršiš
 ali ga širiš**:
 
@@ -272,9 +302,37 @@ napaka po fazi 9b, ne nova zahteva.
 - **Brez ostankov generatorjev.** Kar je pustil `create-*` in se ne uporablja,
   gre ven.
 - **Delovni imenik je čist** in vse je commitano na veji zahteve.
+- **Kar ni mogoče ponovno ustvariti, je zajeto v kopijo.** Če zahteva doda
+  podatke, ki jih ni mogoče znova dobiti (ocene, prepisi, slike), pove, kako
+  jih zajame varnostna kopija iz `docs/03-obratovanje.md`. Brez tega zahteva ni
+  dokončana.
 
 Seznam raste iz izkušenj: ko se kaj pokaže kot ponavljajoča se napaka, sodi
 sem, ne v kriterije ene zahteve.
+
+---
+
+## 1c. Kratka pot
+
+Ne gre vsaka sprememba skozi vseh deset faz. **Kratka pot** velja, kadar so
+izpolnjeni vsi pogoji iz lestvice v fazi 4 (znotraj obstoječih vzorcev, brez
+nove odvisnosti, brez migracije sheme, brez spremembe javnega vmesnika,
+≲ 3 datoteke). Če nisi prepričan, kratka pot ne velja.
+
+Kratka pot: faza 1 (vprašanja) → branch → izvedba in testi → pregledovalec →
+verify → poročilo. Razlike od polne poti:
+
+- plana kot datoteke ni — plan je do pet vrstic v poročilu (kaj, kje, kateri
+  testi);
+- `docs/01-arhitektura.md` se dopolni samo, če se je stanje res spremenilo;
+- ADR nastane samo, če je bila sprejeta odločitev, ki bi jo kdo kdaj iskal.
+
+Če se med delom izkaže, da kateri pogoj ne drži (migracija, četrta datoteka,
+sprememba vmesnika), preskoči na polno pot: plan se napiše takrat in se
+commita, delo do tega trenutka ostane na veji.
+
+Kar je enako: faza 1, pregledovalec, verify vezan na HEAD, merilo dokončanosti,
+trdi robovi. Kratka pot skrajša pisanje, ne pregleda.
 
 ---
 
