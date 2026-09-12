@@ -7,6 +7,7 @@ stanje, ne poti, po kateri je stanje nastalo. Vsak test, ki gre skozi prenos,
 bi ob spremembi prenosa padel iz razloga, ki s to zahtevo nima zveze.
 """
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
+from app.db import MaterialsRepository
 from app.models import (
     STATUS_NAPAKA,
     STATUS_NOV,
@@ -1197,15 +1199,23 @@ class TestPakiranje:
 
 
 class TestBrezJavaScripta:
-    """Stran ne sme uporabljati JavaScripta.
+    """Stran ne sme uporabljati JavaScripta — razen kjer ga zahteva izrecno uvede.
 
     Kriterij iz `docs/verzije/v1.md` in odločitev 1 v planu: vsa dinamika so
     obrazci. Brez tega testa bi bila zahteva izpolnjena samo, dokler se je
     nekdo spomni — dodan `<script>` ne bi podrl ničesar.
+
+    `ADR-024` skripto dovoljuje kot nadgradnjo in `V2-R08` jo uvede na strani s
+    podrobnostmi snovi. Test je zato **zožen, ne izbrisan**: izvzeta je samo
+    `snov.html` (in s tem njena izrisana stran), za katero meje `ADR-024`
+    preverja `TestPovecava`. Vsaka druga predloga ostane pod polnim testom.
     """
 
     #: Vzorci, ki pomenijo, da se na strani izvaja koda.
     VZORCI = ("<script", "javascript:", "onclick=", "onload=", "onerror=", "onsubmit=")
+
+    #: Predloge, ki skripto smejo imeti. `snov.html`: povečan prikaz, V2-R08.
+    IZVZETE = ("snov.html",)
 
     def test_v_predlogah_ni_javascripta(self) -> None:
         from app.routers.admin import MAPA_PREDLOG
@@ -1213,6 +1223,7 @@ class TestBrezJavaScripta:
         najdeno = [
             f"{pot.name}: {vzorec}"
             for pot in sorted(MAPA_PREDLOG.glob("*.html"))
+            if pot.name not in self.IZVZETE
             for vzorec in self.VZORCI
             if vzorec in pot.read_text(encoding="utf-8").lower()
         ]
@@ -1223,17 +1234,342 @@ class TestBrezJavaScripta:
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
         # Predloge so eno, izris drugo: skript bi lahko prišel tudi iz vsebine.
+        # Podrobnosti snovi tu ni več — izvzete so z `IZVZETE`.
         zapisi(motor, slike)
 
         for pot in (
             "/admin",
             "/admin/subjects/MAT",
-            f"/admin/materials/{UUID_ENA}",
             f"/admin/materials/{UUID_ENA}/delete",
         ):
             besedilo = odjemalec.get(pot).text.lower()
             for vzorec in self.VZORCI:
                 assert vzorec not in besedilo, f"{pot} vsebuje {vzorec}"
+
+
+#: Tretji identifikator za listanje; po abecedi je za `UUID_ENA` in `UUID_DVA`.
+UUID_TRI = "c0ffee00-1234-4abc-8def-001122334455"
+
+
+def del_povecave(besedilo: str) -> str:
+    """Del strani s povečanim prikazom, brez skripte za njim.
+
+    Trditve o puščicah in prenosu morajo veljati prav v prikazu: ista pot do
+    slike je na strani tudi ob sliki v podrobnostih.
+    """
+    zacetek = besedilo.index('<div class="prekritje" id="prekritje"')
+    return besedilo[zacetek : besedilo.index("<script>", zacetek)]
+
+
+def skripta(besedilo: str) -> str:
+    """Telo edine skripte na strani."""
+    zacetek = besedilo.index("<script>")
+    return besedilo[zacetek : besedilo.index("</script>", zacetek)]
+
+
+class TestPovecava:
+    """Povečan prikaz slike na `GET /admin/materials/{id}` (V2-R08).
+
+    Testi dokazujejo samo, kar je v izrisu. **Kako se prikaz obnaša** — da se
+    odpre, zapre z `Esc` in klikom zunaj, da stran ne drsi, da tipki listata —
+    pytest ne izvede in se preveri ročno v fazi 9b (`docs/odlocitve/ADR-024`,
+    „Posledice").
+    """
+
+    @staticmethod
+    def stran(odjemalec: TestClient, material_id: str) -> str:
+        odgovor = odjemalec.get(f"/admin/materials/{material_id}")
+        assert odgovor.status_code == 200
+        return odgovor.text
+
+    @staticmethod
+    def tri_zaporedne(motor: Engine, slike: Path, subject: str = "MAT") -> None:
+        """Tri slike istega predmeta; najnovejša je `UUID_TRI`, najstarejša `UUID_ENA`."""
+        zapisi(motor, slike, UUID_ENA, subject, "2026-09-04T07:30:00+00:00")
+        zapisi(motor, slike, UUID_DVA, subject, "2026-09-04T08:30:00+00:00")
+        zapisi(motor, slike, UUID_TRI, subject, "2026-09-04T09:30:00+00:00")
+
+    # --- Povečan prikaz ---
+
+    def test_slika_je_povezava_na_izvirnik(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Meja 3 `ADR-024`: brez skripte klik odpre izvirnik.
+        zapisi(motor, slike)
+
+        besedilo = self.stran(odjemalec, UUID_ENA)
+
+        assert re.search(
+            rf'<a class="povecaj" href="/admin/materials/{UUID_ENA}/image" data-povecava>'
+            rf'\s*<img src="/admin/materials/{UUID_ENA}/image"',
+            besedilo,
+        )
+
+    def test_prikaz_je_v_izrisu_skrit(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Brez skripte ga ne sme biti videti. `display: grid` bi atribut
+        # `hidden` prevladal, zato je pravilo, ki ga vrne, del dokaza.
+        zapisi(motor, slike)
+
+        besedilo = self.stran(odjemalec, UUID_ENA)
+
+        assert '<div class="prekritje" id="prekritje" hidden>' in besedilo
+        assert ".prekritje[hidden] { display: none; }" in besedilo
+
+    def test_prikaz_kaze_isto_datoteko_brez_omejitve_visine(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+
+        besedilo = self.stran(odjemalec, UUID_ENA)
+        prikaz = del_povecave(besedilo)
+
+        assert re.findall(r'src="([^"]*)"', prikaz) == [f"/admin/materials/{UUID_ENA}/image"]
+        # `max-height: 78vh` velja za `.snov img`. Prikaz stoji za zadnjim
+        # elementom `.snov` (povezava nazaj), torej zunaj njega.
+        assert besedilo.index('<div class="prekritje"') > besedilo.index('class="nazaj"')
+
+    def test_prikaz_ima_gumb_za_zapiranje(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+
+        prikaz = del_povecave(self.stran(odjemalec, UUID_ENA))
+
+        assert '<button class="prekritje-gumb" type="button" id="prekritje-zapri">' in prikaz
+
+    @pytest.mark.parametrize(
+        ("taken_at", "ime"),
+        [
+            ("2026-09-04T07:30:00+00:00", "MAT_2026-09-04_09-30.jpg"),  # poletni čas
+            ("2026-12-01T23:15:00+00:00", "MAT_2026-12-02_00-15.jpg"),  # zimski, čez polnoč
+        ],
+    )
+    def test_prenos_nosi_predmet_in_lokalni_cas(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, taken_at: str, ime: str
+    ) -> None:
+        zapisi(motor, slike, taken_at=taken_at)
+
+        prikaz = del_povecave(self.stran(odjemalec, UUID_ENA))
+
+        prenos = re.search(
+            rf'<a class="prekritje-gumb" href="/admin/materials/{UUID_ENA}/image"'
+            r'\s+download="([^"]*)">',
+            prikaz,
+        )
+        assert prenos is not None
+        assert prenos.group(1) == ime
+
+    def test_ime_prenosa_nadomesti_nevarne_znake(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, subject="A/B? č")
+
+        prikaz = del_povecave(self.stran(odjemalec, UUID_ENA))
+
+        assert 'download="A_B____2026-09-04_09-30.jpg"' in prikaz
+
+    def test_brez_datoteke_ni_prikaza(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, vsebina=None)
+
+        besedilo = self.stran(odjemalec, UUID_ENA)
+
+        assert "data-povecava" not in besedilo
+        assert 'id="prekritje"' not in besedilo
+        assert "<script" not in besedilo
+        assert f'href="/admin/materials/{UUID_ENA}/image"' not in besedilo
+        # Obstoječe sporočilo ostane dobesedno.
+        assert "Zapis v bazi obstaja, slike na disku pa ni." in besedilo
+
+    # --- Listanje ---
+
+    def test_sosedi_v_sredini(self, odjemalec: TestClient, motor: Engine, slike: Path) -> None:
+        # Smer mreže na strani predmeta: levo novejša, desno starejša.
+        self.tri_zaporedne(motor, slike)
+
+        prikaz = del_povecave(self.stran(odjemalec, UUID_DVA))
+
+        assert f'id="prekritje-prejsnja" href="/admin/materials/{UUID_TRI}#povecano"' in prikaz
+        assert f'id="prekritje-naslednja" href="/admin/materials/{UUID_ENA}#povecano"' in prikaz
+        assert "neaktivna" not in prikaz
+
+    def test_prva_slika_ima_neaktivno_prejsnjo(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        self.tri_zaporedne(motor, slike)
+
+        prikaz = del_povecave(self.stran(odjemalec, UUID_TRI))
+
+        assert '<span class="puscica neaktivna" aria-disabled="true">←</span>' in prikaz
+        assert 'id="prekritje-prejsnja"' not in prikaz
+        assert f'id="prekritje-naslednja" href="/admin/materials/{UUID_DVA}#povecano"' in prikaz
+
+    def test_zadnja_slika_ima_neaktivno_naslednjo_in_ne_ovije(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        self.tri_zaporedne(motor, slike)
+
+        prikaz = del_povecave(self.stran(odjemalec, UUID_ENA))
+
+        assert '<span class="puscica neaktivna" aria-disabled="true">→</span>' in prikaz
+        assert 'id="prekritje-naslednja"' not in prikaz
+        assert f"/admin/materials/{UUID_TRI}#povecano" not in prikaz
+        assert f'id="prekritje-prejsnja" href="/admin/materials/{UUID_DVA}#povecano"' in prikaz
+
+    def test_edina_slika_ima_obe_puscici_neaktivni(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+
+        prikaz = del_povecave(self.stran(odjemalec, UUID_ENA))
+
+        assert prikaz.count('class="puscica neaktivna" aria-disabled="true"') == 2
+        assert "#povecano" not in prikaz
+
+    def test_drug_predmet_ni_sosed(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, UUID_ENA, "MAT", "2026-09-04T07:30:00+00:00")
+        zapisi(motor, slike, UUID_DVA, "SLO", "2026-09-04T08:30:00+00:00")
+        zapisi(motor, slike, UUID_TRI, "MAT", "2026-09-04T09:30:00+00:00")
+
+        prikaz = del_povecave(self.stran(odjemalec, UUID_TRI))
+
+        assert f'id="prekritje-naslednja" href="/admin/materials/{UUID_ENA}#povecano"' in prikaz
+        assert UUID_DVA not in prikaz
+
+    def test_arhiviran_sosed_izpade(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        self.tri_zaporedne(motor, slike)
+        arhiviraj(motor, UUID_DVA)
+
+        prikaz = del_povecave(self.stran(odjemalec, UUID_TRI))
+
+        assert f'id="prekritje-naslednja" href="/admin/materials/{UUID_ENA}#povecano"' in prikaz
+        assert UUID_DVA not in prikaz
+
+    def test_arhivirana_snov_ima_prikaz_brez_puscic(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        self.tri_zaporedne(motor, slike)
+        arhiviraj(motor, UUID_DVA)
+
+        besedilo = self.stran(odjemalec, UUID_DVA)
+        prikaz = del_povecave(besedilo)
+
+        assert "data-povecava" in besedilo
+        assert f'src="/admin/materials/{UUID_DVA}/image"' in prikaz
+        assert "puscica" not in prikaz
+        assert "#povecano" not in prikaz
+
+    def test_neznana_koda_ima_puscici(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Popravljen kriterij V2-R08: neznana koda s slikami ima svojo stran
+        # predmeta in je v naboru.
+        zapisi(motor, slike, UUID_ENA, "XYZ", "2026-09-04T07:30:00+00:00")
+        zapisi(motor, slike, UUID_DVA, "XYZ", "2026-09-04T08:30:00+00:00")
+
+        prikaz = del_povecave(self.stran(odjemalec, UUID_DVA))
+
+        assert f'id="prekritje-naslednja" href="/admin/materials/{UUID_ENA}#povecano"' in prikaz
+        assert '<span class="puscica neaktivna" aria-disabled="true">←</span>' in prikaz
+
+    def test_enak_cas_obisce_obe_sliki(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # `UUID_ENA` je vstavljen prvi, da vrstni red vstavljanja ne more
+        # nadomestiti razvrščanja po `id` (`id DESC`: `UUID_DVA` je prvi).
+        zapisi(motor, slike, UUID_ENA, "MAT", "2026-09-04T07:30:00+00:00")
+        zapisi(motor, slike, UUID_DVA, "MAT", "2026-09-04T07:30:00+00:00")
+
+        prva = del_povecave(self.stran(odjemalec, UUID_DVA))
+        druga = del_povecave(self.stran(odjemalec, UUID_ENA))
+        predmet = odjemalec.get("/admin/subjects/MAT").text
+
+        assert f'id="prekritje-naslednja" href="/admin/materials/{UUID_ENA}#povecano"' in prva
+        assert f'id="prekritje-prejsnja" href="/admin/materials/{UUID_DVA}#povecano"' in druga
+        assert predmet.index(UUID_DVA) < predmet.index(UUID_ENA)
+
+    # --- Meje `ADR-024` ---
+
+    def test_skripta_ostane_v_mejah(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Meje 1 in 2: vgrajena, brez zunanjega vira. Meja 4: ne pošilja in ne
+        # sproža obrazcev. Kaj skripta *počne*, test ne dokaže — samo, česa v
+        # njej ni.
+        from app.routers.admin import MAPA_PREDLOG
+
+        zapisi(motor, slike)
+        besedilo = self.stran(odjemalec, UUID_ENA)
+        predloga = (MAPA_PREDLOG / "snov.html").read_text(encoding="utf-8")
+
+        for vir in (besedilo, predloga):
+            male = vir.lower()
+            assert male.count("<script") == 1
+            assert "<script>" in male  # brez atributov, torej brez `src`
+            for vzorec in TestBrezJavaScripta.VZORCI[1:]:
+                assert vzorec not in male
+            telo = skripta(male)
+            for prepovedano in ("fetch(", "xmlhttprequest", "sendbeacon", ".submit(", "<form"):
+                assert prepovedano not in telo
+
+    def test_skripta_bere_isto_oznako_kot_povezave(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+
+        besedilo = self.stran(odjemalec, UUID_ENA)
+
+        assert 'var OZNAKA = "#povecano";' in skripta(besedilo)
+
+
+class TestSosediVPredmetu:
+    """`MaterialsRepository.sosedi_v_predmetu` (V2-R08).
+
+    Obljuba je „isti nabor in isti vrstni red kot stran predmeta", zato se
+    sosedi primerjajo neposredno s `seznam_po_predmetu` nad stanjem, ki vsebuje
+    vse, kar bi ju lahko razdružilo: drug predmet, arhiv in enak čas.
+    """
+
+    ARHIVIRANA = "d0d0d0d0-0000-4000-8000-000000000001"
+    DRUG_PREDMET = "e0e0e0e0-0000-4000-8000-000000000002"
+
+    def test_sosedi_so_sosedi_na_seznamu_predmeta(self, motor: Engine, slike: Path) -> None:
+        zapisi(motor, slike, UUID_ENA, "MAT", "2026-09-04T07:30:00+00:00")
+        zapisi(motor, slike, UUID_DVA, "MAT", "2026-09-04T07:30:00+00:00")
+        zapisi(motor, slike, UUID_TRI, "MAT", "2026-09-04T09:30:00+00:00")
+        zapisi(motor, slike, self.ARHIVIRANA, "MAT", "2026-09-04T08:00:00+00:00")
+        zapisi(motor, slike, self.DRUG_PREDMET, "SLO", "2026-09-04T08:15:00+00:00")
+        arhiviraj(motor, self.ARHIVIRANA)
+
+        with Session(motor) as seja:
+            repozitorij = MaterialsRepository(seja)
+            seznam = [snov.id for snov in repozitorij.seznam_po_predmetu("MAT")]
+            sosedi = [
+                repozitorij.sosedi_v_predmetu(snov)
+                for snov in repozitorij.seznam_po_predmetu("MAT")
+            ]
+
+        assert seznam == [UUID_TRI, UUID_DVA, UUID_ENA]
+        assert sosedi == [(None, UUID_DVA), (UUID_TRI, UUID_ENA), (UUID_DVA, None)]
+
+    def test_arhivirana_snov_nima_sosedov(self, motor: Engine, slike: Path) -> None:
+        zapisi(motor, slike, UUID_ENA, "MAT", "2026-09-04T07:30:00+00:00")
+        zapisi(motor, slike, UUID_DVA, "MAT", "2026-09-04T08:30:00+00:00")
+        arhiviraj(motor, UUID_ENA)
+
+        with Session(motor) as seja:
+            repozitorij = MaterialsRepository(seja)
+            snov = repozitorij.poisci(UUID_ENA)
+            assert snov is not None
+
+            assert repozitorij.sosedi_v_predmetu(snov) == (None, None)
 
 
 class TestOblikovanje:
