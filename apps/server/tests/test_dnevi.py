@@ -10,20 +10,26 @@ stanje, ne poti, po kateri je stanje nastalo — isti razlog kot v
 pravila o lokalnem dnevu, uporabljajo **zapisane** trenutke in zapisane
 pričakovane dneve (`2026-07-01T22:30Z` je lokalno že 2. julij) — ti veljajo ne
 glede na to, kdaj zbirka teče. Tisti, ki preizkušajo gumbe *Danes*, *Včeraj* in
-*Ta teden*, morajo vedeti, kateri dan je danes, in ga dobijo iz `danes()`; da
-`danes()` ni `date.today()` po uri stroja, dokazuje
-`test_privzeti_dan_zajame_cel_lokalni_dan` — postavi posnetka ob 00:30 in 23:30
-po domačem času, ki v UTC pripadata dvema različnima dnevoma.
+*Ta teden*, morajo vedeti, kateri dan je danes, in ga dobijo iz `danes()`.
+
+Da `danes()` ni `date.today()` po uri stroja, dokazuje `TestDanes` — s
+namestnikom, ki igra stroj z uro v UTC. Tega **ne** dokazuje
+`test_privzeti_dan_zajame_cel_lokalni_dan`: ta je na stroju, ki že stoji v pasu
+`Europe/Ljubljana`, zelen tudi ob strojni uri, in prvotna različica tega
+docstringa je trdila nasprotno. Napačna trditev je hujša od manjkajočega
+testa — naslednjemu bralcu pove, da je mesto pokrito.
 """
 
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from app.casi import danes, dnevi_od_do, pas
+from app.db import MaterialsRepository
 from app.models import STATUS_NOV, Material
 from app.routers.dnevi import DNI_V_TEDNU, Obdobje, preberi_obdobje
 
@@ -157,6 +163,79 @@ class TestMejeObdobja:
         assert do == datetime(2026, 7, 7, 22, 0, tzinfo=UTC)
 
 
+class _UraVUtc:
+    """Namestnik `datetime`, ki igra stroj z uro v UTC (kot vsebnik).
+
+    `now(tz)` vrne pravi trenutek v podanem pasu, `now()` brez pasu pa naiven
+    čas po **strojni** uri. Razlika med obema je prav tisto, kar mora `danes()`
+    upoštevati: izbrani trenutek je v UTC še 1. julij, po domačem času pa že
+    2. julij ob 00:30.
+    """
+
+    TRENUTEK = datetime(2026, 7, 1, 22, 30, tzinfo=UTC)
+
+    @classmethod
+    def now(cls, tz: object = None) -> datetime:
+        if tz is None:
+            return cls.TRENUTEK.replace(tzinfo=None)
+        return cls.TRENUTEK.astimezone(tz)  # type: ignore[arg-type]
+
+
+class TestDanes:
+    """`danes()` bere koledar v domačem pasu in ne strojne ure."""
+
+    def test_je_lokalni_dan_in_ne_strojni(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("app.casi.datetime", _UraVUtc)
+
+        # Dokaz, da je namestnik postavljen prav: strojna ura bi dala 1. julij.
+        assert _UraVUtc.now().date() == date(2026, 7, 1)
+        # `date.today()` po strojni uri bi torej v tem trenutku lagal za en dan.
+        assert danes() == date(2026, 7, 2)
+
+
+class TestPoizvedbaObdobja:
+    """Meje poizvedbe, presojane nad repozitorijem in ne nad stranjo.
+
+    Nad stranjo se pokvarjena **zgornja** meja ne vidi: grupiranje v Pythonu je
+    drugi filter, ki snov s tujim lokalnim dnevom spusti na tla, ker njenega
+    dneva na seznamu dni ni. Stran je zato pravilna tudi ob meji `<= do` —
+    pokvarjena meja pa bi pomenila prenos in izračun nad snovjo, ki na stran ne
+    sodi, in bi se pokazala prvi dan, ko bi kdo grupiranje poenostavil. Odkrito
+    z mutacijskim preizkusom po pregledu.
+    """
+
+    def test_spodnja_meja_je_vkljucna(self, motor: Engine, slike: Path) -> None:
+        zapisi(motor, slike, "polnoc", taken_at=lokalno(date(2026, 9, 8), 0, 0))
+        od, do = dnevi_od_do(date(2026, 9, 8), date(2026, 9, 8))
+
+        with Session(motor) as seja:
+            najdeno = MaterialsRepository(seja).seznam_po_obdobju(od, do)
+
+        assert [snov.id for snov in najdeno] == ["polnoc"]
+
+    def test_zgornja_meja_je_izkljucna(self, motor: Engine, slike: Path) -> None:
+        # Polnoč naslednjega dne pripada **naslednjemu** dnevu; zaprt interval
+        # bi ta posnetek štel dvakrat.
+        zapisi(motor, slike, "polnoc", taken_at=lokalno(date(2026, 9, 9), 0, 0))
+        od, do = dnevi_od_do(date(2026, 9, 8), date(2026, 9, 8))
+
+        with Session(motor) as seja:
+            najdeno = MaterialsRepository(seja).seznam_po_obdobju(od, do)
+
+        assert najdeno == []
+
+    def test_teden_zajame_oba_robna_dneva(self, motor: Engine, slike: Path) -> None:
+        zapisi(motor, slike, "prvi", taken_at=lokalno(date(2026, 9, 6), 0, 0))
+        zapisi(motor, slike, "zadnji", taken_at=lokalno(date(2026, 9, 12), 23, 59))
+        zapisi(motor, slike, "prezgodaj", taken_at=lokalno(date(2026, 9, 5), 23, 59))
+        od, do = dnevi_od_do(date(2026, 9, 6), date(2026, 9, 12))
+
+        with Session(motor) as seja:
+            najdeno = MaterialsRepository(seja).seznam_po_obdobju(od, do)
+
+        assert [snov.id for snov in najdeno] == ["prvi", "zadnji"]
+
+
 class TestIzbraniDan:
     """Kaj stran pokaže za en zapisan dan."""
 
@@ -243,6 +322,53 @@ class TestIzbraniDan:
         assert oznaka_dneva(date(2026, 9, 8)) in odgovor.text
         assert "Tega dne ni nobene slike." in odgovor.text
 
+    def test_posnetek_tocno_ob_lokalni_polnoci_pripada_temu_dnevu(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Spodnja meja je **vključna**. Brez tega testa bi `>= od` smel postati
+        # `> od` in posnetek natanko ob polnoči bi tiho izpadel iz obeh dni.
+        zapisi(motor, slike, "polnoc", taken_at=lokalno(date(2026, 9, 8), 0, 0))
+
+        tega_dne = odjemalec.get(POT, params={"dan": "2026-09-08"})
+        dan_prej = odjemalec.get(POT, params={"dan": "2026-09-07"})
+
+        assert sidro("polnoc") in tega_dne.text
+        assert sidro("polnoc") not in dan_prej.text
+
+    def test_posnetek_ob_naslednji_polnoci_pripada_naslednjemu_dnevu(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Zgornja meja je **izključna**. Brez tega testa bi `< do` smel postati
+        # `<= do` in posnetek natanko ob polnoči bi štel v dva dneva hkrati —
+        # natanko to, kar `dnevi_od_do` trdi, da preprečuje.
+        zapisi(motor, slike, "polnoc", taken_at=lokalno(date(2026, 9, 9), 0, 0))
+
+        dan_prej = odjemalec.get(POT, params={"dan": "2026-09-08"})
+        tega_dne = odjemalec.get(POT, params={"dan": "2026-09-09"})
+
+        assert sidro("polnoc") not in dan_prej.text
+        assert sidro("polnoc") in tega_dne.text
+
+    def test_slika_izven_mape_s_slikami_se_ne_izrise(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, tmp_path: Path
+    ) -> None:
+        # Ista meja kot pri streženju slike: za datoteko izven `images_dir`
+        # velja isto kot za manjkajočo, sicer bi predloga narisala `<img>`,
+        # pot `/image` pa bi ga zavrnila.
+        tuja = tmp_path / "tuja.jpg"
+        tuja.write_bytes(b"slika")
+        zapisi(motor, slike, "a-1", taken_at=datetime(2026, 9, 8, 6, 0, tzinfo=UTC))
+        with Session(motor) as seja:
+            material = seja.get(Material, "a-1")
+            assert material is not None
+            material.image_path = str(tuja)
+            seja.commit()
+
+        odgovor = odjemalec.get(POT, params={"dan": "2026-09-08"})
+
+        assert "slike na disku ni" in odgovor.text
+        assert 'src="/admin/materials/a-1/image"' not in odgovor.text
+
     def test_meja_dneva_je_lokalna_polnoc(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
@@ -292,6 +418,18 @@ class TestVrstniRed:
         # vrne kodo samo, in naslov „XYZ — XYZ" bi bil videti kot okvara.
         assert "XYZ — XYZ" not in besedilo
         assert "MAT — Matematika" in besedilo
+
+    def test_neznane_kode_so_med_sabo_po_abecedi(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        kdaj = datetime(2026, 9, 8, 6, 0, tzinfo=UTC)
+        # Vstavljeni v obratnem vrstnem redu, da abecede ne podpre vhod sam.
+        zapisi(motor, slike, "a-1", subject="XYZ", taken_at=kdaj)
+        zapisi(motor, slike, "a-2", subject="ABC", taken_at=kdaj)
+
+        besedilo = odjemalec.get(POT, params={"dan": "2026-09-08"}).text
+
+        assert besedilo.index("ABC") < besedilo.index("XYZ")
 
     def test_predmet_brez_slik_tega_dne_se_ne_izpise(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -358,12 +496,16 @@ class TestGumbi:
         assert sidro("danasnja") in besedilo
         assert sidro("vcerajsnja") not in besedilo
 
-    def test_vceraj_pelje_na_vcerajsnji_dan(self, odjemalec: TestClient) -> None:
+    def test_vsi_trije_gumbi_so_na_strani(self, odjemalec: TestClient) -> None:
         vceraj = danes() - timedelta(days=1)
 
         besedilo = odjemalec.get(POT).text
 
+        # Kriterij imenuje vse tri; brez teh trditev je katerega koli mogoče
+        # izbrisati, ne da bi zbirka to opazila.
+        assert '<a class="gumb gumb-obdelava" href="/admin/days">Danes</a>' in besedilo
         assert f'href="/admin/days?dan={vceraj.isoformat()}"' in besedilo
+        assert 'href="/admin/days?obdobje=teden"' in besedilo
 
     def test_teden_zajame_sedem_dni_in_ne_osem(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -376,6 +518,24 @@ class TestGumbi:
 
         assert sidro("znotraj") in besedilo
         assert sidro("zunaj") not in besedilo
+
+    def test_teden_pove_svoj_obseg(self, odjemalec: TestClient) -> None:
+        zdaj = danes()
+
+        besedilo = odjemalec.get(POT, params={"obdobje": "teden"}).text
+
+        # Edino mesto, kjer stran pove, kje se teden začne in konča.
+        prvi = oznaka_dneva(zdaj - timedelta(days=DNI_V_TEDNU - 1))
+        assert f"od {prvi} do {oznaka_dneva(zdaj)}" in besedilo
+
+    def test_teden_s_praznim_dnevom_ni_napaka(self, odjemalec: TestClient) -> None:
+        # Prazna vrednost je privzetek in ne ročno vtipkana napaka, zato tu
+        # ni 400 — za razliko od `?obdobje=teden&dan=2026-09-01`. Zapisano kot
+        # test, da je to odločitev in ne naključje.
+        odgovor = odjemalec.get(POT, params={"obdobje": "teden", "dan": ""})
+
+        assert odgovor.status_code == 200
+        assert oznaka_dneva(danes()) in odgovor.text
 
     def test_teden_izpise_vse_dni_tudi_prazne(
         self, odjemalec: TestClient, motor: Engine, slike: Path
