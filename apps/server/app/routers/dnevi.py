@@ -208,7 +208,11 @@ def razvrsti_po_dnevih(
         predmeti = [
             {
                 "koda": koda,
-                "oznaka": oznaka_predmeta(koda),
+                # `None` za kodo, ki je ni na seznamu desetih: `oznaka_predmeta`
+                # takrat vrne kodo samo in naslov bi se bral „XYZ — XYZ".
+                # Koda ostane vidna, kot zahteva odločitev 3 v
+                # `docs/plan/V1-R04.md` — podvojena pač ni.
+                "oznaka": oznaka_predmeta(koda) if oznaka_predmeta(koda) != koda else None,
                 "koliko_opis": stevilo_z_besedo(len(skupine[koda]), SLIKE),
                 "slike": [_pogled_slike(snov, images_dir) for snov in skupine[koda]],
             }

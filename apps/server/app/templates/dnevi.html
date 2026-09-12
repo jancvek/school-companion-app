@@ -48,7 +48,7 @@
              sedemdeset večinoma praznih vrstic. Kaj tisti dan manjka, ve
              lastnik sam (`ADR-023`). #}
           <h3>
-            {{ predmet.koda }} — {{ predmet.oznaka }}
+            {{ predmet.koda }}{% if predmet.oznaka %} — {{ predmet.oznaka }}{% endif %}
             <span>{{ predmet.koliko_opis }}</span>
           </h3>
           <ul class="mreza">

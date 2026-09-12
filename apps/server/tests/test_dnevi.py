@@ -288,6 +288,10 @@ class TestVrstniRed:
         assert "XYZ" in besedilo
         assert sidro("a-2") in besedilo
         assert besedilo.index("MAT") < besedilo.index("XYZ")
+        # Koda je vidna, ni pa podvojena: `oznaka_predmeta` za neznano kodo
+        # vrne kodo samo, in naslov „XYZ — XYZ" bi bil videti kot okvara.
+        assert "XYZ — XYZ" not in besedilo
+        assert "MAT — Matematika" in besedilo
 
     def test_predmet_brez_slik_tega_dne_se_ne_izpise(
         self, odjemalec: TestClient, motor: Engine, slike: Path
