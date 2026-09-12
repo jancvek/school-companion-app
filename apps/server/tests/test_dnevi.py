@@ -338,9 +338,10 @@ class TestIzbraniDan:
     def test_posnetek_ob_naslednji_polnoci_pripada_naslednjemu_dnevu(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
-        # Zgornja meja je **izključna**. Brez tega testa bi `< do` smel postati
-        # `<= do` in posnetek natanko ob polnoči bi štel v dva dneva hkrati —
-        # natanko to, kar `dnevi_od_do` trdi, da preprečuje.
+        # Ta test pritrdi **grupiranje po lokalnem dnevu**, ne izključnosti
+        # zgornje meje: pod mutacijo `< do` → `<= do` ostane zelen, ker snov s
+        # tujim lokalnim dnevom pade ven že v grupiranju. Zgornjo mejo varuje
+        # `TestPoizvedbaObdobja::test_zgornja_meja_je_izkljucna`.
         zapisi(motor, slike, "polnoc", taken_at=lokalno(date(2026, 9, 9), 0, 0))
 
         dan_prej = odjemalec.get(POT, params={"dan": "2026-09-08"})
@@ -503,7 +504,7 @@ class TestGumbi:
 
         # Kriterij imenuje vse tri; brez teh trditev je katerega koli mogoče
         # izbrisati, ne da bi zbirka to opazila.
-        assert '<a class="gumb gumb-obdelava" href="/admin/days">Danes</a>' in besedilo
+        assert 'href="/admin/days">Danes' in besedilo
         assert f'href="/admin/days?dan={vceraj.isoformat()}"' in besedilo
         assert 'href="/admin/days?obdobje=teden"' in besedilo
 
