@@ -14,7 +14,7 @@ računanje na pamet — in prav ura posnetka je podatek, po katerem operater
 sliko prepozna.
 """
 
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
@@ -63,20 +63,37 @@ def v_domacem(trenutek: datetime) -> datetime:
     return trenutek.astimezone(pas())
 
 
-def datum(trenutek: datetime) -> str:
-    """Samo datum, v berljivem lokalnem zapisu (`9. 9. 2026`).
+def datum_dneva(dan: date) -> str:
+    """Koledarski dan v berljivem zapisu (`9. 9. 2026`).
 
     Oblika je sestavljena ročno in ne s `strftime`: oznaki `%-d` in `%-m` (dan
     in mesec brez vodilne ničle) na Windows ne obstajata, testi pa tečejo tam.
+
+    Sprejme `date` in ne `datetime`, ker pregled po dnevih (V2-R07) izpiše tudi
+    dan, ki nobenega posnetka nima — takrat trenutka, ki bi ga bilo mogoče
+    pretvoriti, ni.
     """
-    lokalni = v_domacem(trenutek)
-    return f"{lokalni.day}. {lokalni.month}. {lokalni.year}"
+    return f"{dan.day}. {dan.month}. {dan.year}"
+
+
+def datum(trenutek: datetime) -> str:
+    """Samo datum trenutka iz baze, v berljivem lokalnem zapisu."""
+    return datum_dneva(v_domacem(trenutek).date())
 
 
 def cas(trenutek: datetime) -> str:
     """Trenutek iz baze v berljiv lokalni zapis, z uro."""
     lokalni = v_domacem(trenutek)
     return f"{datum(trenutek)} ob {lokalni:%H:%M}"
+
+
+def ura(trenutek: datetime) -> str:
+    """Samo ura in minuta v domačem pasu (`08:05`).
+
+    Za pregled po dnevih (V2-R07): datum nosi naslov skupine, ob sliki stoji
+    samo ura in ponovljen datum bi bil šum.
+    """
+    return f"{v_domacem(trenutek):%H:%M}"
 
 
 def cas_ali_prazno(trenutek: datetime | None) -> str | None:
@@ -199,3 +216,29 @@ def dan_od_do(trenutek: datetime) -> tuple[datetime, datetime]:
     dan = v_domacem(trenutek).date()
     zacetek = datetime.combine(dan, time.min, tzinfo=pas())
     return zacetek.astimezone(UTC), (zacetek + timedelta(days=1)).astimezone(UTC)
+
+
+def danes() -> date:
+    """Današnji koledarski dan v domačem pasu.
+
+    Ne `date.today()`: ta vrne dan po uri **stroja**, in stroj je v vsebniku
+    nastavljen na UTC. Med lokalno polnočjo in dvema bi bil to še prejšnji dan
+    in gumb „Danes" bi kazal včerajšnjo snov (V2-R07).
+    """
+    return datetime.now(pas()).date()
+
+
+def dnevi_od_do(prvi: date, zadnji: date) -> tuple[datetime, datetime]:
+    """Meji obdobja od dneva `prvi` do **vključno** dneva `zadnji`, v UTC.
+
+    Polodprto `[od, do)` in lokalno, iz istih dveh razlogov kot `dan_od_do`:
+    zaprt interval bi posnetek točno ob polnoči štel dvakrat, meja v UTC pa bi
+    poleti posnetek med 22:00 in 24:00 UTC pripisala prejšnjemu dnevu.
+
+    `dan_od_do` ostaja svoja funkcija in ne ovoj nad to: tam je vhod trenutek
+    posnetka (sestavljalnik kvizov ne ve, katerega dne je), tu pa koledarski
+    dan, ki ga je izbral operater in ki nobenega posnetka ni nujno imel.
+    """
+    zacetek = datetime.combine(prvi, time.min, tzinfo=pas())
+    konec = datetime.combine(zadnji + timedelta(days=1), time.min, tzinfo=pas())
+    return zacetek.astimezone(UTC), konec.astimezone(UTC)

@@ -16,7 +16,7 @@ from sqlalchemy import Engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.db import naredi_motor, naredi_tovarno_sej
-from app.routers import admin, kvizi, materials, resevanje, statistika
+from app.routers import admin, dnevi, kvizi, materials, resevanje, statistika
 from app.schemas import Zivost
 from app.security import ApiKeyMiddleware
 from app.settings import Settings
@@ -129,6 +129,10 @@ def create_app(
     # obstoječo potjo se ne prekriva. Pod `/admin` in torej brez ključa:
     # vidna je samo na operaterski strani (`docs/odlocitve/ADR-021` F).
     app.include_router(statistika.router)
+    # Pregled slik po obdobju in predmetih (V2-R07), pod `/admin/days`. Z
+    # nobeno obstoječo potjo se ne prekriva in samo bere; javnost znotraj
+    # omrežja je posledica `ADR-006`, zapisana v `docs/odlocitve/ADR-023`.
+    app.include_router(dnevi.router)
 
     # Napake pod `/admin` naj bodo stran, ne JSON. Prestreznik se za vse
     # ostale poti umakne privzetemu — glej `admin.prestrezi_napako`.

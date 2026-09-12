@@ -1,0 +1,82 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}Pregled po dnevih{% endblock %}
+
+{% block vsebina %}
+  <h1>Pregled po dnevih</h1>
+  <p class="pod">
+    {{ obdobje_opis }} &middot; {{ skupaj_opis }}.
+    {# „Nazadnje prejeto" stoji tu in ne spodaj: prazen dan ne sme biti
+       zamenjan za neopravljeno delo, kadar telefon še ni prenesel. Šteje
+       vsako prejeto sliko, tudi arhivirano (`docs/odlocitve/ADR-023`). #}
+    {% if prejeto_opis %}
+      Strežnik je nazadnje prejel sliko {{ prejeto_opis }}.
+    {% else %}
+      Strežnik še ni prejel nobene slike.
+    {% endif %}
+  </p>
+
+  {# Gumbi so navadne povezave in izbirnik dneva je obrazec `GET`: stran
+     ničesar ne spremeni, zato mora biti dosegljiva z osvežitvijo in iz
+     zgodovine brskalnika. Skrito polje `obdobje=dan` poskrbi, da iz vmesnika
+     nikoli ne nastane kombinacija „teden in poljuben dan", ki je 400. #}
+  <div class="vstopi">
+    <a class="gumb gumb-obdelava" href="/admin/days">Danes</a>
+    <a class="gumb gumb-obdelava" href="/admin/days?dan={{ vceraj }}">Včeraj</a>
+    <a class="gumb gumb-obdelava" href="/admin/days?obdobje=teden">Ta teden</a>
+    <form method="get" action="/admin/days" class="vstopi">
+      <input type="hidden" name="obdobje" value="dan">
+      <label>
+        Dan:
+        <input type="date" name="dan" value="{{ izbrani_dan }}" class="ime">
+      </label>
+      <button class="gumb gumb-obdelava" type="submit">Pokaži</button>
+    </form>
+  </div>
+  <p class="drobno">
+    „Ta teden" pomeni zadnjih {{ dni_v_tednu }} dni, ki se končajo z današnjim.
+    Prikazane so samo slike, ki niso v arhivu.
+  </p>
+
+  {% for dan in dnevi %}
+    <section class="skupina">
+      <h2>{{ dan.datum }}</h2>
+      {% if dan.predmeti %}
+        <p class="drobno">{{ dan.koliko_opis }}</p>
+        {% for predmet in dan.predmeti %}
+          {# Predmet brez slik tega dne se ne izpiše: pri tednu bi bilo to
+             sedemdeset večinoma praznih vrstic. Kaj tisti dan manjka, ve
+             lastnik sam (`ADR-023`). #}
+          <h3>
+            {{ predmet.koda }}{% if predmet.oznaka %} — {{ predmet.oznaka }}{% endif %}
+            <span>{{ predmet.koliko_opis }}</span>
+          </h3>
+          <ul class="mreza">
+            {% for slika in predmet.slike %}
+              <li>
+                <a href="/admin/materials/{{ slika.id }}">
+                  {% if slika.ima_sliko %}
+                    {# `loading="lazy"` je edino, kar teden drži znosen:
+                       sličic ni in tu se ne uvajajo, pomanjšava je v CSS. #}
+                    <img src="/admin/materials/{{ slika.id }}/image" alt="" loading="lazy">
+                  {% else %}
+                    <span class="brez-slike">slike na disku ni</span>
+                  {% endif %}
+                  {# Ob sliki samo ura: datum nosi naslov skupine, stanje
+                     obdelave pa stran s podrobnostmi, kamor klik pelje. #}
+                  <span class="opis"><span class="cas">{{ slika.ura }}</span></span>
+                </a>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endfor %}
+      {% else %}
+        {# Prazen dan se izpiše in ne izpade: prav odsotnost slik je odgovor
+           na vprašanje, ali je bila snov tisti dan poslikana. #}
+        <p class="drobno">Tega dne ni nobene slike.</p>
+      {% endif %}
+    </section>
+  {% endfor %}
+
+  <a class="nazaj" href="/admin">← Nazaj na predmete</a>
+{% endblock %}

@@ -21,7 +21,7 @@
 | Modul | Odgovornost | Datoteke |
 |---|---|---|
 | `apps/mobile` | Kamera, izbira predmeta, lokalna baza, zgodovina, upload worker, brisanje arhiviranih snovi, reševanje kvizov | `apps/mobile/` (od V1-R01; upload worker od V1-R02; brisanje od V1-R07; kvizi od V2-R02) |
-| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju, arhiv, sestavljalnik kvizov, poskusi reševanja, rezultat in tisk, statistika čez kvize | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03; arhiv od V1-R07; kvizi od V2-R01; poskusi od V2-R02; rezultat od V2-R03; statistika od V2-R04) |
+| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju, arhiv, sestavljalnik kvizov, poskusi reševanja, rezultat in tisk, statistika čez kvize, pregled slik po dnevih | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03; arhiv od V1-R07; kvizi od V2-R01; poskusi od V2-R02; rezultat od V2-R03; statistika od V2-R04; pregled po dnevih od V2-R07) |
 
 Ločena mapi namenoma ne delita orodij za monorepo (npr. Turborepo) — gre za
 dva jezika (TypeScript / Python) brez skupne kode, zato vsaka živi s svojim
@@ -73,6 +73,7 @@ logika testljiva brez naprave.
 | `app/routers/kvizi.py` | sestavljalnik kvizov pod `/admin/quizzes` (V2-R01); rezultat rešenega kviza in stran za tisk (V2-R03) |
 | `app/routers/resevanje.py` | poti telefona za kvize: `GET /quizzes/pending`, `POST /quiz-attempts` (V2-R02) |
 | `app/routers/statistika.py` | statistika čez kvize pod `/admin/statistics` (V2-R04) |
+| `app/routers/dnevi.py` | pregled slik po obdobju in predmetih pod `/admin/days` (V2-R07) |
 | `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository` in `StatistikaRepository` (V2-R04, samo bere) — edina pot do baze |
 | `app/models.py` | tabele `materials`, `questions`, `quizzes`, `quiz_items` in `question_attempts` |
 | `app/storage.py` | zapis, meja mape in brisanje slik na disku |
@@ -82,8 +83,8 @@ logika testljiva brez naprave.
 | `app/statistika.py` | pravila štetja statistike: razporeditev, izpeljava pravilnosti, razvrstitev, meseci (V2-R04). Brez FastAPI in brez seje |
 | `app/settings.py` | nastavitve iz okolja |
 | `app/subjects.py` | predmeti, slovenske oznake stanj in oznake ocen (`OZNAKE_OCEN`, tu od V2-R04) |
-| `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03); šolsko leto in meseci (V2-R04) |
-| `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01) |
+| `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03); šolsko leto in meseci (V2-R04); današnji dan, meje poljubnega obdobja in ura brez datuma (V2-R07) |
+| `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01) ter 400 (V2-R07) |
 | `app/besedilo.py` | slovenske oblike števil (dvojina) |
 
 `app/casi.py`, `app/strani.py` in `app/besedilo.py` niso nove plasti, ampak
@@ -523,6 +524,7 @@ Strežniško izrisan HTML za lastnika sistema (`docs/00-namen.md`, vloga
 | `/admin/quizzes/{id}/cancel` | POST | prekliče kviz, preusmeri (303) (V2-R01) |
 | `/admin/statistics` | GET | statistika čez kvize po predmetih; okno `?leto=2026` ali `?leto=vse` (V2-R04) |
 | `/admin/statistics/subjects/{koda}` | GET | statistika predmeta: po mesecih, snovi, vprašanja od najtežjega (V2-R04) |
+| `/admin/days` | GET | slike dneva ali zadnjih sedmih dni, po dnevu in predmetu; `?dan=YYYY-MM-DD`, `?obdobje=dan\|teden` (V2-R07) |
 
 Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Prijave ni** —
 meja je Tailscale; posledice, vključno s CSRF, so v `docs/odlocitve/ADR-006`.
@@ -635,6 +637,50 @@ so predmeti našteti po urniku in ne po abecedi.
 Števila v besedilu so zapisana s slovensko **dvojino** („2 vprašanji", ne
 „2 vprašanj"). To zna `stevilo_z_besedo` iz `app/besedilo.py`; velja za vse
 strani, tudi starejše. Glej razdelek „Slovenske oblike števil" spodaj.
+
+## Pregled po dnevih (V2-R07)
+
+`GET /admin/days` pokaže **nearhivirane** slike obdobja, grupirane po lokalnem
+koledarskem dnevu (padajoče) in znotraj dneva po vrstnem redu `PREDMETI`;
+slike znotraj predmeta so **naraščajoče** po `taken_at`, ker so zaporedni
+posnetki strani iste snovi (`ADR-003`). Predmet brez slik tistega dne se ne
+izpiše, **dan brez slik pa se izpiše prazen** — prav odsotnost slik je odgovor
+na vprašanje, ali je bila snov poslikana (`ADR-023`).
+
+Obdobje je en dan (`?dan=YYYY-MM-DD`, privzeto današnji) ali teden
+(`?obdobje=teden`), pri čemer je **teden zadnjih sedem dni, ki se končajo z
+današnjim**, in ne koledarski teden. Sidro je današnji dan, zato gumb ne nosi
+datuma in je `?obdobje=teden&dan=…` zavrnjen kot 400: parameter, ki na obseg ne
+vpliva, ne sme izgledati, kot da nanj vpliva.
+
+**Neveljaven vhod je 400 in ne tih padec na privzetek.** Tu se ta pot namenoma
+razlikuje od statistike, kjer nerazberljiv `?leto=` pade na tekoče šolsko leto:
+tam je okno pripomoček nad istimi podatki, tu je datum celoten pomen strani.
+Razlog je zapisan v `ADR-023`, da razlika kdaj ne bo odkrita kot nedoslednost.
+
+**Meje obdobja so polodprte in lokalne** (`ADR-016` B). Izračuna jih
+`app/casi.py:dnevi_od_do` in repozitoriju poda kot par UTC trenutkov;
+grupiranje po lokalnem dnevu je v Pythonu, ker izraz za lokalni dan v SQL ni
+prenosljiv med SQLite (testi) in Postgresom (produkcija).
+
+**Grupiranje je drugi filter, in to je vidno v testih.** Snov, ki bi iz SQL
+prišla čez zgornjo mejo, pade ven, ker njenega lokalnega dneva na seznamu dni
+ni — stran je zato pravilna tudi ob meji `<= do`. Meje se zato presojajo nad
+`MaterialsRepository.seznam_po_obdobju` in ne nad izrisom. Odkrito z
+mutacijskim preizkusom v V2-R07.
+
+`danes()` bere koledar v domačem pasu in ne strojne ure: v vsebniku teče UTC in
+med lokalno polnočjo in dvema bi `date.today()` vrnil še prejšnji dan. Razlike
+ne pokaže noben test nad stranjo, ker je stroj lastnika v istem pasu —
+pritrjena je z namestnikom `datetime` (`TestDanes`).
+
+V glavi strani piše, kdaj je strežnik nazadnje prejel sliko
+(`max(materials.received_at)` čez **vse** zapise, tudi arhivirane). Brez tega
+je prazen dan videti enako kot dan, ko telefon še ni prenašal.
+
+Sličic ni in se s to zahtevo ne uvajajo: uporabi se ista pot do slike kot
+drugje, z `loading="lazy"` in pomanjšavo v CSS. Teden je zato zgornja meja
+obsega.
 
 ## Slovenske oblike števil
 

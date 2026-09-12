@@ -146,6 +146,41 @@ class MaterialsRepository:
             )
         )
 
+    def seznam_po_obdobju(self, od: datetime, do: datetime) -> list[Material]:
+        """Nearhivirane slike, posnete v polodprtem intervalu `[od, do)`.
+
+        Čez vse predmete in **naraščajoče** po `taken_at` — obratno kot
+        `seznam_po_predmetu`. Zaporedni posnetki so strani iste snovi
+        (`docs/odlocitve/ADR-003`), zato jih pregled po dnevih (V2-R07) bere v
+        vrstnem redu, v katerem so nastali.
+
+        Meji dobi kot par trenutkov v UTC; o časovnih pasovih in o tem, kateri
+        lokalni dan je to, repozitorij ne ve nič. Grupiranje po lokalnem dnevu
+        je zato v Pythonu — izraz za lokalni dan v SQL ni prenosljiv med SQLite
+        (testi) in Postgresom (produkcija), `docs/odlocitve/ADR-023`.
+        """
+        return list(
+            self.session.scalars(
+                select(Material)
+                .where(
+                    Material.archived_at.is_(None),
+                    Material.taken_at >= od,
+                    Material.taken_at < do,
+                )
+                .order_by(Material.taken_at)
+            )
+        )
+
+    def nazadnje_prejeto(self) -> datetime | None:
+        """Kdaj je strežnik nazadnje prevzel sliko; `None`, če še nikoli.
+
+        Šteje **vse** zapise, tudi arhivirane: vprašanje je, ali je telefon
+        slike prenesel, ne ali so še v pregledu. Brez tega bi bil prazen dan
+        videti enako kot dan, ko telefon še ni prenašal (V2-R07,
+        `docs/odlocitve/ADR-023`).
+        """
+        return self.session.scalar(select(func.max(Material.received_at)))
+
     # --- Obdelava (V1-R03) ---
 
     def _posodobi(self, stavek: Update) -> int:
