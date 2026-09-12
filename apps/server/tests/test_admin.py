@@ -1191,6 +1191,8 @@ class TestPakiranje:
             "statistika.html",
             "statistika-predmet.html",
             "_statistika.html",
+            # V2-R07.
+            "dnevi.html",
         }
 
 

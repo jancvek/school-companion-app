@@ -1,4 +1,4 @@
-"""Skupna plomba operaterskih strani: izrisovalnik in dve strani z napako.
+"""Skupna plomba operaterskih strani: izrisovalnik in tri strani z napako.
 
 Do V2-R01 je vse to živelo v `app/routers/admin.py`. Ko je isto potreboval še
 usmerjevalnik kvizov, je bila izbira med krožnim uvozom in svojim modulom —
@@ -47,4 +47,21 @@ def ni_dovoljeno(predloge: Jinja2Templates, request: Request, sporocilo: str) ->
         "najdena-ni.html",
         {"naslov": "Tega še ne gre", "sporocilo": sporocilo},
         status_code=409,
+    )
+
+
+def neveljavna_zahteva(predloge: Jinja2Templates, request: Request, sporocilo: str) -> Response:
+    """400 kot stran, ne kot JSON.
+
+    Ni 404: pot obstaja, narobe je vrednost v naslovu. In ni tih padec na
+    privzetek, kot ga pri `?leto=` naredi statistika: pri pregledu po dnevih je
+    datum celoten pomen strani, zato bi tiha zamenjava z današnjim dnem
+    pomenila, da operater gleda današnje slike in misli, da gleda torkove
+    (`docs/odlocitve/ADR-023`).
+    """
+    return predloge.TemplateResponse(
+        request,
+        "najdena-ni.html",
+        {"naslov": "Tega naslova ne razumem", "sporocilo": sporocilo},
+        status_code=400,
     )

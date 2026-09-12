@@ -197,6 +197,17 @@
     .pas-2 { background: #c9b458; }
     .pas-3 { background: var(--poudarek); }
     .zaporedje span { white-space: nowrap; }
+    /* --- Pregled po dnevih (V2-R07) --- */
+    /* Naslov predmeta znotraj dneva. Manjši od naslova dneva, ker je dan
+       enota, ki jo lastnik primerja z urnikom v glavi. */
+    .skupina h3 { font-size: 0.95rem; margin: 1.2rem 0 0.5rem; }
+    .skupina h3 span { color: var(--zamolklo); font-weight: 400; font-size: 0.85rem; }
+    .skupina .drobno { margin: 0 0 0.75rem; }
+    .skupina .mreza { margin-bottom: 1rem; }
+    /* Izbirnik dneva je obrazec znotraj vrstice z gumbi; brez tega bi se
+       njegova notranja poravnava borila z zunanjim `flex`. */
+    .vstopi form { display: flex; gap: 0.75rem; align-items: center; margin: 0; }
+    .vstopi input[type="date"] { width: auto; }
     /* Papir: brez glave, obrazca in povezav; ključ na svojem listu. */
     @media print {
       header, .ne-tiskaj { display: none; }
