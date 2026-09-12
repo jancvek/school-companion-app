@@ -1513,8 +1513,12 @@ class TestPovecava:
             male = vir.lower()
             assert male.count("<script") == 1
             assert "<script>" in male  # brez atributov, torej brez `src`
-            for vzorec in TestBrezJavaScripta.VZORCI[1:]:
-                assert vzorec not in male
+            assert "javascript:" not in male
+            # Vsak `on…=` in ne le štirje iz `TestBrezJavaScripta.VZORCI`:
+            # izvzetje od tistega testa ne sme odpreti `onkeydown=` ali
+            # `onfocus=`, ki ju ta stran s skripto prav lahko skuša uporabiti.
+            # Odkril pregled v fazi 7.
+            assert re.search(r"\son[a-z]+\s*=", male) is None
             telo = skripta(male)
             for prepovedano in ("fetch(", "xmlhttprequest", "sendbeacon", ".submit(", "<form"):
                 assert prepovedano not in telo
