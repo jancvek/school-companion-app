@@ -21,7 +21,7 @@
 | Modul | Odgovornost | Datoteke |
 |---|---|---|
 | `apps/mobile` | Kamera, izbira predmeta, lokalna baza, zgodovina, upload worker, brisanje arhiviranih snovi, reševanje kvizov | `apps/mobile/` (od V1-R01; upload worker od V1-R02; brisanje od V1-R07; kvizi od V2-R02) |
-| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju, arhiv, sestavljalnik kvizov, poskusi reševanja, rezultat in tisk, statistika čez kvize, pregled slik po dnevih | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03; arhiv od V1-R07; kvizi od V2-R01; poskusi od V2-R02; rezultat od V2-R03; statistika od V2-R04; pregled po dnevih od V2-R07) |
+| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju, arhiv, sestavljalnik kvizov, poskusi reševanja, rezultat in tisk, statistika čez kvize, pregled slik po dnevih, povečan prikaz slike | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03; arhiv od V1-R07; kvizi od V2-R01; poskusi od V2-R02; rezultat od V2-R03; statistika od V2-R04; pregled po dnevih od V2-R07; povečan prikaz od V2-R08) |
 
 Ločena mapi namenoma ne delita orodij za monorepo (npr. Turborepo) — gre za
 dva jezika (TypeScript / Python) brez skupne kode, zato vsaka živi s svojim
@@ -499,8 +499,12 @@ klica. Glej `docs/odlocitve/ADR-009`.
 ## Operaterska stran (`/admin`)
 
 Strežniško izrisan HTML za lastnika sistema (`docs/00-namen.md`, vloga
-„spremlja delovanje"). Brez JavaScripta, brez gradnje frontenda, brez `npm` v
-`apps/server`. Nastala v V1-R04; V1-R03 jo je razširila s prikazom obdelave.
+„spremlja delovanje"). Brez gradnje frontenda in brez `npm` v `apps/server`.
+Nastala v V1-R04; V1-R03 jo je razširila s prikazom obdelave.
+
+**Skripta je izjema, ne privzetek** (`ADR-024`): edina je na strani s
+podrobnostmi snovi (V2-R08), vgrajena v `snov.html`. Vse ostale strani so brez
+nje in to preverja `TestBrezJavaScripta`, ki izvzame samo `snov.html`.
 
 | Pot | Metoda | Kaj |
 |---|---|---|
@@ -681,6 +685,46 @@ je prazen dan videti enako kot dan, ko telefon še ni prenašal.
 Sličic ni in se s to zahtevo ne uvajajo: uporabi se ista pot do slike kot
 drugje, z `loading="lazy"` in pomanjšavo v CSS. Teden je zato zgornja meja
 obsega.
+
+## Povečan prikaz slike (V2-R08)
+
+Na `/admin/materials/{id}` je slika povezava na `/image`. Skripta klik
+prestreže in odpre prikaz čez celo okno z isto datoteko, brez omejitve
+`max-height: 78vh` (prikaz stoji zunaj `.snov`). Snov brez datoteke prikaza,
+povezave in skripte nima.
+
+**Meje so iz `ADR-024`** in veljajo za vsako prihodnjo skripto pod `/admin`:
+vgrajena v predlogo, brez zunanjega vira, stran dela brez nje, in ničesar ne
+pošilja ne sestavlja. Zato je prikaz v izrisu z atributom `hidden` in vse
+povezave v njem izriše strežnik — sosede, prenos in ime datoteke. Slog mora
+`hidden` vrniti izrecno (`.prekritje[hidden] { display: none; }`), ker ga
+`display: grid` sicer prevlada.
+
+**Puščici peljeta na podrobnosti soseda** s sidrom `#povecano`, ki prikaz ob
+prihodu spet odpre; skripta ga ob zaprtju odstrani s `history.replaceState`.
+Slika se v prikazu ne zamenja, zato se prenese samo tista, ki jo operater
+gleda. Smer je smer mreže na strani predmeta: levo novejša, desno starejša.
+Na robu je puščica `<span>` in ne povezava; ovijanja ni. Arhivirana snov
+puščic nima, ker je v naboru ni.
+
+**Nabor sosedov je nabor strani predmeta**: `MaterialsRepository` ima zanj en
+filter (`_nabor_predmeta`) in en vrstni red (`_VRSTNI_RED_PREDMETA`:
+`taken_at DESC, id DESC`), ki ju bereta `seznam_po_predmetu` in
+`sosedi_v_predmetu`. Drugi ključ je nujen: dve sliki z istim časom bi imeli
+nedoločen vrstni red in listanje bi eno preskočilo. `sosedi_v_predmetu` bere
+samo stolpec `id` — ena poizvedba na stran, pri arhivirani snovi nobena.
+
+Ime prenosa je `MAT_2026-09-04_09-30.jpg` (koda, lokalni čas na minuto; znaki
+kode zunaj `[A-Za-z0-9-]` so `_`) in gre v atribut `download`. Pot `/image` in
+njen odgovor sta ostala nespremenjena.
+
+### Znane omejitve
+
+- **Vedenja prikaza testi ne dokažejo** — samo zgradbo (skrit prikaz, povezave,
+  ime, meje skripte). Odprtje, zapiranje, zaklep drsenja in tipke se preverijo
+  v brskalniku.
+- **Fokus v prikazu ni ujet**: tabulator ga lahko odnese na stran za njim.
+- **Vsaka puščica je nova stran** in nov vnos v zgodovini brskalnika.
 
 ## Slovenske oblike števil
 

@@ -11,6 +11,7 @@ vrne v vrsto; ker to zavrže prejšnji rezultat, je `POST` in ne povezava
 (`docs/odlocitve/ADR-009`).
 """
 
+import re
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -23,7 +24,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from app.besedilo import SLIKE, stevilo_z_besedo
-from app.casi import cas, cas_ali_prazno
+from app.casi import cas, cas_ali_prazno, v_domacem
 from app.db import KviziRepository, MaterialsRepository
 from app.dependencies import daj_nastavitve, daj_repozitorij, daj_repozitorij_kvizov
 from app.models import STATUS_V_OBDELAVI, Material
@@ -152,6 +153,57 @@ def _pogled_podrobno(material: Material, images_dir: Path) -> dict[str, Any]:
         }
     )
     return pogled
+
+
+#: Znaki kode predmeta, ki v imenu prenesene datoteke ostanejo; vse drugo je `_`.
+#:
+#: Koda sme vsebovati karkoli (`POST /materials` jo omejuje samo po dolžini),
+#: poševnica ali dvopičje v imenu datoteke pa bi brskalnik ime zavrgel ali
+#: prerezal.
+_NEVARNO_V_IMENU = re.compile(r"[^A-Za-z0-9-]")
+
+#: Sidro, ki na strani s podrobnostmi ob prihodu odpre povečan prikaz (V2-R08).
+OZNAKA_POVECAVE = "#povecano"
+
+
+def _ime_prenosa(material: Material) -> str:
+    """Predlagano ime prenesene slike: `MAT_2026-09-04_09-30.jpg`.
+
+    Koda in čas posnetka v domačem pasu, na minuto — to operater na posnetku
+    prepozna. Identifikatorja ni: dvoumnost med dvema posnetkoma iste minute
+    je manjša škoda kot neberljivo ime. Sestavi ga strežnik in ne skripta
+    (`docs/odlocitve/ADR-024`, meja 4).
+    """
+    koda = _NEVARNO_V_IMENU.sub("_", material.subject)
+    return f"{koda}_{v_domacem(material.taken_at):%Y-%m-%d_%H-%M}.jpg"
+
+
+def _povezava_povecave(material_id: str | None) -> str | None:
+    """Pot na podrobnosti soseda, ki tam spet odpre povečan prikaz."""
+    if material_id is None:
+        return None
+    return f"{PREDPONA}/materials/{material_id}{OZNAKA_POVECAVE}"
+
+
+def _pogled_povecave(
+    material: Material, repozitorij: MaterialsRepository
+) -> dict[str, Any]:
+    """Kar potrebuje povečan prikaz na strani s podrobnostmi (V2-R08).
+
+    Puščic arhivirana snov nima, ker je v naboru predmeta ni; `listanje` to
+    pove predlogi, da ji ni treba sklepati iz dveh praznih sosedov — tudi
+    edina slika predmeta ima oba prazna, a puščici ima, le neaktivni.
+    """
+    prejsnji, naslednji = repozitorij.sosedi_v_predmetu(material)
+    return {
+        # Isto sidro kot v povezavah na soseda. Iz ene konstante, sicer bi se
+        # skripta in povezave razšli po tihem in prikaz ob prihodu ne bi odprl.
+        "oznaka": OZNAKA_POVECAVE,
+        "ime_prenosa": _ime_prenosa(material),
+        "listanje": material.archived_at is None,
+        "prejsnja": _povezava_povecave(prejsnji),
+        "naslednja": _povezava_povecave(naslednji),
+    }
 
 
 #: Pojasnilo, zakaj dokončnega brisanja (še) ni.
@@ -292,8 +344,15 @@ def snov(
     if material is None:
         return ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
+    pogled = _pogled_podrobno(material, nastavitve.images_dir)
+    # Snov brez datoteke povečanega prikaza nima, zato tudi poizvedbe po
+    # sosedih ne plača.
+    povecava = (
+        _pogled_povecave(material, repozitorij) if pogled["velikost"] is not None else None
+    )
+
     return predloge.TemplateResponse(
-        request, "snov.html", {"snov": _pogled_podrobno(material, nastavitve.images_dir)}
+        request, "snov.html", {"snov": pogled, "povecava": povecava}
     )
 
 

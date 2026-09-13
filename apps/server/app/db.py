@@ -85,6 +85,24 @@ def naredi_tovarno_sej(motor: Engine) -> sessionmaker[Session]:
     return sessionmaker(bind=motor, autoflush=False, expire_on_commit=False)
 
 
+def _nabor_predmeta(subject: str) -> tuple[ColumnElement[bool], ...]:
+    """Pogoji, ki določajo slike enega predmeta: ta predmet, brez arhiva.
+
+    Na enem mestu, ker ga bereta `seznam_po_predmetu` in `sosedi_v_predmetu`
+    (V2-R08). Povečan prikaz obljublja isti nabor kot stran predmeta, in dva
+    ločeno napisana filtra bi se nekoč razšla po tihem.
+    """
+    return (Material.subject == subject, Material.archived_at.is_(None))
+
+
+#: Vrstni red slik predmeta: najnovejša prva, ob enakem času odloči `id`.
+#:
+#: Brez drugega ključa je vrstni red dveh slik z istim `taken_at` nedoločen —
+#: na strani predmeta je to nevidno, listanje v povečanem prikazu pa bi eno od
+#: njiju preskočilo ali se med njima vrtelo (V2-R08).
+_VRSTNI_RED_PREDMETA = (Material.taken_at.desc(), Material.id.desc())
+
+
 class MaterialsRepository:
     """Operacije nad tabelo `materials`, ki jih potrebujeta V1-R02 in V1-R04."""
 
@@ -141,10 +159,39 @@ class MaterialsRepository:
         return list(
             self.session.scalars(
                 select(Material)
-                .where(Material.subject == subject, Material.archived_at.is_(None))
-                .order_by(Material.taken_at.desc())
+                .where(*_nabor_predmeta(subject))
+                .order_by(*_VRSTNI_RED_PREDMETA)
             )
         )
+
+    def sosedi_v_predmetu(self, material: Material) -> tuple[str | None, str | None]:
+        """`id` slike pred `material` in za njim v `seznam_po_predmetu`.
+
+        Za povečan prikaz (V2-R08). `None` pomeni rob nabora — ovijanja ni.
+        Arhivirane snovi v naboru ni, zato zanjo poizvedbe sploh ni.
+
+        Bere samo stolpec `id` in ne cele vrstice: `seznam_po_predmetu` bi za
+        dva identifikatorja naložil prepise in revizijsko sled celotnega
+        predmeta. Seznam je v Pythonu, ker primerjava para `(taken_at, id)` v
+        SQL ni enako zapisljiva nad SQLite (testi) in Postgresom.
+        """
+        if material.archived_at is not None:
+            return None, None
+
+        idji = list(
+            self.session.scalars(
+                select(Material.id)
+                .where(*_nabor_predmeta(material.subject))
+                .order_by(*_VRSTNI_RED_PREDMETA)
+            )
+        )
+        if material.id not in idji:
+            return None, None
+
+        mesto = idji.index(material.id)
+        prejsnji = idji[mesto - 1] if mesto > 0 else None
+        naslednji = idji[mesto + 1] if mesto + 1 < len(idji) else None
+        return prejsnji, naslednji
 
     def seznam_po_obdobju(self, od: datetime, do: datetime) -> list[Material]:
         """Nearhivirane slike, posnete v polodprtem intervalu `[od, do)`.

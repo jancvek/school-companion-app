@@ -1,8 +1,9 @@
 {# Skupno ogrodje operaterske strani.
 
    Slog je vgrajen namenoma: ločena datoteka bi zahtevala streženje statičnih
-   datotek, kar je za eno stran več postavitve, kot prihrani. JavaScripta ni
-   (odločitev 1 v `docs/plan/V1-R04.md`). #}
+   datotek, kar je za eno stran več postavitve, kot prihrani. Skripte v
+   ogrodju ni: `ADR-024` jo dovoljuje samo kot nadgradnjo posamezne strani,
+   vgrajeno v njeno predlogo (od V2-R08 samo `snov.html`). #}
 <!DOCTYPE html>
 <html lang="sl">
 <head>
@@ -208,6 +209,40 @@
        njegova notranja poravnava borila z zunanjim `flex`. */
     .vstopi form { display: flex; gap: 0.75rem; align-items: center; margin: 0; }
     .vstopi input[type="date"] { width: auto; }
+    /* --- V2-R08 --- */
+    .povecaj { display: inline-block; cursor: zoom-in; }
+    /* `display: grid` bi prevladal nad atributom `hidden`, zato ga to pravilo
+       vrne. Brez njega bi bil element viden tudi brez skripte. */
+    .prekritje {
+      position: fixed; inset: 0; z-index: 10;
+      display: grid; grid-template-columns: 4rem minmax(0, 1fr) 4rem;
+      grid-template-rows: auto minmax(0, 1fr);
+      background: rgba(0, 0, 0, 0.9);
+    }
+    .prekritje[hidden] { display: none; }
+    .prekritje-vrstica {
+      grid-column: 1 / -1; display: flex; justify-content: flex-end;
+      gap: 0.75rem; padding: 0.75rem 1rem;
+    }
+    .prekritje-gumb {
+      padding: 0.4rem 0.8rem; border: 1px solid rgba(255, 255, 255, 0.5);
+      border-radius: 6px; background: transparent; color: #fff;
+      font: inherit; text-decoration: none; cursor: pointer;
+    }
+    .prekritje-gumb:hover { background: rgba(255, 255, 255, 0.15); }
+    /* Brez `width`/`height`: slika se pomanjša na okno, čez lastno
+       ločljivost pa se ne poveča. */
+    .prekritje-sredina {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 0; padding-bottom: 1rem;
+    }
+    .prekritje-sredina img { max-width: 100%; max-height: 100%; }
+    .puscica {
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 2.5rem; text-decoration: none;
+    }
+    .puscica.neaktivna { color: rgba(255, 255, 255, 0.25); cursor: default; }
+    html.brez-drsenja { overflow: hidden; }
     /* Papir: brez glave, obrazca in povezav; ključ na svojem listu. */
     @media print {
       header, .ne-tiskaj { display: none; }

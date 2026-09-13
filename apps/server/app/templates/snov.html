@@ -10,8 +10,13 @@
 
   <div class="snov">
     <div>
-      {% if snov.velikost is not none %}
-        <img src="/admin/materials/{{ snov.id }}/image" alt="Posneta snov">
+      {% if povecava %}
+        {# Povezava na izvirnik že v izrisu: brez skripte klik odpre datoteko,
+           s skripto ga prestreže povečan prikaz (`docs/odlocitve/ADR-024`,
+           meja 3). #}
+        <a class="povecaj" href="/admin/materials/{{ snov.id }}/image" data-povecava>
+          <img src="/admin/materials/{{ snov.id }}/image" alt="Posneta snov">
+        </a>
       {% else %}
         <p class="opozorilo">
           Zapis v bazi obstaja, slike na disku pa ni.
@@ -187,8 +192,8 @@
 
   {% if snov.ima_sled %}
     {# Zloženo privzeto: to je gradivo za razhroščevanje, ne za vsakdanji
-       pregled. `details` je HTML in ne JavaScript — stran ostane brez skript
-       (kriterij V1-R04). #}
+       pregled. `details` je HTML in ne skripta — edina skripta na tej strani
+       je povečan prikaz slike, in ta je nadgradnja (`ADR-024`). #}
     <section class="izid">
       <h2>Kaj je bilo poslano in kaj vrnjeno</h2>
 
@@ -213,5 +218,110 @@
         </p>
       {% endif %}
     </section>
+  {% endif %}
+
+  {% if povecava %}
+    {# Povečan prikaz (V2-R08). Zunaj `.snov`, da ga pravilo `max-height: 78vh`
+       ne doseže. V izrisu je skrit; brez skripte ga nihče ne vidi in stran je
+       taka kot pred V2-R08.
+
+       Vse povezave v njem izriše strežnik — sosede, prenos, ime datoteke.
+       Skripta jih samo sproži in nobene poti ne sestavi (`ADR-024`, meja 4).
+       Puščici peljeta na podrobnosti soseda in ne zamenjata slike tu, da se
+       prenese samo slika, ki jo operater res gleda.
+
+       Smer je smer mreže na strani predmeta: levo novejša, desno starejša.
+       Neaktivna puščica ni povezava, da ne more nikamor peljati. #}
+    <div class="prekritje" id="prekritje" hidden>
+      <div class="prekritje-vrstica">
+        <a class="prekritje-gumb" href="/admin/materials/{{ snov.id }}/image"
+           download="{{ povecava.ime_prenosa }}">Prenesi izvirnik</a>
+        <button class="prekritje-gumb" type="button" id="prekritje-zapri">Zapri ✕</button>
+      </div>
+      {% if povecava.listanje %}
+        {% if povecava.prejsnja %}
+          <a class="puscica" id="prekritje-prejsnja" href="{{ povecava.prejsnja }}"
+             title="Novejša slika">←</a>
+        {% else %}
+          <span class="puscica neaktivna" aria-disabled="true">←</span>
+        {% endif %}
+      {% else %}
+        <span></span>
+      {% endif %}
+      <div class="prekritje-sredina">
+        <img src="/admin/materials/{{ snov.id }}/image" alt="Posneta snov, povečano"
+             loading="lazy">
+      </div>
+      {% if povecava.listanje %}
+        {% if povecava.naslednja %}
+          <a class="puscica" id="prekritje-naslednja" href="{{ povecava.naslednja }}"
+             title="Starejša slika">→</a>
+        {% else %}
+          <span class="puscica neaktivna" aria-disabled="true">→</span>
+        {% endif %}
+      {% else %}
+        <span></span>
+      {% endif %}
+    </div>
+
+    {# Vgrajena in brez zunanje knjižnice (`ADR-024`, meji 1 in 2). Ničesar ne
+       pošilja. Edino, kar spremeni v naslovu, je odstranitev sidra ob
+       zaprtju, da osvežitev strani prikaza ne odpre znova — to po odločitvi
+       lastnika ni sestavljanje poti (`docs/verzije/v2.md`, V2-R08). #}
+    <script>
+      (function () {
+        var prekritje = document.getElementById("prekritje");
+        var povezava = document.querySelector("a[data-povecava]");
+        var zapri = document.getElementById("prekritje-zapri");
+        var prejsnja = document.getElementById("prekritje-prejsnja");
+        var naslednja = document.getElementById("prekritje-naslednja");
+        var OZNAKA = {{ povecava.oznaka|tojson }};
+
+        function odpri() {
+          prekritje.hidden = false;
+          document.documentElement.classList.add("brez-drsenja");
+          zapri.focus();
+        }
+
+        function zapriPrikaz() {
+          prekritje.hidden = true;
+          document.documentElement.classList.remove("brez-drsenja");
+          if (location.hash === OZNAKA) {
+            history.replaceState(null, "", location.pathname + location.search);
+          }
+          povezava.focus();
+        }
+
+        povezava.addEventListener("click", function (dogodek) {
+          dogodek.preventDefault();
+          odpri();
+        });
+
+        zapri.addEventListener("click", zapriPrikaz);
+
+        prekritje.addEventListener("click", function (dogodek) {
+          if (dogodek.target.closest("a, button, img, .puscica") === null) {
+            zapriPrikaz();
+          }
+        });
+
+        document.addEventListener("keydown", function (dogodek) {
+          if (prekritje.hidden || dogodek.altKey || dogodek.ctrlKey || dogodek.metaKey) {
+            return;
+          }
+          if (dogodek.key === "Escape") {
+            zapriPrikaz();
+          } else if (dogodek.key === "ArrowLeft" && prejsnja) {
+            prejsnja.click();
+          } else if (dogodek.key === "ArrowRight" && naslednja) {
+            naslednja.click();
+          }
+        });
+
+        if (location.hash === OZNAKA) {
+          odpri();
+        }
+      })();
+    </script>
   {% endif %}
 {% endblock %}
