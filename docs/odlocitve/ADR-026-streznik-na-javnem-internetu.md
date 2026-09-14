@@ -21,6 +21,13 @@ vzdrževanje Tailscale odjemalca pomeni, da sistema ne bo uporabljal nihče.
 Preverjeno pred odločitvijo: lastnik ima **javni IP** (ne CGNAT), torej so na
 mizi vse tri poti spodaj, ne le tiste brez odprtih vrat.
 
+Preverjeno po odločitvi, 14. 9. 2026, in to spremeni eno predpostavko v njej:
+**vrata 80 na tem stroju niso na voljo.** Drži jih HTTP.sys, ker na IIS teče
+**Aras Innovator**. IIS zato ni odvečna storitev, ki bi se dala ugasniti, in
+vrata 80 se v usmerjevalniku ne smejo preusmeriti — sicer bi bil Aras
+dosegljiv z interneta. Prvotni zapis te odločitve je predvideval odprti vrati
+80 in 443; velja samo 443.
+
 ## Možnosti
 
 1. **Cloudflare Tunnel.** Odhodna povezava s strežnika navzven; na
@@ -47,8 +54,12 @@ svojih in tujih otrok noče.
 Tehnične meje, ki jih ta odločitev nalaga:
 
 - **`api` se ne veže na gostiteljev naslov.** Ostane v omrežju Docker Compose,
-  dosegljiv samo Caddyju. Navzven sta odprti izključno vrati 80 in 443, in
-  vrata 80 samo zaradi izdaje certifikata in preusmeritve na HTTPS.
+  dosegljiv samo Caddyju. Navzven so odprta **izključno vrata 443**.
+- **Certifikat se pridobiva prek `TLS-ALPN-01`**, ki teče v celoti prek vrat
+  443; `HTTP-01` je izklopljen, ker vrata 80 pripadajo Arasu. Cena je izguba
+  samodejne preusmeritve z `http://` na `https://` — za aplikacijo brez
+  pomena, ker je naslov v APK `https`, za človeka v brskalniku pa nerodnost,
+  ki jo je treba poznati.
 - **`uvicorn` teče s `--proxy-headers`, z zaupanjem samo Caddyjevemu naslovu.**
   Brez tega bo vsak odjemalec v dnevniku in v omejevalniku hitrosti videti kot
   isti IP, kar omejevanje naredi neuporabno.
@@ -66,6 +77,19 @@ Tehnične meje, ki jih ta odločitev nalaga:
   nikoli.
 - **Varnostna kopija baze in slik je pogoj za prvo tujo družino**, ne poznejša
   izboljšava.
+
+**Zahteva `V3-R02` se gradi v dveh korakih, in vmesno stanje je zavestno
+sprejeto.** Prvi korak postavi Caddy, certifikat in pot do strežnika; `/admin`
+v njem varuje samo `basic_auth` v Caddyju, `--proxy-headers` ni nastavljen,
+omejevanja poskusov prijave ni in varnostna kopija ni preverjena. Strežnik je
+torej na internetu, preden je `V3-R02` dokončana.
+
+To je sprejemljivo natanko toliko časa, dokler velja oboje: v bazi je ena sama
+družina (lastnikova) in `V3-R03` je naslednje delo, ne odloženo delo. Vsak
+korak, ki bi to podaljšal — nova funkcionalnost, druga zahteva vmes — pomeni,
+da se prvi korak vrne in se `V3-R02` dokonča prej. `basic_auth` je čep z
+datumom poteka, ne rešitev; ko pride prava prijava, mora pasti, sicer Googlov
+povratni klic (`V3-R08`) trči vanj.
 
 ## Posledice
 
