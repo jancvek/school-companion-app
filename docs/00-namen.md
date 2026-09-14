@@ -2,11 +2,15 @@
 
 ## Kaj to je
 
-Mobilna aplikacija za eno učenko (Maša), s katero po šoli fotografira
-obravnavano učno snov. Slike se lokalno shranijo, nato prenesejo na domači
-strežnik, kjer jih vision model prepiše in iz njih sestavi kratek kviz. Maša
-na vprašanja odgovarja in ocenjuje težavnost, kar z leti tvori osebno bazo
-znanja iz njenih lastnih zapiskov.
+Mobilna aplikacija za učenca, s katero po šoli fotografira obravnavano učno
+snov. Slike se lokalno shranijo, nato prenesejo na domači strežnik, kjer jih
+vision model prepiše in iz njih sestavi kratek kviz. Učenec na vprašanja
+odgovarja in ocenjuje težavnost, kar z leti tvori osebno bazo znanja iz
+njegovih lastnih zapiskov.
+
+Isti domači strežnik uporablja več družin (`docs/odlocitve/ADR-025`). Vsaka
+družina ima enega ali več staršev in enega ali več otrok ter vidi izključno
+svoje podatke.
 
 ## Problem, ki ga rešuje
 
@@ -18,13 +22,15 @@ samopreverjanje iz dejanske snovi, ki jo je Maša tisti dan imela pri pouku.
 
 | Vloga | Kaj počne |
 |---|---|
-| Maša (učenka, osnovna šola) | Fotografira snov, odgovarja na generirana vprašanja, ocenjuje težavnost |
-| Lastnik sistema (starš) | Vzdržuje domači strežnik, API ključe, spremlja delovanje |
+| Otrok (učenec, osnovna šola) | Fotografira snov, odgovarja na generirana vprašanja, ocenjuje težavnost. Dela izključno v mobilni aplikaciji |
+| Starš | Spremlja delovanje svoje družine, sestavlja kvize, gleda statistiko, odpira in ureja račune svojih otrok. Dela izključno v spletnem adminu. Ne vidi čez mejo svoje družine |
+| Lastnik sistema | Vzdržuje domači strežnik, API ključe in varnostne kopije ter odpira nove družine. Ena sama oseba za vso namestitev. Danes je to tudi starš, jutri ni nujno (`docs/odlocitve/ADR-025`) |
 
 ## Ključni pojmi domene
 
 | Pojem | Pomen |
 |---|---|
+| Družina | Obseg lastništva vseh podatkov: eden ali več staršev in eden ali več otrok. Nobena poizvedba ne prestopi njene meje; glej `docs/odlocitve/ADR-025` |
 | Snov / material | En fotografiran zapis učne vsebine: slika + predmet + datum/ura + (po obdelavi) prepis in vprašanja |
 | Predmet | Šolski predmet iz vnaprej določenega (hardcoded) seznama, npr. SLO, MAT, ANG |
 | Zgodovina | Pregled preteklih posnetkov snovi, razvrščenih po predmetu in času (najnovejši prvi) |
@@ -62,8 +68,11 @@ samopreverjanje iz dejanske snovi, ki jo je Maša tisti dan imela pri pouku.
 
 ## Kaj aplikacija namenoma NI
 
-- Ni večuporabniška platforma — ena družina, en API ključ, brez
-  prijave/registracije uporabnikov.
+- Ni odprta platforma. Več družin je od `docs/odlocitve/ADR-025` podprtih, a
+  **registracije ni**: družino in prvega starša v njej odpre lastnik sistema.
+  Krog uporabnikov so njegovi znanci, zato ni pogojev uporabe, ni politike
+  zasebnosti in ni izvoza podatkov. Če se krog razširi čez znance, je to nova
+  verzija, ne popravek.
 - Ni objavljena na Google Play — distribucija samo prek EAS Build APK.
 - Ni orodje za poročanje šoli ali tretjim. Pregled ocen čez kvize (V2-R04) je
   lastnikov delovni pripomoček za pogovor z Mašo — brez izvoza, brez PDF in
