@@ -3,7 +3,10 @@
 Vrstni red je enak kot na telefonu (odločitev 4 v planu V1-R01, odločitev 5 v
 planu V1-R02): najprej cela datoteka, šele nato vrstica v bazi.
 
-Zapis gre v `<images_dir>/.tmp/<id>.jpg` in se na končno mesto premakne z
+**Slike so ločene po družinah** (`docs/odlocitve/ADR-025`): končno mesto je
+`<images_dir>/<family_id>/<id>.jpg`, meja mape pa je mapa družine, ne koren.
+
+Zapis gre v `<mapa družine>/.tmp/<id>.jpg` in se na končno mesto premakne z
 `os.replace`, ki je na istem datotečnem sistemu atomaren. Prekinjen prenos
 zato pusti kvečjemu ostanek v `.tmp/`, nikoli pa polovične slike na mestu, kjer
 jo bo V1-R03 iskal kot celo.
@@ -15,6 +18,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import Protocol
+from uuid import UUID
 
 #: Podmapa za nedokončane zapise.
 ZACASNA_PODMAPA = ".tmp"
@@ -31,18 +35,39 @@ class BereBajte(Protocol):
     def read(self, size: int = -1, /) -> bytes: ...
 
 
-def koncna_pot(images_dir: Path, material_id: str) -> Path:
+def mapa_druzine(images_dir: Path, family_id: str) -> Path:
+    """Mapa slik ene družine, `<images_dir>/<family_id>`.
+
+    To je meja mape za vse, kar bere ali briše slike te družine: slika tuje
+    družine ali slika v korenu je za to družino „ni na disku".
+
+    `family_id` mora biti UUID v kanonični obliki, sicer `ValueError`. Iz njega
+    nastane pot, zato niz s poševnico ali `..` ne sme priti do diska — isti
+    razlog, kot je `id` v `POST /materials` tipiziran kot `UUID`.
+    """
+    try:
+        kanonicen: str | None = str(UUID(family_id))
+    except ValueError:
+        kanonicen = None
+    if kanonicen != family_id:
+        raise ValueError(f"Identifikator družine ni UUID v kanonični obliki: {family_id!r}")
+    return images_dir / family_id
+
+
+def koncna_pot(images_dir: Path, family_id: str, material_id: str) -> Path:
     """Mesto, kjer slika živi, ko je zapis končan."""
-    return images_dir / f"{material_id}.jpg"
+    return mapa_druzine(images_dir, family_id) / f"{material_id}.jpg"
 
 
-def shrani_sliko(images_dir: Path, material_id: str, vir: BereBajte) -> Path:
-    """Zapiše `vir` v `<images_dir>/<id>.jpg` in vrne končno pot.
+def shrani_sliko(images_dir: Path, family_id: str, material_id: str, vir: BereBajte) -> Path:
+    """Zapiše `vir` v `<images_dir>/<family_id>/<id>.jpg` in vrne končno pot.
 
     Ob kakršnikoli napaki počisti začasno datoteko in napako prenese naprej —
     klicatelj mora poskrbeti, da v tem primeru ne nastane vrstica v bazi.
     """
-    zacasna_mapa = images_dir / ZACASNA_PODMAPA
+    # `.tmp/` znotraj mape družine: isti datotečni sistem kot končno mesto,
+    # zato `replace` ostane atomaren.
+    zacasna_mapa = mapa_druzine(images_dir, family_id) / ZACASNA_PODMAPA
     zacasna_mapa.mkdir(parents=True, exist_ok=True)
 
     # Enolično ime, ne `<id>.jpg`: dve hkratni zahtevi z istim `id` bi sicer
@@ -50,7 +75,7 @@ def shrani_sliko(images_dir: Path, material_id: str, vir: BereBajte) -> Path:
     # Prav temu se `.tmp/` izogiba, zato tu ne sme biti trkov.
     rocica, ime = tempfile.mkstemp(prefix=f"{material_id}-", suffix=".jpg", dir=zacasna_mapa)
     zacasna = Path(ime)
-    koncna = koncna_pot(images_dir, material_id)
+    koncna = koncna_pot(images_dir, family_id, material_id)
 
     try:
         # Pišemo skozi deskriptor, ki ga je vrnil `mkstemp`, in ga s tem tudi

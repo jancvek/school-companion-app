@@ -665,7 +665,8 @@ def test_ponovni_zagon_po_prekinjenem_premiku(baza: str, slike: Path) -> None:
     vrne. Ponovni zagon mora priti do istega izida kot neprekinjen.
     """
     _polna_baza_pred_druzinami(baza, slike)
-    (slike / CVEK_ID).mkdir()
+    # `exist_ok`: mapo Cvek fixture `slike` že ustvari (`conftest.py`).
+    (slike / CVEK_ID).mkdir(exist_ok=True)
     (slike / "m1.jpg").replace(slike / CVEK_ID / "m1.jpg")
 
     command.upgrade(alembic_nastavitve(baza), "head")

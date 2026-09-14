@@ -14,7 +14,7 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from app.models import STATUS_NOV, Material
-from tests.conftest import KLJUC
+from tests.conftest import CVEK_ID, KLJUC
 
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 UUID_DVA = "a1b2c3d4-e5f6-4789-abcd-ef0123456789"
@@ -31,12 +31,13 @@ def zapisi(
     potrjeno: datetime | None = None,
 ) -> Path:
     """Ustvari zapis z datoteko in mu po potrebi postavi stanje arhiva."""
-    pot = slike / f"{material_id}.jpg"
+    pot = slike / CVEK_ID / f"{material_id}.jpg"
     pot.write_bytes(b"slika")
 
     with Session(motor) as seja:
         seja.add(
             Material(
+                family_id=CVEK_ID,
                 id=material_id,
                 subject=subject,
                 taken_at=datetime(2026, 9, 4, 7, 30, tzinfo=UTC),

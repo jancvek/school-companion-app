@@ -18,7 +18,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db import MaterialsRepository
+from app.db import DruzineRepository, MaterialsRepository
 from app.obdelava import obdelaj_cakajoce
 from app.vision import Klicalec
 
@@ -39,8 +39,11 @@ def obnovi_obticale(tovarna_sej: sessionmaker[Session]) -> int:
     gre za dva zaporedna, vsak zase veljavna prehoda. Zato je obdelava v
     ozadju vezana na en proces; glej `docs/01-arhitektura.md`.
     """
+    # Po družinah, kot obdelava (`docs/odlocitve/ADR-029` B).
+    koliko = 0
     with tovarna_sej() as seja:
-        koliko = MaterialsRepository(seja).obnovi_obticale()
+        for family_id in DruzineRepository(seja).idji():
+            koliko += MaterialsRepository(seja, family_id).obnovi_obticale()
 
     if koliko:
         dnevnik.warning(

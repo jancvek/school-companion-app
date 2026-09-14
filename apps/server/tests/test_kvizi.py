@@ -29,7 +29,7 @@ from app.models import (
     QuizItem,
 )
 from app.routers.kvizi import NAJVEC_IME, NAJVEC_KODA, PRIVZETO_STEVILO
-from tests.conftest import KLJUC
+from tests.conftest import CVEK_ID, KLJUC
 
 #: Trije stabilni identifikatorji; testi jih berejo iz izrisane strani.
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
@@ -59,11 +59,12 @@ def snov(
     povedati, iz česa je vprašanje (`docs/odlocitve/ADR-012`).
     """
     kdaj = taken_at or datetime(2026, 9, 4, 7, 30, tzinfo=UTC)
-    pot = slike / f"{material_id}.jpg"
+    pot = slike / CVEK_ID / f"{material_id}.jpg"
     pot.write_bytes(b"slika")
 
     with Session(motor) as seja:
         material = Material(
+            family_id=CVEK_ID,
             id=material_id,
             subject=subject,
             taken_at=kdaj,
@@ -75,6 +76,7 @@ def snov(
         )
         material.vsa_vprasanja = [
             Question(
+                family_id=CVEK_ID,
                 id=f"{material_id}-v{i}",
                 position=i,
                 question=f"Vprašanje {i} iz {material_id[:4]}?",
@@ -321,6 +323,7 @@ class TestObkljukanje:
             assert material is not None
             material.vsa_vprasanja.append(
                 Question(
+                    family_id=CVEK_ID,
                     id=f"{UUID_ENA}-nov1",
                     position=1,
                     question="Novo vprašanje?",
@@ -761,6 +764,7 @@ class TestZamrznitev:
             assert material is not None
             material.vsa_vprasanja.append(
                 Question(
+                    family_id=CVEK_ID,
                     id=f"{UUID_ENA}-nov1",
                     position=1,
                     question="Popolnoma drugačno vprašanje?",
@@ -1275,6 +1279,7 @@ class TestPredogledJeZadnjaBeseda:
             assert material is not None
             material.vsa_vprasanja.append(
                 Question(
+                    family_id=CVEK_ID,
                     id=f"{UUID_ENA}-nov1",
                     position=1,
                     question="Vprasanje iz nove serije?",

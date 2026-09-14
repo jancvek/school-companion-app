@@ -32,6 +32,7 @@ from app.casi import danes, dnevi_od_do, pas
 from app.db import MaterialsRepository
 from app.models import STATUS_NOV, Material
 from app.routers.dnevi import DNI_V_TEDNU, Obdobje, preberi_obdobje
+from tests.conftest import CVEK_ID
 
 POT = "/admin/days"
 
@@ -83,13 +84,14 @@ def zapisi(
     arhivirano: datetime | None = None,
 ) -> None:
     """Ustvari zapis in (privzeto) njegovo datoteko."""
-    pot = slike / f"{material_id}.jpg"
+    pot = slike / CVEK_ID / f"{material_id}.jpg"
     if vsebina is not None:
         pot.write_bytes(vsebina)
 
     with Session(motor) as seja:
         seja.add(
             Material(
+                family_id=CVEK_ID,
                 id=material_id,
                 subject=subject,
                 taken_at=taken_at,
@@ -209,7 +211,7 @@ class TestPoizvedbaObdobja:
         od, do = dnevi_od_do(date(2026, 9, 8), date(2026, 9, 8))
 
         with Session(motor) as seja:
-            najdeno = MaterialsRepository(seja).seznam_po_obdobju(od, do)
+            najdeno = MaterialsRepository(seja, CVEK_ID).seznam_po_obdobju(od, do)
 
         assert [snov.id for snov in najdeno] == ["polnoc"]
 
@@ -220,7 +222,7 @@ class TestPoizvedbaObdobja:
         od, do = dnevi_od_do(date(2026, 9, 8), date(2026, 9, 8))
 
         with Session(motor) as seja:
-            najdeno = MaterialsRepository(seja).seznam_po_obdobju(od, do)
+            najdeno = MaterialsRepository(seja, CVEK_ID).seznam_po_obdobju(od, do)
 
         assert najdeno == []
 
@@ -231,7 +233,7 @@ class TestPoizvedbaObdobja:
         od, do = dnevi_od_do(date(2026, 9, 6), date(2026, 9, 12))
 
         with Session(motor) as seja:
-            najdeno = MaterialsRepository(seja).seznam_po_obdobju(od, do)
+            najdeno = MaterialsRepository(seja, CVEK_ID).seznam_po_obdobju(od, do)
 
         assert [snov.id for snov in najdeno] == ["prvi", "zadnji"]
 

@@ -3,6 +3,12 @@
 Poslovna logika govori z `MaterialsRepository`, ne s SQLAlchemy neposredno —
 tako testi tečejo nad SQLite v pomnilniku, produkcija pa nad Postgresom, in
 oboje skozi isto kodo.
+
+**Vsak repozitorij podatkov pripada eni družini** (`docs/odlocitve/ADR-025`):
+`family_id` je obvezen argument konstruktorja, vsaka poizvedba in vsak
+`UPDATE` ima pogoj družine, `Session.get` se nad podatki ne uporablja (gre mimo
+vsakega pogoja) in seja je zasebna. `DruzineRepository` bere samo tabelo
+`families`, nikoli podatkov družine.
 """
 
 from collections.abc import Iterable, Sequence
@@ -29,6 +35,7 @@ from app.models import (
     STATUS_NOV,
     STATUS_PRIPRAVLJEN,
     STATUS_V_OBDELAVI,
+    Family,
     Material,
     Question,
     QuestionAttempt,
@@ -85,14 +92,18 @@ def naredi_tovarno_sej(motor: Engine) -> sessionmaker[Session]:
     return sessionmaker(bind=motor, autoflush=False, expire_on_commit=False)
 
 
-def _nabor_predmeta(subject: str) -> tuple[ColumnElement[bool], ...]:
-    """Pogoji, ki določajo slike enega predmeta: ta predmet, brez arhiva.
+def _nabor_predmeta(family_id: str, subject: str) -> tuple[ColumnElement[bool], ...]:
+    """Pogoji, ki določajo slike enega predmeta: ta družina, ta predmet, brez arhiva.
 
     Na enem mestu, ker ga bereta `seznam_po_predmetu` in `sosedi_v_predmetu`
     (V2-R08). Povečan prikaz obljublja isti nabor kot stran predmeta, in dva
     ločeno napisana filtra bi se nekoč razšla po tihem.
     """
-    return (Material.subject == subject, Material.archived_at.is_(None))
+    return (
+        Material.family_id == family_id,
+        Material.subject == subject,
+        Material.archived_at.is_(None),
+    )
 
 
 #: Vrstni red slik predmeta: najnovejša prva, ob enakem času odloči `id`.
@@ -103,15 +114,68 @@ def _nabor_predmeta(subject: str) -> tuple[ColumnElement[bool], ...]:
 _VRSTNI_RED_PREDMETA = (Material.taken_at.desc(), Material.id.desc())
 
 
-class MaterialsRepository:
-    """Operacije nad tabelo `materials`, ki jih potrebujeta V1-R02 in V1-R04."""
+class DruzineRepository:
+    """Branje tabele `families` — edini repozitorij brez družine.
+
+    Ne bere podatkov nobene družine, zato ni obvoz iz `ADR-025`. Potrebujeta ga
+    obdelava v ozadju, ki gre po družinah (`docs/odlocitve/ADR-029` B), in
+    začasna izbira družine pred prijavo (`app/dependencies.py`, `ADR-029` A).
+    """
 
     def __init__(self, session: Session) -> None:
-        self.session = session
+        self._session = session
+
+    def idji(self) -> list[str]:
+        """`id` vseh družin, najstarejša prva."""
+        return list(
+            self._session.scalars(select(Family.id).order_by(Family.created_at, Family.id))
+        )
+
+    def edina(self) -> str | None:
+        """`id` edine družine, ali `None`, kadar jih ni natanko ena."""
+        idji = list(self._session.scalars(select(Family.id).limit(2)))
+        return idji[0] if len(idji) == 1 else None
+
+
+class _RepozitorijDruzine:
+    """Seja in družina — skupna osnova vseh repozitorijev podatkov.
+
+    `family_id` je obvezen in brez privzetka (`docs/odlocitve/ADR-025`). Prazen
+    niz je napaka že tu: repozitorij, ki bi tiho bral „nobeno" družino, bi bil
+    videti kot prazna družina in napaka v izbiri družine bi bila nevidna.
+
+    Seja je zasebna, da je usmerjevalnik ne more vzeti in poizvedovati mimo
+    repozitorija.
+    """
+
+    def __init__(self, session: Session, family_id: str) -> None:
+        if not family_id:
+            raise ValueError("Repozitorij brez družine ne obstaja (docs/odlocitve/ADR-025).")
+        self._session = session
+        self._family_id = family_id
+
+    @property
+    def family_id(self) -> str:
+        """Družina, katere podatke ta repozitorij bere in piše."""
+        return self._family_id
+
+
+class MaterialsRepository(_RepozitorijDruzine):
+    """Operacije nad tabelo `materials` ene družine (V1-R02, V1-R04, V3-R01)."""
+
+    def _moje(self) -> ColumnElement[bool]:
+        """Pogoj družine nad `materials`; na enem mestu, da ga nobena poizvedba ne pozabi."""
+        return Material.family_id == self._family_id
 
     def poisci(self, material_id: str) -> Material | None:
-        """Zapis z danim `id` ali `None`."""
-        return self.session.get(Material, material_id)
+        """Zapis z danim `id` v tej družini ali `None`.
+
+        Poizvedba in ne `Session.get`: ta išče samo po primarnem ključu in bi
+        vrnil zapis tuje družine.
+        """
+        return self._session.scalars(
+            select(Material).where(Material.id == material_id, self._moje())
+        ).one_or_none()
 
     def obstaja(self, material_id: str) -> bool:
         """Ali zapis z danim `id` že obstaja."""
@@ -124,15 +188,28 @@ class MaterialsRepository:
         `id` znova, ker prvega odgovora ni dočakal). `IntegrityError` pokrije
         tekmovanje dveh hkratnih zahtev z istim `id`: takrat je zmagala prva in
         to za klicatelja pomeni isto — zapis obstaja, ni ga ustvaril on.
+
+        **Družino zapis dobi od repozitorija**, ne od klicatelja. Zapis, ki mu
+        je klicatelj družino že nastavil, mora imeti to družino.
+
+        `id` je globalen primarni ključ. Zapis z `id`, ki obstaja v **drugi**
+        družini, pade na istem `IntegrityError` in vrne `False`; klicatelj ga
+        od tekmovanja loči s `poisci`, ki v tej družini ne najde ničesar
+        (`docs/odlocitve/ADR-029` D).
         """
+        if not material.family_id:
+            material.family_id = self._family_id
+        elif material.family_id != self._family_id:
+            raise ValueError("Zapisa tuje družine ni mogoče vstaviti skozi ta repozitorij.")
+
         if self.obstaja(material.id):
             return False
 
         try:
-            self.session.add(material)
-            self.session.commit()
+            self._session.add(material)
+            self._session.commit()
         except IntegrityError:
-            self.session.rollback()
+            self._session.rollback()
             return False
 
         return True
@@ -143,9 +220,9 @@ class MaterialsRepository:
         Vrne samo predmete, ki v bazi res so. Kateri predmeti se pokažejo tudi
         s številom nič, je odločitev vmesnika, ne baze.
         """
-        vrstice = self.session.execute(
+        vrstice = self._session.execute(
             select(Material.subject, func.count())
-            .where(Material.archived_at.is_(None))
+            .where(self._moje(), Material.archived_at.is_(None))
             .group_by(Material.subject)
         ).all()
         return {subject: koliko for subject, koliko in vrstice}
@@ -157,9 +234,9 @@ class MaterialsRepository:
         isti posnetek na obeh straneh stoji na istem mestu.
         """
         return list(
-            self.session.scalars(
+            self._session.scalars(
                 select(Material)
-                .where(*_nabor_predmeta(subject))
+                .where(*_nabor_predmeta(self._family_id, subject))
                 .order_by(*_VRSTNI_RED_PREDMETA)
             )
         )
@@ -179,9 +256,9 @@ class MaterialsRepository:
             return None, None
 
         idji = list(
-            self.session.scalars(
+            self._session.scalars(
                 select(Material.id)
-                .where(*_nabor_predmeta(material.subject))
+                .where(*_nabor_predmeta(self._family_id, material.subject))
                 .order_by(*_VRSTNI_RED_PREDMETA)
             )
         )
@@ -207,9 +284,10 @@ class MaterialsRepository:
         (testi) in Postgresom (produkcija), `docs/odlocitve/ADR-023`.
         """
         return list(
-            self.session.scalars(
+            self._session.scalars(
                 select(Material)
                 .where(
+                    self._moje(),
                     Material.archived_at.is_(None),
                     Material.taken_at >= od,
                     Material.taken_at < do,
@@ -221,12 +299,14 @@ class MaterialsRepository:
     def nazadnje_prejeto(self) -> datetime | None:
         """Kdaj je strežnik nazadnje prevzel sliko; `None`, če še nikoli.
 
-        Šteje **vse** zapise, tudi arhivirane: vprašanje je, ali je telefon
+        Šteje **vse** zapise družine, tudi arhivirane: vprašanje je, ali je telefon
         slike prenesel, ne ali so še v pregledu. Brez tega bi bil prazen dan
         videti enako kot dan, ko telefon še ni prenašal (V2-R07,
         `docs/odlocitve/ADR-023`).
         """
-        return self.session.scalar(select(func.max(Material.received_at)))
+        return self._session.scalar(
+            select(func.max(Material.received_at)).where(self._moje())
+        )
 
     # --- Obdelava (V1-R03) ---
 
@@ -243,9 +323,9 @@ class MaterialsRepository:
         """
         izid = cast(
             "CursorResult[Any]",
-            self.session.execute(stavek.execution_options(synchronize_session=False)),
+            self._session.execute(stavek.execution_options(synchronize_session=False)),
         )
-        self.session.commit()
+        self._session.commit()
         return int(izid.rowcount)
 
     def _upokoji_vprasanja(self, material: Material) -> None:
@@ -282,16 +362,17 @@ class MaterialsRepository:
           članstvo; sicer bi `veljavna_vprasanja` še vedno vračala predmete,
           ki v bazi niso več veljavni.
         """
-        self.session.execute(
+        self._session.execute(
             update(Question)
             .where(
+                Question.family_id == self._family_id,
                 Question.material_id == material.id,
                 Question.retired_at.is_(None),
             )
             .values(retired_at=datetime.now(UTC))
             .execution_options(synchronize_session="fetch")
         )
-        self.session.expire(
+        self._session.expire(
             material, ["vsa_vprasanja", "veljavna_vprasanja", "upokojena_vprasanja"]
         )
 
@@ -302,9 +383,13 @@ class MaterialsRepository:
         slika ne čaka najdlje. Isti razlog kot pri čakalni vrsti na telefonu.
         """
         return list(
-            self.session.scalars(
+            self._session.scalars(
                 select(Material)
-                .where(Material.status == STATUS_NOV, Material.archived_at.is_(None))
+                .where(
+                    self._moje(),
+                    Material.status == STATUS_NOV,
+                    Material.archived_at.is_(None),
+                )
                 .order_by(Material.taken_at.asc())
             )
         )
@@ -320,7 +405,7 @@ class MaterialsRepository:
         """
         return self._posodobi(
             update(Material)
-            .where(Material.id == material_id, Material.status == STATUS_NOV)
+            .where(self._moje(), Material.id == material_id, Material.status == STATUS_NOV)
             .values(status=STATUS_V_OBDELAVI)
         ) == 1
 
@@ -364,10 +449,13 @@ class MaterialsRepository:
                     # (`docs/odlocitve/ADR-012`).
                     subject=material.subject,
                     material_taken_at=material.taken_at,
+                    # Družina je stolpec in ne izpeljava: vprašanje preživi
+                    # material (`docs/odlocitve/ADR-029` C).
+                    family_id=material.family_id,
                 )
             )
 
-        self.session.commit()
+        self._session.commit()
         return True
 
     def vrni_v_vrsto(self, material_id: str) -> bool:
@@ -404,7 +492,7 @@ class MaterialsRepository:
         material.error = None
         self._upokoji_vprasanja(material)
 
-        self.session.commit()
+        self._session.commit()
         return True
 
     def sprosti_prevzem(self, material_id: str) -> bool:
@@ -420,7 +508,11 @@ class MaterialsRepository:
         """
         return self._posodobi(
             update(Material)
-            .where(Material.id == material_id, Material.status == STATUS_V_OBDELAVI)
+            .where(
+                self._moje(),
+                Material.id == material_id,
+                Material.status == STATUS_V_OBDELAVI,
+            )
             .values(status=STATUS_NOV)
         ) == 1
 
@@ -435,7 +527,9 @@ class MaterialsRepository:
         noben zapis v `processing` ta trenutek ni v resnični obdelavi.
         """
         return self._posodobi(
-            update(Material).where(Material.status == STATUS_V_OBDELAVI).values(status=STATUS_NOV)
+            update(Material)
+            .where(self._moje(), Material.status == STATUS_V_OBDELAVI)
+            .values(status=STATUS_NOV)
         )
 
     # --- Arhiv (V1-R07) ---
@@ -453,16 +547,16 @@ class MaterialsRepository:
 
         if material.archived_at is None:
             material.archived_at = datetime.now(UTC)
-            self.session.commit()
+            self._session.commit()
 
         return material
 
     def stej_arhivirane(self) -> int:
         """Koliko zapisov je v arhivu."""
         return int(
-            self.session.scalar(
+            self._session.scalar(
                 select(func.count()).select_from(Material).where(
-                    Material.archived_at.is_not(None)
+                    self._moje(), Material.archived_at.is_not(None)
                 )
             )
             or 0
@@ -471,9 +565,9 @@ class MaterialsRepository:
     def seznam_arhiviranih(self) -> list[Material]:
         """Arhivirani zapisi, najnovejše arhivirani prvi."""
         return list(
-            self.session.scalars(
+            self._session.scalars(
                 select(Material)
-                .where(Material.archived_at.is_not(None))
+                .where(self._moje(), Material.archived_at.is_not(None))
                 .order_by(Material.archived_at.desc())
             )
         )
@@ -487,9 +581,10 @@ class MaterialsRepository:
         istega razloga kot pri čakalni vrsti prenosa.
         """
         return list(
-            self.session.scalars(
+            self._session.scalars(
                 select(Material.id)
                 .where(
+                    self._moje(),
                     Material.archived_at.is_not(None),
                     Material.device_deleted_at.is_(None),
                 )
@@ -515,6 +610,7 @@ class MaterialsRepository:
         return self._posodobi(
             update(Material)
             .where(
+                self._moje(),
                 Material.id.in_(seznam),
                 Material.archived_at.is_not(None),
                 Material.device_deleted_at.is_(None),
@@ -545,8 +641,8 @@ class MaterialsRepository:
         if material is None or material.device_deleted_at is None:
             return None
 
-        self.session.delete(material)
-        self.session.commit()
+        self._session.delete(material)
+        self._session.commit()
         return material
 
 
@@ -642,16 +738,16 @@ class PoskusZaZapis:
     answered_at: datetime
 
 
-class KviziRepository:
+class KviziRepository(_RepozitorijDruzine):
     """Operacije nad `quizzes` in `quiz_items` (V2-R01).
 
     Svoj razred in ne metode na `MaterialsRepository`: poizvedba izbirnika sicer
     bere `materials` in `questions`, a obstaja zaradi kvizov.
     `MaterialsRepository` ostane to, kar je bil, in ne postane predal za vse.
-    """
 
-    def __init__(self, session: Session) -> None:
-        self.session = session
+    Družina kviza je `quizzes.family_id`, družina postavke je družina njenega
+    kviza (`docs/odlocitve/ADR-029` C).
+    """
 
     # --- Izbirnik ---
 
@@ -682,7 +778,10 @@ class KviziRepository:
         # Izrecna oznaka tipa: brez nje mypy tip seznama sklepa iz prvega
         # elementa (`BinaryExpression`) in zavrne `==`, ki vrne širši
         # `ColumnElement`.
-        pogoji: list[ColumnElement[bool]] = [Material.archived_at.is_(None)]
+        pogoji: list[ColumnElement[bool]] = [
+            Material.family_id == self._family_id,
+            Material.archived_at.is_(None),
+        ]
         if subject is not None:
             pogoji.append(Material.subject == subject)
         if od is not None:
@@ -691,7 +790,7 @@ class KviziRepository:
             pogoji.append(Material.taken_at < do)
 
         snovi = list(
-            self.session.scalars(
+            self._session.scalars(
                 select(Material).where(*pogoji).order_by(Material.taken_at.desc())
             )
         )
@@ -713,9 +812,10 @@ class KviziRepository:
 
     def _stej_veljavna(self, material_ids: Sequence[str]) -> dict[str, int]:
         """Koliko veljavnih vprašanj ima katera snov. Ena poizvedba za vse."""
-        vrstice = self.session.execute(
+        vrstice = self._session.execute(
             select(Question.material_id, func.count())
             .where(
+                Question.family_id == self._family_id,
                 Question.material_id.in_(material_ids),
                 Question.retired_at.is_(None),
             )
@@ -738,11 +838,13 @@ class KviziRepository:
         potrebuje.
         """
         return set(
-            self.session.scalars(
+            self._session.scalars(
                 select(Question.material_id)
                 .join(QuizItem, QuizItem.question_id == Question.id)
                 .join(Quiz, Quiz.id == QuizItem.quiz_id)
                 .where(
+                    Question.family_id == self._family_id,
+                    Quiz.family_id == self._family_id,
                     Question.material_id.in_(material_ids),
                     Question.retired_at.is_(None),
                     Quiz.canceled_at.is_(None),
@@ -772,9 +874,13 @@ class KviziRepository:
             return []
 
         snovi = list(
-            self.session.scalars(
+            self._session.scalars(
                 select(Material)
-                .where(Material.id.in_(idji), Material.archived_at.is_(None))
+                .where(
+                    Material.family_id == self._family_id,
+                    Material.id.in_(idji),
+                    Material.archived_at.is_(None),
+                )
                 .order_by(Material.taken_at.desc())
             )
         )
@@ -782,9 +888,10 @@ class KviziRepository:
             return []
 
         po_snovi: dict[str, list[Question]] = {snov.id: [] for snov in snovi}
-        vprasanja = self.session.scalars(
+        vprasanja = self._session.scalars(
             select(Question)
             .where(
+                Question.family_id == self._family_id,
                 Question.material_id.in_(po_snovi.keys()),
                 Question.retired_at.is_(None),
             )
@@ -817,14 +924,19 @@ class KviziRepository:
         `id`: manjkajoče vprašanje ga skrajša, podvojeno pa ga ne podaljša —
         v obeh primerih je krajši od seznama, ki je prišel. Tu je stala še
         ločena preverba s `set()`; bila je mrtva veja in je šla ven.
+
+        **Vprašanje tuje družine šteje kot neobstoječe** — isti izid kot
+        spremenjen obrazec (`docs/odlocitve/ADR-029`).
         """
         if not question_ids:
             return None
 
         najdena = {
             vprasanje.id: vprasanje
-            for vprasanje in self.session.scalars(
-                select(Question).where(Question.id.in_(question_ids))
+            for vprasanje in self._session.scalars(
+                select(Question).where(
+                    Question.family_id == self._family_id, Question.id.in_(question_ids)
+                )
             )
         }
         if len(najdena) != len(question_ids):
@@ -847,8 +959,14 @@ class KviziRepository:
         neodvisna od vprašanja: ponovna obdelava ali dokončno brisanje snovi je
         ne spremenita (`ADR-016` E).
         """
+        # Druga ograja za `vprasanja_po_idjih`: kviz ne sme nikoli prestopiti
+        # meje družine, tudi če bi vprašanja prišla od drugod.
+        if any(vprasanje.family_id != self._family_id for vprasanje in vprasanja):
+            raise ValueError("Kviz ne sme vsebovati vprašanja tuje družine (ADR-025).")
+
         kviz = Quiz(
             id=str(uuid4()),
+            family_id=self._family_id,
             name=ime,
             subject=subject,
             created_at=datetime.now(UTC),
@@ -864,8 +982,8 @@ class KviziRepository:
                 )
             )
 
-        self.session.add(kviz)
-        self.session.commit()
+        self._session.add(kviz)
+        self._session.commit()
         return kviz
 
     def seznam(self) -> list[tuple[Quiz, int]]:
@@ -878,9 +996,10 @@ class KviziRepository:
         seznam desetih kvizov prebral vse njihove postavke, da bi izpisal deset
         številk. `GROUP BY` po primarnem ključu je dovolj tudi na Postgresu.
         """
-        vrstice = self.session.execute(
+        vrstice = self._session.execute(
             select(Quiz, func.count(QuizItem.id))
             .outerjoin(QuizItem, QuizItem.quiz_id == Quiz.id)
+            .where(Quiz.family_id == self._family_id)
             .group_by(Quiz.id)
             .order_by(Quiz.created_at.desc())
         ).all()
@@ -894,9 +1013,9 @@ class KviziRepository:
         tridesetimi postavkami — kar je po `PREDOLG_KVIZ` pričakovana zgornja
         velikost — bi to pomenilo dvaintrideset poizvedb namesto treh.
         """
-        return self.session.scalars(
+        return self._session.scalars(
             select(Quiz)
-            .where(Quiz.id == quiz_id)
+            .where(Quiz.family_id == self._family_id, Quiz.id == quiz_id)
             .options(selectinload(Quiz.postavke).selectinload(QuizItem.question))
         ).one_or_none()
 
@@ -924,7 +1043,11 @@ class KviziRepository:
 
         return {
             snov.id: snov
-            for snov in self.session.scalars(select(Material).where(Material.id.in_(idji)))
+            for snov in self._session.scalars(
+                select(Material).where(
+                    Material.family_id == self._family_id, Material.id.in_(idji)
+                )
+            )
         }
 
     def poskusi_kviza(self, quiz_id: str) -> dict[str, QuestionAttempt]:
@@ -936,10 +1059,13 @@ class KviziRepository:
         """
         return {
             poskus.quiz_item_id: poskus
-            for poskus in self.session.scalars(
+            for poskus in self._session.scalars(
                 select(QuestionAttempt)
                 .join(QuizItem, QuizItem.id == QuestionAttempt.quiz_item_id)
-                .where(QuizItem.quiz_id == quiz_id)
+                .where(
+                    QuestionAttempt.family_id == self._family_id,
+                    QuizItem.quiz_id == quiz_id,
+                )
             )
         }
 
@@ -960,7 +1086,7 @@ class KviziRepository:
 
         if kviz.canceled_at is None:
             kviz.canceled_at = datetime.now(UTC)
-            self.session.commit()
+            self._session.commit()
 
         return kviz
 
@@ -982,9 +1108,13 @@ class KviziRepository:
         ena na kviz.
         """
         kvizi = list(
-            self.session.scalars(
+            self._session.scalars(
                 select(Quiz)
-                .where(Quiz.canceled_at.is_(None), Quiz.solved_at.is_(None))
+                .where(
+                    Quiz.family_id == self._family_id,
+                    Quiz.canceled_at.is_(None),
+                    Quiz.solved_at.is_(None),
+                )
                 .order_by(Quiz.created_at)
                 .options(selectinload(Quiz.postavke))
             )
@@ -993,10 +1123,13 @@ class KviziRepository:
             return []
 
         odgovorjene = set(
-            self.session.scalars(
+            self._session.scalars(
                 select(QuestionAttempt.quiz_item_id)
                 .join(QuizItem, QuizItem.id == QuestionAttempt.quiz_item_id)
-                .where(QuizItem.quiz_id.in_([kviz.id for kviz in kvizi]))
+                .where(
+                    QuestionAttempt.family_id == self._family_id,
+                    QuizItem.quiz_id.in_([kviz.id for kviz in kvizi]),
+                )
             )
         )
 
@@ -1043,14 +1176,22 @@ class KviziRepository:
         Dva hkratna paketa za isto postavko bi se srečala na enoličnosti v
         shemi. Takrat se transakcija ponovi enkrat: druga ponovitev vidi zapis
         tekmeca in poskus preskoči, kot pravi „prvi zmaga".
+
+        **Postavka tuje družine šteje kot neobstoječa** in paket vrne `None`
+        (`docs/odlocitve/ADR-029`). Poskus dobi družino od repozitorija. Znana
+        meja: poskus, katerega `id` (UUID s telefona) že obstaja v drugi
+        družini, pade dvakrat na primarnem ključu in izjema gre naprej — brez
+        ponarejanja se to ne zgodi, obvoz s poizvedbo brez družine pa ni dovoljen.
         """
         if not poskusi:
             return 0
 
         postavke_idji = {poskus.quiz_item_id for poskus in poskusi}
         kvizi_postavk = dict(
-            self.session.execute(
-                select(QuizItem.id, QuizItem.quiz_id).where(QuizItem.id.in_(postavke_idji))
+            self._session.execute(
+                select(QuizItem.id, QuizItem.quiz_id)
+                .join(Quiz, Quiz.id == QuizItem.quiz_id)
+                .where(Quiz.family_id == self._family_id, QuizItem.id.in_(postavke_idji))
             )
             .tuples()
             .all()
@@ -1059,16 +1200,18 @@ class KviziRepository:
             return None
 
         znani_idji = set(
-            self.session.scalars(
+            self._session.scalars(
                 select(QuestionAttempt.id).where(
-                    QuestionAttempt.id.in_([poskus.id for poskus in poskusi])
+                    QuestionAttempt.family_id == self._family_id,
+                    QuestionAttempt.id.in_([poskus.id for poskus in poskusi]),
                 )
             )
         )
         zasedene = set(
-            self.session.scalars(
+            self._session.scalars(
                 select(QuestionAttempt.quiz_item_id).where(
-                    QuestionAttempt.quiz_item_id.in_(postavke_idji)
+                    QuestionAttempt.family_id == self._family_id,
+                    QuestionAttempt.quiz_item_id.in_(postavke_idji),
                 )
             )
         )
@@ -1078,9 +1221,10 @@ class KviziRepository:
         for poskus in poskusi:
             if poskus.id in znani_idji or poskus.quiz_item_id in zasedene:
                 continue
-            self.session.add(
+            self._session.add(
                 QuestionAttempt(
                     id=poskus.id,
+                    family_id=self._family_id,
                     quiz_item_id=poskus.quiz_item_id,
                     mode=poskus.mode,
                     rating=poskus.rating,
@@ -1096,11 +1240,11 @@ class KviziRepository:
 
         try:
             # Seja ima `autoflush=False`; štetje spodaj mora vstavljeno videti.
-            self.session.flush()
+            self._session.flush()
             self._oznaci_resene(set(kvizi_postavk.values()), zdaj)
-            self.session.commit()
+            self._session.commit()
         except IntegrityError:
-            self.session.rollback()
+            self._session.rollback()
             if _ponovitev:
                 raise
             return self.zapisi_poskuse(poskusi, _ponovitev=True)
@@ -1118,25 +1262,30 @@ class KviziRepository:
         Rešenost se izpelje **neodvisno od preklica** (`ADR-019` C); katera os
         ima prednost pri prikazu, je stvar prikaza.
         """
-        vrstice = self.session.execute(
+        vrstice = self._session.execute(
             select(QuizItem.quiz_id, func.count(QuizItem.id), func.count(QuestionAttempt.id))
+            .join(Quiz, Quiz.id == QuizItem.quiz_id)
             .outerjoin(QuestionAttempt, QuestionAttempt.quiz_item_id == QuizItem.id)
-            .where(QuizItem.quiz_id.in_(quiz_ids))
+            .where(Quiz.family_id == self._family_id, QuizItem.quiz_id.in_(quiz_ids))
             .group_by(QuizItem.quiz_id)
         ).tuples()
         reseni = [quiz_id for quiz_id, postavk, poskusov in vrstice if postavk == poskusov]
         if not reseni:
             return
 
-        self.session.execute(
+        self._session.execute(
             update(Quiz)
-            .where(Quiz.id.in_(reseni), Quiz.solved_at.is_(None))
+            .where(
+                Quiz.family_id == self._family_id,
+                Quiz.id.in_(reseni),
+                Quiz.solved_at.is_(None),
+            )
             .values(solved_at=zdaj)
             .execution_options(synchronize_session="fetch")
         )
 
 
-class StatistikaRepository:
+class StatistikaRepository(_RepozitorijDruzine):
     """Branje dnevnika poskusov za statistiko čez kvize (V2-R04).
 
     Svoj razred in ne metode na `KviziRepository`, iz istega razloga, kot je
@@ -1146,20 +1295,20 @@ class StatistikaRepository:
 
     **Vsaka poizvedba šteje samo način `samoocena`.** Statistiki dveh načinov
     se nikoli ne povprečita (`ADR-014`); danes drugega načina ni, zato bi bil
-    pozabljen pogoj neviden do dneva, ko bi prišel ABC.
+    pozabljen pogoj neviden do dneva, ko bi prišel ABC. Isti skupni pogoji
+    nosijo tudi družino poskusa.
     """
 
-    def __init__(self, session: Session) -> None:
-        self.session = session
-
-    @staticmethod
-    def _pogoji(od: datetime | None, do: datetime | None) -> list[ColumnElement[bool]]:
-        """Način in okno po `answered_at`, polodprto `[od, do)`, meje v UTC.
+    def _pogoji(self, od: datetime | None, do: datetime | None) -> list[ColumnElement[bool]]:
+        """Družina, način in okno po `answered_at`, polodprto `[od, do)`, meje v UTC.
 
         `answered_at` je v bazi v UTC — `routers/resevanje.py` ga pred zapisom
         pretvori —, zato primerjava drži tudi nad SQLite, ki pasu ne hrani.
         """
-        pogoji: list[ColumnElement[bool]] = [QuestionAttempt.mode == NACIN_SAMOOCENA]
+        pogoji: list[ColumnElement[bool]] = [
+            QuestionAttempt.family_id == self._family_id,
+            QuestionAttempt.mode == NACIN_SAMOOCENA,
+        ]
         if od is not None:
             pogoji.append(QuestionAttempt.answered_at >= od)
         if do is not None:
@@ -1185,7 +1334,7 @@ class StatistikaRepository:
         if subject is not None:
             pogoji.append(Question.subject == subject)
 
-        vrstice = self.session.execute(
+        vrstice = self._session.execute(
             select(
                 QuestionAttempt.rating,
                 QuestionAttempt.answered_at,
@@ -1247,7 +1396,7 @@ class StatistikaRepository:
         nekaj tisoč vrednosti na leto.
         """
         return list(
-            self.session.scalars(
+            self._session.scalars(
                 select(QuestionAttempt.answered_at).where(*self._pogoji(None, None))
             )
         )
@@ -1263,7 +1412,11 @@ class StatistikaRepository:
             return {}
         return {
             snov.id: snov
-            for snov in self.session.scalars(select(Material).where(Material.id.in_(idji)))
+            for snov in self._session.scalars(
+                select(Material).where(
+                    Material.family_id == self._family_id, Material.id.in_(idji)
+                )
+            )
         }
 
     def ima_poskuse(self, subject: str) -> bool:
@@ -1274,7 +1427,7 @@ class StatistikaRepository:
         kodo tiho izgubile (isto pravilo kot `/admin`).
         """
         return (
-            self.session.scalars(
+            self._session.scalars(
                 select(QuestionAttempt.id)
                 .join(QuizItem, QuizItem.id == QuestionAttempt.quiz_item_id)
                 .join(Question, Question.id == QuizItem.question_id)

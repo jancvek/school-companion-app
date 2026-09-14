@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.casi import trajanje
 from app.models import Material, Question, QuestionAttempt, Quiz, QuizItem
+from tests.conftest import CVEK_ID
 from tests.test_kvizi import UUID_DVA, UUID_ENA, objavi, snov, upokoji
 from tests.test_resevanje import poskus, poslji
 
@@ -360,7 +361,7 @@ class TestIzvor:
     ) -> None:
         quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
         self._arhiviraj(motor)
-        (slike / f"{UUID_ENA}.jpg").unlink()
+        (slike / CVEK_ID / f"{UUID_ENA}.jpg").unlink()
 
         besedilo = stran(odjemalec, quiz_id)
 
@@ -371,7 +372,7 @@ class TestIzvor:
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
         quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
-        (slike / f"{UUID_ENA}.jpg").unlink()
+        (slike / CVEK_ID / f"{UUID_ENA}.jpg").unlink()
 
         besedilo = stran(odjemalec, quiz_id)
 

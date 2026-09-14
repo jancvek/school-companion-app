@@ -25,7 +25,7 @@ from app.models import (
     Material,
     Question,
 )
-from tests.conftest import KLJUC
+from tests.conftest import CVEK_ID, KLJUC
 
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 UUID_DVA = "a1b2c3d4-e5f6-4789-abcd-ef0123456789"
@@ -44,13 +44,14 @@ def zapisi(
     `vsebina=None` pomeni vrstico brez datoteke — stanje, ki na tej strani ne
     sme povzročiti izjeme.
     """
-    pot = slike / f"{material_id}.jpg"
+    pot = slike / CVEK_ID / f"{material_id}.jpg"
     if vsebina is not None:
         pot.write_bytes(vsebina)
 
     with Session(motor) as seja:
         seja.add(
             Material(
+                family_id=CVEK_ID,
                 id=material_id,
                 subject=subject,
                 taken_at=datetime.fromisoformat(taken_at),
@@ -96,6 +97,7 @@ def obdelaj(
         # `retired_at` prazen, torej so veljavna.
         material.vsa_vprasanja = [
             Question(
+                family_id=CVEK_ID,
                 id=f"{material_id}-v{i}",
                 position=i,
                 question=f"Vprašanje {i}?",
@@ -156,6 +158,7 @@ def dodaj_serijo(
         for i in range(1, koliko + 1):
             material.vsa_vprasanja.append(
                 Question(
+                    family_id=CVEK_ID,
                     id=f"{material_id}-{oznaka}{i}",
                     position=i,
                     question=f"Vprašanje {oznaka}{i}?",
@@ -665,7 +668,7 @@ class TestArhiviranje:
         arhiviraj(motor)
 
         with Session(motor) as seja:
-            assert MaterialsRepository(seja).seznam_novih() == []
+            assert MaterialsRepository(seja, CVEK_ID).seznam_novih() == []
 
     def test_arhivirani_zapis_nima_gumba_za_ponovno_obdelavo(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -1553,7 +1556,7 @@ class TestSosediVPredmetu:
         arhiviraj(motor, self.ARHIVIRANA)
 
         with Session(motor) as seja:
-            repozitorij = MaterialsRepository(seja)
+            repozitorij = MaterialsRepository(seja, CVEK_ID)
             seznam = [snov.id for snov in repozitorij.seznam_po_predmetu("MAT")]
             sosedi = [
                 repozitorij.sosedi_v_predmetu(snov)
@@ -1569,7 +1572,7 @@ class TestSosediVPredmetu:
         arhiviraj(motor, UUID_ENA)
 
         with Session(motor) as seja:
-            repozitorij = MaterialsRepository(seja)
+            repozitorij = MaterialsRepository(seja, CVEK_ID)
             snov = repozitorij.poisci(UUID_ENA)
             assert snov is not None
 

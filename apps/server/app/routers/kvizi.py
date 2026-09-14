@@ -38,7 +38,7 @@ from app.models import (
     QuizItem,
 )
 from app.settings import Settings
-from app.storage import je_znotraj, velikost_slike
+from app.storage import je_znotraj, mapa_druzine, velikost_slike
 from app.strani import daj_predloge, ni_dovoljeno, ni_najdeno
 from app.subjects import OZNAKE_OCEN, oznaka_predmeta
 
@@ -155,14 +155,14 @@ def _razlog(snov: SnovZaIzbor) -> str | None:
     return "obdelano, a brez veljavnih vprašanj"
 
 
-def _vrstica(snov: SnovZaIzbor, obkljukana: bool, images_dir: Path) -> dict[str, Any]:
+def _vrstica(snov: SnovZaIzbor, obkljukana: bool, mapa_slik: Path) -> dict[str, Any]:
     """Ena vrstica izbirnika, pripravljena za predlogo.
 
     Predloga ne sklepa in ne oblikuje — dobi gotove vrednosti, tako kot
     `_pogled` na strani predmetov.
     """
     pot = Path(snov.material.image_path)
-    ima_sliko = je_znotraj(images_dir, pot) and velikost_slike(pot) is not None
+    ima_sliko = je_znotraj(mapa_slik, pot) and velikost_slike(pot) is not None
     return {
         "id": snov.material.id,
         "koda": snov.material.subject,
@@ -218,7 +218,7 @@ def _izrisi_izbirnik(
     request: Request,
     predloge: Jinja2Templates,
     repozitorij: KviziRepository,
-    images_dir: Path,
+    mapa_slik: Path,
     vstop: str,
     subject: str | None,
     stevilo: int,
@@ -244,7 +244,7 @@ def _izrisi_izbirnik(
                 if izbrane is None
                 else snov.material.id in izbrane
             ),
-            images_dir=images_dir,
+            mapa_slik=mapa_slik,
         )
         for snov in snovi
     ]
@@ -312,7 +312,7 @@ def izbirnik(
         request,
         predloge,
         repozitorij,
-        nastavitve.images_dir,
+        mapa_druzine(nastavitve.images_dir, repozitorij.family_id),
         vstop=vstop,
         subject=subject,
         stevilo=_prebrano_stevilo(stevilo),
@@ -343,7 +343,7 @@ def izbirnik_z_izborom(
         request,
         predloge,
         repozitorij,
-        nastavitve.images_dir,
+        mapa_druzine(nastavitve.images_dir, repozitorij.family_id),
         vstop=vstop,
         subject=subject,
         stevilo=_prebrano_stevilo(stevilo),
@@ -388,7 +388,7 @@ def predogled(
             request,
             predloge,
             repozitorij,
-            nastavitve.images_dir,
+            mapa_druzine(nastavitve.images_dir, repozitorij.family_id),
             vstop=vstop,
             subject=subject,
             stevilo=koliko,
@@ -590,19 +590,19 @@ def _skupine(
     return skupine
 
 
-def _opombe_izvora(postavka: QuizItem, snov: Material, images_dir: Path) -> list[str]:
+def _opombe_izvora(postavka: QuizItem, snov: Material, mapa_slik: Path) -> list[str]:
     """Kaj mora operater vedeti o izvorni snovi, preden klikne povezavo.
 
     Samo v rezultatu (`docs/plan/V2-R03.md`, odločitev 3): stran nerešenega
     kviza ostane, kakršna je bila, ker test iz `V2-R01` dokazuje, da je ponovna
     obdelava ne spremeni.
 
-    Slika „na disku" pomeni isto kot v izbirniku — znotraj `images_dir` in
+    Slika „na disku" pomeni isto kot v izbirniku — znotraj `mapa_slik` in
     berljive velikosti.
     """
     opombe: list[str] = []
     pot = Path(snov.image_path)
-    ima_sliko = je_znotraj(images_dir, pot) and velikost_slike(pot) is not None
+    ima_sliko = je_znotraj(mapa_slik, pot) and velikost_slike(pot) is not None
     if snov.archived_at is not None:
         opombe.append(
             "v arhivu" if ima_sliko else "v arhivu, slika počiščena — prepis je na strani snovi"
@@ -625,7 +625,7 @@ def _postavka_rezultata(
     postavka: QuizItem,
     poskus: QuestionAttempt | None,
     snovi: dict[str, Material],
-    images_dir: Path,
+    mapa_slik: Path,
 ) -> dict[str, Any]:
     """Ena postavka rešenega kviza, pripravljena za predlogo.
 
@@ -649,7 +649,7 @@ def _postavka_rezultata(
             if vprasanje is not None
             else None
         ),
-        "opombe": _opombe_izvora(postavka, snov, images_dir) if snov is not None else [],
+        "opombe": _opombe_izvora(postavka, snov, mapa_slik) if snov is not None else [],
         # Dve trajanji in ne eno (`ADR-019` D): razmislek pove, kako dolgo je
         # iskala odgovor, ocena pa je mehki signal iz `ADR-014` — „Lahko"
         # dve sekundi po razkritju.
@@ -662,7 +662,7 @@ def _rezultat(
     kviz: Quiz,
     poskusi: dict[str, QuestionAttempt],
     snovi: dict[str, Material],
-    images_dir: Path,
+    mapa_slik: Path,
 ) -> list[dict[str, Any]]:
     """Skupine rezultata za predlogo, vsaka z oznako in sklanjanim številom."""
     return [
@@ -670,7 +670,7 @@ def _rezultat(
             "oznaka": OZNAKE_OCEN[ocena] if ocena is not None else BREZ_OCENE,
             "stevilo_opis": stevilo_z_besedo(len(clani), VPRASANJA),
             "postavke": [
-                _postavka_rezultata(postavka, poskus, snovi, images_dir)
+                _postavka_rezultata(postavka, poskus, snovi, mapa_slik)
                 for postavka, poskus in clani
             ],
         }
@@ -712,7 +712,7 @@ def kviz(
                     najden,
                     repozitorij.poskusi_kviza(quiz_id),
                     repozitorij.snovi_postavk(najden),
-                    nastavitve.images_dir,
+                    mapa_druzine(nastavitve.images_dir, repozitorij.family_id),
                 ),
             },
         )

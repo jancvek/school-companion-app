@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.models import OCENE, Question, QuestionAttempt, Quiz
 from app.models import QuizItem as Postavka
 from app.schemas import NAJVEC_POSKUSOV
-from tests.conftest import KLJUC
+from tests.conftest import CVEK_ID, KLJUC
 from tests.test_kvizi import UUID_ENA, objavi, snov
 
 GLAVE = {"X-API-Key": KLJUC}
@@ -44,6 +44,7 @@ def kviz(
     idji = [str(uuid4()) for _ in range(postavk)]
     with Session(motor) as seja:
         nov = Quiz(
+            family_id=CVEK_ID,
             id=quiz_id,
             name="MAT — 10. 9. 2026",
             subject="MAT",

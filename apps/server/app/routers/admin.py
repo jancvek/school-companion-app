@@ -30,7 +30,7 @@ from app.dependencies import daj_nastavitve, daj_repozitorij, daj_repozitorij_kv
 from app.models import STATUS_V_OBDELAVI, Material
 from app.routers.kvizi import seznam_kvizov
 from app.settings import Settings
-from app.storage import je_znotraj, pobrisi_sliko, velikost_slike
+from app.storage import je_znotraj, mapa_druzine, pobrisi_sliko, velikost_slike
 from app.strani import daj_predloge, ni_dovoljeno, ni_najdeno
 from app.subjects import PREDMETI, oznaka_predmeta, oznaka_statusa, poisci_predmet
 
@@ -58,13 +58,13 @@ def _velikost_opis(bajti: int | None) -> str:
     return f"{bajti / (1024 * 1024):.1f} MB"
 
 
-def _pogled(material: Material, images_dir: Path) -> dict[str, Any]:
+def _pogled(material: Material, mapa_slik: Path) -> dict[str, Any]:
     """Zapis, pripravljen za predlogo.
 
     Predloga ne računa in ne oblikuje — dobi gotove nize. Tako je oblikovanje
     testljivo brez izrisa in predloga ostane brana kot postavitev.
 
-    Za datoteko izven `images_dir` velja isto kot za manjkajočo. Sicer bi
+    Za datoteko izven `mapa_slik` velja isto kot za manjkajočo. Sicer bi
     predloga narisala `<img>`, pot `/image` pa bi ga zavrnila — stran bi
     kazala pokvarjeno sliko namesto povedati, kaj je narobe.
 
@@ -73,7 +73,7 @@ def _pogled(material: Material, images_dir: Path) -> dict[str, Any]:
     na sliko. Za stran s podrobnostmi je `_pogled_podrobno`.
     """
     pot = Path(material.image_path)
-    velikost = velikost_slike(pot) if je_znotraj(images_dir, pot) else None
+    velikost = velikost_slike(pot) if je_znotraj(mapa_slik, pot) else None
     return {
         "id": material.id,
         "koda": material.subject,
@@ -98,7 +98,7 @@ def _stevilo(koliko: int | None) -> str:
     return "—" if koliko is None else f"{koliko}"
 
 
-def _pogled_podrobno(material: Material, images_dir: Path) -> dict[str, Any]:
+def _pogled_podrobno(material: Material, mapa_slik: Path) -> dict[str, Any]:
     """Kot `_pogled`, plus izid obdelave in revizijska sled (V1-R03).
 
     Vse, kar je posebej za to stran, je zbrano tu: predloga potem samo
@@ -106,7 +106,7 @@ def _pogled_podrobno(material: Material, images_dir: Path) -> dict[str, Any]:
     predloga sicer sklepala o pomenu statusov — in bi se sklepanje podvojilo
     ob vsakem novem stanju.
     """
-    pogled = _pogled(material, images_dir)
+    pogled = _pogled(material, mapa_slik)
     pogled.update(
         {
             "status": material.status,
@@ -292,7 +292,10 @@ def arhiv(
         "arhiv.html",
         {
             "koliko_opis": stevilo_z_besedo(len(snovi), SLIKE),
-            "snovi": [_pogled(snov, nastavitve.images_dir) for snov in snovi],
+            "snovi": [
+                _pogled(snov, mapa_druzine(nastavitve.images_dir, repozitorij.family_id))
+                for snov in snovi
+            ],
         },
     )
 
@@ -326,7 +329,10 @@ def predmet(
             "koda": koda,
             "oznaka": oznaka_predmeta(koda),
             "koliko_opis": stevilo_z_besedo(len(snovi), SLIKE),
-            "snovi": [_pogled(snov, nastavitve.images_dir) for snov in snovi],
+            "snovi": [
+                _pogled(snov, mapa_druzine(nastavitve.images_dir, repozitorij.family_id))
+                for snov in snovi
+            ],
         },
     )
 
@@ -344,7 +350,8 @@ def snov(
     if material is None:
         return ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
-    pogled = _pogled_podrobno(material, nastavitve.images_dir)
+    mapa_slik = mapa_druzine(nastavitve.images_dir, repozitorij.family_id)
+    pogled = _pogled_podrobno(material, mapa_slik)
     # Snov brez datoteke povečanega prikaza nima, zato tudi poizvedbe po
     # sosedih ne plača.
     povecava = (
@@ -374,7 +381,8 @@ def slika(
     # Pot je zapisala naša koda in bi ji smeli zaupati. Ne zaupamo ji, ker je
     # cena preverbe ena vrstica, cena napačne predpostavke pa branje poljubne
     # datoteke s strežnika (odločitev 8 v `docs/plan/V1-R04.md`).
-    if not je_znotraj(nastavitve.images_dir, pot) or not pot.is_file():
+    mapa_slik = mapa_druzine(nastavitve.images_dir, repozitorij.family_id)
+    if not je_znotraj(mapa_slik, pot) or not pot.is_file():
         return ni_najdeno(predloge, request, "Slike tega zapisa na disku ni.")
 
     return FileResponse(pot, media_type="image/jpeg")
@@ -394,7 +402,9 @@ def potrdi_arhiviranje(
         return ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
     return predloge.TemplateResponse(
-        request, "arhiviranje.html", {"snov": _pogled(material, nastavitve.images_dir)}
+        request,
+        "arhiviranje.html",
+        {"snov": _pogled(material, mapa_druzine(nastavitve.images_dir, repozitorij.family_id))},
     )
 
 
@@ -447,7 +457,7 @@ def pocisti_sliko(
     # Ista meja kot pri streženju slike: pot je zapisala naša koda, a je ne
     # jemljemo za dano — cena preverbe je ena vrstica, cena napačne
     # predpostavke pa brisanje poljubne datoteke s strežnika.
-    if je_znotraj(nastavitve.images_dir, pot):
+    if je_znotraj(mapa_druzine(nastavitve.images_dir, repozitorij.family_id), pot):
         pobrisi_sliko(pot)
 
     return RedirectResponse(
@@ -472,7 +482,13 @@ def potrdi_brisanje(
         return ni_dovoljeno(predloge, request, ZADRZANO)
 
     return predloge.TemplateResponse(
-        request, "brisanje.html", {"snov": _pogled_podrobno(material, nastavitve.images_dir)}
+        request,
+        "brisanje.html",
+        {
+            "snov": _pogled_podrobno(
+                material, mapa_druzine(nastavitve.images_dir, repozitorij.family_id)
+            )
+        },
     )
 
 
@@ -511,7 +527,7 @@ def izbrisi(
     # ta klic meje ni imel; zdaj stojita poti druga ob drugi in razlike ne bi
     # pojasnilo nič.
     pot = Path(pobrisani.image_path)
-    if je_znotraj(nastavitve.images_dir, pot):
+    if je_znotraj(mapa_druzine(nastavitve.images_dir, repozitorij.family_id), pot):
         pobrisi_sliko(pot)
 
     # Nazaj v arhiv in ne na predmet: s seznama predmeta je bila ta slika
@@ -574,11 +590,14 @@ async def prestrezi_napako(request: Request, izjema: Exception) -> Response:
     napaki (odločitev 7 v `docs/plan/V1-R04.md`).
     """
     if isinstance(izjema, StarletteHTTPException) and je_admin_pot(request.url.path):
-        sporocilo = (
-            "Te strani na strežniku ni."
-            if izjema.status_code == 404
-            else "Ta stran tega dejanja ne podpira."
-        )
+        if izjema.status_code == 404:
+            sporocilo = "Te strani na strežniku ni."
+        elif izjema.status_code == 405:
+            sporocilo = "Ta stran tega dejanja ne podpira."
+        else:
+            # Sporočilo je sestavila naša koda in je slovensko — npr.
+            # izbira družine v `app/dependencies.py`.
+            sporocilo = str(izjema.detail)
         predloge: Jinja2Templates = request.app.state.predloge
         return predloge.TemplateResponse(
             request,

@@ -30,7 +30,7 @@ from app.db import MaterialsRepository
 from app.dependencies import daj_nastavitve, daj_repozitorij
 from app.models import Material
 from app.settings import Settings
-from app.storage import je_znotraj, velikost_slike
+from app.storage import je_znotraj, mapa_druzine, velikost_slike
 from app.strani import daj_predloge, neveljavna_zahteva
 from app.subjects import PREDMETI, oznaka_predmeta
 
@@ -155,21 +155,21 @@ def preberi_obdobje(dan: str | None, obdobje: str | None, zdaj: date) -> Obdobje
     return Obdobje(prvi=izbrani_dan, zadnji=izbrani_dan, je_teden=False)
 
 
-def _pogled_slike(material: Material, images_dir: Path) -> dict[str, Any]:
+def _pogled_slike(material: Material, mapa_slik: Path) -> dict[str, Any]:
     """Ena sličica: samo ura posnetka in ali datoteka obstaja.
 
     Stanje obdelave in berljivost tu **nista** — vidna sta na strani
-    podrobnosti, kamor sličica pelje. Za datoteko izven `images_dir` velja isto
+    podrobnosti, kamor sličica pelje. Za datoteko izven `mapa_slik` velja isto
     kot za manjkajočo, kot v `admin._pogled`: sicer bi predloga narisala `<img>`,
     pot `/image` pa bi ga zavrnila.
     """
     pot = Path(material.image_path)
-    ima_sliko = je_znotraj(images_dir, pot) and velikost_slike(pot) is not None
+    ima_sliko = je_znotraj(mapa_slik, pot) and velikost_slike(pot) is not None
     return {"id": material.id, "ura": ura(material.taken_at), "ima_sliko": ima_sliko}
 
 
 def razvrsti_po_dnevih(
-    dnevi: list[date], snovi: list[Material], images_dir: Path
+    dnevi: list[date], snovi: list[Material], mapa_slik: Path
 ) -> list[dict[str, Any]]:
     """Slike, razvrščene po dnevu in znotraj dneva po predmetu.
 
@@ -214,7 +214,7 @@ def razvrsti_po_dnevih(
                 # `docs/plan/V1-R04.md` — podvojena pač ni.
                 "oznaka": oznaka_predmeta(koda) if oznaka_predmeta(koda) != koda else None,
                 "koliko_opis": stevilo_z_besedo(len(skupine[koda]), SLIKE),
-                "slike": [_pogled_slike(snov, images_dir) for snov in skupine[koda]],
+                "slike": [_pogled_slike(snov, mapa_slik) for snov in skupine[koda]],
             }
             for koda in vrstni_red
         ]
@@ -266,6 +266,8 @@ def pregled_po_dnevih(
             # Vrednost za `<input type="date">`; ta pozna samo obliko ISO.
             "izbrani_dan": izbrano.zadnji.isoformat(),
             "vceraj": (zdaj - timedelta(days=1)).isoformat(),
-            "dnevi": razvrsti_po_dnevih(izbrano.dnevi, snovi, nastavitve.images_dir),
+            "dnevi": razvrsti_po_dnevih(
+                izbrano.dnevi, snovi, mapa_druzine(nastavitve.images_dir, repozitorij.family_id)
+            ),
         },
     )
