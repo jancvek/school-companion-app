@@ -86,7 +86,10 @@ def _vrednost(telo: list[str], kljuc: str) -> str:
 
 #: Ključ `ports` v kateremkoli zapisu: blokovnem (`ports:`) ali v eni vrstici
 #: (`ports: ["8000:8000"]`).
-PORTS = re.compile(r"^(?P<zamik>\s*)ports\s*:(?P<ostanek>.*)$")
+PORTS = re.compile(r"^(?P<zamik>\s*)[\"']?ports[\"']?\s*:(?P<ostanek>.*)$")
+
+#: `network_mode` (npr. `host`) odpre vrata brez ključa `ports`.
+NETWORK_MODE = re.compile(r"^\s*[\"']?network_mode[\"']?\s*:")
 
 
 def _objave(vrstice: list[str]) -> list[str]:
@@ -177,6 +180,17 @@ class TestObjavljenaVrata:
 
     def test_edina_objava_v_datoteki_je_443(self) -> None:
         assert _vse_objave() == ["443:443"]
+
+    def test_kljuc_ports_je_samo_pri_caddyju(self) -> None:
+        # Blokovni seznam brez zamika (`ports:` in `- "…"` na istem zamiku) je
+        # veljaven YAML, ki ga `_objave` ne razbere. Štetje ključev ga ujame ne
+        # glede na zapis in ne glede na servis (ugotovitev pregledovalca).
+        vrstice = _vrstice_compose()
+        assert sum(1 for vrstica in vrstice if PORTS.match(vrstica)) == 1
+        assert any(PORTS.match(vrstica) for vrstica in _servis("caddy"))
+
+    def test_noben_servis_nima_network_mode(self) -> None:
+        assert not any(NETWORK_MODE.match(vrstica) for vrstica in _vrstice_compose())
 
     def test_nobena_objava_ni_80_ali_udp(self) -> None:
         # Vrata 80 so Arasova (IIS) in se ne smejo pojaviti nikjer; HTTP/3 je
@@ -286,33 +300,36 @@ class TestCaddyfile:
 
 
 def _vrhnji_bloki(besedilo: str) -> list[str]:
-    """Glave blokov na najvišji ravni, po vrsti; globalni blok ima prazno glavo.
+    """Vse, kar stoji na najvišji ravni, po vrsti; globalni blok ima prazno glavo.
 
-    Nadomestna vrednost `{$IME}` ni blok in se preskoči, sicer bi `{$DOMENA} {`
-    štel za dva bloka.
+    Glava bloka je **vse besedilo od konca prejšnjega bloka** do oklepaja, ne le
+    vrstica z oklepajem: Caddy dovoli naslove čez več vrstic (`:443,` v vrstici
+    pred `{$DOMENA} {`). Besedilo za zadnjim blokom (npr. `import`) se vrne kot
+    dodaten element. Nadomestna vrednost `{$IME}` ni blok in se preskoči.
     """
     glave: list[str] = []
     globina = 0
-    zacetek_vrstice = 0
+    zacetek_glave = 0
     i = 0
     while i < len(besedilo):
         znak = besedilo[i]
-        if znak == "\n":
-            zacetek_vrstice = i + 1
-        elif znak == "{" and besedilo.startswith("{$", i):
+        if znak == "{" and besedilo.startswith("{$", i):
             konec = besedilo.find("}", i)
             assert konec != -1, "Nadomestna vrednost ni zaprta."
             i = konec
         elif znak == "{":
             if globina == 0:
-                glave.append(besedilo[zacetek_vrstice:i].strip())
+                glave.append(" ".join(besedilo[zacetek_glave:i].split()))
             globina += 1
         elif znak == "}":
             globina -= 1
             assert globina >= 0, "Zaklepaj brez oklepaja."
+            if globina == 0:
+                zacetek_glave = i + 1
         i += 1
     assert globina == 0, "Blok ni zaprt."
-    return glave
+    ostanek = " ".join(besedilo[zacetek_glave:].split())
+    return [*glave, ostanek] if ostanek else glave
 
 
 # --- Zaupanje proxy glavam -------------------------------------------------

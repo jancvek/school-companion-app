@@ -83,8 +83,8 @@ function Get-Sha256([string] $Pot) {
 
 if (Test-Path -LiteralPath $Cilj) {
     # Neuspele kopije se ne štejejo med cele, a se tudi ne smejo kopičiti brez
-    # meje, ko dnevno opravilo pada dan za dnem. Ohrani se jih največ `-Ohrani`;
-    # čiščenje teče pred kopijo, da meja drži tudi ob naslednjem neuspehu.
+    # meje, ko dnevno opravilo pada dan za dnem. Pred kopijo ostane največ
+    # `-Ohrani` neuspelih map; če tudi ta kopija ne uspe, jih je `-Ohrani + 1`.
     $neuspele = Get-ChildItem -LiteralPath $Cilj -Directory |
         Where-Object { $_.Name -match $ImeNeuspele } |
         Sort-Object Name -Descending
