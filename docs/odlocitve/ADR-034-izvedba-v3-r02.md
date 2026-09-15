@@ -86,3 +86,31 @@ okvare diska — to je sprejeto in zapisano, ne spregledano.
 - **Na katere zahteve to odslej vpliva:** `V3-R03` (omejevanje po
   identifikatorju), `V3-R05` (ponovna obnova kopije uporabi skripto iz F),
   `V3-R08` (povratni naslov na `school-buddy.duckdns.org`).
+
+## Dopolnitev — preizkus obnove brez Compose (15. 9. 2026, med izvedbo)
+
+**Preglasi:** v F besedi „ločen projekt Compose" in odločitev 11 v
+`docs/plan/V3-R02.md` v istem delu. Plan ostane, kakršen je bil.
+
+**Kontekst.** Poskus `docker compose -p school-obnova up --no-start db` je
+padel s `Pool overlaps with other one on this address space`. Compose ob
+zagonu ustvari **vsa** omrežja iz datoteke, ne le tista, ki jih izbrani servis
+rabi; omrežje `spredaj` ima stalno podomrežje (`172.30.10.0/24`), ki ga že drži
+živi strežnik. Drug projekt iz iste datoteke zato na istem stroju ne more
+nastati, dokler teče prvi.
+
+**Možnosti.**
+
+1. **Obnova z navadnim `docker`.** Vsebnik baze in prazna volumna z imeni
+   `school-obnova*`, ista slika baze kot v produkciji. Za: namen ostane
+   (prazna namestitev, živi strežnik nedotaknjen), brez nove slike in brez
+   spremembe `docker-compose.yml`. Proti: obnova ne gre skozi datoteko Compose,
+   zato ne preveri, da iz nje nastane delujoča baza — to preveri vsak zagon
+   produkcije.
+2. **Nastavljivo podomrežje v `docker-compose.yml`.** Za: obnova skozi
+   Compose. Proti: Caddyjev naslov in zaupanje v `api` postaneta spremenljivki,
+   ki morata biti vedno usklajeni — prav napaka, pred katero varuje test
+   zaupanja.
+
+**Odločitev.** Možnost 1. Izbral lastnik. `scripts/obnova.ps1` ustvari samo
+vire z imeni, ki se začnejo s `school-obnova`, in na koncu pobriše samo te.
