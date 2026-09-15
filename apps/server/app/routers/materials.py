@@ -93,6 +93,7 @@ def prevzemi_material(
 
     material = Material(
         id=identifikator,
+        family_id=repozitorij.family_id,
         subject=subject,
         taken_at=v_utc(taken_at),
         image_path=str(pot),

@@ -207,6 +207,12 @@ brez njega ostalo brez družine (`ADR-029` C). Primarni ključi ostanejo globaln
   ima vsaka pot in metoda svoj primer; posnetek družine zavrne tabelo brez
   zapisanega pravila družine.
 
+**Znana omejitev:** `POST /quiz-attempts` s poskusom, katerega `id` (UUID s
+telefona) že obstaja v **drugi** družini, vrne `500` (dvakrat `IntegrityError`
+na primarnem ključu), ne `4xx`. Brez ponarejanja se to ne zgodi; obvoz s
+poizvedbo brez družine ni dovoljen, drugačen izid pa bi bil nova odločitev o
+pogodbi s telefonom.
+
 Tabela `materials` (nastane v V1-R02, razširi jo V1-R03):
 
 | Stolpec | Tip | Opomba |
@@ -416,7 +422,8 @@ ležijo neposredno v korenu `IMAGES_DIR`, in datoteke premakne v
 ponovni zagon po prekinitvi pride do istega stanja. Datotek brez vrstice in
 `.tmp/` se ne dotakne. **`IMAGES_DIR` je obvezen, kadar baza ni prazna**;
 preverba je pred prvim DDL. `downgrade` slike in poti vrne in stolpce spusti;
-pri več kot eni družini se ne izvede.
+pri več kot eni družini se ne izvede. Če `downgrade` pade po premiku slik, se
+pozdravi s ponovnim `downgrade`, ne z `upgrade`.
 
 Migracije vodi **Alembic** (`apps/server/alembic/`). Prva migracija ustvari
 razširitev `vector` — vektorskih stolpcev še ni, iskanje po pomenu je V2.

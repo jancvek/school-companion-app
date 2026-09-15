@@ -532,6 +532,7 @@ PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
         _m(s, b).vstavi_ce_ga_ni(
             Material(
                 id=a.akt,
+                family_id=b.family_id,
                 subject=b.subject,
                 taken_at=b.posneto,
                 image_path="/nikamor.jpg",

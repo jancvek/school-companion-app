@@ -5,7 +5,7 @@ Tabela `families` in obvezen `family_id` na `materials`, `questions`,
 **Cvek**, vse obstoječe slike se premaknejo v njeno mapo. Razlogi so v
 `docs/odlocitve/ADR-025` in `ADR-029`, postopek v `docs/plan/V3-R01.md`.
 
-Tri stvari, ki niso očitne:
+Štiri stvari, ki niso očitne:
 
 - **Cvek ima stalen `id`.** Premik datotek ni del transakcije baze. Če
   migracija pade po premiku, se baza vrne, datoteke pa ostanejo v novi mapi;
@@ -17,6 +17,9 @@ Tri stvari, ki niso očitne:
 - **Prepiše se samo pot slike, ki leži neposredno v korenu `IMAGES_DIR`.** Pot
   drugje ostane, kakršna je — aplikacija jo je že doslej štela za „ni na disku".
   Datoteke brez vrstice in ostanki v `.tmp/` ostanejo nedotaknjeni.
+- **Isto velja v obratno smer.** `downgrade` slike vrne pred DDL; če DDL nato
+  pade, ostane baza na `0007` s potmi v mapi Cvek, slike pa so že v korenu.
+  Pozdravi se s **ponovnim `downgrade`** (enako idempotenten), ne z `upgrade`.
 
 Revision ID: 0007_druzine
 Revises: 0006_poskusi

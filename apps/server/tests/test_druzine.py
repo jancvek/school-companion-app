@@ -10,7 +10,7 @@ import inspect
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from fastapi import FastAPI
@@ -28,6 +28,7 @@ from app.dependencies import SPOROCILO_NI_ENE_DRUZINE, daj_druzino
 from app.models import (
     STATUS_NAPAKA,
     STATUS_NOV,
+    STATUS_PRIPRAVLJEN,
     STATUS_V_OBDELAVI,
     Family,
     Material,
@@ -37,7 +38,10 @@ from app.obdelava import obdelaj_cakajoce
 from app.routers.materials import SPOROCILO_TUJ_ID
 from app.worker import obnovi_obticale
 from tests.conftest import CVEK_ID, KLJUC
+from tests.test_kvizi import objavi
 from tests.test_obdelava import klicalec_vrne, uspesen_izid
+from tests.test_resevanje import poskus, poslji
+from tests.test_rezultat import postavke
 
 #: Druga družina. Kanoničen UUID, ker iz njega nastane mapa slik.
 DRUGA_ID = "9d4c2b1a-7e6f-4d5c-8b3a-1f2e3d4c5b6a"
@@ -128,14 +132,18 @@ class TestRepozitorijBrezDruzine:
             assert not hasattr(repozitorij, "session")
             assert repozitorij.family_id == CVEK_ID
 
-    def test_vstavljanje_zapisa_tuje_druzine_se_zavrne(self, motor: Engine) -> None:
-        """Družino zapis dobi od repozitorija; tuje ne sme prinesti s sabo."""
+    @pytest.mark.parametrize("druzina", [DRUGA_ID, None], ids=["tuja", "brez"])
+    def test_vstavljanje_zapisa_s_tujo_ali_brez_druzine_se_zavrne(
+        self, motor: Engine, druzina: str | None
+    ) -> None:
+        """Zapis mora nositi družino repozitorija (plan V3-R01, odločitev 2)."""
         dodaj_druzino(motor)
-        with Session(motor) as seja, pytest.raises(ValueError, match="tuje družine"):
+        with Session(motor) as seja, pytest.raises(ValueError, match="družino tega repozitorija"):
             MaterialsRepository(seja, CVEK_ID).vstavi_ce_ga_ni(
                 Material(
+                    # Brez družine: polja sploh ni, kot pri poti, ki bi ga pozabila.
+                    **({} if druzina is None else {"family_id": druzina}),
                     id=UUID_ENA,
-                    family_id=DRUGA_ID,
                     subject="MAT",
                     taken_at=datetime(2026, 9, 4, 7, 30, tzinfo=UTC),
                     image_path="/nikamor.jpg",
@@ -299,3 +307,152 @@ class TestObdelavaPoDruzinah:
 
         with Session(motor) as seja:
             assert set(seja.scalars(select(Material.status))) == {STATUS_NOV}
+
+
+class TestMejaMapeVUsmerjevalnikih:
+    """Meja mape v usmerjevalnikih je mapa družine, ne koren (kriterij V3-R01).
+
+    Vrstica družine kaže na **obstoječo** datoteko: v mapi družine (kontrola), v
+    korenu ali v mapi druge družine. Slika je samo prva. Obstoječi testi meje
+    postavijo datoteko v `tmp_path`, zunaj korena, zato meje družine ne ločijo od
+    meje korena; to je našel pregledovalec v fazi 7.
+
+    Vsak primer je **eno mesto** v usmerjevalniku, kjer se računa, ali je slika na
+    disku — mutacija kateregakoli od njih mora podreti natanko svoj primer.
+    """
+
+    KJE = ("lastna_mapa", "koren", "tuja_mapa")
+
+    SLIKA = f'src="/admin/materials/{UUID_ENA}/image"'
+
+    #: ime → (stanje snovi, zahteva, ki stran izriše)
+    PRIMERI_STRANI: ClassVar[dict[str, tuple[dict[str, Any], Callable[[TestClient], Any]]]] = {
+        "admin.predmet": ({}, lambda o: o.get("/admin/subjects/MAT")),
+        "admin.arhiv": ({"arhivirana": True}, lambda o: o.get("/admin/archive")),
+        "admin.snov": ({}, lambda o: o.get(f"/admin/materials/{UUID_ENA}")),
+        "admin.arhiviranje": ({}, lambda o: o.get(f"/admin/materials/{UUID_ENA}/archive")),
+        "admin.brisanje": (
+            {"arhivirana": True, "potrjena": True},
+            lambda o: o.get(f"/admin/materials/{UUID_ENA}/delete"),
+        ),
+        "dnevi": ({}, lambda o: o.get("/admin/days")),
+        "kvizi.izbirnik": ({}, lambda o: o.get("/admin/quizzes/new?vstop=danes")),
+        "kvizi.izbirnik_z_izborom": (
+            {},
+            lambda o: o.post("/admin/quizzes/new", data={"vstop": "danes"}),
+        ),
+        "kvizi.predogled_brez_vprasanj": (
+            {"vprasanj": 0},
+            lambda o: o.post("/admin/quizzes/preview", data={"vstop": "danes", "snov": [UUID_ENA]}),
+        ),
+    }
+
+    @staticmethod
+    def _slika(slike: Path, kje: str) -> Path:
+        """Obstoječa datoteka na dani legi."""
+        mapa = {"lastna_mapa": slike / CVEK_ID, "koren": slike, "tuja_mapa": slike / DRUGA_ID}[kje]
+        mapa.mkdir(parents=True, exist_ok=True)
+        pot = mapa / f"{UUID_ENA}.jpg"
+        pot.write_bytes(b"slika")
+        return pot
+
+    @staticmethod
+    def _snov(
+        motor: Engine,
+        pot: Path,
+        *,
+        arhivirana: bool = False,
+        potrjena: bool = False,
+        vprasanj: int = 5,
+    ) -> None:
+        """Današnja obdelana snov družine Cvek, katere `image_path` je `pot`."""
+        zdaj = datetime.now(UTC)
+        with Session(motor) as seja:
+            material = Material(
+                id=UUID_ENA,
+                family_id=CVEK_ID,
+                subject="MAT",
+                taken_at=zdaj,
+                image_path=str(pot),
+                status=STATUS_PRIPRAVLJEN,
+                received_at=zdaj,
+                readable=True,
+                transcript="Prepis.",
+                summary="Povzetek.",
+                archived_at=zdaj if arhivirana else None,
+                device_deleted_at=zdaj if potrjena else None,
+            )
+            material.vsa_vprasanja = [
+                Question(
+                    id=f"meja-v{i}",
+                    family_id=CVEK_ID,
+                    position=i,
+                    question=f"Vprašanje {i}?",
+                    answer=f"Odgovor {i}.",
+                    subject="MAT",
+                    material_taken_at=zdaj,
+                )
+                for i in range(1, vprasanj + 1)
+            ]
+            seja.add(material)
+            seja.commit()
+
+    @pytest.mark.parametrize("kje", KJE)
+    @pytest.mark.parametrize("primer", sorted(PRIMERI_STRANI))
+    def test_stran_pokaze_sliko_samo_iz_mape_druzine(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, primer: str, kje: str
+    ) -> None:
+        stanje, zahteva = self.PRIMERI_STRANI[primer]
+        self._snov(motor, self._slika(slike, kje), **stanje)
+
+        odgovor = zahteva(odjemalec)
+
+        assert odgovor.status_code == 200, odgovor.text[:300]
+        assert (self.SLIKA in odgovor.text) is (kje == "lastna_mapa")
+
+    @pytest.mark.parametrize("kje", KJE)
+    def test_rezultat_kviza_pozna_sliko_samo_iz_mape_druzine(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, kje: str
+    ) -> None:
+        self._snov(motor, self._slika(slike, kje))
+        quiz_id = objavi(odjemalec, motor, [UUID_ENA], koliko=3, subject="MAT", vstop="rocna")
+        oddano = poslji(odjemalec, [poskus(p) for p in postavke(motor, quiz_id)])
+        assert oddano.status_code == 200, oddano.text
+
+        besedilo = odjemalec.get(f"/admin/quizzes/{quiz_id}").text
+
+        assert ("slike ni na disku" in besedilo) is (kje != "lastna_mapa")
+
+    @pytest.mark.parametrize("kje", KJE)
+    def test_strezenje_slike_samo_iz_mape_druzine(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, kje: str
+    ) -> None:
+        self._snov(motor, self._slika(slike, kje))
+
+        odgovor = odjemalec.get(f"/admin/materials/{UUID_ENA}/image")
+
+        assert odgovor.status_code == (200 if kje == "lastna_mapa" else 404)
+
+    @pytest.mark.parametrize("kje", KJE)
+    def test_ciscenje_slike_brise_samo_v_mapi_druzine(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, kje: str
+    ) -> None:
+        pot = self._slika(slike, kje)
+        self._snov(motor, pot, arhivirana=True)
+
+        odgovor = odjemalec.post(f"/admin/materials/{UUID_ENA}/purge-image", follow_redirects=False)
+
+        assert odgovor.status_code == 303
+        assert pot.exists() is (kje != "lastna_mapa")
+
+    @pytest.mark.parametrize("kje", KJE)
+    def test_dokoncno_brisanje_brise_datoteko_samo_v_mapi_druzine(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, kje: str
+    ) -> None:
+        pot = self._slika(slike, kje)
+        self._snov(motor, pot, arhivirana=True, potrjena=True)
+
+        odgovor = odjemalec.post(f"/admin/materials/{UUID_ENA}/delete", follow_redirects=False)
+
+        assert odgovor.status_code == 303
+        assert pot.exists() is (kje != "lastna_mapa")

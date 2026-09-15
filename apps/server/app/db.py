@@ -189,18 +189,17 @@ class MaterialsRepository(_RepozitorijDruzine):
         tekmovanje dveh hkratnih zahtev z istim `id`: takrat je zmagala prva in
         to za klicatelja pomeni isto — zapis obstaja, ni ga ustvaril on.
 
-        **Družino zapis dobi od repozitorija**, ne od klicatelja. Zapis, ki mu
-        je klicatelj družino že nastavil, mora imeti to družino.
+        **Zapis mora nositi družino tega repozitorija.** Zapis brez družine ali
+        s tujo je `ValueError` (plan V3-R01, odločitev 2): klicatelj družino
+        vzame iz `family_id` repozitorija, ne iz zahteve.
 
         `id` je globalen primarni ključ. Zapis z `id`, ki obstaja v **drugi**
         družini, pade na istem `IntegrityError` in vrne `False`; klicatelj ga
         od tekmovanja loči s `poisci`, ki v tej družini ne najde ničesar
         (`docs/odlocitve/ADR-029` D).
         """
-        if not material.family_id:
-            material.family_id = self._family_id
-        elif material.family_id != self._family_id:
-            raise ValueError("Zapisa tuje družine ni mogoče vstaviti skozi ta repozitorij.")
+        if material.family_id != self._family_id:
+            raise ValueError("Zapis mora nositi družino tega repozitorija, ne tuje ali prazne.")
 
         if self.obstaja(material.id):
             return False
