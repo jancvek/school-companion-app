@@ -32,11 +32,11 @@ IZVZETE_POTI = frozenset({"/health"})
 #: Predpone, ki ključa ne zahtevajo.
 #:
 #: Operaterska stran teče v brskalniku, ta pa glave `X-API-Key` ne zna
-#: poslati. Meja pred njo je Tailscale in vezava strežnika na tisti naslov —
-#: glej `docs/odlocitve/ADR-006`, ki to izbiro in njene posledice zapiše.
+#: poslati. Do V3-R03 jo varuje začasen `basic_auth` v Caddyju pred `api`
+#: (`docs/odlocitve/ADR-026`); pred V3-R02 je bila meja Tailscale (`ADR-006`).
 #:
 #: **Tu ne dodajaj ničesar brez ADR.** Vsaka predpona na tem seznamu je pot,
-#: ki jo lahko odpre kdorkoli v omrežju.
+#: ki je aplikacija sama ne varuje — strežnik je na javnem internetu.
 IZVZETE_PREDPONE = frozenset({"/admin"})
 
 
@@ -130,8 +130,8 @@ def create_app(
     # vidna je samo na operaterski strani (`docs/odlocitve/ADR-021` F).
     app.include_router(statistika.router)
     # Pregled slik po obdobju in predmetih (V2-R07), pod `/admin/days`. Z
-    # nobeno obstoječo potjo se ne prekriva in samo bere; javnost znotraj
-    # omrežja je posledica `ADR-006`, zapisana v `docs/odlocitve/ADR-023`.
+    # nobeno obstoječo potjo se ne prekriva in samo bere; varuje jo isto kot
+    # ves `/admin` (`docs/odlocitve/ADR-026`).
     app.include_router(dnevi.router)
 
     # Napake pod `/admin` naj bodo stran, ne JSON. Prestreznik se za vse

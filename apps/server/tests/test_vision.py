@@ -132,7 +132,7 @@ class TestSestavaZahteve:
         assert vsebina[1]["type"] == "image_url"
 
     def test_slika_gre_kot_base64_in_ne_kot_naslov(self, slika: Path) -> None:
-        """Strežnik je za Tailscale; do naslova slike OpenAI nima dostopa."""
+        """Slike so samo pod `/admin`, za geslom; do naslova slike OpenAI nima dostopa."""
         url = sestavi_sporocila(slika)[0]["content"][1]["image_url"]["url"]
 
         predpona = "data:image/jpeg;base64,"

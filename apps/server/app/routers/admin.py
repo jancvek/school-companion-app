@@ -1,8 +1,9 @@
 """Operaterska stran: pregled prejetih slik in brisanje.
 
 Stran je namenjena lastniku sistema, ne učenki (`docs/00-namen.md`, vloga
-„spremlja delovanje"). Ključa ne zahteva — meja je Tailscale; glej
-`docs/odlocitve/ADR-006` za to izbiro in njene posledice.
+„spremlja delovanje"). Ključa ne zahteva. Do V3-R03 jo varuje začasen
+`basic_auth` v Caddyju (`docs/odlocitve/ADR-026`); pred V3-R02 je bila meja
+Tailscale (`docs/odlocitve/ADR-006`).
 
 Stran s podrobnostmi od V1-R03 pokaže tudi izid obdelave — prepis, povzetek,
 vprašanja z odgovori — in celotno revizijsko sled klica: poslani prompt, surov

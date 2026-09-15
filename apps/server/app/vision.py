@@ -226,8 +226,8 @@ def _slika_kot_podatkovni_url(pot: Path) -> str:
 def sestavi_sporocila(pot: Path) -> list[dict[str, Any]]:
     """Sporočila enega klica: prompt in slika.
 
-    Slika gre kot base64 in ne kot naslov: strežnik je za Tailscale in OpenAI
-    do njega nima dostopa.
+    Slika gre kot base64 in ne kot naslov: strežnik slike streže samo pod
+    `/admin`, za geslom, zato OpenAI do njih nima dostopa.
     """
     return [
         {
