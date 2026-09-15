@@ -138,6 +138,15 @@ class TestObjavljenaVrata:
     def test_caddy_objavi_samo_tcp_443(self) -> None:
         assert _seznam(_odsek(_servis("caddy"), "ports", 4)) == ["443:443"]
 
+    def test_api_ni_objavljen_na_gostitelju(self) -> None:
+        # Tudi ne na `127.0.0.1` ali Tailscale naslovu: `api` je dosegljiv samo
+        # skozi Caddy. `expose` bi bil neškodljiv, a ga ni treba.
+        assert not _ima_kljuc(_servis("api"), "ports", 4)
+        assert "BIND_ADDRESS" not in COMPOSE.read_text(encoding="utf-8")
+
+    def test_edina_objava_v_datoteki_je_443(self) -> None:
+        assert _vse_objave() == ["443:443"]
+
     def test_nobena_objava_ni_80_ali_udp(self) -> None:
         # Vrata 80 so Arasova (IIS) in se ne smejo pojaviti nikjer; HTTP/3 je
         # izklopljen, zato tudi UDP ne.

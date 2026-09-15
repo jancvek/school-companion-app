@@ -63,8 +63,6 @@ ADMIN_UPORABNIK=
 # Brez njih Compose znake `$` razume kot spremenljivke in zgostitev tiho pokvari.
 ADMIN_ZGOSTITEV=
 
-# ZAČASNO do drugega koraka V3-R02: stari APK še prenaša prek Tailscale.
-# Naslov, na katerem posluša API. Vpiši Tailscale naslov tega stroja
-# (`tailscale ip -4`), da strežnik ni dosegljiv iz domačega omrežja ali
-# interneta. Za preizkus na istem stroju je smiselno 127.0.0.1.
-BIND_ADDRESS=127.0.0.1
+# Nastavitve naslova, na katerem posluša API, ni več: `api` nima vrat na
+# gostitelju in je dosegljiv samo skozi Caddy (V3-R02). Stara vrstica
+# `BIND_ADDRESS` se lahko iz `.env` pobriše; če ostane, se prezre.

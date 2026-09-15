@@ -67,12 +67,8 @@ services:
       # `default` z bazo, `spredaj` s Caddyjem. Caddy do baze nima poti.
       - default
       - spredaj
-    ports:
-      # ZAČASNO do drugega koraka V3-R02 (plan, odločitev 8): stari APK še
-      # prenaša prek Tailscale. Vezava pade skupaj z namestitvijo novega APK.
-      # Samo Tailscale naslov tega stroja. Privzetek 127.0.0.1 je namenoma
-      # neuporaben od zunaj: raje ne dela, kot da je odprt v domače omrežje.
-      - "${BIND_ADDRESS:-127.0.0.1}:8000:8000"
+    # Brez `ports`: `api` ni vezan na noben naslov gostitelja in je dosegljiv
+    # samo iz omrežja Compose, torej navzven samo skozi Caddy (V3-R02).
     depends_on:
       db:
         condition: service_healthy
