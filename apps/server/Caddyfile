@@ -3,7 +3,6 @@
 #
 # Vrednosti `{$…}` pridejo iz okolja vsebnika, tega pa poda
 # `docker-compose.yml` iz `apps/server/.env`. Skrivnosti tu ni in je ne sme biti.
-
 {
 	# Samo HTTP/1.1 in HTTP/2. HTTP/3 bi zahteval še UDP 443, navzven pa so
 	# odprta izključno TCP 443.
