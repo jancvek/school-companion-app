@@ -13,11 +13,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, event, func, select
 from sqlalchemy.orm import Session
 
 from app.casi import dan_od_do, datum
+from app.dependencies import daj_druzino
 from app.models import (
     STATUS_NAPAKA,
     STATUS_NOV,
@@ -1064,8 +1066,12 @@ class TestPoizvedbe:
         return stevec
 
     def test_izbirnik_je_tri_poizvedbe_ne_glede_na_stevilo_snovi(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, aplikacija: FastAPI, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
+        # Izbira družine je ena poizvedba na zahtevo in ni poizvedba te strani
+        # (`docs/odlocitve/ADR-029` A). Tu je zamenjana, da test meri samo stran;
+        # ceno izbire meri `test_druzine.py`.
+        aplikacija.dependency_overrides[daj_druzino] = lambda: CVEK_ID
         for i in range(12):
             snov(motor, slike, f"veliko-{i:02d}", vprasanj=5)
 

@@ -14,11 +14,13 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, event, select, update
 from sqlalchemy.orm import Session
 
 from app.casi import trajanje
+from app.dependencies import daj_druzino
 from app.models import Material, Question, QuestionAttempt, Quiz, QuizItem
 from tests.conftest import CVEK_ID
 from tests.test_kvizi import UUID_DVA, UUID_ENA, objavi, snov, upokoji
@@ -689,8 +691,12 @@ class TestPoizvedbe:
     """Rezultat ne sme brati poskusa ali snovi na postavko."""
 
     def test_rezultat_je_pet_poizvedb(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, aplikacija: FastAPI, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
+        # Izbira družine je ena poizvedba na zahtevo in ni poizvedba te strani
+        # (`docs/odlocitve/ADR-029` A). Tu je zamenjana, da test meri samo stran;
+        # ceno izbire meri `test_druzine.py`.
+        aplikacija.dependency_overrides[daj_druzino] = lambda: CVEK_ID
         snov(motor, slike, UUID_ENA, vprasanj=10)
         snov(motor, slike, UUID_DVA, vprasanj=10)
         quiz_id = objavi(odjemalec, motor, [UUID_ENA, UUID_DVA], koliko=10)
