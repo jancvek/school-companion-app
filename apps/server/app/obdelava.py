@@ -16,9 +16,9 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db import IzidObdelave, MaterialsRepository, VprasanjeZaZapis
+from app.db import DruzineRepository, IzidObdelave, MaterialsRepository, VprasanjeZaZapis
 from app.models import STATUS_NAPAKA, STATUS_PRIPRAVLJEN
-from app.storage import je_znotraj
+from app.storage import je_znotraj, mapa_druzine
 from app.vision import Klicalec, NapakaObdelave
 
 dnevnik = logging.getLogger(__name__)
@@ -42,27 +42,38 @@ def obdelaj_cakajoce(
     strežnika čakala celo serijo: pri dvajsetih čakajočih slikah in časovni
     omejitvi 120 s je to do štirideset minut. Zapis, ki je takrat že v teku, se
     dokonča — prekinjen klic bi bil plačan in zavržen.
+
+    **Po družinah** (`docs/odlocitve/ADR-029` B): repozitorija brez družine
+    ni, zato obhod vzame družine eno za drugo. „Najstarejši posnetek prvi"
+    velja znotraj družine.
     """
     with tovarna_sej() as seja:
-        cakajoci = [material.id for material in MaterialsRepository(seja).seznam_novih()]
+        druzine = DruzineRepository(seja).idji()
 
     obdelanih = 0
-    for material_id in cakajoci:
-        if naj_se_ustavi is not None and naj_se_ustavi():
-            dnevnik.info(
-                "Obdelava se ustavlja; %d zapisov ostaja v vrsti za naslednji zagon.",
-                len(cakajoci) - obdelanih,
-            )
-            break
+    for family_id in druzine:
+        with tovarna_sej() as seja:
+            cakajoci = [
+                material.id for material in MaterialsRepository(seja, family_id).seznam_novih()
+            ]
 
-        try:
-            if obdelaj_zapis(tovarna_sej, klicalec, images_dir, material_id):
-                obdelanih += 1
-        except Exception:
-            # Sem pridemo samo, če je odpovedalo že samo zapisovanje izida.
-            # Zapis smo takrat že poskusili sprostiti; tu ostane še to, da
-            # obdelava teče naprej za naslednje slike.
-            dnevnik.exception("Obdelava zapisa %s je nepričakovano odpovedala.", material_id)
+        for zaporedje, material_id in enumerate(cakajoci):
+            if naj_se_ustavi is not None and naj_se_ustavi():
+                dnevnik.info(
+                    "Obdelava se ustavlja; %d zapisov družine %s ostaja v vrsti "
+                    "za naslednji zagon.",
+                    len(cakajoci) - zaporedje,
+                    family_id,
+                )
+                return obdelanih
+
+            try:
+                if obdelaj_zapis(tovarna_sej, klicalec, images_dir, family_id, material_id):
+                    obdelanih += 1
+            except Exception:
+                dnevnik.exception(
+                    "Obdelava zapisa %s je nepričakovano odpovedala.", material_id
+                )
 
     return obdelanih
 
@@ -71,15 +82,18 @@ def obdelaj_zapis(
     tovarna_sej: sessionmaker[Session],
     klicalec: Klicalec,
     images_dir: Path,
+    family_id: str,
     material_id: str,
 ) -> bool:
-    """Obdela en zapis; vrne, ali ga je ta klic res prevzel in dokončal.
+    """Obdela en zapis družine; vrne, ali ga je ta klic res prevzel in dokončal.
+
+    `images_dir` je koren; meja slike je mapa družine (`mapa_druzine`).
 
     `False` pomeni, da zapis ni bil na voljo — bodisi ga je medtem prevzel kdo
     drug, bodisi ni več v stanju `new`. To ni napaka.
     """
     with tovarna_sej() as seja:
-        if not MaterialsRepository(seja).prevzemi_za_obdelavo(material_id):
+        if not MaterialsRepository(seja, family_id).prevzemi_za_obdelavo(material_id):
             return False
 
     # **Vse od prevzema naprej je v enem `try`.** Od trenutka, ko je zapis
@@ -91,26 +105,26 @@ def obdelaj_zapis(
     # ali zapis izida.
     try:
         with tovarna_sej() as seja:
-            material = MaterialsRepository(seja).poisci(material_id)
+            material = MaterialsRepository(seja, family_id).poisci(material_id)
             if material is None:
                 # Zapis je nekdo izbrisal med prevzemom in branjem. Sprostiti
                 # ni česa in pisati ni kam.
                 return False
             pot = Path(material.image_path)
 
-        izid = _izid_za(klicalec, images_dir, pot, material_id)
+        izid = _izid_za(klicalec, mapa_druzine(images_dir, family_id), pot, material_id)
 
         with tovarna_sej() as seja:
-            MaterialsRepository(seja).zapisi_izid(material_id, izid)
+            MaterialsRepository(seja, family_id).zapisi_izid(material_id, izid)
     except Exception:
-        _sprosti(tovarna_sej, material_id)
+        _sprosti(tovarna_sej, family_id, material_id)
         raise
 
     return True
 
 
 def _izid_za(
-    klicalec: Klicalec, images_dir: Path, pot: Path, material_id: str
+    klicalec: Klicalec, mapa_slik: Path, pot: Path, material_id: str
 ) -> IzidObdelave:
     """Kaj se zapiše za ta zapis — uspeh ali napaka.
 
@@ -122,7 +136,7 @@ def _izid_za(
     # Preverba pred klicem: za sliko, ki je ni, ne plačamo. Meja `images_dir`
     # je ista kot pri streženju slike na admin strani — pot je zapisala naša
     # koda, a je cena preverbe ena vrstica (`app/storage.py`).
-    if not je_znotraj(images_dir, pot) or not pot.is_file():
+    if not je_znotraj(mapa_slik, pot) or not pot.is_file():
         dnevnik.error("Slike zapisa %s ni na disku: %s", material_id, pot)
         return IzidObdelave(
             status=STATUS_NAPAKA,
@@ -181,7 +195,7 @@ def _izid_za(
     )
 
 
-def _sprosti(tovarna_sej: sessionmaker[Session], material_id: str) -> None:
+def _sprosti(tovarna_sej: sessionmaker[Session], family_id: str, material_id: str) -> None:
     """Zasilna vrnitev prevzetega zapisa v vrsto. Napake požre.
 
     Pospravljanje za drugo napako je ne sme prekriti — isto pravilo kot pri
@@ -189,7 +203,7 @@ def _sprosti(tovarna_sej: sessionmaker[Session], material_id: str) -> None:
     """
     try:
         with tovarna_sej() as seja:
-            MaterialsRepository(seja).sprosti_prevzem(material_id)
+            MaterialsRepository(seja, family_id).sprosti_prevzem(material_id)
     except Exception:
         dnevnik.exception(
             "Zapisa %s ni bilo mogoče vrniti v vrsto; ostal bo v obdelavi do "

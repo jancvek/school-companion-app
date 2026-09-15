@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 
 from app.db import MaterialsRepository
 from app.dependencies import daj_nastavitve, daj_repozitorij
@@ -24,6 +24,14 @@ from app.settings import Settings
 from app.storage import pobrisi_sliko, shrani_sliko
 
 router = APIRouter()
+
+#: Odgovor za `id`, ki na strežniku že obstaja v drugi družini
+#: (`docs/odlocitve/ADR-029` D). Pravilno delujoč telefon ga ne vidi —
+#: `id` je UUID, ki ga generira sam.
+SPOROCILO_TUJ_ID = (
+    "Posnetek s tem identifikatorjem na strežniku že obstaja pri drugi družini, "
+    "zato ni zapisan. Sporoči to lastniku sistema; posnetek na telefonu ostane."
+)
 
 
 def v_utc(trenutek: datetime) -> datetime:
@@ -79,10 +87,13 @@ def prevzemi_material(
         # odgovor s trdo vpisanim `new` bi lagal.
         return MaterialPrevzet(id=identifikator, status=obstojeci.status, created=False)
 
-    pot = shrani_sliko(nastavitve.images_dir, identifikator, file.file)
+    pot = shrani_sliko(
+        nastavitve.images_dir, repozitorij.family_id, identifikator, file.file
+    )
 
     material = Material(
         id=identifikator,
+        family_id=repozitorij.family_id,
         subject=subject,
         taken_at=v_utc(taken_at),
         image_path=str(pot),
@@ -98,13 +109,19 @@ def prevzemi_material(
         raise
 
     if not nastal:
-        # Sem pridemo samo ob tekmovanju dveh hkratnih zahtev z istim `id`.
-        # Datoteka na disku je veljavna slika tega zapisa, zato ostane.
+        zmagovalec = repozitorij.poisci(identifikator)
+        if zmagovalec is None:
+            # Vstavljanje je padlo na primarnem ključu, v tej družini pa zapisa
+            # ni: `id` pripada drugi družini (`docs/odlocitve/ADR-029` D).
+            # Pravkar zapisana datoteka je sirota v mapi te družine.
+            pobrisi_sliko(pot)
+            raise HTTPException(status_code=409, detail=SPOROCILO_TUJ_ID)
+
+        # Sem pridemo ob tekmovanju dveh hkratnih zahtev iste družine z istim
+        # `id`. Datoteka na disku je veljavna slika tega zapisa, zato ostane.
         response.status_code = 200
         # Status beremo iz zapisa, ki je zmagal, iz istega razloga kot zgoraj.
-        zmagovalec = repozitorij.poisci(identifikator)
-        status = zmagovalec.status if zmagovalec is not None else STATUS_NOV
-        return MaterialPrevzet(id=identifikator, status=status, created=False)
+        return MaterialPrevzet(id=identifikator, status=zmagovalec.status, created=False)
 
     return MaterialPrevzet(id=identifikator, status=material.status, created=True)
 

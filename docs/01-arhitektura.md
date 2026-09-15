@@ -74,14 +74,15 @@ logika testljiva brez naprave.
 | `app/routers/resevanje.py` | poti telefona za kvize: `GET /quizzes/pending`, `POST /quiz-attempts` (V2-R02) |
 | `app/routers/statistika.py` | statistika čez kvize pod `/admin/statistics` (V2-R04) |
 | `app/routers/dnevi.py` | pregled slik po obdobju in predmetih pod `/admin/days` (V2-R07) |
-| `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository` in `StatistikaRepository` (V2-R04, samo bere) — edina pot do baze |
-| `app/models.py` | tabele `materials`, `questions`, `quizzes`, `quiz_items` in `question_attempts` |
-| `app/storage.py` | zapis, meja mape in brisanje slik na disku |
+| `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository` in `StatistikaRepository` (V2-R04, samo bere) — vsak z obvezno družino (V3-R01) — in `DruzineRepository`; edina pot do baze |
+| `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items` in `question_attempts` |
+| `app/storage.py` | zapis, meja mape in brisanje slik na disku; mapa družine (V3-R01) |
 | `app/vision.py` | **edini modul, ki uvaža `openai`**: prompt, shema odgovora, klic |
 | `app/obdelava.py` | kaj se zgodi z enim zapisom: prevzem, klic, zapis izida. Sinhron |
 | `app/worker.py` | časovnik: obhodi v presledkih, zagon in ustavitev. Brez poslovne logike |
 | `app/statistika.py` | pravila štetja statistike: razporeditev, izpeljava pravilnosti, razvrstitev, meseci (V2-R04). Brez FastAPI in brez seje |
 | `app/settings.py` | nastavitve iz okolja |
+| `app/dependencies.py` | odvisnosti poti iz `app.state`; začasna izbira družine `daj_druzino` (V3-R01, `ADR-029` A) |
 | `app/subjects.py` | predmeti, slovenske oznake stanj in oznake ocen (`OZNAKE_OCEN`, tu od V2-R04) |
 | `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03); šolsko leto in meseci (V2-R04); današnji dan, meje poljubnega obdobja in ura brez datuma (V2-R07) |
 | `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01) ter 400 (V2-R07) |
@@ -179,11 +180,45 @@ je prenesen — `oznaciPrenesene` teče pred `pobrisiKvizeRazen`.
 
 ### Strežnik — PostgreSQL
 
+#### Družina kot lastnik podatkov (V3-R01)
+
+Tabela `families`: `id` (`VARCHAR(36)`, UUID s strežnika, hkrati ime mape
+slik), `name` (`VARCHAR(200) NOT NULL`), `created_at`. Nič drugega.
+
+`family_id NOT NULL` imajo `materials`, `questions`, `quizzes` in
+`question_attempts`. **Izpeljave:** `quiz_items` stolpca nima — družina
+postavke je družina njenega kviza (`quiz_id` je `NOT NULL`). `questions` ga ima
+kot stolpec in ne izpeljavo iz materiala, ker vprašanje material preživi in bi
+brez njega ostalo brez družine (`ADR-029` C). Primarni ključi ostanejo globalni.
+
+**Izolacija je lastnost kode** (`ADR-025`):
+
+- `MaterialsRepository`, `KviziRepository` in `StatistikaRepository` dobijo
+  `family_id` v konstruktorju, brez privzetka; prazen niz je `ValueError`. Seja
+  je zasebna, `Session.get` se nad podatki ne uporablja, vsaka poizvedba in
+  vsak `UPDATE` ima pogoj družine. Nove vrstice dobijo družino od repozitorija.
+- `DruzineRepository` bere samo `families` (za obdelavo in izbiro družine).
+- **Izbira družine je začasna** (`ADR-029` A): `daj_druzino` vrne edino
+  družino v bazi, pri nič ali več vrže `500` s slovenskim sporočilom. Ena
+  poizvedba na zahtevo. Zamenjata jo seja (`V3-R03`) in žeton (`V3-R04`);
+  do takrat druga družina v bazi ustavi vse poti.
+- `tests/test_tesnjenje.py` pošlje identifikatorje ene družine v imenu druge
+  na vsako pot in v vsako javno metodo repozitorijev. Varovali zahtevata, da
+  ima vsaka pot in metoda svoj primer; posnetek družine zavrne tabelo brez
+  zapisanega pravila družine.
+
+**Znana omejitev:** `POST /quiz-attempts` s poskusom, katerega `id` (UUID s
+telefona) že obstaja v **drugi** družini, vrne `500` (dvakrat `IntegrityError`
+na primarnem ključu), ne `4xx`. Brez ponarejanja se to ne zgodi; obvoz s
+poizvedbo brez družine ni dovoljen, drugačen izid pa bi bil nova odločitev o
+pogodbi s telefonom.
+
 Tabela `materials` (nastane v V1-R02, razširi jo V1-R03):
 
 | Stolpec | Tip | Opomba |
 |---|---|---|
 | `id` | `VARCHAR(36) PRIMARY KEY` | UUID s telefona; nosilec idempotentnosti |
+| `family_id` | `VARCHAR(36) NOT NULL` | tuji ključ na `families.id`, brez `ondelete`, indeksiran (V3-R01) |
 | `subject` | `VARCHAR(16) NOT NULL` | koda predmeta |
 | `taken_at` | `TIMESTAMPTZ NOT NULL` | trenutek posnetka, normaliziran v UTC |
 | `image_path` | `VARCHAR(1024) NOT NULL` | pot do slike na disku strežnika |
@@ -208,6 +243,7 @@ Tabela `questions` (V1-R03):
 | Stolpec | Tip | Opomba |
 |---|---|---|
 | `id` | `VARCHAR(36) PRIMARY KEY` | UUID, generiran **na strežniku** |
+| `family_id` | `VARCHAR(36) NOT NULL` | tuji ključ na `families.id`, brez `ondelete`, indeksiran (V3-R01) |
 | `material_id` | `VARCHAR(36)` | tuji ključ na `materials.id`, `ON DELETE SET NULL`, indeksiran; `NULL`, ko je material dokončno izbrisan (V1-R07) |
 | `subject` | `VARCHAR(16)` | predmet materiala, prepisan ob nastanku (V1-R07) |
 | `material_taken_at` | `TIMESTAMPTZ` | čas posnetka materiala, prepisan ob nastanku (V1-R07) |
@@ -271,6 +307,7 @@ Tabela `quizzes` (V2-R01):
 | Stolpec | Tip | Opomba |
 |---|---|---|
 | `id` | `VARCHAR(36) PRIMARY KEY` | UUID, generiran **na strežniku** |
+| `family_id` | `VARCHAR(36) NOT NULL` | tuji ključ na `families.id`, brez `ondelete`, indeksiran (V3-R01) |
 | `name` | `VARCHAR(200) NOT NULL` | sestavi se samodejno (`MAT — 9. 9. 2026`), operater ga sme prepisati |
 | `subject` | `VARCHAR(16)` | koda predmeta; `NULL` = kviz čez več predmetov |
 | `created_at` | `TIMESTAMPTZ NOT NULL` | čas objave — osnutkov ni, zato je to hkrati čas nastanka |
@@ -330,6 +367,7 @@ Tabela `question_attempts` (V2-R02):
 | Stolpec | Tip | Opomba |
 |---|---|---|
 | `id` | `VARCHAR(36) PRIMARY KEY` | UUID, generiran **na telefonu**; nosilec idempotentnosti |
+| `family_id` | `VARCHAR(36) NOT NULL` | tuji ključ na `families.id`, brez `ondelete`, indeksiran (V3-R01) |
 | `quiz_item_id` | `VARCHAR(36) NOT NULL` | tuji ključ na `quiz_items.id`, **brez `ondelete`**; `UNIQUE` |
 | `mode` | `VARCHAR(16) NOT NULL` | način odgovarjanja; zaenkrat vedno `samoocena` (`ADR-014`) |
 | `rating` | `VARCHAR(16) NOT NULL` | `nisem_vedela`, `tezko`, `srednje` ali `lahko` |
@@ -375,6 +413,18 @@ nerešeni, kar je res. Njen `downgrade` tabelo in stolpec spusti in s tem
 **dokončno izgubi vse poskuse in podatek o rešenosti**; kvizi ostanejo, a bi
 jih ponoven `upgrade` naredil nerešene in telefon bi jih prenesel znova.
 
+Migracija `0007_druzine` ustvari `families` z družino **Cvek** (stalen `id`
+`5b0f6c2e-8d3a-4c7e-9a1b-2f4d6e8c0a13`), `family_id` doda kot `NULL`-abilen,
+zapolni s Cvek in nato naredi obvezen. Nato prepiše `image_path` slik, ki
+ležijo neposredno v korenu `IMAGES_DIR`, in datoteke premakne v
+`<IMAGES_DIR>/<Cvek>/`. Premik ni del transakcije baze, zato je idempotenten
+(vir je in cilja ni → premakni; vira ni → pusti) in `id` družine je stalen —
+ponovni zagon po prekinitvi pride do istega stanja. Datotek brez vrstice in
+`.tmp/` se ne dotakne. **`IMAGES_DIR` je obvezen, kadar baza ni prazna**;
+preverba je pred prvim DDL. `downgrade` slike in poti vrne in stolpce spusti;
+pri več kot eni družini se ne izvede. Če `downgrade` pade po premiku slik, se
+pozdravi s ponovnim `downgrade`, ne z `upgrade`.
+
 Migracije vodi **Alembic** (`apps/server/alembic/`). Prva migracija ustvari
 razširitev `vector` — vektorskih stolpcev še ni, iskanje po pomenu je V2.
 `alembic/env.py` povezavo bere iz `DATABASE_URL`, vendar **samo, kadar url ni
@@ -388,8 +438,10 @@ teče v istem procesu in bi migracija tiho ugasnila dnevnik aplikacije za vse
 teste za sabo. Odkrito v V1-R03, ko je test dnevniškega zapisa ob manjkajočem
 `OPENAI_API_KEY` padel samo v celotni zbirki, ne pa sam.
 
-Slike živijo v `/data/images/<id>.jpg`. Zapis gre najprej v
-`/data/images/.tmp/` pod enoličnim imenom in se na končno mesto premakne
+Slike živijo v `/data/images/<family_id>/<id>.jpg` (V3-R01). **Meja mape je
+mapa družine**, ne koren: slika tuje družine ali v korenu je za družino „ni na
+disku" (`storage.mapa_druzine`, ki sprejme samo kanoničen UUID). Zapis gre
+najprej v `<mapa družine>/.tmp/` pod enoličnim imenom in se na končno mesto premakne
 atomarno; vrstica v bazi nastane šele za datoteko. Prekinjen prenos zato ne
 pusti polovične slike na mestu, kjer jo bo V1-R03 iskal kot celo.
 
@@ -404,6 +456,11 @@ Od V1-R07 obstaja tretji izid: **410** za zapis, ki je medtem šel v arhiv.
 Telefon ga zbriše pri sebi in ne šteje za neuspeh. Brez tega bi posnetek, ki
 je na telefonu obtičal v `pending`, tam ostal za vedno — z delovnega seznama
 je lahko že padel, ker je bilo brisanje na napravi že potrjeno.
+
+Od V3-R01 obstaja četrti izid: **409** za `id`, ki na strežniku obstaja v
+**drugi** družini (`ADR-029` D). Vstavljanje pade na primarnem ključu, v lastni
+družini zapisa ni; pravkar zapisana datoteka se pobriše. Pravilno delujoč
+telefon tega izida ne vidi.
 
 Ključ preverja **ASGI vmesna plast**, ne odvisnost endpointa: FastAPI telo
 zahteve prebere pred razreševanjem odvisnosti, zato bi strežnik večmegabajtno
@@ -430,8 +487,10 @@ strežniku obtičalo in ADR-003 bi padel.
 ## Vision obdelava (V1-R03)
 
 Zanka teče kot `asyncio` opravilo v procesu `api`, priklopljeno na `lifespan`.
-Vsakih 30 s (`WORKER_INTERVAL_SECONDS`) pobere zapise s `status='new'`,
-najstarejši posnetek prvi, in jih obdela **zaporedno**. Samo delo teče v niti
+Vsakih 30 s (`WORKER_INTERVAL_SECONDS`) pobere zapise s `status='new'`
+**po družinah** (od V3-R01, `ADR-029` B), znotraj družine najstarejši posnetek
+prvi, in jih obdela **zaporedno**. Obnova obtičalih ob zagonu gre prav tako po
+družinah. Samo delo teče v niti
 (`asyncio.to_thread`), ker sta SQLAlchemy in odjemalec OpenAI sinhrona; brez
 tega bi en klic za sto sekund ustavil celoten strežnik.
 
@@ -462,7 +521,7 @@ napaka obdelave: zapis je `ready` s `readable=false`, brez prepisa in brez
 vprašanj. Razliko pokaže oznaka „obdelano — slika ni berljiva".
 
 **Vrstica brez datoteke na disku gre v `failed` brez klica** — za sliko, ki je
-ni, ne plačamo. Meja `images_dir` je ista kot pri streženju slike na admin
+ni, ne plačamo. Meja je mapa družine, ista kot pri streženju slike na admin
 strani.
 
 Klic gre skozi `app/vision.py` in nikjer drugje (ADR-008). Slika potuje kot
@@ -532,8 +591,9 @@ nje in to preverja `TestBrezJavaScripta`, ki izvzame samo `snov.html`.
 
 Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Prijave ni** —
 meja je Tailscale; posledice, vključno s CSRF, so v `docs/odlocitve/ADR-006`.
+Strani kažejo podatke edine družine v bazi (`daj_druzino`, V3-R01).
 
-Napake pod `/admin` (404, 405) izriše prestreznik `StarletteHTTPException`,
+Napake pod `/admin` (404, 405 in 500 izbire družine) izriše prestreznik `StarletteHTTPException`,
 registriran v `create_app`. Izven te predpone se umakne privzetemu, ker morajo
 odgovori `POST /materials` ostati JSON — telefon tam pričakuje sporočilo o
 napaki, ne strani. Prvi poskus je bila pot `/{ostanek:path}` na koncu

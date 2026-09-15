@@ -7,6 +7,7 @@ stavkov, ki bi jih poznal samo Postgres.
 """
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -18,11 +19,15 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import naredi_tovarno_sej
 from app.main import create_app
-from app.models import Base
+from app.models import Base, Family
 from app.settings import Settings
 
 #: Ključ, ki v testih velja za pravega.
 KLJUC = "kljuc-za-teste-dovolj-dolg"
+
+#: Družina, ki jo ima vsaka testna baza (V3-R01). Isti `id` kot Cvek v
+#: migraciji `0007_druzine`, da je baza po `create_all` enaka migrirani.
+CVEK_ID = "5b0f6c2e-8d3a-4c7e-9a1b-2f4d6e8c0a13"
 
 #: Spremenljivke okolja, ki jih `Settings` prebere sama.
 #:
@@ -60,9 +65,13 @@ def okolje_brez_nastavitev() -> Iterator[None]:
 
 @pytest.fixture
 def slike(tmp_path: Path) -> Path:
-    """Mapa, ki v testih igra `/data/images`."""
+    """Mapa, ki v testih igra `/data/images`.
+
+    Vrne **koren**, kot `Settings.images_dir`. Mapa družine Cvek je že
+    ustvarjena, ker vanjo pišejo pomočniki testov (`slike / CVEK_ID`).
+    """
     mapa = tmp_path / "images"
-    mapa.mkdir()
+    (mapa / CVEK_ID).mkdir(parents=True)
     return mapa
 
 
@@ -112,6 +121,11 @@ def motor() -> Iterator[Engine]:
         poolclass=StaticPool,
     )
     Base.metadata.create_all(motor)
+    # Družina, ki jo po `0007_druzine` ima vsaka baza; brez nje vsaka pot pade
+    # na izbiri družine (`app/dependencies.py`).
+    with Session(motor) as seja:
+        seja.add(Family(id=CVEK_ID, name="Cvek", created_at=datetime(2026, 9, 1, tzinfo=UTC)))
+        seja.commit()
     yield motor
     motor.dispose()
 

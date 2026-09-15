@@ -35,6 +35,7 @@ from app.vision import (
     VprasanjeModela,
     VsebinaOdgovora,
 )
+from tests.conftest import CVEK_ID
 
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 UUID_DVA = "a1b2c3d4-e5f6-4789-abcd-ef0123456789"
@@ -50,13 +51,14 @@ def zapisi(
     vsebina: bytes | None = b"slika",
 ) -> Path:
     """Ustvari zapis in (privzeto) njegovo datoteko; vrne pot do slike."""
-    pot = slike / f"{material_id}.jpg"
+    pot = slike / CVEK_ID / f"{material_id}.jpg"
     if vsebina is not None:
         pot.write_bytes(vsebina)
 
     with Session(motor) as seja:
         seja.add(
             Material(
+                family_id=CVEK_ID,
                 id=material_id,
                 subject="MAT",
                 taken_at=datetime.fromisoformat(taken_at),
@@ -171,7 +173,7 @@ class TestPrevzem:
         zapisi(motor, slike)
 
         with tovarna_sej() as seja:
-            assert MaterialsRepository(seja).prevzemi_za_obdelavo(UUID_ENA) is True
+            assert MaterialsRepository(seja, CVEK_ID).prevzemi_za_obdelavo(UUID_ENA) is True
 
         assert preberi(motor).status == STATUS_V_OBDELAVI
 
@@ -186,8 +188,8 @@ class TestPrevzem:
         zapisi(motor, slike)
 
         with tovarna_sej() as prva, tovarna_sej() as druga:
-            assert MaterialsRepository(prva).prevzemi_za_obdelavo(UUID_ENA) is True
-            assert MaterialsRepository(druga).prevzemi_za_obdelavo(UUID_ENA) is False
+            assert MaterialsRepository(prva, CVEK_ID).prevzemi_za_obdelavo(UUID_ENA) is True
+            assert MaterialsRepository(druga, CVEK_ID).prevzemi_za_obdelavo(UUID_ENA) is False
 
     @pytest.mark.parametrize("status", [STATUS_V_OBDELAVI, STATUS_PRIPRAVLJEN, STATUS_NAPAKA])
     def test_zapis_izven_new_se_ne_prevzame(
@@ -196,11 +198,11 @@ class TestPrevzem:
         zapisi(motor, slike, status=status)
 
         with tovarna_sej() as seja:
-            assert MaterialsRepository(seja).prevzemi_za_obdelavo(UUID_ENA) is False
+            assert MaterialsRepository(seja, CVEK_ID).prevzemi_za_obdelavo(UUID_ENA) is False
 
     def test_neznan_zapis_se_ne_prevzame(self, tovarna_sej: sessionmaker[Session]) -> None:
         with tovarna_sej() as seja:
-            assert MaterialsRepository(seja).prevzemi_za_obdelavo("ni-ga") is False
+            assert MaterialsRepository(seja, CVEK_ID).prevzemi_za_obdelavo("ni-ga") is False
 
 
 class TestVrstaCakajocih:
@@ -213,7 +215,7 @@ class TestVrstaCakajocih:
         zapisi(motor, slike, UUID_DVA, status=STATUS_PRIPRAVLJEN)
 
         with tovarna_sej() as seja:
-            cakajoci = [m.id for m in MaterialsRepository(seja).seznam_novih()]
+            cakajoci = [m.id for m in MaterialsRepository(seja, CVEK_ID).seznam_novih()]
 
         assert cakajoci == [UUID_ENA]
 
@@ -225,7 +227,7 @@ class TestVrstaCakajocih:
         zapisi(motor, slike, UUID_DVA, taken_at="2026-09-04T07:00:00+00:00")
 
         with tovarna_sej() as seja:
-            cakajoci = [m.id for m in MaterialsRepository(seja).seznam_novih()]
+            cakajoci = [m.id for m in MaterialsRepository(seja, CVEK_ID).seznam_novih()]
 
         assert cakajoci == [UUID_DVA, UUID_ENA]
 
@@ -239,7 +241,7 @@ class TestSrecnaPot:
         pot = zapisi(motor, slike)
         klicalec, klicane = klicalec_vrne(uspesen_izid())
 
-        assert obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA) is True
+        assert obdelaj_zapis(tovarna_sej, klicalec, slike, CVEK_ID, UUID_ENA) is True
 
         material = preberi(motor)
         assert material.status == STATUS_PRIPRAVLJEN
@@ -261,7 +263,7 @@ class TestSrecnaPot:
         zapisi(motor, slike)
         klicalec, _ = klicalec_vrne(uspesen_izid(koliko_vprasanj=7))
 
-        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+        obdelaj_zapis(tovarna_sej, klicalec, slike, CVEK_ID, UUID_ENA)
 
         material = preberi(motor)
         veljavna = material.veljavna_vprasanja
@@ -277,7 +279,7 @@ class TestSrecnaPot:
         zapisi(motor, slike)
         klicalec, _ = klicalec_vrne(uspesen_izid(readable=False))
 
-        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+        obdelaj_zapis(tovarna_sej, klicalec, slike, CVEK_ID, UUID_ENA)
 
         material = preberi(motor)
         assert material.status == STATUS_PRIPRAVLJEN
@@ -309,7 +311,7 @@ class TestNapake:
                 output_tokens=0,
             )
 
-        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+        obdelaj_zapis(tovarna_sej, klicalec, slike, CVEK_ID, UUID_ENA)
 
         material = preberi(motor)
         assert material.status == STATUS_NAPAKA
@@ -332,7 +334,7 @@ class TestNapake:
         def klicalec(pot: Path) -> IzidKlica:
             raise ZeroDivisionError("delitev z nic")
 
-        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+        obdelaj_zapis(tovarna_sej, klicalec, slike, CVEK_ID, UUID_ENA)
 
         material = preberi(motor)
         assert material.status == STATUS_NAPAKA
@@ -347,7 +349,7 @@ class TestNapake:
         zapisi(motor, slike, vsebina=None)
         klicalec, klicane = klicalec_vrne(uspesen_izid())
 
-        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+        obdelaj_zapis(tovarna_sej, klicalec, slike, CVEK_ID, UUID_ENA)
 
         assert klicane == []
         material = preberi(motor)
@@ -364,6 +366,7 @@ class TestNapake:
         with Session(motor) as seja:
             seja.add(
                 Material(
+                    family_id=CVEK_ID,
                     id=UUID_ENA,
                     subject="MAT",
                     taken_at=datetime(2026, 9, 4, 7, 30, tzinfo=UTC),
@@ -375,7 +378,7 @@ class TestNapake:
             seja.commit()
         klicalec, klicane = klicalec_vrne(uspesen_izid())
 
-        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+        obdelaj_zapis(tovarna_sej, klicalec, slike, CVEK_ID, UUID_ENA)
 
         assert klicane == []
         assert preberi(motor).status == STATUS_NAPAKA
@@ -390,7 +393,7 @@ class TestNapake:
         def klicalec(pot: Path) -> IzidKlica:
             raise NapakaObdelave("karkoli")
 
-        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+        obdelaj_zapis(tovarna_sej, klicalec, slike, CVEK_ID, UUID_ENA)
 
         assert preberi(motor).status != STATUS_V_OBDELAVI
 
@@ -462,11 +465,11 @@ class TestVrnitevVVrsto:
         """
         zapisi(motor, slike)
         klicalec, _ = klicalec_vrne(uspesen_izid())
-        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+        obdelaj_zapis(tovarna_sej, klicalec, slike, CVEK_ID, UUID_ENA)
         assert stevilo_vprasanj(motor) == 5
 
         with tovarna_sej() as seja:
-            assert MaterialsRepository(seja).vrni_v_vrsto(UUID_ENA) is True
+            assert MaterialsRepository(seja, CVEK_ID).vrni_v_vrsto(UUID_ENA) is True
 
         material = preberi(motor)
         assert material.status == STATUS_NOV
@@ -502,11 +505,11 @@ class TestVrnitevVVrsto:
         """
         zapisi(motor, slike)
         klicalec, _ = klicalec_vrne(uspesen_izid())
-        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+        obdelaj_zapis(tovarna_sej, klicalec, slike, CVEK_ID, UUID_ENA)
 
         monkeypatch.setattr(db, "datetime", UraKiTece(datetime(2026, 9, 6, tzinfo=UTC)))
         with tovarna_sej() as seja:
-            MaterialsRepository(seja).vrni_v_vrsto(UUID_ENA)
+            MaterialsRepository(seja, CVEK_ID).vrni_v_vrsto(UUID_ENA)
 
         zigi = {v.retired_at for v in preberi(motor).upokojena_vprasanja}
         assert len(zigi) == 1
@@ -530,16 +533,16 @@ class TestVrnitevVVrsto:
         monkeypatch.setattr(db, "datetime", UraKiTece(datetime(2026, 9, 6, tzinfo=UTC)))
         zapisi(motor, slike)
         prvi, _ = klicalec_vrne(uspesen_izid(koliko_vprasanj=5))
-        obdelaj_zapis(tovarna_sej, prvi, slike, UUID_ENA)
+        obdelaj_zapis(tovarna_sej, prvi, slike, CVEK_ID, UUID_ENA)
         with tovarna_sej() as seja:
-            MaterialsRepository(seja).vrni_v_vrsto(UUID_ENA)
+            MaterialsRepository(seja, CVEK_ID).vrni_v_vrsto(UUID_ENA)
         prva_serija = {v.id: v.retired_at for v in preberi(motor).upokojena_vprasanja}
         assert len(prva_serija) == 5
 
         drugi, _ = klicalec_vrne(uspesen_izid(koliko_vprasanj=3))
         assert obdelaj_cakajoce(tovarna_sej, drugi, slike) == 1
         with tovarna_sej() as seja:
-            MaterialsRepository(seja).vrni_v_vrsto(UUID_ENA)
+            MaterialsRepository(seja, CVEK_ID).vrni_v_vrsto(UUID_ENA)
 
         assert stevilo_vprasanj(motor) == 8
         assert stevilo_upokojenih(motor) == 8
@@ -555,12 +558,12 @@ class TestVrnitevVVrsto:
     ) -> None:
         zapisi(motor, slike, status=STATUS_NAPAKA)
         with tovarna_sej() as seja:
-            MaterialsRepository(seja).zapisi_izid(
+            MaterialsRepository(seja, CVEK_ID).zapisi_izid(
                 UUID_ENA, IzidObdelave(status=STATUS_NAPAKA, error="prej je padlo")
             )
 
         with tovarna_sej() as seja:
-            assert MaterialsRepository(seja).vrni_v_vrsto(UUID_ENA) is True
+            assert MaterialsRepository(seja, CVEK_ID).vrni_v_vrsto(UUID_ENA) is True
 
         material = preberi(motor)
         assert material.status == STATUS_NOV
@@ -573,13 +576,13 @@ class TestVrnitevVVrsto:
         zapisi(motor, slike, status=STATUS_V_OBDELAVI)
 
         with tovarna_sej() as seja:
-            assert MaterialsRepository(seja).vrni_v_vrsto(UUID_ENA) is False
+            assert MaterialsRepository(seja, CVEK_ID).vrni_v_vrsto(UUID_ENA) is False
 
         assert preberi(motor).status == STATUS_V_OBDELAVI
 
     def test_neznanega_zapisa_ni(self, tovarna_sej: sessionmaker[Session]) -> None:
         with tovarna_sej() as seja:
-            assert MaterialsRepository(seja).vrni_v_vrsto("ni-ga") is False
+            assert MaterialsRepository(seja, CVEK_ID).vrni_v_vrsto("ni-ga") is False
 
     def test_po_vrnitvi_gre_zapis_znova_skozi_obdelavo(
         self, motor: Engine, slike: Path, tovarna_sej: sessionmaker[Session]
@@ -596,11 +599,11 @@ class TestVrnitevVVrsto:
         """
         zapisi(motor, slike)
         klicalec, klicane = klicalec_vrne(uspesen_izid(koliko_vprasanj=5))
-        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+        obdelaj_zapis(tovarna_sej, klicalec, slike, CVEK_ID, UUID_ENA)
         stara = {v.id for v in preberi(motor).veljavna_vprasanja}
 
         with tovarna_sej() as seja:
-            MaterialsRepository(seja).vrni_v_vrsto(UUID_ENA)
+            MaterialsRepository(seja, CVEK_ID).vrni_v_vrsto(UUID_ENA)
 
         drugi, _ = klicalec_vrne(uspesen_izid(koliko_vprasanj=9))
         assert obdelaj_cakajoce(tovarna_sej, drugi, slike) == 1
@@ -629,10 +632,10 @@ class TestVrnitevVVrsto:
         """
         zapisi(motor, slike)
         prvi, _ = klicalec_vrne(uspesen_izid(koliko_vprasanj=5))
-        obdelaj_zapis(tovarna_sej, prvi, slike, UUID_ENA)
+        obdelaj_zapis(tovarna_sej, prvi, slike, CVEK_ID, UUID_ENA)
 
         with tovarna_sej() as seja:
-            MaterialsRepository(seja).vrni_v_vrsto(UUID_ENA)
+            MaterialsRepository(seja, CVEK_ID).vrni_v_vrsto(UUID_ENA)
 
         def pade(pot: Path) -> IzidKlica:
             raise NapakaObdelave("Storitev OpenAI ni odgovorila.")
@@ -656,10 +659,10 @@ class TestVrnitevVVrsto:
         """
         zapisi(motor, slike)
         prvi, _ = klicalec_vrne(uspesen_izid(koliko_vprasanj=5))
-        obdelaj_zapis(tovarna_sej, prvi, slike, UUID_ENA)
+        obdelaj_zapis(tovarna_sej, prvi, slike, CVEK_ID, UUID_ENA)
 
         with tovarna_sej() as seja:
-            MaterialsRepository(seja).vrni_v_vrsto(UUID_ENA)
+            MaterialsRepository(seja, CVEK_ID).vrni_v_vrsto(UUID_ENA)
 
         drugi, _ = klicalec_vrne(uspesen_izid(readable=False))
         assert obdelaj_cakajoce(tovarna_sej, drugi, slike) == 1
@@ -680,7 +683,7 @@ class TestObnovitevObticalih:
         zapisi(motor, slike, status=STATUS_V_OBDELAVI)
 
         with tovarna_sej() as seja:
-            assert MaterialsRepository(seja).obnovi_obticale() == 1
+            assert MaterialsRepository(seja, CVEK_ID).obnovi_obticale() == 1
 
         assert preberi(motor).status == STATUS_NOV
 
@@ -691,7 +694,7 @@ class TestObnovitevObticalih:
         zapisi(motor, slike, UUID_DVA, status=STATUS_NAPAKA)
 
         with tovarna_sej() as seja:
-            assert MaterialsRepository(seja).obnovi_obticale() == 0
+            assert MaterialsRepository(seja, CVEK_ID).obnovi_obticale() == 0
 
         assert preberi(motor, UUID_ENA).status == STATUS_PRIPRAVLJEN
         assert preberi(motor, UUID_DVA).status == STATUS_NAPAKA
@@ -704,7 +707,7 @@ class TestObnovitevObticalih:
         klicalec, _ = klicalec_vrne(uspesen_izid())
 
         with tovarna_sej() as seja:
-            MaterialsRepository(seja).obnovi_obticale()
+            MaterialsRepository(seja, CVEK_ID).obnovi_obticale()
 
         assert obdelaj_cakajoce(tovarna_sej, klicalec, slike) == 1
         assert preberi(motor).status == STATUS_PRIPRAVLJEN
@@ -716,7 +719,7 @@ class TestZapisIzida:
     def test_neznan_zapis_vrne_false(self, tovarna_sej: sessionmaker[Session]) -> None:
         with tovarna_sej() as seja:
             assert (
-                MaterialsRepository(seja).zapisi_izid(
+                MaterialsRepository(seja, CVEK_ID).zapisi_izid(
                     "ni-ga", IzidObdelave(status=STATUS_NAPAKA)
                 )
                 is False
@@ -742,9 +745,9 @@ class TestZapisIzida:
         )
 
         with tovarna_sej() as seja:
-            MaterialsRepository(seja).zapisi_izid(UUID_ENA, izid)
+            MaterialsRepository(seja, CVEK_ID).zapisi_izid(UUID_ENA, izid)
         with tovarna_sej() as seja:
-            MaterialsRepository(seja).zapisi_izid(UUID_ENA, izid)
+            MaterialsRepository(seja, CVEK_ID).zapisi_izid(UUID_ENA, izid)
 
         assert len(preberi(motor).veljavna_vprasanja) == 1
         assert stevilo_vprasanj(motor) == 2
@@ -772,7 +775,7 @@ class TestZapisIzida:
             vprasanja=(VprasanjeZaZapis(question="V1?", answer="O1."),),
         )
         with tovarna_sej() as seja:
-            MaterialsRepository(seja).zapisi_izid(UUID_ENA, prvi)
+            MaterialsRepository(seja, CVEK_ID).zapisi_izid(UUID_ENA, prvi)
 
         pravi_uuid4 = db.uuid4
         preostali = [1]
@@ -795,7 +798,7 @@ class TestZapisIzida:
         )
         with pytest.raises(RuntimeError):  # noqa: SIM117
             with tovarna_sej() as seja:
-                MaterialsRepository(seja).zapisi_izid(UUID_ENA, drugi)
+                MaterialsRepository(seja, CVEK_ID).zapisi_izid(UUID_ENA, drugi)
 
         # Nič se ni premaknilo: prvo vprašanje je še vedno veljavno in samo.
         material = preberi(motor)
@@ -822,10 +825,10 @@ class TestZapisIzida:
             vprasanja=(VprasanjeZaZapis(question="V?", answer="O."),),
         )
         with tovarna_sej() as seja:
-            MaterialsRepository(seja).zapisi_izid(UUID_ENA, izid)
+            MaterialsRepository(seja, CVEK_ID).zapisi_izid(UUID_ENA, izid)
 
         with tovarna_sej() as seja:
-            repozitorij = MaterialsRepository(seja)
+            repozitorij = MaterialsRepository(seja, CVEK_ID)
             material = repozitorij.poisci(UUID_ENA)
             assert material is not None
             # Bralec vprašanja prebere **pred** upokojitvijo in jih obdrži.
@@ -849,7 +852,7 @@ class TestZapisIzida:
         zapisi(motor, slike, taken_at="2026-09-04T07:30:00+00:00")
 
         with tovarna_sej() as seja:
-            MaterialsRepository(seja).zapisi_izid(
+            MaterialsRepository(seja, CVEK_ID).zapisi_izid(
                 UUID_ENA,
                 IzidObdelave(
                     status=STATUS_PRIPRAVLJEN,
@@ -874,7 +877,7 @@ class TestZapisIzida:
         zapisi(motor, slike)
 
         with tovarna_sej() as seja:
-            repozitorij = MaterialsRepository(seja)
+            repozitorij = MaterialsRepository(seja, CVEK_ID)
             repozitorij.zapisi_izid(
                 UUID_ENA,
                 IzidObdelave(
@@ -910,7 +913,7 @@ class TestSledJeCelaObVsakemIzidu:
         zapisi(motor, slike)
         klicalec, _ = klicalec_vrne(uspesen_izid())
 
-        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+        obdelaj_zapis(tovarna_sej, klicalec, slike, CVEK_ID, UUID_ENA)
 
         material = preberi(motor)
         assert material.prompt == "POSLANI PROMPT"
@@ -935,7 +938,7 @@ class TestSledJeCelaObVsakemIzidu:
                 output_tokens=12,
             )
 
-        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+        obdelaj_zapis(tovarna_sej, klicalec, slike, CVEK_ID, UUID_ENA)
 
         material = preberi(motor)
         assert material.prompt == "POSLANI PROMPT"
@@ -955,7 +958,7 @@ class TestSledJeCelaObVsakemIzidu:
         zapisi(motor, slike, vsebina=None)
         klicalec, klicane = klicalec_vrne(uspesen_izid())
 
-        obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+        obdelaj_zapis(tovarna_sej, klicalec, slike, CVEK_ID, UUID_ENA)
 
         material = preberi(motor)
         assert klicane == []
@@ -986,7 +989,7 @@ class TestSledJeCelaObVsakemIzidu:
         monkeypatch.setattr("app.obdelava.je_znotraj", pokvarjen_dostop)
 
         with pytest.raises(PermissionError):
-            obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+            obdelaj_zapis(tovarna_sej, klicalec, slike, CVEK_ID, UUID_ENA)
 
         assert klicane == []
         # Zapis je spet v vrsti, ne obtičal.
@@ -1081,7 +1084,7 @@ class TestUstavljanjeMedSerijo:
         monkeypatch.setattr(MaterialsRepository, "poisci", pokvarjeno_branje)
 
         with pytest.raises(RuntimeError):
-            obdelaj_zapis(tovarna_sej, klicalec, slike, UUID_ENA)
+            obdelaj_zapis(tovarna_sej, klicalec, slike, CVEK_ID, UUID_ENA)
 
         monkeypatch.setattr(MaterialsRepository, "poisci", izvirni)
         assert klicane == []

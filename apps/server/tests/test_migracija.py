@@ -24,6 +24,9 @@ from app.models import Base
 
 KOREN = Path(__file__).resolve().parent.parent
 
+#: Stalen `id` družine Cvek iz `0007_druzine`.
+CVEK_ID = "5b0f6c2e-8d3a-4c7e-9a1b-2f4d6e8c0a13"
+
 
 def alembic_nastavitve(database_url: str) -> Config:
     config = Config(str(KOREN / "alembic.ini"))
@@ -33,12 +36,16 @@ def alembic_nastavitve(database_url: str) -> Config:
 
 
 @pytest.fixture
-def baza(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+def baza(tmp_path: Path, slike: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     # `DATABASE_URL` gre stran, čeprav ima izrecna nastavitev v `env.py` že
     # prednost. Ta test dela `downgrade base`; če bi se kdaj povezal na živo
     # bazo, bi v njej spustil tabelo `materials`. Dve ograji sta tu poceni,
     # posledica ene same napake pa ni.
     monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    # `0007_druzine` premika slike in brez mape nad polno bazo pade. Mapa je
+    # testna, kot baza; test, ki preverja prav odsotnost, jo odstrani sam.
+    monkeypatch.setenv("IMAGES_DIR", str(slike))
 
     # Datoteka in ne `:memory:`: Alembic si odpre svojo povezavo, baza v
     # pomnilniku pa z njo ne bi bila ista.
@@ -56,7 +63,8 @@ def test_migracija_ustvari_tabelo_materials(baza: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "tabela", ["materials", "questions", "quizzes", "quiz_items", "question_attempts"]
+    "tabela",
+    ["families", "materials", "questions", "quizzes", "quiz_items", "question_attempts"],
 )
 def test_migrirana_shema_se_ujema_z_modeli(baza: str, tabela: str) -> None:
     """Če se model in migracija razideta, mora to javiti test, ne namestitev.
@@ -120,10 +128,15 @@ def test_vprasanja_kazejo_na_material(baza: str) -> None:
 
     motor = create_engine(baza)
     try:
-        kljuci = inspect(motor).get_foreign_keys("questions")
+        # Po stolpcu in ne „edini ključ": od `0007_druzine` ima tabela še
+        # ključ na `families`, ki ga preverja `test_druzina_je_obvezen_tuji_kljuc`.
+        kljuci = [
+            k
+            for k in inspect(motor).get_foreign_keys("questions")
+            if k["constrained_columns"] == ["material_id"]
+        ]
         assert len(kljuci) == 1
         assert kljuci[0]["referred_table"] == "materials"
-        assert kljuci[0]["constrained_columns"] == ["material_id"]
         assert kljuci[0]["referred_columns"] == ["id"]
         assert kljuci[0]["options"]["ondelete"].upper() == "SET NULL"
     finally:
@@ -267,14 +280,26 @@ def test_obstojece_vprasanje_je_po_migraciji_veljavno(baza: str) -> None:
         motor.dispose()
 
 
-def _vstavi_kviz(povezava: Any) -> None:
-    """Kviz z eno postavko, kot ga je pustila `0005_kvizi`."""
-    povezava.execute(
-        text(
-            "INSERT INTO quizzes (id, name, subject, created_at) "
-            "VALUES ('k1', 'MAT — 9. 9. 2026', 'MAT', '2026-09-09 08:00:00')"
+def _vstavi_kviz(povezava: Any, family_id: str | None = None) -> None:
+    """Kviz z eno postavko, kot ga je pustila `0005_kvizi`.
+
+    Z `family_id` kot po `0007_druzine`, kjer je stolpec obvezen.
+    """
+    if family_id is None:
+        povezava.execute(
+            text(
+                "INSERT INTO quizzes (id, name, subject, created_at) "
+                "VALUES ('k1', 'MAT — 9. 9. 2026', 'MAT', '2026-09-09 08:00:00')"
+            )
         )
-    )
+    else:
+        povezava.execute(
+            text(
+                "INSERT INTO quizzes (id, name, subject, created_at, family_id) "
+                "VALUES ('k1', 'MAT — 9. 9. 2026', 'MAT', '2026-09-09 08:00:00', :druzina)"
+            ),
+            {"druzina": family_id},
+        )
     povezava.execute(
         text(
             "INSERT INTO quiz_items (id, quiz_id, question_id, position, "
@@ -330,9 +355,13 @@ def test_poskus_je_enolicen_na_postavko_in_brez_kaskade(baza: str) -> None:
     motor = create_engine(baza)
     try:
         pregled = inspect(motor)
-        [kljuc] = pregled.get_foreign_keys("question_attempts")
+        # Po stolpcu, iz istega razloga kot v `test_vprasanja_kazejo_na_material`.
+        [kljuc] = [
+            k
+            for k in pregled.get_foreign_keys("question_attempts")
+            if k["constrained_columns"] == ["quiz_item_id"]
+        ]
         assert kljuc["referred_table"] == "quiz_items"
-        assert kljuc["constrained_columns"] == ["quiz_item_id"]
         assert not kljuc["options"].get("ondelete")
 
         enolicni = [u["column_names"] for u in pregled.get_unique_constraints("question_attempts")]
@@ -349,14 +378,16 @@ def test_razveljavitev_poskusov_ohrani_kvize(baza: str) -> None:
     motor = create_engine(baza)
     try:
         with motor.begin() as povezava:
-            _vstavi_kviz(povezava)
+            _vstavi_kviz(povezava, CVEK_ID)
             povezava.execute(
                 text(
                     "INSERT INTO question_attempts (id, quiz_item_id, mode, rating, "
-                    "shown_at, revealed_at, answered_at, received_at) "
+                    "shown_at, revealed_at, answered_at, received_at, family_id) "
                     "VALUES ('a1', 'p1', 'samoocena', 'lahko', '2026-09-10 15:00:00', "
-                    "'2026-09-10 15:00:07', '2026-09-10 15:00:09', '2026-09-10 15:05:00')"
-                )
+                    "'2026-09-10 15:00:07', '2026-09-10 15:00:09', '2026-09-10 15:05:00', "
+                    ":druzina)"
+                ),
+                {"druzina": CVEK_ID},
             )
             povezava.execute(
                 text("UPDATE quizzes SET solved_at = '2026-09-10 15:05:00' WHERE id = 'k1'")
@@ -386,39 +417,45 @@ def test_razveljavitev_prezivi_podatke(baza: str) -> None:
     motor = create_engine(baza)
     try:
         with motor.begin() as povezava:
+            # `family_id` je od `0007_druzine` obvezen; Cvek ustvari migracija sama.
+            druzina = {"druzina": CVEK_ID}
             povezava.execute(
                 text(
                     "INSERT INTO materials "
-                    "(id, subject, taken_at, image_path, status, received_at) "
+                    "(id, subject, taken_at, image_path, status, received_at, family_id) "
                     "VALUES ('star', 'MAT', '2026-09-01 08:00:00', "
-                    "'/data/images/star.jpg', 'ready', '2026-09-01 08:05:00')"
-                )
+                    "'/data/images/star.jpg', 'ready', '2026-09-01 08:05:00', :druzina)"
+                ),
+                druzina,
             )
             povezava.execute(
                 text(
                     "INSERT INTO questions "
-                    "(id, material_id, position, question, answer, subject) "
-                    "VALUES ('v1', 'star', 1, 'Kdaj?', 'Leta 1991.', 'MAT')"
-                )
+                    "(id, material_id, position, question, answer, subject, family_id) "
+                    "VALUES ('v1', 'star', 1, 'Kdaj?', 'Leta 1991.', 'MAT', :druzina)"
+                ),
+                druzina,
             )
             # Sirota, ki je shema pred to migracijo ne zna zapisati.
             povezava.execute(
                 text(
                     "INSERT INTO questions "
-                    "(id, material_id, position, question, answer, subject) "
-                    "VALUES ('v2', NULL, 1, 'Brez materiala?', 'Da.', 'MAT')"
-                )
+                    "(id, material_id, position, question, answer, subject, family_id) "
+                    "VALUES ('v2', NULL, 1, 'Brez materiala?', 'Da.', 'MAT', :druzina)"
+                ),
+                druzina,
             )
             # Upokojeno vprašanje, da gre `downgrade` migracije `0004` res
             # čez vrstico, ki ima stolpec napolnjen. Brez nje bi `DROP COLUMN`
             # tekel nad samimi praznimi vrednostmi in ne bi dokazal ničesar.
             povezava.execute(
                 text(
-                    "INSERT INTO questions "
-                    "(id, material_id, position, question, answer, subject, retired_at) "
+                    "INSERT INTO questions (id, material_id, position, question, "
+                    "answer, subject, retired_at, family_id) "
                     "VALUES ('v3', 'star', 1, 'Stara serija?', 'Da.', 'MAT', "
-                    "'2026-09-06 09:00:00')"
-                )
+                    "'2026-09-06 09:00:00', :druzina)"
+                ),
+                druzina,
             )
 
         command.downgrade(config, "0002_obdelava")
@@ -482,3 +519,246 @@ def test_izrecna_nastavitev_ima_prednost_pred_okoljem(
     assert ciljna.exists()
     # Tuje baze se migracija ne sme niti dotakniti.
     assert not tuja.exists()
+
+
+# --- Družine (V3-R01, `0007_druzine`) ---
+
+
+def _polna_baza_pred_druzinami(baza: str, slike: Path) -> None:
+    """Baza v stanju `0006_poskusi`, kakršna je na strežniku pred V3-R01.
+
+    Material s sliko, arhiviran material brez slike (počiščena slika), vprašanje,
+    osirotelo vprašanje, kviz s postavko in poskus. Na disku še datoteka brez
+    vrstice in ostanek v `.tmp/` — oboje mora migracija pustiti pri miru.
+    """
+    command.upgrade(alembic_nastavitve(baza), "0006_poskusi")
+
+    (slike / "m1.jpg").write_bytes(b"slika-m1")
+    (slike / "sirota.jpg").write_bytes(b"sirota")
+    (slike / ".tmp").mkdir()
+    (slike / ".tmp" / "napol.jpg").write_bytes(b"napol")
+
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            for material_id, arhiviran in (("m1", None), ("m2", "2026-09-05 10:00:00")):
+                povezava.execute(
+                    text(
+                        "INSERT INTO materials (id, subject, taken_at, image_path, status, "
+                        "received_at, archived_at) VALUES (:id, 'MAT', '2026-09-01 08:00:00', "
+                        ":pot, 'ready', '2026-09-01 08:05:00', :arhiv)"
+                    ),
+                    {
+                        "id": material_id,
+                        "pot": str(slike / f"{material_id}.jpg"),
+                        "arhiv": arhiviran,
+                    },
+                )
+            povezava.execute(
+                text(
+                    "INSERT INTO questions (id, material_id, position, question, answer, subject) "
+                    "VALUES ('v1', 'm1', 1, 'Kdaj?', 'Leta 1991.', 'MAT'), "
+                    "('v2', NULL, 1, 'Brez materiala?', 'Da.', 'MAT')"
+                )
+            )
+            _vstavi_kviz(povezava)
+            povezava.execute(text("UPDATE quiz_items SET question_id = 'v1' WHERE id = 'p1'"))
+            povezava.execute(
+                text(
+                    "INSERT INTO question_attempts (id, quiz_item_id, mode, rating, "
+                    "shown_at, revealed_at, answered_at, received_at) "
+                    "VALUES ('a1', 'p1', 'samoocena', 'lahko', '2026-09-10 15:00:00', "
+                    "'2026-09-10 15:00:07', '2026-09-10 15:00:09', '2026-09-10 15:05:00')"
+                )
+            )
+    finally:
+        motor.dispose()
+
+
+#: Tabele, ki po `0007_druzine` nosijo družino, in koliko vrstic ima vsaka v
+#: `_polna_baza_pred_druzinami`.
+VRSTIC = {"materials": 2, "questions": 2, "quizzes": 1, "question_attempts": 1}
+
+
+def _stej(motor: Any) -> dict[str, int]:
+    with motor.connect() as povezava:
+        return {
+            tabela: povezava.execute(text(f"SELECT count(*) FROM {tabela}")).scalar_one()
+            for tabela in [*VRSTIC, "quiz_items"]
+        }
+
+
+def test_druzina_cvek_prevzame_vse_vrstice_in_slike(baza: str, slike: Path) -> None:
+    """Kriterij V3-R01: vse vrstice dobijo Cvek, vse slike gredo v njeno mapo."""
+    _polna_baza_pred_druzinami(baza, slike)
+
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    motor = create_engine(baza)
+    try:
+        with motor.connect() as povezava:
+            druzine = povezava.execute(text("SELECT id, name FROM families")).tuples().all()
+            assert druzine == [(CVEK_ID, "Cvek")]
+            for tabela in VRSTIC:
+                v_tabeli = povezava.execute(text(f"SELECT DISTINCT family_id FROM {tabela}"))
+                assert v_tabeli.scalars().all() == [CVEK_ID], tabela
+            poti = dict(
+                povezava.execute(text("SELECT id, image_path FROM materials")).tuples().all()
+            )
+
+        assert _stej(motor) == {**VRSTIC, "quiz_items": 1}
+    finally:
+        motor.dispose()
+
+    mapa = slike / CVEK_ID
+    # Slika je premaknjena z vsebino vred, pot v bazi kaže nanjo.
+    assert poti["m1"] == str(mapa / "m1.jpg")
+    assert (mapa / "m1.jpg").read_bytes() == b"slika-m1"
+    assert not (slike / "m1.jpg").exists()
+    # Počiščena slika: pot prepisana, datoteke ni in je tudi prej ni bilo.
+    assert poti["m2"] == str(mapa / "m2.jpg")
+    assert not (mapa / "m2.jpg").exists()
+    # Sirota in ostanek v `.tmp/` ostaneta, kjer sta bila.
+    assert (slike / "sirota.jpg").read_bytes() == b"sirota"
+    assert (slike / ".tmp" / "napol.jpg").read_bytes() == b"napol"
+    assert not (mapa / "sirota.jpg").exists()
+
+
+def test_migracija_brez_mape_slik_nad_polno_bazo_pade(
+    baza: str, slike: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tih privzetek bi prepisal poti, datotek pa ne bi premaknil."""
+    _polna_baza_pred_druzinami(baza, slike)
+    monkeypatch.delenv("IMAGES_DIR")
+
+    with pytest.raises(RuntimeError, match="IMAGES_DIR"):
+        command.upgrade(alembic_nastavitve(baza), "head")
+
+    # Preverba je pred vsakim DDL: shema in slika sta nedotaknjeni.
+    motor = create_engine(baza)
+    try:
+        assert "families" not in inspect(motor).get_table_names()
+    finally:
+        motor.dispose()
+    assert (slike / "m1.jpg").read_bytes() == b"slika-m1"
+
+
+def test_migracija_prazne_baze_ne_potrebuje_mape_slik(
+    baza: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("IMAGES_DIR")
+
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    motor = create_engine(baza)
+    try:
+        with motor.connect() as povezava:
+            assert povezava.execute(text("SELECT id FROM families")).scalars().all() == [CVEK_ID]
+    finally:
+        motor.dispose()
+
+
+def test_ponovni_zagon_po_prekinjenem_premiku(baza: str, slike: Path) -> None:
+    """Premik ni v transakciji baze: baza je stara, slika pa že v mapi Cvek.
+
+    Točno to stanje pusti migracija, ki pade po premiku datotek in se ji baza
+    vrne. Ponovni zagon mora priti do istega izida kot neprekinjen.
+    """
+    _polna_baza_pred_druzinami(baza, slike)
+    # `exist_ok`: mapo Cvek fixture `slike` že ustvari (`conftest.py`).
+    (slike / CVEK_ID).mkdir(exist_ok=True)
+    (slike / "m1.jpg").replace(slike / CVEK_ID / "m1.jpg")
+
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    motor = create_engine(baza)
+    try:
+        with motor.connect() as povezava:
+            pot = povezava.execute(
+                text("SELECT image_path FROM materials WHERE id = 'm1'")
+            ).scalar_one()
+    finally:
+        motor.dispose()
+    assert pot == str(slike / CVEK_ID / "m1.jpg")
+    assert (slike / CVEK_ID / "m1.jpg").read_bytes() == b"slika-m1"
+
+
+def test_razveljavitev_druzin_vrne_slike_poti_in_vrstice(baza: str, slike: Path) -> None:
+    """`downgrade` nad polno bazo: nobena vrstica ne izgine, slike nazaj v koren."""
+    _polna_baza_pred_druzinami(baza, slike)
+    config = alembic_nastavitve(baza)
+    command.upgrade(config, "head")
+
+    command.downgrade(config, "0006_poskusi")
+
+    motor = create_engine(baza)
+    try:
+        pregled = inspect(motor)
+        assert "families" not in pregled.get_table_names()
+        for tabela in VRSTIC:
+            assert "family_id" not in {s["name"] for s in pregled.get_columns(tabela)}, tabela
+        assert _stej(motor) == {**VRSTIC, "quiz_items": 1}
+        with motor.connect() as povezava:
+            poti = dict(
+                povezava.execute(text("SELECT id, image_path FROM materials")).tuples().all()
+            )
+    finally:
+        motor.dispose()
+
+    assert poti == {"m1": str(slike / "m1.jpg"), "m2": str(slike / "m2.jpg")}
+    assert (slike / "m1.jpg").read_bytes() == b"slika-m1"
+    assert not (slike / CVEK_ID / "m1.jpg").exists()
+
+
+def test_razveljavitev_z_dvema_druzinama_se_ne_izvede(baza: str) -> None:
+    config = alembic_nastavitve(baza)
+    command.upgrade(config, "head")
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            povezava.execute(
+                text(
+                    "INSERT INTO families (id, name, created_at) "
+                    "VALUES ('druga', 'Druga', '2026-09-14 10:00:00')"
+                )
+            )
+
+        with pytest.raises(RuntimeError, match="2 družin"):
+            command.downgrade(config, "0006_poskusi")
+
+        assert "families" in inspect(motor).get_table_names()
+    finally:
+        motor.dispose()
+
+
+@pytest.mark.parametrize("tabela", list(VRSTIC))
+def test_druzina_je_obvezen_tuji_kljuc(baza: str, tabela: str) -> None:
+    """`family_id` kaže na `families`, brez `ondelete` — družina se ne briše."""
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    motor = create_engine(baza)
+    try:
+        pregled = inspect(motor)
+        [kljuc] = [
+            k
+            for k in pregled.get_foreign_keys(tabela)
+            if k["constrained_columns"] == ["family_id"]
+        ]
+        assert kljuc["referred_table"] == "families"
+        assert kljuc["referred_columns"] == ["id"]
+        assert not kljuc["options"].get("ondelete")
+        [stolpec] = [s for s in pregled.get_columns(tabela) if s["name"] == "family_id"]
+        assert stolpec["nullable"] is False
+    finally:
+        motor.dispose()
+
+
+def test_postavka_kviza_nima_druzine(baza: str) -> None:
+    """Družina postavke je družina kviza (`ADR-029` C)."""
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    motor = create_engine(baza)
+    try:
+        assert "family_id" not in {s["name"] for s in inspect(motor).get_columns("quiz_items")}
+    finally:
+        motor.dispose()

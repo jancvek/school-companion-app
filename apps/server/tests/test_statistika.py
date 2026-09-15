@@ -44,6 +44,7 @@ from app.statistika import (
     solska_leta,
 )
 from app.subjects import PREDMETI
+from tests.conftest import CVEK_ID
 from tests.test_kvizi import UUID_DVA, UUID_ENA, UUID_TRI, objavi, snov, upokoji
 from tests.test_resevanje import poskus, poslji
 from tests.test_rezultat import postavke
@@ -107,6 +108,7 @@ def vstavi_poskus(
     with Session(motor) as seja:
         seja.add(
             QuestionAttempt(
+                family_id=CVEK_ID,
                 id=str(uuid4()),
                 quiz_item_id=quiz_item_id,
                 mode=mode,
@@ -435,6 +437,7 @@ class TestKajSteje:
         with Session(motor) as seja:
             seja.add(
                 Question(
+                    family_id=CVEK_ID,
                     id="nova-serija-1",
                     material_id=UUID_ENA,
                     position=1,
@@ -481,7 +484,7 @@ class TestKajSteje:
                 .values(archived_at=KDAJ, device_deleted_at=KDAJ)
             )
             seja.commit()
-            assert MaterialsRepository(seja).pobrisi(UUID_ENA) is not None
+            assert MaterialsRepository(seja, CVEK_ID).pobrisi(UUID_ENA) is not None
 
         besedilo = predmet(odjemalec)
 

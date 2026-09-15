@@ -1,5 +1,10 @@
-"""Tabele `materials`, `questions`, `quizzes`, `quiz_items` in
+"""Tabele `families`, `materials`, `questions`, `quizzes`, `quiz_items` in
 `question_attempts` na strežniku.
+
+**Družina je lastnik vseh podatkov** (`docs/odlocitve/ADR-025`): `family_id`
+je obvezen na `materials`, `questions`, `quizzes` in `question_attempts`.
+`quiz_items` ga nima — postavka brez kviza ne obstaja (`quiz_id` je
+`NOT NULL`), zato je njena družina družina kviza (`ADR-029` C).
 
 Tipi so izbrani tako, da ista shema stoji nad Postgresom (produkcija) in nad
 SQLite (testi) — glej odločitev 2 v `docs/plan/V1-R02.md`. Zato `id` ni
@@ -52,13 +57,43 @@ class Base(DeclarativeBase):
     """Skupna osnova za modele."""
 
 
+class Family(Base):
+    """Družina: obseg lastništva vseh podatkov (`docs/odlocitve/ADR-025`).
+
+    Ime in nič drugega — ni naslova, ni nastavitev. Uporabniki pridejo v
+    `V3-R03`.
+    """
+
+    __tablename__ = "families"
+
+    #: UUID, generiran na strežniku. Je tudi ime mape slik družine.
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    #: Ime za prikaz, npr. `Cvek`.
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class Material(Base):
     """Ena fotografirana učna snov, prejeta s telefona."""
 
     __tablename__ = "materials"
 
     #: UUID, generiran na telefonu. Nosilec idempotentnosti.
+    #:
+    #: Primarni ključ ostane **globalen** in ne po družini: tuj `id` pri
+    #: prevzemu je `409` (`docs/odlocitve/ADR-029` D).
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    #: Družina, ki ji zapis pripada (`docs/odlocitve/ADR-025`). Obvezna in
+    #: brez `ondelete`: družina se ne briše, `V3-R05` jo deaktivira.
+    family_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("families.id", name="fk_materials_family_id"),
+        nullable=False,
+        index=True,
+    )
 
     #: Koda predmeta, npr. `MAT`.
     subject: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -216,6 +251,19 @@ class Question(Base):
     #: s telefona) — vprašanje nastane tu in nikjer drugje.
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
 
+    #: Družina, ki ji zapis pripada (`docs/odlocitve/ADR-025`). Obvezna in
+    #: brez `ondelete`: družina se ne briše, `V3-R05` jo deaktivira.
+    #:
+    #: Stolpec in ne izpeljava iz materiala: vprašanje preživi material
+    #: (`ADR-012`) in bi brez njega ostalo brez družine (`ADR-029` C). Isti
+    #: razlog kot `subject` in `material_taken_at` spodaj.
+    family_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("families.id", name="fk_questions_family_id"),
+        nullable=False,
+        index=True,
+    )
+
     #: Material, iz katerega je vprašanje nastalo, ali `NULL`, kadar je bil
     #: material dokončno izbrisan.
     #:
@@ -289,6 +337,15 @@ class Quiz(Base):
 
     #: UUID, generiran **na strežniku** — kviz nastane tu, ne na telefonu.
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    #: Družina, ki ji zapis pripada (`docs/odlocitve/ADR-025`). Obvezna in
+    #: brez `ondelete`: družina se ne briše, `V3-R05` jo deaktivira.
+    family_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("families.id", name="fk_quizzes_family_id"),
+        nullable=False,
+        index=True,
+    )
 
     #: Ime za prikaz. Sestavi se samodejno (`MAT — 9. 9. 2026`), operater pa ga
     #: v obrazcu lahko prepiše.
@@ -424,6 +481,15 @@ class QuestionAttempt(Base):
 
     #: UUID, generiran na telefonu. Nosilec idempotentnosti.
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    #: Družina, ki ji zapis pripada (`docs/odlocitve/ADR-025`). Obvezna in
+    #: brez `ondelete`: družina se ne briše, `V3-R05` jo deaktivira.
+    family_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("families.id", name="fk_question_attempts_family_id"),
+        nullable=False,
+        index=True,
+    )
 
     #: Postavka, na katero je to odgovor.
     #:

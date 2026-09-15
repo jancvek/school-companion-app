@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.db import MaterialsRepository
 from app.models import Material
 from app.storage import ZACASNA_PODMAPA
-from tests.conftest import KLJUC
+from tests.conftest import CVEK_ID, KLJUC
 
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 UUID_DVA = "a1b2c3d4-e5f6-4789-abcd-ef0123456789"
@@ -73,7 +73,7 @@ class TestUspesenPrenos:
             assert zapis.subject == "MAT"
             assert zapis.status == "new"
 
-        assert (slike / f"{UUID_ENA}.jpg").read_bytes() == b"slika-ena"
+        assert (slike / CVEK_ID / f"{UUID_ENA}.jpg").read_bytes() == b"slika-ena"
 
     def test_taken_at_se_shrani_kot_trenutek_v_utc(
         self, odjemalec: TestClient, motor: Engine
@@ -123,7 +123,7 @@ class TestIdempotentnost:
             "/materials", data=polja(), files=datoteka(b"druga"), headers={"X-API-Key": KLJUC}
         )
 
-        assert (slike / f"{UUID_ENA}.jpg").read_bytes() == b"prva"
+        assert (slike / CVEK_ID / f"{UUID_ENA}.jpg").read_bytes() == b"prva"
 
     def test_razlicna_id_dasta_dve_vrstici(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -136,7 +136,7 @@ class TestIdempotentnost:
         )
 
         assert stevilo_vrstic(motor) == 2
-        assert len(slike_na_disku(slike)) == 2
+        assert len(slike_na_disku(slike / CVEK_ID)) == 2
 
 
 class TestKljuc:
@@ -162,7 +162,7 @@ class TestKljuc:
 
         assert odgovor.status_code == 401, opis
         assert stevilo_vrstic(motor) == 0
-        assert slike_na_disku(slike) == []
+        assert slike_na_disku(slike / CVEK_ID) == []
 
     def test_kljuc_z_ne_ascii_znaki_ne_sesuje_streznika(self, odjemalec: TestClient) -> None:
         # Starlette glave dekodira kot latin-1, zato je lahko ključ, ki pride
@@ -209,7 +209,7 @@ class TestNeveljavenZahtevek:
 
         assert odgovor.status_code == 422
         assert stevilo_vrstic(motor) == 0
-        assert slike_na_disku(slike) == []
+        assert slike_na_disku(slike / CVEK_ID) == []
 
     def test_manjkajoca_datoteka_da_422(self, odjemalec: TestClient, motor: Engine) -> None:
         odgovor = odjemalec.post("/materials", data=polja(), headers={"X-API-Key": KLJUC})
@@ -243,7 +243,7 @@ class TestNeveljavenZahtevek:
 
         assert odgovor.status_code == 422
         assert stevilo_vrstic(motor) == 0
-        assert slike_na_disku(slike) == []
+        assert slike_na_disku(slike / CVEK_ID) == []
 
 
 class TestNapakaPriZapisu:
@@ -267,7 +267,7 @@ class TestNapakaPriZapisu:
             )
 
         assert stevilo_vrstic(motor) == 0
-        assert slike_na_disku(slike) == []
+        assert slike_na_disku(slike / CVEK_ID) == []
 
     def test_ob_padcu_vstavljanja_slika_ne_ostane(
         self,
@@ -290,7 +290,7 @@ class TestNapakaPriZapisu:
 
         # Slika brez vrstice je sirota, ki je nihče nikoli ne pogleda.
         assert stevilo_vrstic(motor) == 0
-        assert slike_na_disku(slike) == []
+        assert slike_na_disku(slike / CVEK_ID) == []
 
 
 class TestAtomarnost:
@@ -303,7 +303,7 @@ class TestAtomarnost:
             "/materials", data=polja(), files=datoteka(), headers={"X-API-Key": KLJUC}
         )
 
-        zacasna = slike / ZACASNA_PODMAPA
+        zacasna = slike / CVEK_ID / ZACASNA_PODMAPA
         assert list(zacasna.iterdir()) == []
 
 
@@ -362,6 +362,7 @@ class TestOdgovorOdrazaZapis:
         with Session(motor) as seja:
             seja.add(
                 Material(
+                    family_id=CVEK_ID,
                     id=UUID_ENA,
                     subject="MAT",
                     taken_at=datetime(2026, 9, 4, 7, 30, tzinfo=UTC),
