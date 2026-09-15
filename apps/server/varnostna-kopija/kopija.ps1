@@ -29,6 +29,10 @@
 .EXAMPLE
     pwsh -File apps/server/varnostna-kopija/kopija.ps1
 #>
+# `$PSNativeCommandUseErrorActionPreference` (napaka dockerja ustavi skripto)
+# obstaja šele od PowerShell 7.3. Windows PowerShell 5.1 (`powershell.exe`) bi
+# napake tiho prezrl, zato ga skripta zavrne. Dnevno opravilo naj kliče `pwsh`.
+#Requires -Version 7.3
 [CmdletBinding()]
 param(
     [string] $Cilj = 'C:\varnostne-kopije\school_companion',
@@ -43,6 +47,7 @@ $PSNativeCommandUseErrorActionPreference = $true
 $Projekt = 'server'
 $Tabele = @('families', 'materials', 'questions', 'quizzes', 'quiz_items', 'question_attempts')
 $ImeCeleKopije = '^\d{4}-\d{2}-\d{2}_\d{6}$'
+$ImeNeuspele = '^\d{4}-\d{2}-\d{2}_\d{6}-neuspela$'
 $SeznamSlik = 'cd /data && find images -type f ! -path "*/.tmp/*" -exec sha256sum {} + | LC_ALL=C sort -k 2'
 
 function Get-Vsebnik([string] $Servis) {
@@ -74,6 +79,19 @@ function Get-Stanje([string] $Baza, [string] $Api) {
 
 function Get-Sha256([string] $Pot) {
     return (Get-FileHash -Algorithm SHA256 -LiteralPath $Pot).Hash.ToLowerInvariant()
+}
+
+if (Test-Path -LiteralPath $Cilj) {
+    # Neuspele kopije se ne štejejo med cele, a se tudi ne smejo kopičiti brez
+    # meje, ko dnevno opravilo pada dan za dnem. Ohrani se jih največ `-Ohrani`;
+    # čiščenje teče pred kopijo, da meja drži tudi ob naslednjem neuspehu.
+    $neuspele = Get-ChildItem -LiteralPath $Cilj -Directory |
+        Where-Object { $_.Name -match $ImeNeuspele } |
+        Sort-Object Name -Descending
+    foreach ($stara in ($neuspele | Select-Object -Skip $Ohrani)) {
+        Remove-Item -LiteralPath $stara.FullName -Recurse -Force
+        Write-Host "Pobrisana stara neuspela kopija: $($stara.Name)"
+    }
 }
 
 $baza = Get-Vsebnik 'db'

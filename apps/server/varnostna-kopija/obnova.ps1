@@ -24,6 +24,9 @@
 .EXAMPLE
     pwsh -File apps/server/varnostna-kopija/obnova.ps1 -Mapa C:\varnostne-kopije\school_companion\2026-09-16_020000
 #>
+# `$PSNativeCommandUseErrorActionPreference` obstaja šele od PowerShell 7.3;
+# v 5.1 bi neuspel ukaz dockerja ne ustavil skripte (glej `kopija.ps1`).
+#Requires -Version 7.3
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]

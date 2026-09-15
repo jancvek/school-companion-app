@@ -84,19 +84,46 @@ def _vrednost(telo: list[str], kljuc: str) -> str:
     raise AssertionError(f"Ni vrednosti za {kljuc!r}.")
 
 
-def _vse_objave() -> list[str]:
-    """Vsaka objava vrat v celotni datoteki, pri kateremkoli servisu."""
-    vrstice = _vrstice_compose()
+#: Ključ `ports` v kateremkoli zapisu: blokovnem (`ports:`) ali v eni vrstici
+#: (`ports: ["8000:8000"]`).
+PORTS = re.compile(r"^(?P<zamik>\s*)ports\s*:(?P<ostanek>.*)$")
+
+
+def _objave(vrstice: list[str]) -> list[str]:
+    """Vsaka objava vrat v danih vrsticah, v obeh zapisih YAML.
+
+    Blokovni zapis sam ne zadošča: `ports: ["8000:8000"]` bi šel mimo in test
+    „`api` nima vrat" bi bil zelen ob odprtih vratih (ugotovitev pregledovalca).
+    Zapis, ki ga ta pomočnik ne zna razbrati, je napaka testa, ne prazen izid.
+    """
     objave: list[str] = []
     for i, vrstica in enumerate(vrstice):
-        if vrstica.strip() == "ports:":
-            telo = []
-            for naslednja in vrstice[i + 1 :]:
-                if naslednja.strip() and _zamik(naslednja) <= _zamik(vrstica):
-                    break
-                telo.append(naslednja)
-            objave.extend(_seznam(telo))
+        najdba = PORTS.match(vrstica)
+        if najdba is None:
+            continue
+        ostanek = najdba["ostanek"].strip()
+        if ostanek:
+            assert ostanek.startswith("[") and ostanek.endswith("]"), (
+                f"Nepoznan zapis `ports`: {vrstica.strip()!r}"
+            )
+            objave.extend(
+                element.strip().strip("\"'")
+                for element in ostanek[1:-1].split(",")
+                if element.strip()
+            )
+            continue
+        telo = []
+        for naslednja in vrstice[i + 1 :]:
+            if naslednja.strip() and _zamik(naslednja) <= len(najdba["zamik"]):
+                break
+            telo.append(naslednja)
+        objave.extend(_seznam(telo))
     return objave
+
+
+def _vse_objave() -> list[str]:
+    """Vsaka objava vrat v celotni datoteki, pri kateremkoli servisu."""
+    return _objave(_vrstice_compose())
 
 
 # --- Branje `Caddyfile` ----------------------------------------------------
@@ -141,7 +168,11 @@ class TestObjavljenaVrata:
     def test_api_ni_objavljen_na_gostitelju(self) -> None:
         # Tudi ne na `127.0.0.1` ali Tailscale naslovu: `api` je dosegljiv samo
         # skozi Caddy. `expose` bi bil neškodljiv, a ga ni treba.
-        assert not _ima_kljuc(_servis("api"), "ports", 4)
+        api = _servis("api")
+        assert not any(PORTS.match(vrstica) for vrstica in api), "api ima ključ `ports`"
+        assert _objave(api) == []
+        # `network_mode: host` bi vrata odprl brez ključa `ports`.
+        assert not any(vrstica.strip().startswith("network_mode") for vrstica in api)
         assert "BIND_ADDRESS" not in COMPOSE.read_text(encoding="utf-8")
 
     def test_edina_objava_v_datoteki_je_443(self) -> None:
@@ -246,6 +277,42 @@ class TestCaddyfile:
 
     def test_promet_gre_na_api(self) -> None:
         assert "reverse_proxy api:8000" in _ukazi(_blok(_caddyfile(), "{$DOMENA}"))
+
+    def test_edino_spletisce_je_domena(self) -> None:
+        # Dodaten naslov strani (`:443 { … }`, gol IP, drugo ime) bi zahteve z
+        # drugačnim `Host` spustil do `api` mimo `basic_auth`, ki je samo v
+        # bloku domene (ugotovitev pregledovalca).
+        assert _vrhnji_bloki(_caddyfile()) == ["", "{$DOMENA}"]
+
+
+def _vrhnji_bloki(besedilo: str) -> list[str]:
+    """Glave blokov na najvišji ravni, po vrsti; globalni blok ima prazno glavo.
+
+    Nadomestna vrednost `{$IME}` ni blok in se preskoči, sicer bi `{$DOMENA} {`
+    štel za dva bloka.
+    """
+    glave: list[str] = []
+    globina = 0
+    zacetek_vrstice = 0
+    i = 0
+    while i < len(besedilo):
+        znak = besedilo[i]
+        if znak == "\n":
+            zacetek_vrstice = i + 1
+        elif znak == "{" and besedilo.startswith("{$", i):
+            konec = besedilo.find("}", i)
+            assert konec != -1, "Nadomestna vrednost ni zaprta."
+            i = konec
+        elif znak == "{":
+            if globina == 0:
+                glave.append(besedilo[zacetek_vrstice:i].strip())
+            globina += 1
+        elif znak == "}":
+            globina -= 1
+            assert globina >= 0, "Zaklepaj brez oklepaja."
+        i += 1
+    assert globina == 0, "Blok ni zaprt."
+    return glave
 
 
 # --- Zaupanje proxy glavam -------------------------------------------------
