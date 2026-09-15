@@ -112,5 +112,9 @@ nastati, dokler teče prvi.
    ki morata biti vedno usklajeni — prav napaka, pred katero varuje test
    zaupanja.
 
-**Odločitev.** Možnost 1. Izbral lastnik. `scripts/obnova.ps1` ustvari samo
-vire z imeni, ki se začnejo s `school-obnova`, in na koncu pobriše samo te.
+**Odločitev.** Možnost 1. Izbral lastnik. `obnova.ps1` ustvari samo vire z
+imeni, ki se začnejo s `school-obnova`, in na koncu pobriše samo te.
+
+**Lokacija skript.** Skripti sta v `apps/server/varnostna-kopija/` in ne v
+`scripts/`, kot pravita F in plan: `scripts/` je del ograje in agentu ni
+dovoljen za pisanje. Izbral lastnik, da se ograja ne spreminja.
