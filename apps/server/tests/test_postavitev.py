@@ -12,13 +12,19 @@ kadar vzorca ne najde — tih prazen izid bi test naredil zelen iz napačnega
 razloga.
 """
 
+import asyncio
 import ipaddress
+import json
 import re
 from pathlib import Path
+from typing import Any
+
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 MAPA_STREZNIKA = Path(__file__).resolve().parent.parent
 COMPOSE = MAPA_STREZNIKA / "docker-compose.yml"
 CADDYFILE = MAPA_STREZNIKA / "Caddyfile"
+DOCKERFILE = MAPA_STREZNIKA / "Dockerfile"
 OKOLJE_PRIMER = MAPA_STREZNIKA / "okolje.primer"
 
 #: Prava bcrypt zgostitev, ne zgled `'$2a$14$...'` iz `okolje.primer`.
@@ -231,3 +237,85 @@ class TestCaddyfile:
 
     def test_promet_gre_na_api(self) -> None:
         assert "reverse_proxy api:8000" in _ukazi(_blok(_caddyfile(), "{$DOMENA}"))
+
+
+# --- Zaupanje proxy glavam -------------------------------------------------
+
+
+def _naslov_caddyja() -> str:
+    return _vrednost(_odsek(_odsek(_servis("caddy"), "networks", 4), "spredaj", 6), "ipv4_address")
+
+
+def _zaupano_v_compose() -> str:
+    """Vrednost `--forwarded-allow-ips` iz ukaza servisa `api`."""
+    vrednosti = re.findall(r"--forwarded-allow-ips[ =]([^\s\"]+)", "\n".join(_servis("api")))
+    assert len(vrednosti) == 1, vrednosti
+    return str(vrednosti[0])
+
+
+def _ukaz_dockerfile() -> list[str]:
+    vrstice = [
+        v for v in DOCKERFILE.read_text(encoding="utf-8").splitlines() if v.startswith("CMD ")
+    ]
+    assert len(vrstice) == 1, vrstice
+    ukaz: list[str] = json.loads(vrstice[0].removeprefix("CMD "))
+    return ukaz
+
+
+def _odjemalec_za_aplikacijo(odjemalec: str, zaupano: str) -> str:
+    """Naslov, ki ga aplikacija vidi za zahtevo z glavo `X-Forwarded-For`.
+
+    Gre skozi uvicornov `ProxyHeadersMiddleware` — isti razred, ki ga uvicorn
+    vklopi z `--proxy-headers` — z vrednostjo, kakršna je v nastavitvi.
+    """
+    videno: dict[str, Any] = {}
+
+    async def aplikacija(scope: Any, receive: Any, send: Any) -> None:
+        videno["client"] = scope["client"]
+
+    async def prejmi() -> Any:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def poslji(sporocilo: Any) -> None:
+        return None
+
+    scope: Any = {
+        "type": "http",
+        "scheme": "http",
+        "client": (odjemalec, 50000),
+        "headers": [(b"x-forwarded-for", b"198.51.100.7"), (b"x-forwarded-proto", b"https")],
+    }
+    asyncio.run(ProxyHeadersMiddleware(aplikacija, trusted_hosts=zaupano)(scope, prejmi, poslji))
+    return str(videno["client"][0])
+
+
+class TestZaupanjeProxyGlavam:
+    def test_zaupan_je_samo_caddyjev_naslov(self) -> None:
+        zaupano = _zaupano_v_compose()
+        # Ne `*`, ne seznam in ne podomrežje: prehod `172.30.10.1` je v istem
+        # podomrežju in bi sicer lahko podtaknil glavo.
+        assert zaupano == _naslov_caddyja()
+        assert ipaddress.ip_address(zaupano)
+
+    def test_zastavici_sta_v_isti_vrstici_kot_uvicorn(self) -> None:
+        # V `sh -c` je nova vrstica ločilo ukazov: zastavica v naslednji vrstici
+        # bi bila svoj (neuspel) ukaz, uvicorn pa bi tekel brez nje.
+        vrstica = next(v for v in _servis("api") if "uvicorn" in v)
+        assert "--proxy-headers" in vrstica
+        assert "--forwarded-allow-ips" in vrstica
+
+    def test_dockerfile_zaupa_istemu_naslovu(self) -> None:
+        ukaz = _ukaz_dockerfile()
+        assert "--proxy-headers" in ukaz
+        assert ukaz[ukaz.index("--forwarded-allow-ips") + 1] == _naslov_caddyja()
+
+    def test_ponarejena_glava_od_zunaj_ne_prevlada(self) -> None:
+        assert _odjemalec_za_aplikacijo("203.0.113.5", _zaupano_v_compose()) == "203.0.113.5"
+
+    def test_ponarejena_glava_s_prehoda_ne_prevlada(self) -> None:
+        assert _odjemalec_za_aplikacijo("172.30.10.1", _zaupano_v_compose()) == "172.30.10.1"
+
+    def test_glava_od_caddyja_velja(self) -> None:
+        # Brez tega bi bili zgornji testi zeleni tudi, če glava ne bi veljala
+        # nikoli — na primer ob tipkarski napaki v naslovu.
+        assert _odjemalec_za_aplikacijo(_naslov_caddyja(), _zaupano_v_compose()) == "198.51.100.7"

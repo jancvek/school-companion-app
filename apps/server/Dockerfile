@@ -21,4 +21,6 @@ COPY alembic ./alembic
 # naredi preslikava vrat v `docker-compose.yml` (odločitev 8 v planu).
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+# Proxy glavam zaupamo samo Caddyjevemu stalnemu naslovu iz `docker-compose.yml`
+# (V3-R02), tudi ob zagonu slike mimo Compose.
+CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "172.30.10.10"]

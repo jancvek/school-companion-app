@@ -77,9 +77,15 @@ services:
       db:
         condition: service_healthy
     # Shema se postavi ob zagonu; brez tega bi bila prva zahteva 500.
+    #
+    # `--proxy-headers` glavi `X-Forwarded-For` zaupa samo s Caddyjevega
+    # stalnega naslova. Zastavici morata ostati v isti vrstici kot `uvicorn`:
+    # v `sh -c` je nova vrstica ločilo ukazov. Na Docker Desktop Caddy sam vidi
+    # le prehod omrežja, zato pravega naslova odjemalca tu ni
+    # (`docs/odlocitve/ADR-034` A).
     command: >
       sh -c "alembic upgrade head &&
-             uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000"
+             uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips 172.30.10.10"
     restart: unless-stopped
 
 networks:
