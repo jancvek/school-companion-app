@@ -49,6 +49,21 @@ OPENAI_TIMEOUT_SECONDS=120
 # Razmik med obhodi obdelave, v sekundah.
 WORKER_INTERVAL_SECONDS=30
 
+# Domena, na kateri je strežnik dosegljiv prek HTTPS (V3-R02). Caddy zanjo
+# pridobi certifikat. Brez nje se Caddy ne zažene.
+DOMENA=school-buddy.duckdns.org
+
+# ZAČASNO — geslo pred `/admin`, dokler V3-R03 ne prinese prave prijave
+# (`docs/odlocitve/ADR-026`). Uporabniško ime izbereš sam.
+ADMIN_UPORABNIK=
+
+# Zgostitev gesla (bcrypt), nikoli geslo samo. Naredi jo z:
+#   docker run --rm -it caddy:2.11.4-alpine caddy hash-password
+# Vrednost zapiši v **enojnih narekovajih**, npr. ADMIN_ZGOSTITEV='$2a$14$...'.
+# Brez njih Compose znake `$` razume kot spremenljivke in zgostitev tiho pokvari.
+ADMIN_ZGOSTITEV=
+
+# ZAČASNO do drugega koraka V3-R02: stari APK še prenaša prek Tailscale.
 # Naslov, na katerem posluša API. Vpiši Tailscale naslov tega stroja
 # (`tailscale ip -4`), da strežnik ni dosegljiv iz domačega omrežja ali
 # interneta. Za preizkus na istem stroju je smiselno 127.0.0.1.
