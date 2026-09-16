@@ -25,6 +25,12 @@
 		}
 	}
 
+	# Ikona zavihka. Brez tega jo brskalnik zahteva od `api`, ta pa za pot zunaj
+	# `/admin` vrne 401 (API ključ). Chrome in Edge 401 na zahtevo, ki je nosila
+	# geslo, razumeta kot zavrnjeno geslo in ga pozabita — geslo za `/admin` bi
+	# spraševala ob vsakem kliku. Spada k `basic_auth` spodaj.
+	respond /favicon.ico 204
+
 	# ZAČASNO — pade v V3-R03, ko pride prava prijava (`ADR-026`).
 	# Ujemalnik zajame `/admin` in `/admin/...`, ne pa poti, ki se le začne
 	# enako (`/administration`).

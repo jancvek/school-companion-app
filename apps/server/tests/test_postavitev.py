@@ -292,6 +292,13 @@ class TestCaddyfile:
     def test_promet_gre_na_api(self) -> None:
         assert "reverse_proxy api:8000" in _ukazi(_blok(_caddyfile(), "{$DOMENA}"))
 
+    def test_ikono_zavihka_streze_caddy(self) -> None:
+        # Brez tega `/favicon.ico` pride do `api`, ki vrne 401; brskalnik ob tem
+        # pozabi geslo za `/admin` in ga zahteva ob vsakem kliku (najdeno v
+        # živo 16. 9., Chrome in Edge). Odgovor ne sme biti 401 ali 403.
+        ukazi = _ukazi(_blok(_caddyfile(), "{$DOMENA}"))
+        assert "respond /favicon.ico 204" in ukazi
+
     def test_edino_spletisce_je_domena(self) -> None:
         # Dodaten naslov strani (`:443 { … }`, gol IP, drugo ime) bi zahteve z
         # drugačnim `Host` spustil do `api` mimo `basic_auth`, ki je samo v
