@@ -17,6 +17,7 @@ dependencies = [
     "pydantic-settings",
     "jinja2",
     "openai",
+    "argon2-cffi",
 ]
 
 [project.optional-dependencies]

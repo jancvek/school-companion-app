@@ -22,6 +22,7 @@ from sqlalchemy import (
     CursorResult,
     Engine,
     create_engine,
+    delete,
     func,
     select,
     update,
@@ -32,15 +33,20 @@ from sqlalchemy.sql import Update
 
 from app.models import (
     NACIN_SAMOOCENA,
+    POVERILNICA_GESLO,
     STATUS_NOV,
     STATUS_PRIPRAVLJEN,
     STATUS_V_OBDELAVI,
+    Credential,
     Family,
+    LoginAttempt,
     Material,
     Question,
     QuestionAttempt,
     Quiz,
     QuizItem,
+    User,
+    UserSession,
 )
 
 
@@ -1435,3 +1441,229 @@ class StatistikaRepository(_RepozitorijDruzine):
             ).first()
             is not None
         )
+
+
+# --- Identiteta (V3-R03) ---------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PoverilnicaZaPrijavo:
+    """Vse, kar prijava potrebuje o enem identifikatorju.
+
+    Bere se v eni poizvedbi: poverilnica, oseba in ime njene družine. Ime
+    družine je tu, ker ga nosi glava vsake admin strani (`docs/verzije/v3.md`)
+    in bi bila sicer druga poizvedba ob vsaki zahtevi.
+    """
+
+    credential_id: str
+    user_id: str
+    family_id: str
+    family_name: str
+    role: str
+    display_name: str
+    is_active: bool
+    is_system_owner: bool
+    #: `None` pomeni, da geslo ni nastavljeno (`docs/odlocitve/ADR-035` G).
+    secret_hash: str | None
+
+
+@dataclass(frozen=True)
+class SejaUporabnika:
+    """Seja skupaj z osebo in družino, ki ji pripada."""
+
+    session_id: str
+    user_id: str
+    family_id: str
+    family_name: str
+    role: str
+    display_name: str
+    is_active: bool
+    is_system_owner: bool
+    csrf_token: str
+    expires_at: datetime
+    last_used_at: datetime
+
+
+class PrijavaRepository:
+    """Tabele `users`, `credentials`, `sessions` in `login_attempts`.
+
+    **Drugi repozitorij brez družine** (prvi je `DruzineRepository`) in to je
+    neizogibno: prijava pozna samo identifikator, družino pa šele izve —
+    poizvedba, omejena na družino, bi morala družino poznati vnaprej. Zato ta
+    razred ne bere nobene tabele s podatki družine; vrne `family_id`, s katerim
+    `app/dependencies.py` sestavi repozitorije podatkov (`ADR-025`, `ADR-035` H).
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    # --- Poverilnice -------------------------------------------------------
+
+    def poverilnica(self, identifier: str) -> PoverilnicaZaPrijavo | None:
+        """Poverilnica z danim identifikatorjem, ali `None`, če je ni.
+
+        Identifikator je enoličen čez celotno namestitev, zato je izid en sam.
+        """
+        vrstica = self._session.execute(
+            select(
+                Credential.id,
+                Credential.secret_hash,
+                User.id,
+                User.family_id,
+                Family.name,
+                User.role,
+                User.display_name,
+                User.is_active,
+                User.is_system_owner,
+            )
+            .join(User, User.id == Credential.user_id)
+            .join(Family, Family.id == User.family_id)
+            .where(Credential.identifier == identifier, Credential.kind == POVERILNICA_GESLO)
+        ).first()
+        if vrstica is None:
+            return None
+        return PoverilnicaZaPrijavo(
+            credential_id=vrstica[0],
+            secret_hash=vrstica[1],
+            user_id=vrstica[2],
+            family_id=vrstica[3],
+            family_name=vrstica[4],
+            role=vrstica[5],
+            display_name=vrstica[6],
+            is_active=vrstica[7],
+            is_system_owner=vrstica[8],
+        )
+
+    def zapisi_zgostitev(self, credential_id: str, secret_hash: str, ko: datetime) -> None:
+        """Vpiše novo zgostitev gesla. Gesla samega ne vidi."""
+        self._session.execute(
+            update(Credential)
+            .where(Credential.id == credential_id)
+            .values(secret_hash=secret_hash, updated_at=ko)
+        )
+        self._session.commit()
+
+    # --- Omejevanje ugibanja ----------------------------------------------
+
+    def neuspelih_poskusov(self, identifier: str, od: datetime) -> int:
+        """Koliko neuspelih poskusov je bilo na ta identifikator po `od`."""
+        return int(
+            self._session.scalar(
+                select(func.count(LoginAttempt.id)).where(
+                    LoginAttempt.identifier == identifier,
+                    LoginAttempt.created_at >= od,
+                )
+            )
+            or 0
+        )
+
+    def zabelezi_neuspeh(self, identifier: str, ip_address: str | None, ko: datetime) -> None:
+        """Zapiše en neuspel poskus."""
+        self._session.add(
+            LoginAttempt(
+                id=str(uuid4()),
+                identifier=identifier,
+                ip_address=ip_address,
+                created_at=ko,
+            )
+        )
+        self._session.commit()
+
+    def pozabi_poskuse(self, identifier: str) -> None:
+        """Izbriše poskuse enega identifikatorja — po uspešni prijavi."""
+        self._session.execute(delete(LoginAttempt).where(LoginAttempt.identifier == identifier))
+        self._session.commit()
+
+    def pocisti_stare_poskuse(self, pred: datetime) -> None:
+        """Izbriše poskuse, starejše od `pred`. Teče ob prijavi (`ADR-035` C)."""
+        self._session.execute(delete(LoginAttempt).where(LoginAttempt.created_at < pred))
+        self._session.commit()
+
+    # --- Seje --------------------------------------------------------------
+
+    def ustvari_sejo(
+        self,
+        *,
+        user_id: str,
+        token_hash: str,
+        csrf_token: str,
+        ko: datetime,
+        potece: datetime,
+        device_label: str | None,
+    ) -> str:
+        """Zapiše novo sejo in vrne njen `id`."""
+        session_id = str(uuid4())
+        self._session.add(
+            UserSession(
+                id=session_id,
+                user_id=user_id,
+                token_hash=token_hash,
+                csrf_token=csrf_token,
+                created_at=ko,
+                expires_at=potece,
+                last_used_at=ko,
+                device_label=device_label,
+            )
+        )
+        self._session.commit()
+        return session_id
+
+    def seja(self, token_hash: str) -> SejaUporabnika | None:
+        """Seja za dano zgostitev žetona, skupaj z osebo in družino.
+
+        Vrne tudi **potekle** seje: kaj se z njimi zgodi, odloči klicatelj
+        (`app/prijava.py` jih pobriše). Poizvedba, ki bi potekle skrila, bi
+        pomenila, da vrstica ostane v bazi za vedno.
+        """
+        vrstica = self._session.execute(
+            select(
+                UserSession.id,
+                UserSession.csrf_token,
+                UserSession.expires_at,
+                UserSession.last_used_at,
+                User.id,
+                User.family_id,
+                Family.name,
+                User.role,
+                User.display_name,
+                User.is_active,
+                User.is_system_owner,
+            )
+            .join(User, User.id == UserSession.user_id)
+            .join(Family, Family.id == User.family_id)
+            .where(UserSession.token_hash == token_hash)
+        ).first()
+        if vrstica is None:
+            return None
+        return SejaUporabnika(
+            session_id=vrstica[0],
+            csrf_token=vrstica[1],
+            expires_at=vrstica[2],
+            last_used_at=vrstica[3],
+            user_id=vrstica[4],
+            family_id=vrstica[5],
+            family_name=vrstica[6],
+            role=vrstica[7],
+            display_name=vrstica[8],
+            is_active=vrstica[9],
+            is_system_owner=vrstica[10],
+        )
+
+    def osvezi_sejo(self, session_id: str, ko: datetime, potece: datetime) -> None:
+        """Odmakne drseči rok seje naprej."""
+        self._session.execute(
+            update(UserSession)
+            .where(UserSession.id == session_id)
+            .values(last_used_at=ko, expires_at=potece)
+        )
+        self._session.commit()
+
+    def izbrisi_sejo(self, session_id: str) -> None:
+        """Odjava ene naprave."""
+        self._session.execute(delete(UserSession).where(UserSession.id == session_id))
+        self._session.commit()
+
+    def pocisti_potekle_seje(self, ko: datetime) -> None:
+        """Izbriše vse seje, ki jim je rok potekel (`ADR-035` C)."""
+        self._session.execute(delete(UserSession).where(UserSession.expires_at <= ko))
+        self._session.commit()
