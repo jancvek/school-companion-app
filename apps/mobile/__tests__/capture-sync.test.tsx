@@ -95,7 +95,7 @@ afterEach(() => {
 });
 
 it('shranjevanje se konča takoj, tudi če prenos nikoli ne odgovori', async () => {
-  // Prenos, ki visi — telefon izven Tailscale omrežja.
+  // Prenos, ki visi — telefon brez delujoče povezave do strežnika.
   const prenesiEno = jest.fn(() => new Promise<never>(() => {}));
 
   await render(

@@ -38,8 +38,7 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
-      ],
-      "./plugins/with-cleartext-traffic"
+      ]
     ],
     "experiments": {
       "typedRoutes": true

@@ -707,7 +707,8 @@ class TestDosegljivostInMeje:
         assert 'name="obdobje" value="dan"' in besedilo
 
     def test_kljuc_pod_admin_ni_zahtevan(self, odjemalec: TestClient) -> None:
-        # Meja je Tailscale (`ADR-006`); odjemalec ključa ne pošlje.
+        # Pod `/admin` aplikacija ključa ne zahteva; stran varuje Caddy
+        # (`ADR-026`). Odjemalec ključa ne pošlje.
         assert odjemalec.get(POT).status_code == 200
 
     def test_stevila_so_v_dvojini(self, odjemalec: TestClient, motor: Engine, slike: Path) -> None:

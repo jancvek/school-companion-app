@@ -5,9 +5,12 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
  * spremenljivk okolja (Expo naloži `.env` sam). V aplikaciji ni zaslona z
  * nastavitvami — odločitev 10 v `docs/plan/V1-R02.md`.
  *
- * Ključ s tem konča vgrajen v APK. To je zavestno: gre za en družinski ključ
- * na omrežju, ki je že zaprto s Tailscale. Cena je, da zamenjava ključa
- * zahteva novo gradnjo.
+ * Ključ s tem konča vgrajen v APK. To je zavestno: gre za en družinski ključ,
+ * ki od V3-R02 potuje samo prek HTTPS in ga V3-R04 zamenja z žetonom. Cena je,
+ * da zamenjava ključa zahteva novo gradnjo.
+ *
+ * `SERVER_BASE_URL` mora biti `https://`; drugačen naslov aplikacija šteje za
+ * nenastavljen prenos (`src/config/server.ts`, `docs/odlocitve/ADR-034` E).
  *
  * Manjkajoča vrednost ni napaka ob gradnji — aplikacija mora delovati tudi
  * brez nastavljenega prenosa (odločitev 11), samo prenašati ne zna.

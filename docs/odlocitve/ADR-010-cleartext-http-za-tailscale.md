@@ -2,7 +2,9 @@
 
 - **Datum:** 2026-09-07
 - **Nastalo pri:** V1-R02 (popravek po sprejemu)
-- **Status:** Sprejeto
+- **Status:** Razveljavljen z `ADR-026` (V3-R02). Strežnik je na javnem
+  internetu prek HTTPS; config plugin za nešifriran promet in njegov test sta
+  izbrisana, aplikacija govori samo `https`.
 
 ## Kontekst
 

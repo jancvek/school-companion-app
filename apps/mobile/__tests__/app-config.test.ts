@@ -8,9 +8,15 @@
  * Ugotovitev pregledovalca; ta test kliče pravi privzeti izvoz.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+
 import type { ConfigContext } from 'expo/config';
 
 import appConfig from '../app.config';
+import appJson from '../app.json';
+
+const MAPA_APLIKACIJE = path.join(__dirname, '..');
 
 /** Minimalen kontekst, kakršnega poda Expo. */
 function kontekst(extra: Record<string, unknown> = {}): ConfigContext {
@@ -30,7 +36,7 @@ describe('app.config.ts', () => {
     // `extra.eas.projectId` pride iz `app.json` in veže projekt na EAS. Če bi
     // se izgubil, gradnja ne ve, kateri projekt gradi — in nič v aplikaciji
     // tega ne bi pokazalo.
-    process.env.SERVER_BASE_URL = 'http://sto.ts.net:8000';
+    process.env.SERVER_BASE_URL = 'https://school-buddy.duckdns.org';
     process.env.SERVER_API_KEY = 'skrivnost';
     process.env.EAS_BUILD_ID = '317bdcd1-c7db-4c2c-8a6b-1cb1ce15ea29';
 
@@ -38,7 +44,7 @@ describe('app.config.ts', () => {
 
     expect(izid.extra).toEqual({
       eas: { projectId: 'projekt-1' },
-      serverBaseUrl: 'http://sto.ts.net:8000',
+      serverBaseUrl: 'https://school-buddy.duckdns.org',
       apiKey: 'skrivnost',
       buildId: '317bdcd1-c7db-4c2c-8a6b-1cb1ce15ea29',
     });
@@ -65,4 +71,30 @@ describe('app.config.ts', () => {
     expect(izid.name).toBe('Šolski pomočnik');
     expect(izid.slug).toBe('school-companion');
   });
+});
+
+/**
+ * Dovoljenje za nešifriran promet je šlo ven z V3-R02 (`docs/odlocitve/ADR-026`).
+ * Kriterij pravi „odstranjeno, ne izklopljeno": vtičnika ni ne na disku ne v
+ * registraciji, in nobena nastavitev gradnje dovoljenja ne vklopi po drugi
+ * poti. Kaj je v zgrajeni APK, ta test ne vidi — to je ročna preverba manifesta.
+ */
+describe('nešifriranega prometa ni (V3-R02)', () => {
+  it('vtičnik ni registriran v app.json', () => {
+    expect(JSON.stringify(appJson.expo.plugins).toLowerCase()).not.toContain('cleartext');
+  });
+
+  it('vtičnika ni na disku', () => {
+    expect(existsSync(path.join(MAPA_APLIKACIJE, 'plugins', 'with-cleartext-traffic.js'))).toBe(
+      false,
+    );
+  });
+
+  it.each(['app.json', 'app.config.ts', 'eas.json'])(
+    '%s dovoljenja ne omenja',
+    (datoteka) => {
+      const besedilo = readFileSync(path.join(MAPA_APLIKACIJE, datoteka), 'utf8');
+      expect(besedilo.toLowerCase()).not.toContain('cleartext');
+    },
+  );
 });

@@ -17,8 +17,10 @@ RUN pip install --no-cache-dir .
 COPY alembic.ini ./
 COPY alembic ./alembic
 
-# Znotraj vsebnika poslušamo na vseh vmesnikih; omejitev na Tailscale naslov
-# naredi preslikava vrat v `docker-compose.yml` (odločitev 8 v planu).
+# Znotraj vsebnika poslušamo na vseh vmesnikih. Vrat na gostitelju `api` nima:
+# v `docker-compose.yml` je dosegljiv samo skozi Caddy (V3-R02).
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+# Proxy glavam zaupamo samo Caddyjevemu stalnemu naslovu iz `docker-compose.yml`
+# (V3-R02), tudi ob zagonu slike mimo Compose.
+CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "172.30.10.10"]

@@ -1,0 +1,43 @@
+# Caddy pred `api` (V3-R02): HTTPS na lastni domeni, samo vrata 443.
+# Odločitve so v `docs/odlocitve/ADR-026` in `ADR-034`.
+#
+# Vrednosti `{$…}` pridejo iz okolja vsebnika, tega pa poda
+# `docker-compose.yml` iz `apps/server/.env`. Skrivnosti tu ni in je ne sme biti.
+{
+	# Samo HTTP/1.1 in HTTP/2. HTTP/3 bi zahteval še UDP 443, navzven pa so
+	# odprta izključno TCP 443.
+	servers {
+		protocols h1 h2
+	}
+
+	# Vrata 80 na tem stroju drži IIS (Aras Innovator), zato preusmeritve z
+	# `http://` na `https://` ni in je ne more biti.
+	auto_https disable_redirects
+}
+
+{$DOMENA} {
+	tls {
+		# Izdajatelj je izrecno Let's Encrypt; brez tega bi Caddy ob neuspehu
+		# poskusil še pri drugem izdajatelju.
+		issuer acme {
+			# Certifikat samo prek TLS-ALPN-01, ki teče v celoti na 443.
+			disable_http_challenge
+		}
+	}
+
+	# Ikona zavihka. Brez tega jo brskalnik zahteva od `api`, ta pa za pot zunaj
+	# `/admin` vrne 401 (API ključ). Chrome in Edge 401 na zahtevo, ki je nosila
+	# geslo, razumeta kot zavrnjeno geslo in ga pozabita — geslo za `/admin` bi
+	# spraševala ob vsakem kliku. Spada k `basic_auth` spodaj.
+	respond /favicon.ico 204
+
+	# ZAČASNO — pade v V3-R03, ko pride prava prijava (`ADR-026`).
+	# Ujemalnik zajame `/admin` in `/admin/...`, ne pa poti, ki se le začne
+	# enako (`/administration`).
+	@admin path /admin /admin/*
+	basic_auth @admin {
+		{$ADMIN_UPORABNIK} {$ADMIN_ZGOSTITEV}
+	}
+
+	reverse_proxy api:8000
+}

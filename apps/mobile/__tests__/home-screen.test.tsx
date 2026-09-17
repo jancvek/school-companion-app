@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react-nativ
 import HomeScreen from '../app/index';
 import PickSubjectForCaptureScreen from '../app/slikaj/index';
 import PickSubjectForHistoryScreen from '../app/zgodovina/index';
+import { preberiNastavitve } from '@/config/server';
 import { SUBJECTS } from '@/constants/subjects';
 import { insertMaterial } from '@/db/materials';
 import { migriraj } from '@/db/migrations';
@@ -190,6 +191,22 @@ describe('stanje prenosa na domači strani', () => {
     await insertMaterial(db, material({ id: 'a' }));
 
     await izrisi(false);
+
+    expect(await screen.findByTestId('prenos-ni-nastavljen')).toBeTruthy();
+    expect(screen.queryByTestId('stevec-cakajocih')).toBeNull();
+  });
+
+  it('http naslov iz gradnje pove, da prenos ni nastavljen (V3-R02)', async () => {
+    // Gradnja nešifriranega prometa ne dovoli več; brez tega bi posnetki večno
+    // čakali na prenos in stran bi kazala le števec (`ADR-034` E).
+    await insertMaterial(db, material({ id: 'a' }));
+    const nastavitve = preberiNastavitve({ serverBaseUrl: 'http://sto.ts.net:8000', apiKey: 'k' });
+
+    await render(
+      <SyncProvider db={db} nastavitve={nastavitve} prenesiEno={async () => ({ vrsta: 'pending', razlog: 'test' })}>
+        <HomeScreen />
+      </SyncProvider>,
+    );
 
     expect(await screen.findByTestId('prenos-ni-nastavljen')).toBeTruthy();
     expect(screen.queryByTestId('stevec-cakajocih')).toBeNull();

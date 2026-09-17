@@ -1,9 +1,38 @@
-# Dva servisa, kot pravi kriterij V1-R02: `api` in `db`. Brez Celery in Redisa —
-# obseg (5–25 slik na teden) ju ne potrebuje.
+# Trije servisi: `caddy` spredaj (V3-R02, `docs/odlocitve/ADR-026`), `api` in
+# `db`. Brez Celery in Redisa — obseg (5–25 slik na teden) ju ne potrebuje.
 #
 # Vrednosti pridejo iz `apps/server/.env` (glej `okolje.primer`).
+#
+# **Ta datoteka ostane v `apps/server`.** Ime mape je ime projekta Compose
+# (`server`), to pa je predpona volumnov z bazo in slikami. Premik ali
+# preimenovanje bi strežnik zagnal nad praznima volumnoma.
 
 services:
+  caddy:
+    # Pripeta različica: `latest` bi ob ponovnem zagonu tiho prinesel drugo.
+    image: caddy:2.11.4-alpine
+    environment:
+      DOMENA: ${DOMENA:?DOMENA ni nastavljena}
+      # ZAČASNO — `basic_auth` pred `/admin` pade v V3-R03 (`ADR-026`).
+      ADMIN_UPORABNIK: ${ADMIN_UPORABNIK:?ADMIN_UPORABNIK ni nastavljen}
+      ADMIN_ZGOSTITEV: ${ADMIN_ZGOSTITEV:?ADMIN_ZGOSTITEV ni nastavljena}
+    ports:
+      # Edina vrata, odprta navzven, in samo TCP. Vrata 80 so Arasova.
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certifikati in račun ACME. Brez obstojnega volumna bi vsak zagon
+      # prosil za nov certifikat in zadel omejitev Let's Encrypt.
+      - caddy-podatki:/data
+      - caddy-nastavitve:/config
+    networks:
+      spredaj:
+        # Stalen naslov: `api` proxy glavam zaupa samo temu naslovu.
+        ipv4_address: 172.30.10.10
+    depends_on:
+      - api
+    restart: unless-stopped
+
   db:
     image: pgvector/pgvector:pg17
     environment:
@@ -34,19 +63,37 @@ services:
       WORKER_INTERVAL_SECONDS: ${WORKER_INTERVAL_SECONDS:-30}
     volumes:
       - slike:/data/images
-    ports:
-      # Samo Tailscale naslov tega stroja. Privzetek 127.0.0.1 je namenoma
-      # neuporaben od zunaj: raje ne dela, kot da je odprt v domače omrežje.
-      - "${BIND_ADDRESS:-127.0.0.1}:8000:8000"
+    networks:
+      # `default` z bazo, `spredaj` s Caddyjem. Caddy do baze nima poti.
+      - default
+      - spredaj
+    # Brez `ports`: `api` ni vezan na noben naslov gostitelja in je dosegljiv
+    # samo iz omrežja Compose, torej navzven samo skozi Caddy (V3-R02).
     depends_on:
       db:
         condition: service_healthy
     # Shema se postavi ob zagonu; brez tega bi bila prva zahteva 500.
+    #
+    # `--proxy-headers` glavi `X-Forwarded-For` zaupa samo s Caddyjevega
+    # stalnega naslova. Zastavici morata ostati v isti vrstici kot `uvicorn`:
+    # v `sh -c` je nova vrstica ločilo ukazov. Na Docker Desktop Caddy sam vidi
+    # le prehod omrežja, zato pravega naslova odjemalca tu ni
+    # (`docs/odlocitve/ADR-034` A).
     command: >
       sh -c "alembic upgrade head &&
-             uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000"
+             uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips 172.30.10.10"
     restart: unless-stopped
+
+networks:
+  # Omrežje med Caddyjem in `api`. Podomrežje je stalno, da je stalen tudi
+  # Caddyjev naslov, ki mu `api` zaupa.
+  spredaj:
+    ipam:
+      config:
+        - subnet: 172.30.10.0/24
 
 volumes:
   podatki-baze:
   slike:
+  caddy-podatki:
+  caddy-nastavitve:
