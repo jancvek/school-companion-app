@@ -11,10 +11,10 @@
 | Lokalna baza (telefon) | SQLite (`expo-sqlite`) | Čakalna vrsta za offline-first delovanje |
 | Strežnik | FastAPI (Python) | Naraven za AI/vision klice, lahek |
 | Podatkovna baza (strežnik) | PostgreSQL + pgvector | Ena baza za metapodatke in (kasneje) vektorje, brez ločene vektorske baze |
-| Povezljivost telefon ↔ strežnik | Tailscale | Dostop do domačega strežnika brez port-forwardinga |
+| Povezljivost telefon ↔ strežnik | HTTPS na `school-buddy.duckdns.org`, Caddy pred `api` (od V3-R02) | Pošiljanje od koderkoli; certifikat Let's Encrypt; glej „Javni dostop" in `docs/odlocitve/ADR-026` |
 | Vision / OCR | OpenAI `gpt-4.1` prek uradnega paketa `openai` (od V1-R03) | Klasični OCR (Tesseract) ne obvlada slovenskega rokopisa; izbira in njena začasnost sta v `docs/odlocitve/ADR-008` |
 | Obdelava v ozadju | `asyncio` opravilo v procesu `api` | Pri 5–25 slikah na teden Celery in Redis ne rešita nobene težave tega projekta; „kar bi lahko bila mikrostoritev, naj bo funkcija" |
-| Orkestracija strežnika | Docker Compose (`api` + `db`) | Brez Celery/Redis — obseg (5–25 slik/teden) tega ne potrebuje |
+| Orkestracija strežnika | Docker Compose (`caddy` + `api` + `db`) | Brez Celery/Redis — obseg (5–25 slik/teden) tega ne potrebuje |
 
 ## Moduli
 
@@ -34,7 +34,7 @@ običajnim orodjem (`npm`/`package.json` v `apps/mobile`,
 |---|---|
 | `app/` | zasloni; usmerjanje je datotečno (`expo-router`) |
 | `src/constants/` | seznam desetih predmetov (`{ value, label }`); od V2-R02 še štiri ocene samoocene (`ocene.ts`) |
-| `src/config/` | kar pride v aplikacijo ob gradnji: naslov strežnika, API ključ in oznaka gradnje |
+| `src/config/` | kar pride v aplikacijo ob gradnji: naslov strežnika (samo `https`, od V3-R02), API ključ in oznaka gradnje |
 | `src/db/` | verzionirana shema (migracije) in poizvedbe nad tabelo `materials`; od V2-R02 še nad tabelami kvizov (`kvizi.ts`) |
 | `src/sync/` | prenos na strežnik: en prenos, čakalna vrsta, priklop na življenjski cikel; od V1-R07 tudi brisanje snovi, ki so na strežniku arhivirane; od V2-R02 usklajevanje kvizov in poskusov (`kvizi.ts`, `use-kvizi.tsx`) in skupni klic s časovno omejitvijo (`http.ts`). **Edina mapa v aplikaciji z omrežnim klicem.** |
 | `src/photos/` | stiskanje slike in zapis v `documentDirectory/photos/` |
@@ -42,8 +42,10 @@ običajnim orodjem (`npm`/`package.json` v `apps/mobile`,
 | `src/capture/` | stanje zaslona s kamero (kamera ↔ predogled) |
 | `src/ui/` | skupni gradniki in barve |
 | `src/types.ts` | tip `Material` (ena vrstica tabele `materials`); od V2-R02 še kviz, postavka, poskus in ocena |
-| `plugins/` | Expo config plugini — koda, ki teče **ob gradnji**, ne v aplikaciji |
 | `__tests__/` | enotski in komponentni testi |
+
+Mape `plugins/` od V3-R02 ni: edini config plugin (dovoljenje za nešifriran
+promet, `ADR-010`) je bil odstranjen.
 
 **React Compiler je izklopljen.** Expo predloga ga vklopi
 (`experiments.reactCompiler`), vendar ga `jest` ne uporablja — zastavica pride
@@ -87,6 +89,8 @@ logika testljiva brez naprave.
 | `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03); šolsko leto in meseci (V2-R04); današnji dan, meje poljubnega obdobja in ura brez datuma (V2-R07) |
 | `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01) ter 400 (V2-R07) |
 | `app/besedilo.py` | slovenske oblike števil (dvojina) |
+| `Caddyfile` | Caddy pred `api`: domena, TLS-ALPN, začasen `basic_auth` pred `/admin`, ikona zavihka (V3-R02) |
+| `varnostna-kopija/` | `kopija.ps1` in `obnova.ps1` (V3-R02) |
 
 `app/casi.py`, `app/strani.py` in `app/besedilo.py` niso nove plasti, ampak
 **izvlečki** iz usmerjevalnikov. Prva dva sta nastala v V2-R01 zaradi krožnega
@@ -525,8 +529,8 @@ ni, ne plačamo. Meja je mapa družine, ista kot pri streženju slike na admin
 strani.
 
 Klic gre skozi `app/vision.py` in nikjer drugje (ADR-008). Slika potuje kot
-base64 v `data:` URL, ker je strežnik za Tailscale in OpenAI do njegovih
-naslovov nima dostopa. Odgovor je strukturiran po shemi (`json_schema`,
+base64 v `data:` URL, ker so slike dosegljive samo pod `/admin`, za geslom, in
+OpenAI do njih nima dostopa. Odgovor je strukturiran po shemi (`json_schema`,
 `strict: true`), a gre vseeno skozi preverbo s Pydantic: `strict` je obljuba
 storitve, ne naša invarianta, in ne zna povedati „med 5 in 10 vprašanj" —
 `minItems` v strogem načinu ni podprt, zato to mejo uveljavimo ob sprejemu.
@@ -589,8 +593,9 @@ nje in to preverja `TestBrezJavaScripta`, ki izvzame samo `snov.html`.
 | `/admin/statistics/subjects/{koda}` | GET | statistika predmeta: po mesecih, snovi, vprašanja od najtežjega (V2-R04) |
 | `/admin/days` | GET | slike dneva ali zadnjih sedmih dni, po dnevu in predmetu; `?dan=YYYY-MM-DD`, `?obdobje=dan\|teden` (V2-R07) |
 
-Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Prijave ni** —
-meja je Tailscale; posledice, vključno s CSRF, so v `docs/odlocitve/ADR-006`.
+Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Prijave v
+aplikaciji ni**: do V3-R03 stran varuje začasen `basic_auth` v Caddyju (glej
+„Javni dostop"). CSRF žetona še ni (`docs/odlocitve/ADR-006`); pride z V3-R03.
 Strani kažejo podatke edine družine v bazi (`daj_druzino`, V3-R01).
 
 Napake pod `/admin` (404, 405 in 500 izbire družine) izriše prestreznik `StarletteHTTPException`,
@@ -946,8 +951,8 @@ Test „samo pod `/admin`" bere poti iz `app.openapi()["paths"]` in ne iz
   identiteta (`ADR-021` D). Seštevek snovi se ne pretrga.
 - **Stran predmeta bo čez leto dolga.** Popravek, če bo potreben, je
   ostranjevanje, ne tiho krajšanje.
-- **Mašin telefon je v omrežju Tailscale** in bi `/admin` lahko odprl, kot
-  velja za ves `/admin` od V1-R04 (`ADR-021` F, `ADR-006`).
+- **Kdor pozna geslo za `basic_auth`, vidi ves `/admin`**, tudi statistiko
+  (`ADR-021` F). Do V3-R03 geslo pozna samo lastnik.
 
 ## Kvizi na telefonu (V2-R02)
 
@@ -1095,6 +1100,102 @@ sicer bi manjkajoča baza pasov podrla tudi `GET /health` in `POST /materials`.
 Čas iz baze je lahko brez podatka o pasu: Postgres ga v `TIMESTAMPTZ` vrne,
 **SQLite pa ne**. Prikaz ga zato normalizira v UTC, preden ga pretvori.
 
+## Javni dostop (V3-R02)
+
+Strežnik je na `https://school-buddy.duckdns.org`. Odločitve so v `ADR-026` in
+`ADR-034`.
+
+```
+telefon / brskalnik ─HTTPS 443─▶ usmerjevalnik ─▶ stroj:443 ─▶ caddy ─http─▶ api:8000 ─▶ db
+                                                             omrežje spredaj    omrežje default
+```
+
+| Servis | Omrežje | Navzven |
+|---|---|---|
+| `caddy` (`caddy:2.11.4-alpine`) | `spredaj`, stalen naslov `172.30.10.10` | samo TCP 443 |
+| `api` | `default` in `spredaj` | nič — brez `ports` |
+| `db` | `default` | nič |
+
+- **Certifikat** je Let's Encrypt prek TLS-ALPN-01. HTTP-01 je izklopljen, ker
+  vrata 80 drži IIS (Aras Innovator); zato ni preusmeritve z `http://` in v
+  brskalnik je treba vtipkati `https://`. HTTP/3 je izklopljen (brez UDP 443).
+- **Obnavljanje certifikata je samodejno.** Certifikati in račun ACME so v
+  volumnu `server_caddy-podatki`; brez njega bi vsak zagon prosil za nov
+  certifikat in zadel omejitev Let's Encrypt.
+- **`basic_auth` pred `/admin` in `/admin/*` je začasen** in pade v V3-R03.
+  Uporabnik in bcrypt zgostitev prideta iz `.env`.
+- **Caddy sam odgovori na `/favicon.ico` s 204.** Brez tega ikona zavihka pride
+  do `api`, ta vrne 401 (API ključ), Chrome in Edge pa geslo za `/admin`
+  pozabita in ga zahtevata ob vsakem kliku. Koren `/` ima isto lastnost, zato
+  se admin odpira z `/admin`.
+- **`api` zaupa proxy glavam samo s Caddyjevega naslova**
+  (`--proxy-headers --forwarded-allow-ips 172.30.10.10`, v Compose in v
+  `Dockerfile`).
+- **Znana omejitev: naslov odjemalca ni podatek.** Docker Desktop izvornega
+  naslova ne ohrani; Caddy vidi vse odjemalce kot prehod omrežja. Omejevanje
+  prijav v V3-R03 gre zato po identifikatorju, ne po naslovu (`ADR-034` A).
+- **Ime projekta Compose je `server`** (ime mape) in je predpona volumnov z
+  bazo in slikami. `docker-compose.yml` se ne premika; nikoli
+  `docker compose down -v`.
+- `tests/test_postavitev.py` bere `docker-compose.yml`, `Caddyfile` in
+  `Dockerfile` kot besedilo in dokazuje objave vrat, zaupanje proxy glavam,
+  TLS-ALPN, `basic_auth`, ikono zavihka in eno samo spletišče.
+
+### Postavitev na novem stroju
+
+Sklop zunaj repozitorija, po vrsti:
+
+1. **Domena.** DuckDNS, račun lastnika, poddomena `school-buddy`. Zapis `A`
+   kaže na javni IP doma. Žeton DuckDNS strežnik ne potrebuje in ni v
+   repozitoriju.
+2. **Sprememba IP.** IP je statičen, zato posodabljanja ni. Če se spremeni: na
+   duckdns.org vpiši nov IP; certifikat ostane veljaven.
+3. **Usmerjevalnik.** TCP 443 → LAN naslov stroja (ob postavitvi
+   `192.168.0.111`, rezerviran v DHCP). Vrat 80 in 8000 se ne preusmerja.
+   Usmerjevalnik podpira NAT loopback, zato domena dela tudi z domačega omrežja.
+4. **Požarni zid Windows.** Posebnega pravila ni: dohodni promet spusti pravilo
+   „Docker Desktop Backend" na profilu **Zasebno**. Omrežje `Ethernet` mora
+   ostati na profilu Zasebno — na Javnem isto pravilo promet blokira in strežnik
+   z interneta tiho ni dosegljiv.
+5. **`apps/server/.env`** po `okolje.primer`, s `DOMENA`, `ADMIN_UPORABNIK` in
+   `ADMIN_ZGOSTITEV`. Zgostitev:
+   `docker run --rm -it caddy:2.11.4-alpine caddy hash-password`, v `.env` v
+   **enojnih narekovajih**, sicer Compose znake `$` razume kot spremenljivke.
+6. **Prvi zagon.** `docker compose -f apps\server\docker-compose.yml up -d --build`.
+   Caddy v nekaj sekundah pridobi certifikat (dnevnik:
+   `certificate obtained successfully`).
+7. **Preverba.** Z mobilnih podatkov `https://<domena>/health` →
+   `{"status":"ok"}`; `/admin` vpraša za geslo; z gostitelja `127.0.0.1:8000`
+   ne odgovori.
+8. **Aplikacija.** `SERVER_BASE_URL` v EAS (okolje `preview`) =
+   `https://<domena>`, nova gradnja APK, namestitev **čez** obstoječo
+   aplikacijo (odstranitev izbriše slike, ki čakajo na prenos).
+9. **Podatki** s starega stroja: kopija in obnova spodaj.
+
+### Varnostna kopija
+
+- `apps/server/varnostna-kopija/kopija.ps1` (PowerShell 7.3+): izpis baze in
+  arhiv slik iz vsebnikov (`docker cp`, ne preusmeritev `>`, ki binarni izpis
+  pokvari), SHA-256 vsake slike, `stanje.json` in `PREBERI.md`. Cilj
+  `C:\varnostne-kopije\school_companion\<datum_ura>`; ohrani 14 celih kopij.
+  Števila vrstic in seznam slik primerja pred kopijo in po njej.
+- Dnevno opravilo v Razporejevalniku opravil ustvari lastnik:
+  `pwsh.exe -NoProfile -File <repo>\apps\server\varnostna-kopija\kopija.ps1`.
+- `obnova.ps1 -Mapa <kopija>` obnovi v prazen vsebnik baze in volumna
+  `school-obnova*`, primerja revizijo, vrstice po tabelah in SHA-256 vsake
+  slike, vrne izhod 0 ali 1 in pobriše samo `school-obnova*`. Ne teče prek
+  Compose: drugi projekt iz iste datoteke bi trčil s podomrežjem `spredaj`
+  (`ADR-034`, dopolnitev).
+- **Preizkušeno 15. 9. 2026** na živem strežniku (38 snovi, 312 vprašanj,
+  38 slik): vse se ujema; spremenjeno število vrstic ali spremenjena slika dasta
+  izhod 1.
+- **Kopija je na istem disku kot strežnik** in okvare diska ne preživi —
+  sprejeta cena (`ADR-034` F).
+- **Obnova v produkcijo na novem stroju:** zaženi strežnik (koraka 5–6), ustavi
+  `api`, izpis kopiraj v vsebnik baze in poženi
+  `pg_restore -U solski -d solski --clean --if-exists`, arhiv slik razpakiraj v
+  `/data` vsebnika `api` in `api` zaženi znova.
+
 ## Zunanje odvisnosti
 
 | Odvisnost | Namen | Kdaj dodana |
@@ -1128,6 +1229,13 @@ Tudi V2-R02 ni dodala nobene, ne telefonu ne strežniku: UUID poskusa pride iz
 | `openai` | klic vision modela; izbran zaradi strukturiranega izhoda po shemi | V1-R03 |
 | razvojno: `ruff`, `mypy`, `pytest`, `httpx` | preverbe; `httpx` rabi `TestClient` | V1-R02 |
 
+### Slike vsebnikov
+
+| Slika | Namen | Kdaj dodana |
+|---|---|---|
+| `pgvector/pgvector:pg17` | baza | V1-R02 |
+| `caddy:2.11.4-alpine` | obratni posredniški strežnik, HTTPS; pripeta različica | V3-R02 |
+
 ## Kako se poganja in testira
 
 ### `apps/mobile`
@@ -1158,9 +1266,10 @@ ob tem ne spremeni. Odkrito v V2-R02.
 Naslov strežnika in API ključ prideta v aplikacijo **ob gradnji**, iz
 spremenljivk okolja `SERVER_BASE_URL` in `SERVER_API_KEY` (Expo naloži `.env`
 sam, `app.config.ts` ju prepiše v `extra`). Brez njiju se worker ne zažene,
-aplikacija pa deluje kot v V1-R01 in to tudi pove. Ključ s tem konča vgrajen v
-APK — to je zavestno, ker gre za en družinski ključ na omrežju, ki je že
-zaprto s Tailscale; cena je, da zamenjava ključa zahteva novo gradnjo.
+aplikacija pa deluje kot v V1-R01 in to tudi pove. Naslov brez sheme `https`
+šteje enako kot manjkajoč (V3-R02, `ADR-034` E). Ključ s tem konča vgrajen v
+APK — to je zavestno, ker potuje samo prek HTTPS in ga V3-R04 zamenja z
+žetonom; cena je, da zamenjava ključa zahteva novo gradnjo.
 
 Po isti poti pride tudi **oznaka gradnje** (V1-R06): `app.config.ts` prepiše
 `EAS_BUILD_ID` v `extra.buildId`, domača stran pa jo izpiše kot
@@ -1170,7 +1279,7 @@ mogoče ločiti — verzija je bila pri obeh `1.0.0` in `versionCode` pri obeh 1
 gradnja spremenljivke nima in vrstica takrat pove `razvojna gradnja`; prazna
 vrednost šteje enako kot odsotna.
 
-#### Gradnja APK in nešifriran promet
+#### Gradnja APK
 
 Distribucija je EAS Build, profil `preview` v `apps/mobile/eas.json` (Android
 APK, interna distribucija, okolje `preview`). Naslov in ključ tam nista v
@@ -1184,36 +1293,34 @@ gradnji in dveh APK ne loči le izpis na domači strani, ampak tudi Android. V
 ročno povečevati, se pozabi natanko takrat, ko je potrebna. Cena je, da je
 števec pri EAS in ga svež klon sam ne pozna.
 
-Promet do strežnika je **nešifriran** (`http://` na Tailscale naslov). Android
-ga v release gradnji privzeto blokira, zato ga izrecno dovoli lokalni config
-plugin `apps/mobile/plugins/with-cleartext-traffic.js`, ki v glavno
-`<application>` zapiše `android:usesCleartextTraffic="true"`. Dovoljenje velja
-za celo aplikacijo; utemeljitev, zavrnjene možnosti in odprta pot k HTTPS so v
-`docs/odlocitve/ADR-010`.
+Promet do strežnika je **samo `https`** (V3-R02). `SERVER_BASE_URL` v EAS
+(okolje `preview`) je `https://school-buddy.duckdns.org`. Do V3-R02 je bil
+promet nešifriran in ga je dovolil config plugin
+`plugins/with-cleartext-traffic.js` (`ADR-010`, razveljavljen z `ADR-026`);
+plugin in njegov test sta izbrisana, `app-config.test.ts` pa dokazuje, da ga
+ni ne na disku ne v nastavitvah gradnje.
 
-**To je razred napake, ki ga zeleni testi ne ujamejo.** Plugin teče ob gradnji,
-enotski testi pa vidijo samo njegovo funkcijo in registracijo v `app.json`.
-Dve preverbi, ki gresta dlje:
+**Kaj je v zgrajeni APK, zeleni testi ne vidijo.** Dve preverbi, ki gresta
+dlje:
 
 ```powershell
 npx expo config --type introspect      # razreši plugine in izpiše manifest
 unzip -o app.apk AndroidManifest.xml   # kaj je v resnici v zgrajeni APK
 ```
 
-Prva pokaže v nekaj sekundah in brez gradnje, ali je plugin registriran in ali
-učinkuje. **Njen izpis vsebuje `extra.apiKey` in naslov strežnika v čisti
-obliki** — ne lepi ga v prijave napak in ne shranjuj v dnevnik; kadar gre le za
-manifest, ga poženi s praznima `SERVER_API_KEY` in `SERVER_BASE_URL`.
+Prva pokaže v nekaj sekundah in brez gradnje, kaj pride v manifest; od V3-R02
+`<application>` nima `usesCleartextTraffic`. **Njen izpis vsebuje
+`extra.apiKey` in naslov strežnika v čisti obliki** — ne lepi ga v prijave
+napak in ne shranjuj v dnevnik; kadar gre le za manifest, ga poženi z
+`EXPO_NO_DOTENV=1` in praznima `SERVER_API_KEY` in `SERVER_BASE_URL`.
 
 Druga pove, kaj je v zgrajeni APK. `AndroidManifest.xml` je tam **binarni
-AXML**: ime atributa je v nizovnem bazenu in ga `grep -a` najde, vrednost
-`true` pa je shranjena kot tipiziran boolean in kot besedilo ni vidna. Prisotno
-ime atributa je zato dokaz, da je plugin učinkoval (prej ga v manifestu sploh
-ni bilo), za odčitano vrednost pa je potreben `aapt2 dump xmltree` ali
-`apktool d` — nobeden od njiju ni na tem stroju na `PATH`.
+AXML**: ime atributa je v nizovnem bazenu in ga `grep -a` najde, vrednost pa ni
+vidna kot besedilo. Odsotno ime `usesCleartextTraffic` je zato dokaz, da
+dovoljenja ni.
 
-Zadnja beseda ostane preizkus na telefonu: slika mora priti do stanja
-„Preneseno".
+Zadnja beseda ostane preizkus na telefonu, z mobilnimi podatki zunaj doma:
+slika mora priti do stanja „Preneseno".
 
 ### `apps/server`
 
@@ -1255,9 +1362,9 @@ docker compose -f apps\server\docker-compose.yml up -d --build
 
 `.env` prebere **Docker Compose**, da razreši `${API_KEY}` in poda vrednosti
 vsebniku; strežnik sam `.env` ne bere, ker bi bil `env_file` relativen na
-trenutno delovno mapo. `BIND_ADDRESS` naj bo Tailscale naslov tega stroja
-(`tailscale ip -4`) — privzetek `127.0.0.1` je namenoma neuporaben od zunaj.
-`API_KEY` mora imeti vsaj 16 znakov, sicer se strežnik ne zažene.
+trenutno delovno mapo. `API_KEY` mora imeti vsaj 16 znakov, sicer se strežnik
+ne zažene. Brez `DOMENA`, `ADMIN_UPORABNIK` in `ADMIN_ZGOSTITEV` se Compose ne
+zažene (glej „Javni dostop"). `BIND_ADDRESS` od V3-R02 ne obstaja več.
 
 `OPENAI_API_KEY` se obnaša drugače od `API_KEY`: brez njega strežnik **normalno
 steče** in slike sprejema, ne teče pa obdelava. `OPENAI_MODEL` (privzeto
@@ -1283,9 +1390,9 @@ Pretehtane možnosti, **odločitev je odložena na kasnejšo fazo**:
 
 | Možnost | Za | Proti |
 |---|---|---|
-| Samodejni vpis + takojšen zaklep seje (Sysinternals Autologon, geslo kot LSA skrivnost) | ohrani preverjeno postavitev in vezavo na Tailscale; malo dela | geslo mora biti shranjeno na stroju |
+| Samodejni vpis + takojšen zaklep seje (Sysinternals Autologon, geslo kot LSA skrivnost) | ohrani preverjeno postavitev (Docker Desktop, Caddy na 443); malo dela | geslo mora biti shranjeno na stroju |
 | Nadzorno opravilo, ki na ~15 min preveri `/health` in po potrebi požene `docker compose up -d` | pokrije tudi sesut Docker in zamrznjen WSL; ne zahteva gesla | sam po sebi ne reši odsotne seje |
-| Docker Engine v WSL distribuciji namesto Docker Desktopa, zagnan kot opravilo ob zagonu | ne potrebuje prijave; odpravi tudi pripetost na staro 4.26.1 | **WSL2 objavlja vrata prek NAT na `localhost`**, zato `BIND_ADDRESS` preneha delovati; omrežno mejo bi nadomestil požarni zid ali `portproxy` — pravilo, ki ga je lahko narobe nastaviti in ki ga nihče ne testira (nasprotuje odločitvi 8 v planu V1-R02) |
+| Docker Engine v WSL distribuciji namesto Docker Desktopa, zagnan kot opravilo ob zagonu | ne potrebuje prijave; odpravi tudi pripetost na staro 4.26.1 in morda omejitev naslova odjemalca (`ADR-034` A) | **WSL2 objavlja vrata prek NAT na `localhost`**, zato bi vrata 443 do Caddyja morala skozi `portproxy` — pravilo, ki ga je lahko narobe nastaviti in ki ga nihče ne testira |
 | Ne narediti nič | nič dela; podatki so varni | zamik pri opazitvi izpada |
 
 Če strežnik kdaj preraste ta stroj, je pravi odgovor ločena Linux naprava, ne
