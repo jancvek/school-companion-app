@@ -1191,10 +1191,14 @@ Sklop zunaj repozitorija, po vrsti:
   izhod 1.
 - **Kopija je na istem disku kot strežnik** in okvare diska ne preživi —
   sprejeta cena (`ADR-034` F).
-- **Obnova v produkcijo na novem stroju:** zaženi strežnik (koraka 5–6), ustavi
-  `api`, izpis kopiraj v vsebnik baze in poženi
-  `pg_restore -U solski -d solski --clean --if-exists`, arhiv slik razpakiraj v
-  `/data` vsebnika `api` in `api` zaženi znova.
+- **Obnova v produkcijo na novem stroju** (postopek **ni bil preizkušen**;
+  preizkušen je le `obnova.ps1` v `school-obnova*`):
+  1. zaženi strežnik (koraka 5–6), nato `docker stop server-api-1`;
+  2. `docker cp <kopija>\solski.dump server-db-1:/tmp/solski.dump` in
+     `docker exec server-db-1 pg_restore -U solski -d solski --clean --if-exists /tmp/solski.dump`;
+  3. slike razpakiraj prek začasnega vsebnika na volumnu, ker `api` stoji:
+     `docker run --rm -v server_slike:/data/images -v <kopija>:/kopija:ro pgvector/pgvector:pg17 tar xzf /kopija/slike.tar.gz -C /data`;
+  4. `docker start server-api-1` in primerjaj števila s `PREBERI.md` kopije.
 
 ## Zunanje odvisnosti
 
