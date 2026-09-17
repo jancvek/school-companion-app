@@ -16,7 +16,7 @@ Zakaj vmesni plasti (ASGI middleware) in ne odvisnosti na endpointu:
 
 import secrets
 from datetime import UTC, datetime
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, urlencode
 
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.datastructures import Headers
@@ -121,15 +121,33 @@ SPOROCILO_PREVELIKO_TELO = (
 )
 
 
-def _cilj_po_prijavi(scope: Scope) -> str:
-    """Pot z nizom poizvedbe, na katero se uporabnica po prijavi vrne."""
+#: Metodi, ki ne spreminjata stanja in zato CSRF žetona ne potrebujeta.
+VARNE_METODE = frozenset({"GET", "HEAD"})
+
+
+def _naslov_prijave(scope: Scope) -> str:
+    """Naslov prijavne strani s ciljem, na katerega se uporabnica vrne.
+
+    Cilj gre skozi `urlencode` in ne skozi `quote` s širokim `safe`: pot z
+    **dvema** parametroma (`/admin/quizzes/new?subject=MAT&vstop=rocna`) bi se
+    ob neubeženem `&` pri razčlenitvi prijavne strani odrezala pri prvem od
+    njiju in uporabnica bi pristala na drugem zaslonu, ne le brez parametra.
+
+    **Cilj dobi samo varna metoda.** Pot, ki obstaja le kot `POST`, po prijavi
+    z `GET` vrne 404, vsebine obrazca pa vrnitev tako ali tako ne obnovi; zato
+    gre `POST` brez seje na `/admin`.
+    """
+    if scope["method"] not in VARNE_METODE:
+        return prijava.POT_PRIJAVE
     pot = scope["path"]
     poizvedba = scope.get("query_string", b"").decode("latin-1")
-    return f"{pot}?{poizvedba}" if poizvedba else pot
+    cilj = f"{pot}?{poizvedba}" if poizvedba else pot
+    return f"{prijava.POT_PRIJAVE}?{urlencode({'next': cilj})}"
 
 
 class SejaMiddleware:
-    """Zahteva veljavno sejo za vsako pot pod `/admin` in CSRF žeton za `POST`.
+    """Zahteva veljavno sejo za vsako pot pod `/admin` in CSRF žeton za vsako
+    metodo, ki ni `GET` ali `HEAD`.
 
     Kaj plast naredi, po vrsti:
 
@@ -138,10 +156,14 @@ class SejaMiddleware:
        odgovor gleda človek v brskalniku, ne program.
     3. Z veljavno sejo jo poda naprej v `scope["state"]["prijava"]`, da je
        usmerjevalniki ne berejo še enkrat.
-    4. Pri `POST` prebere telo, primerja CSRF žeton s tistim iz vrstice seje in
-       telo **vrne nazaj** v tok, da ga endpoint prebere kot običajno. Zato ta
-       plast telo bere — drugače CSRF brez odvisnosti v vsakem endpointu ne gre
-       (`docs/odlocitve/ADR-035` D).
+    4. Pri nevarni metodi prebere telo, primerja CSRF žeton s tistim iz vrstice
+       seje in telo **vrne nazaj** v tok, da ga endpoint prebere kot običajno.
+       Zato ta plast telo bere — drugače CSRF brez odvisnosti v vsakem
+       endpointu ne gre (`docs/odlocitve/ADR-035` D).
+
+    Danes je edina nevarna metoda pod `/admin` `POST`. Pravilo je kljub temu
+    napisano kot „vse razen varnih": `V3-R06` bo dodajal akcije, in plast, ki
+    bi naštevala metode, bi novo spustila brez žetona.
     """
 
     def __init__(
@@ -175,16 +197,13 @@ class SejaMiddleware:
             )
 
         if seja is None:
-            odgovor = RedirectResponse(
-                f"{prijava.POT_PRIJAVE}?next={quote(_cilj_po_prijavi(scope), safe='/?=&')}",
-                status_code=303,
-            )
+            odgovor = RedirectResponse(_naslov_prijave(scope), status_code=303)
             await self._odgovori(odgovor, scope, receive, send)
             return
 
         scope.setdefault("state", {})["prijava"] = seja
 
-        if scope["method"] != "POST":
+        if scope["method"] in VARNE_METODE:
             await self.app(scope, receive, send)
             return
 

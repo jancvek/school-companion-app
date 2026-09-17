@@ -667,7 +667,10 @@ Odločitve so v `ADR-027` (model) in `ADR-035` (izvedba).
 - **`SejaMiddleware` je plast, ne odvisnost.** Zahteva sejo za vsako pot pod
   `/admin` razen `/admin/login`; brez nje odgovori s `303` na prijavo z
   `?next=<zahtevana pot>`. Pot, ki je nihče ni dodal na noben seznam, je zato
-  varovana po privzetku. `next` se sprejme samo kot relativna pot pod `/admin`.
+  varovana po privzetku. `next` se sprejme samo kot relativna pot pod `/admin`,
+  zapiše se z `urlencode` (sicer se cilj z dvema parametroma odreže pri `&`) in
+  ga dobi **samo varna metoda** — `POST` brez seje pelje na `/admin`, ker bi
+  vrnitev nanj z `GET` dala 404.
 - **Žeton seje** je `secrets.token_urlsafe(32)`; v bazi je samo njegova
   SHA-256. Piškotek `seja` je `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`,
   z veljavnostjo 30 dni. **Rok je drseči** in se osveži največ enkrat na uro.
@@ -675,11 +678,14 @@ Odločitve so v `ADR-027` (model) in `ADR-035` (izvedba).
   `context_processors` izrisovalnika. `SejaMiddleware` ga pri `POST` prebere iz
   telesa (samo `application/x-www-form-urlencoded`, največ 1 MiB), primerja s
   `secrets.compare_digest` in ob neujemanju odgovori s `403` kot stranjo. Telo
-  vrne nazaj v tok, da ga endpoint prebere kot običajno. Prijavni obrazec seje
-  še nima, zato nosi **dvojno oddan piškotek** `csrf_prijava`.
+  vrne nazaj v tok, da ga endpoint prebere kot običajno. Žeton zahteva **vsaka
+  metoda razen `GET` in `HEAD`**, ne samo `POST`: `V3-R06` bo dodajal akcije.
+  Prijavni obrazec seje še nima, zato nosi **dvojno oddan piškotek**
+  `csrf_prijava`.
 - **Omejevanje ugibanja gre po identifikatorju, ne po naslovu** (`ADR-034` A):
   po 5 neuspehih v 15 minutah vsak nadaljnji poskus čaka 2 sekundi, preden se
-  geslo sploh preveri. To je **upočasnitev, ne zaklep** — zaklep bi pomenil,
+  geslo sploh preveri; zgoščevanje samo teče v niti, da ~60 ms argon2 ne
+  ustavi zanke dogodkov. To je **upočasnitev, ne zaklep** — zaklep bi pomenil,
   da lahko kdorkoli z znanim e-naslovom starša tega izklopi iz njegovega
   admina. Uspešna prijava števce pobriše.
 - **Sporočila ne izdajo, ali račun obstaja.** Neznan identifikator, napačno
@@ -687,9 +693,10 @@ Odločitve so v `ADR-027` (model) in `ADR-035` (izvedba).
   neznanem identifikatorju se zgostitev preveri proti lažni vrednosti, da je
   tudi odzivni čas enak. Edina izjema je otrokov račun: ta dobi razlago, da se
   prijavi v mobilni aplikaciji (`ADR-035` F).
-- **Potekle seje in stari poskusi se čistijo ob prijavi** in ob naletu na
-  potekel piškotek — ne v zanki `Obdelovalec`, ker ta brez `OPENAI_API_KEY`
-  sploh ne teče (`ADR-009`).
+- **Potekle seje in stari poskusi se čistijo ob vsakem poskusu prijave** (ne
+  le ob uspešnem — računa brez gesla ni mogoče uspešno prijaviti) in ob naletu
+  na potekel piškotek. Ne v zanki `Obdelovalec`: ta brez `OPENAI_API_KEY` sploh
+  ne teče (`ADR-009`).
 - **Geslo nastavi lastnik z ukazom** v vsebniku:
   `docker compose exec api python -m app.ukazi nastavi-geslo <identifikator>`.
   Geslo pride z `getpass`, nikoli iz argumenta ali okolja. Najkrajše geslo je

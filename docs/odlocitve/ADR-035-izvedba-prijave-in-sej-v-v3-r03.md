@@ -155,3 +155,27 @@ več admin strani.
 - **Na katere zahteve to vpliva:** `V3-R04` (isti žeton, druga glava),
   `V3-R06` (seje se ob ponastavitvi gesla prekličejo), `V3-R05` (stran
   lastnika), `V1-R04` (kriterij „brez prijave in brez gesla" odpade).
+
+## Popravki po prvem pregledu (17. 9. 2026)
+
+Pregledovalec je našel dve kritični in nekaj manjših točk; spodnje odločitve so
+nastale ob popravkih in **spreminjajo tekst zgoraj**, ne razveljavljajo ga.
+
+- **Cilj `next` gre skozi `urlencode`, ne skozi `quote` s širokim `safe`.** Pot
+  z dvema parametroma (`/admin/quizzes/new?subject=MAT&vstop=rocna` — tak
+  naslov proizvede obrazec v `predmeti.html`) se je ob neubeženem `&` odrezala
+  pri prvem parametru in uporabnica je po prijavi pristala na **drugem
+  zaslonu**, ne le brez parametra.
+- **Cilj dobi samo varna metoda** (`GET`, `HEAD`). Pot, ki obstaja le kot
+  `POST`, po prijavi z `GET` vrne 404, vsebine obrazca pa vrnitev ne obnovi;
+  zato gre `POST` brez seje na `/admin`.
+- **CSRF žeton zahteva vsaka metoda razen `GET` in `HEAD`**, ne samo `POST`.
+  Danes je `POST` edina nevarna metoda pod `/admin`, a `V3-R06` bo dodajal
+  akcije, in plast, ki bi naštevala metode, bi novo spustila brez žetona.
+- **Čiščenje (točka C) teče ob vsakem poskusu prijave, ne le ob uspešnem**, in
+  ob naletu na potekel piškotek pobriše vse potekle seje, ne samo tiste. Sicer
+  bi v natanko tistem stanju, ki ga pusti migracija — račun brez gesla, torej
+  brez uspešne prijave — tabela poskusov rasla brez meje.
+- **Zgoščevanje gesla teče v niti** (`run_in_threadpool`), ne na zanki
+  dogodkov. argon2 je sinhronih ~60 ms; na zanki bi vsak poskus prijave za
+  toliko časa ustavil vse ostale zahteve, tudi prenos slike s telefona.

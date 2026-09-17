@@ -54,6 +54,23 @@ def zgostitev(geslo: str) -> str:
     """
     return prijava.zgosti_geslo(geslo)
 
+
+def je_seja(stavek: str) -> bool:
+    """Ali je ta stavek SQL branje ali osvežitev seje.
+
+    Števci poizvedb v `test_kvizi.py` in `test_rezultat.py` merijo, koliko
+    poizvedb naredi **stran**. Branje seje je od V3-R03 infrastruktura vsake
+    zahteve pod `/admin` (`ADR-035` A) in ni poizvedba strani; njegovo ceno —
+    natanko ena na zahtevo — varuje `test_druzine.py`.
+
+    Ujemanje je po stavku nad tabelo `sessions`, ne po pojavitvi besede
+    kjerkoli: prihodnja poizvedba, ki bi `sessions` samo omenila v `JOIN`, bi
+    se sicer tiho prenehala šteti.
+    """
+    zacetki = ("FROM sessions", "UPDATE sessions", "DELETE FROM sessions")
+    return any(zacetek in stavek for zacetek in zacetki)
+
+
 #: Družina, ki jo ima vsaka testna baza (V3-R01). Isti `id` kot Cvek v
 #: migraciji `0007_druzine`, da je baza po `create_all` enaka migrirani.
 CVEK_ID = "5b0f6c2e-8d3a-4c7e-9a1b-2f4d6e8c0a13"

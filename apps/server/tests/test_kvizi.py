@@ -29,7 +29,7 @@ from app.models import (
     QuizItem,
 )
 from app.routers.kvizi import NAJVEC_IME, NAJVEC_KODA, PRIVZETO_STEVILO
-from tests.conftest import CVEK_ID, KLJUC
+from tests.conftest import CVEK_ID, KLJUC, je_seja
 
 #: Trije stabilni identifikatorji; testi jih berejo iz izrisane strani.
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
@@ -1061,7 +1061,7 @@ class TestPoizvedbe:
             _povezava: object, _kazalec: object, stavek: str, *_ostalo: object
         ) -> None:
             nonlocal stevec
-            if "sessions" not in stavek:
+            if not je_seja(stavek):
                 stevec += 1
 
         event.listen(motor, "before_cursor_execute", zabelezi)

@@ -195,9 +195,16 @@ def preveri_prijavo(
     """Preveri poverilnico in zabeleži neuspeh.
 
     Seje **ne** ustvari — to je ločen korak (`ustvari_sejo`), da je vidno, kje
-    seja nastane. Neuspeh zapiše v `login_attempts`; uspeh števce pobriše in
-    počisti potekle seje ter stare poskuse (`ADR-035` C).
+    seja nastane. Neuspeh zapiše v `login_attempts`, uspeh števce tega
+    identifikatorja pobriše.
+
+    **Čiščenje teče ob vsakem poskusu, ne samo ob uspešnem** (`ADR-035` C).
+    Sicer bi v natanko tistem stanju, ki ga pusti migracija — račun brez
+    gesla, torej brez uspešne prijave — tabela poskusov rasla brez meje.
     """
+    repo.pocisti_stare_poskuse(ko - HRAMBA_POSKUSOV)
+    repo.pocisti_potekle_seje(ko)
+
     poverilnica = repo.poverilnica(identifikator)
 
     if poverilnica is None:
@@ -214,8 +221,6 @@ def preveri_prijavo(
         return IzidPrijave(Izid.OTROK, SPOROCILO_OTROK)
 
     repo.pozabi_poskuse(identifikator)
-    repo.pocisti_potekle_seje(ko)
-    repo.pocisti_stare_poskuse(ko - HRAMBA_POSKUSOV)
     return IzidPrijave(Izid.USPEH, poverilnica=poverilnica)
 
 
@@ -254,7 +259,10 @@ def seja_za_zeton(
     if seja is None:
         return None
     if seja.expires_at <= ko or not seja.is_active:
+        # Ne samo ta vrstica: potekla seja je znak, da jih je verjetno več
+        # (ista naprava, ista ura poteka), in čiščenje je ena poizvedba.
         repo.izbrisi_sejo(seja.session_id)
+        repo.pocisti_potekle_seje(ko)
         return None
     if ko - seja.last_used_at >= RAZMIK_OSVEZITVE:
         repo.osvezi_sejo(seja.session_id, ko, ko + TRAJANJE_SEJE)

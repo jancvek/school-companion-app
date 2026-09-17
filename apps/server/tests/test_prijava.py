@@ -17,6 +17,7 @@ zahteva generiranje.
 import re
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from html import unescape
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from app import prijava
 from app.models import VLOGA_OTROK, LoginAttempt, Material, UserSession
+from app.routers import admin, dnevi, kvizi, statistika, vstop
 from app.routers.admin import MAPA_PREDLOG
 from app.security import SPOROCILO_BREZ_CSRF
 from tests.conftest import (
@@ -64,6 +66,15 @@ def naslov(pot: str) -> str:
     return re.sub(r"\{[^}]+\}", VZOREC, pot)
 
 
+def brez_pretvornika(pot: str) -> str:
+    """`/admin/subjects/{koda:path}` → `/admin/subjects/{koda}`.
+
+    Usmerjevalnik pretvornik zapiše, OpenAPI pa ne; brez te poenotitve bi
+    se seznama razlikovala v poteh, ki sta v resnici isti.
+    """
+    return re.sub(r"\{([^}:]+):[^}]+\}", lambda u: "{" + u.group(1) + "}", pot)
+
+
 def zeton_obrazca(besedilo: str) -> str:
     """CSRF žeton iz izrisane strani."""
     najdeno = re.search(r'name="csrf" value="([^"]+)"', besedilo)
@@ -93,10 +104,15 @@ def prijavi_se(
 
 
 def zeton_cilja(besedilo: str) -> str:
-    """Vrednost skritega polja `cilj` na prijavni strani."""
+    """Vrednost skritega polja `cilj`, kot jo iz obrazca pošlje brskalnik.
+
+    `unescape` ni kozmetika: Jinja `&` v vrednosti zapiše kot `&amp;`, brskalnik
+    pa v `POST` pošlje odubežano vrednost. Brez tega bi test cilj z dvema
+    parametroma poslal drugače od brskalnika.
+    """
     najdeno = re.search(r'name="cilj" value="([^"]*)"', besedilo)
     assert najdeno is not None, besedilo[:500]
-    return najdeno.group(1)
+    return unescape(najdeno.group(1))
 
 
 def sej_v_bazi(motor: Engine) -> int:
@@ -128,6 +144,30 @@ class TestDosegljivost:
             assert odgovor.headers["location"].startswith(prijava.POT_PRIJAVE), (
                 f"{metoda} {pot} pelje na {odgovor.headers['location']}"
             )
+
+    def test_seznam_poti_iz_openapi_je_popoln(self, aplikacija: FastAPI) -> None:
+        """Varovalo za generirani test zgoraj: `openapi()` mora videti vse poti.
+
+        Seznam se bere iz `app.openapi()`, ker `app.routes` poti vključenih
+        usmerjevalnikov ne razgrne (`docs/02-izkusnje.md`). Pot z
+        `include_in_schema=False` pa v OpenAPI ne pride — in bi generiranemu
+        testu ušla. Zato jo tu iščemo pri viru: v usmerjevalnikih samih.
+        """
+        iz_usmerjevalnikov = {
+            (metoda, brez_pretvornika(pot.path))
+            for modul in (admin, dnevi, kvizi, statistika, vstop)
+            for pot in modul.router.routes
+            for metoda in getattr(pot, "methods", set())
+            if pot.path.startswith("/admin")
+        }
+        iz_openapi = {
+            (metoda.upper(), pot)
+            for pot, metode in aplikacija.openapi()["paths"].items()
+            for metoda in metode
+            if pot.startswith("/admin")
+        }
+
+        assert iz_usmerjevalnikov == iz_openapi
 
     def test_prijavna_stran_je_dosegljiva_brez_seje(self, brez_prijave: TestClient) -> None:
         odgovor = brez_prijave.get(prijava.POT_PRIJAVE)
@@ -190,8 +230,21 @@ class TestUspesnaPrijava:
         assert zeton not in zgostitve
         assert zgostitve == [prijava.zgostitev_zetona(zeton)]
 
-    def test_vrne_se_na_zahtevano_pot(self, brez_prijave: TestClient) -> None:
-        zahtevana = "/admin/days?obdobje=teden"
+    @pytest.mark.parametrize(
+        "zahtevana",
+        [
+            "/admin/days?obdobje=teden",
+            # Dva parametra: tega naslova ne proizvaja test, ampak obrazec v
+            # `predmeti.html`. Z neubeženim `&` se je cilj odrezal pri prvem
+            # parametru in `vstop` je padel na privzetek — uporabnica je po
+            # prijavi pristala na **drugem zaslonu**, ne le brez parametra.
+            "/admin/quizzes/new?subject=MAT&vstop=rocna",
+            "/admin/days?dan=2026-09-04&obdobje=dan",
+        ],
+    )
+    def test_vrne_se_na_zahtevano_pot(
+        self, brez_prijave: TestClient, zahtevana: str
+    ) -> None:
         preusmeritev = brez_prijave.get(zahtevana, follow_redirects=False)
         assert preusmeritev.status_code == 303
 
@@ -219,6 +272,19 @@ class TestUspesnaPrijava:
         odgovor = prijavi_se(brez_prijave, cilj=tuj)
 
         assert odgovor.headers["location"] == "/admin"
+
+    def test_post_brez_seje_cilja_ne_dobi(self, brez_prijave: TestClient) -> None:
+        """Pot, ki obstaja samo kot `POST`, po prijavi z `GET` vrne 404.
+
+        Vsebine obrazca vrnitev tako ali tako ne obnovi, zato je stran „ni
+        najdeno" slabši izid od predmetov (`ADR-035` A).
+        """
+        odgovor = brez_prijave.post(
+            "/admin/quizzes/preview", data={"csrf": ""}, follow_redirects=False
+        )
+
+        assert odgovor.status_code == 303
+        assert odgovor.headers["location"] == prijava.POT_PRIJAVE
 
 
 class TestNeuspesnaPrijava:
@@ -415,6 +481,54 @@ class TestOmejevanjeUgibanja:
         assert cakanja == []
 
 
+class TestEnakStrosekNeuspeha:
+    """Odzivni čas ne sme povedati, ali račun obstaja (`ADR-035` F).
+
+    Ure ne merimo — merjenje časa v testu je odvisno od stroja. Namesto tega
+    štejemo klice zgoščevalnika: če jih pri neznanem identifikatorju ni, je
+    odgovor hitrejši in razlika je merljiva od zunaj.
+    """
+
+    @staticmethod
+    def _stej_preverbe(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        """Zamenja cel zgoščevalnik, ker je `verify` na njem samo za branje."""
+        klici: list[str] = []
+        pravi = prijava._ZGOSCEVALNIK
+
+        class Stevec:
+            def hash(self, geslo: str) -> str:
+                return str(pravi.hash(geslo))
+
+            def verify(self, zgostitev: str, geslo: str) -> bool:
+                klici.append(zgostitev)
+                return bool(pravi.verify(zgostitev, geslo))
+
+        monkeypatch.setattr(prijava, "_ZGOSCEVALNIK", Stevec())
+        return klici
+
+    def test_neznan_identifikator_vseeno_preveri_zgostitev(
+        self, brez_prijave: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        klici = self._stej_preverbe(monkeypatch)
+
+        prijavi_se(brez_prijave, identifikator="ni-ga@primer.test")
+
+        assert len(klici) == 1
+
+    def test_racun_brez_gesla_vseeno_preveri_zgostitev(
+        self, aplikacija: FastAPI, motor: Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ustvari_starsa(motor, identifikator="brez-gesla@primer.test", geslo=None)
+        klici = self._stej_preverbe(monkeypatch)
+
+        with PrijavljenOdjemalec(aplikacija, base_url="https://testserver") as odjemalec:
+            prijavi_se(
+                odjemalec, identifikator="brez-gesla@primer.test", geslo="karkoli-12345"
+            )
+
+        assert len(klici) == 1
+
+
 class TestSeja:
     def test_potekla_seja_pelje_na_prijavo_in_izgine(
         self, odjemalec: TestClient, motor: Engine
@@ -478,6 +592,48 @@ class TestSeja:
 
         assert odgovor.status_code == 403
         assert sej_v_bazi(motor) == 1
+
+    def test_potekel_piskotek_pocisti_tudi_druge_potekle_seje(
+        self, odjemalec: TestClient, motor: Engine, aplikacija: FastAPI
+    ) -> None:
+        """`ADR-035` C: čiščenje teče tudi na tej poti, ne le ob prijavi."""
+        tuj = ustvari_starsa(motor, identifikator="druga@primer.test")
+        with PrijavljenOdjemalec(aplikacija, base_url="https://testserver") as drug:
+            prijavi(drug, motor, tuj)
+        with Session(motor) as seja:
+            seja.execute(
+                update(UserSession).values(expires_at=datetime.now(UTC) - timedelta(days=1))
+            )
+            seja.commit()
+        assert sej_v_bazi(motor) == 2
+
+        odjemalec.get("/admin", follow_redirects=False)
+
+        assert sej_v_bazi(motor) == 0
+
+    def test_neuspela_prijava_pocisti_stare_poskuse(
+        self, brez_prijave: TestClient, motor: Engine
+    ) -> None:
+        """Brez tega bi tabela rasla prav v stanju, ki ga pusti migracija.
+
+        Dokler geslo ni nastavljeno, uspešne prijave ni — in če bi čiščenje
+        viselo samo na njej, vrstic ne bi pobrisal nihče (`ADR-035` C).
+        """
+        with Session(motor) as seja:
+            seja.add(
+                LoginAttempt(
+                    id="star",
+                    identifier="nekdo@primer.test",
+                    ip_address=None,
+                    created_at=datetime.now(UTC) - prijava.HRAMBA_POSKUSOV - timedelta(days=1),
+                )
+            )
+            seja.commit()
+
+        prijavi_se(brez_prijave, geslo="to-ni-pravo-geslo")
+
+        with Session(motor) as seja:
+            assert "star" not in list(seja.scalars(select(LoginAttempt.id)))
 
     def test_prijava_pocisti_potekle_seje(
         self, brez_prijave: TestClient, motor: Engine, aplikacija: FastAPI
@@ -548,6 +704,20 @@ class TestCsrfPodAdminom:
         assert odgovor.status_code == 303
         with Session(motor) as seja:
             assert seja.scalars(select(Material.archived_at)).one() is not None
+
+    @pytest.mark.parametrize("metoda", ["DELETE", "PUT", "PATCH"])
+    def test_nevarna_metoda_brez_zetona_je_403(
+        self, odjemalec: TestClient, metoda: str
+    ) -> None:
+        """Pravilo je „vse razen `GET`/`HEAD`", ne „samo `POST`".
+
+        Takih poti pod `/admin` danes ni; `V3-R06` jih bo dodajal in plast, ki
+        bi naštevala metode, bi novo spustila brez žetona.
+        """
+        odgovor = odjemalec.request(metoda, "/admin", follow_redirects=False)
+
+        assert odgovor.status_code == 403
+        assert SPOROCILO_BREZ_CSRF in odgovor.text
 
     def test_vsak_obrazec_v_predlogah_nosi_skrito_polje(self) -> None:
         """403 na poti ne pomaga, če obrazec žetona ne pošlje."""

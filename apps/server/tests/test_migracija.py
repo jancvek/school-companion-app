@@ -62,16 +62,18 @@ def test_migracija_ustvari_tabelo_materials(baza: str) -> None:
         motor.dispose()
 
 
-@pytest.mark.parametrize(
-    "tabela",
-    ["families", "materials", "questions", "quizzes", "quiz_items", "question_attempts"],
-)
+@pytest.mark.parametrize("tabela", sorted(Base.metadata.tables))
 def test_migrirana_shema_se_ujema_z_modeli(baza: str, tabela: str) -> None:
     """Če se model in migracija razideta, mora to javiti test, ne namestitev.
 
     Primerja se **vsaka** tabela iz modelov, ne samo `materials`: nova tabela,
     ki bi jo kdo dodal samo v modele, bi sicer testom ušla in bi jo opazil
     šele vsebnik ob zagonu.
+
+    Seznam tabel je do V3-R03 stal na roko napisan v parametrih in ni bil
+    razširjen — štiri tabele identitete so tako ostale brez primerjave po
+    stolpcih, čeprav je varovalo spodaj imena preverilo. Odslej pride iz
+    `Base.metadata`, kjer zaostati ne more.
     """
     command.upgrade(alembic_nastavitve(baza), "head")
 
@@ -760,5 +762,141 @@ def test_postavka_kviza_nima_druzine(baza: str) -> None:
     motor = create_engine(baza)
     try:
         assert "family_id" not in {s["name"] for s in inspect(motor).get_columns("quiz_items")}
+    finally:
+        motor.dispose()
+
+
+# --- Uporabniki, poverilnice in seje (V3-R03, `0008_uporabniki`) ------------
+
+
+def _vrstice(motor: Any, stavek: str) -> list[tuple[Any, ...]]:
+    with motor.connect() as povezava:
+        return [tuple(v) for v in povezava.execute(text(stavek))]
+
+
+def test_migracija_ustvari_lastnika_in_otroka(baza: str) -> None:
+    """Kriterij V3-R03: migracija posadi starša (lastnika) in otroka Mašo.
+
+    Test je natančen glede **identifikatorjev**, ne le glede števila vrstic:
+    napačen e-naslov bi pomenil, da ukaz `nastavi-geslo` računa ne najde in da
+    admina po namestitvi ni mogoče odkleniti brez ročnega posega v bazo.
+    """
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    motor = create_engine(baza)
+    try:
+        uporabniki = _vrstice(
+            motor,
+            "SELECT u.role, u.display_name, u.is_system_owner, u.is_active, "
+            "u.family_id, c.kind, c.identifier, c.secret_hash "
+            "FROM users u JOIN credentials c ON c.user_id = u.id "
+            "ORDER BY u.role",
+        )
+
+        assert uporabniki == [
+            ("child", "Maša", 0, 1, CVEK_ID, "password", "masa", None),
+            (
+                "parent",
+                "Dejan",
+                1,
+                1,
+                CVEK_ID,
+                "password",
+                "dejan.ambrus@gmail.com",
+                None,
+            ),
+        ]
+    finally:
+        motor.dispose()
+
+
+def test_gesla_v_migraciji_ni(baza: str) -> None:
+    """`secret_hash` je `NULL`: privzeto geslo v repozitoriju bi bilo javno geslo."""
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    motor = create_engine(baza)
+    try:
+        assert _vrstice(motor, "SELECT secret_hash FROM credentials") == [(None,), (None,)]
+        besedilo = (KOREN / "alembic" / "versions" / "0008_uporabniki.py").read_text(
+            encoding="utf-8"
+        )
+        assert "argon2" not in besedilo
+        assert "secret_hash, created_at, updated_at" in besedilo
+    finally:
+        motor.dispose()
+
+
+def test_identifikator_je_enolicen_cez_namestitev(baza: str) -> None:
+    """Dva enaka identifikatorja bi pomenila prijavo, ki ne ve, kdo se prijavlja."""
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    motor = create_engine(baza)
+    try:
+        enolicni = inspect(motor).get_unique_constraints("credentials")
+        assert ["identifier"] in [u["column_names"] for u in enolicni]
+        assert ["token_hash"] in [
+            u["column_names"] for u in inspect(motor).get_unique_constraints("sessions")
+        ]
+    finally:
+        motor.dispose()
+
+
+@pytest.mark.parametrize("tabela", ["users", "credentials", "sessions"])
+def test_tabele_identitete_kazejo_na_lastnika(baza: str, tabela: str) -> None:
+    """`users` na družino, `credentials` in `sessions` na uporabnika."""
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    cilj = {"users": ("family_id", "families"), "credentials": ("user_id", "users")}.get(
+        tabela, ("user_id", "users")
+    )
+    motor = create_engine(baza)
+    try:
+        [kljuc] = [
+            k
+            for k in inspect(motor).get_foreign_keys(tabela)
+            if k["constrained_columns"] == [cilj[0]]
+        ]
+        assert kljuc["referred_table"] == cilj[1]
+    finally:
+        motor.dispose()
+
+
+def test_poskusi_prijave_druzine_nimajo(baza: str) -> None:
+    """Poskus se zabeleži tudi za identifikator, ki ne obstaja (`ADR-035` E)."""
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    motor = create_engine(baza)
+    try:
+        stolpci = {s["name"] for s in inspect(motor).get_columns("login_attempts")}
+        assert stolpci == {"id", "identifier", "ip_address", "created_at"}
+        assert inspect(motor).get_foreign_keys("login_attempts") == []
+    finally:
+        motor.dispose()
+
+
+def test_razveljavitev_0008_pusti_podatke_druzine(baza: str) -> None:
+    """`downgrade` spusti tabele identitete in se snovi ne dotakne."""
+    command.upgrade(alembic_nastavitve(baza), "head")
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            povezava.execute(
+                text(
+                    "INSERT INTO materials (id, family_id, subject, taken_at, image_path, "
+                    "status, received_at) VALUES ('m1', :druzina, 'MAT', "
+                    "'2026-09-04 07:30:00', '/x.jpg', 'new', '2026-09-04 08:00:00')"
+                ),
+                {"druzina": CVEK_ID},
+            )
+    finally:
+        motor.dispose()
+
+    command.downgrade(alembic_nastavitve(baza), "0007_druzine")
+
+    motor = create_engine(baza)
+    try:
+        tabele = set(inspect(motor).get_table_names())
+        assert not tabele & {"users", "credentials", "sessions", "login_attempts"}
+        assert _vrstice(motor, "SELECT id FROM materials") == [("m1",)]
     finally:
         motor.dispose()

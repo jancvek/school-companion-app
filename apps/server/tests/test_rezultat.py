@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.casi import trajanje
 from app.models import Material, Question, QuestionAttempt, Quiz, QuizItem
-from tests.conftest import CVEK_ID
+from tests.conftest import CVEK_ID, je_seja
 from tests.test_kvizi import UUID_DVA, UUID_ENA, objavi, snov, upokoji
 from tests.test_resevanje import poskus, poslji
 
@@ -683,7 +683,7 @@ def stej_poizvedbe(motor: Engine, klic: Callable[[], object]) -> int:
         _povezava: object, _kazalec: object, stavek: str, *_ostalo: object
     ) -> None:
         nonlocal stevec
-        if "sessions" not in stavek:
+        if not je_seja(stavek):
             stevec += 1
 
     event.listen(motor, "before_cursor_execute", zabelezi)

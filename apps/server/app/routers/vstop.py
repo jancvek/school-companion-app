@@ -15,6 +15,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import RedirectResponse, Response
 
 from app import prijava
@@ -120,7 +121,11 @@ async def prijavi(
     if zamik:
         await asyncio.sleep(zamik)
 
-    izid = prijava.preveri_prijavo(
+    # V nit in ne v zanko dogodkov: argon2 je namenoma počasen (~60 ms) in
+    # sinhron. Na zanki bi vsak poskus prijave za toliko časa ustavil **vse**
+    # ostale zahteve strežnika, tudi prenos slike s telefona.
+    izid = await run_in_threadpool(
+        prijava.preveri_prijavo,
         repo,
         identifikator,
         geslo,
