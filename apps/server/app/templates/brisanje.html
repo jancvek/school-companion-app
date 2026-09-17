@@ -50,6 +50,7 @@
       {# Brisanje je POST in nikoli navadna povezava: brskalniki povezave
          prednalagajo, in en napačen klik je nepovraten. #}
       <form method="post" action="/admin/materials/{{ snov.id }}/delete">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
         <button class="gumb" type="submit">Da, izbriši dokončno</button>
       </form>
 

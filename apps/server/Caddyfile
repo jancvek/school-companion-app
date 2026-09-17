@@ -26,18 +26,13 @@
 	}
 
 	# Ikona zavihka. Brez tega jo brskalnik zahteva od `api`, ta pa za pot zunaj
-	# `/admin` vrne 401 (API ključ). Chrome in Edge 401 na zahtevo, ki je nosila
-	# geslo, razumeta kot zavrnjeno geslo in ga pozabita — geslo za `/admin` bi
-	# spraševala ob vsakem kliku. Spada k `basic_auth` spodaj.
+	# `/admin` vrne 401 (API ključ) — ob vsakem odprtju strani napaka v dnevniku,
+	# ki ne pomeni ničesar. Ikone nimamo, zato 204.
 	respond /favicon.ico 204
 
-	# ZAČASNO — pade v V3-R03, ko pride prava prijava (`ADR-026`).
-	# Ujemalnik zajame `/admin` in `/admin/...`, ne pa poti, ki se le začne
-	# enako (`/administration`).
-	@admin path /admin /admin/*
-	basic_auth @admin {
-		{$ADMIN_UPORABNIK} {$ADMIN_ZGOSTITEV}
-	}
-
+	# `basic_auth` pred `/admin` tu **ni več in ne sme biti**. Od V3-R03 admin
+	# varuje prijava v aplikaciji sami: seja za vsako pot, CSRF žeton za vsak
+	# `POST` (`docs/odlocitve/ADR-026`, `ADR-035`). Čep v Caddyju bi zdaj samo
+	# še trčil ob Googlov povratni klic v `V3-R08`.
 	reverse_proxy api:8000
 }

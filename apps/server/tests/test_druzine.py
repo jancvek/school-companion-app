@@ -24,16 +24,19 @@ from app.db import (
     MaterialsRepository,
     StatistikaRepository,
 )
-from app.dependencies import SPOROCILO_NI_ENE_DRUZINE, daj_druzino
+from app.dependencies import SPOROCILO_NI_ENE_DRUZINE, daj_druzino_telefona
 from app.models import (
     STATUS_NAPAKA,
     STATUS_NOV,
     STATUS_PRIPRAVLJEN,
     STATUS_V_OBDELAVI,
+    Credential,
     Family,
     Material,
     Question,
+    User,
 )
+from app.models import UserSession as Session_
 from app.obdelava import obdelaj_cakajoce
 from app.routers.materials import SPOROCILO_TUJ_ID
 from app.worker import obnovi_obticale
@@ -173,41 +176,59 @@ class TestDruzineRepository:
 
 
 class TestIzbiraDruzine:
-    """Začasna izbira edine družine (`ADR-029` A)."""
+    """Od kod pot izve družino: admin iz seje (V3-R03), telefon še začasno.
 
-    def test_je_ena_poizvedba_na_zahtevo_tudi_z_dvema_repozitorijema(
+    `ADR-029` A je izbiro „edina družina v bazi" uvedel za obe strani in
+    napovedal, da jo `V3-R03` za admin zamenja s sejo, `V3-R04` pa za telefon z
+    žetonom. Prvi korak je narejen; drugi še ne (`ADR-035` H).
+    """
+
+    def test_admin_druzine_ne_isce_v_bazi_ampak_v_seji(
         self, odjemalec: TestClient, motor: Engine
     ) -> None:
         """`/admin` uporablja `MaterialsRepository` in `KviziRepository` hkrati.
 
-        FastAPI odvisnost v eni zahtevi razreši enkrat; brez tega bi vsak
-        repozitorij plačal svojo poizvedbo. To je cena, ki jo testa v
-        `TestPoizvedbe` (`test_kvizi.py`, `test_rezultat.py`) namenoma ne štejeta.
+        Družino obema pove seja, ki jo je prebrala vmesna plast — natanko
+        enkrat na zahtevo. Poizvedbe po tabeli `families` na tej poti ni več;
+        če se kdaj vrne, je to tiha vrnitev začasnega pravila `ADR-029` A.
         """
         odgovori = []
         stavki = stavki_med(motor, lambda: odgovori.append(odjemalec.get("/admin")))
 
         assert odgovori[0].status_code == 200
-        assert sum("FROM families" in stavek for stavek in stavki) == 1
+        assert [stavek for stavek in stavki if "FROM families" in stavek] == []
+        assert sum("FROM sessions" in stavek for stavek in stavki) == 1
 
-    def test_brez_druzine_je_admin_stran_500_s_sporocilom(
+    def test_druga_druzina_v_bazi_ne_ustavi_admin_strani(
         self, odjemalec: TestClient, motor: Engine
     ) -> None:
-        with Session(motor) as seja:
-            seja.execute(delete(Family))
-            seja.commit()
+        """Pred V3-R03 je bil to `500`; odkar odloča seja, druga družina ne moti."""
+        dodaj_druzino(motor)
 
         odgovor = odjemalec.get("/admin")
 
-        assert odgovor.status_code == 500
-        assert odgovor.headers["content-type"].startswith("text/html")
-        assert "ni natanko ene družine" in odgovor.text
+        assert odgovor.status_code == 200
 
     def test_z_dvema_druzinama_telefon_dobi_json_500(
         self, odjemalec: TestClient, motor: Engine
     ) -> None:
-        """Druga družina pred prijavo je napaka v namestitvi, ne ugibanje."""
+        """Druga družina pred žetonom telefona je napaka v namestitvi, ne ugibanje."""
         dodaj_druzino(motor)
+
+        odgovor = odjemalec.get("/quizzes/pending", headers=GLAVE)
+
+        assert odgovor.status_code == 500
+        assert odgovor.json() == {"detail": SPOROCILO_NI_ENE_DRUZINE}
+
+    def test_brez_druzine_telefon_dobi_json_500(
+        self, odjemalec: TestClient, motor: Engine
+    ) -> None:
+        with Session(motor) as seja:
+            seja.execute(delete(Session_))
+            seja.execute(delete(Credential))
+            seja.execute(delete(User))
+            seja.execute(delete(Family))
+            seja.commit()
 
         odgovor = odjemalec.get("/quizzes/pending", headers=GLAVE)
 
@@ -223,7 +244,7 @@ class TestPrevzemTujegaId:
     ) -> None:
         dodaj_druzino(motor)
         tuja_slika = snov_druzine(motor, slike, DRUGA_ID, UUID_ENA)
-        aplikacija.dependency_overrides[daj_druzino] = lambda: CVEK_ID
+        aplikacija.dependency_overrides[daj_druzino_telefona] = lambda: CVEK_ID
 
         odgovor = odjemalec.post(
             "/materials",

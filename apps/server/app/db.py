@@ -31,6 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 from sqlalchemy.sql import Update
 
+from app import casi
 from app.models import (
     NACIN_SAMOOCENA,
     POVERILNICA_GESLO,
@@ -1638,8 +1639,10 @@ class PrijavaRepository:
         return SejaUporabnika(
             session_id=vrstica[0],
             csrf_token=vrstica[1],
-            expires_at=vrstica[2],
-            last_used_at=vrstica[3],
+            # Pas je izrecen že tu: SQLite naiven čas vrne, Postgres ne, in
+            # primerjava „ali je seja potekla" mora biti enaka v obeh.
+            expires_at=casi.utc(vrstica[2]),
+            last_used_at=casi.utc(vrstica[3]),
             user_id=vrstica[4],
             family_id=vrstica[5],
             family_name=vrstica[6],

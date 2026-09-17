@@ -68,6 +68,7 @@
          ga ni — takrat ne bi naredil ničesar. #}
       {% if snov.ponovna_obdelava_mozna %}
         <form method="post" action="/admin/materials/{{ snov.id }}/reprocess">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
           <button class="gumb gumb-obdelava" type="submit">Pošlji v obdelavo</button>
         </form>
         {# Vprašanja so od V2-R05 izvzeta iz naštevanja zavrženega — gumb jih
@@ -114,6 +115,7 @@
 
         {% if snov.velikost is not none %}
           <form method="post" action="/admin/materials/{{ snov.id }}/purge-image">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
             <button class="gumb" type="submit">Počisti sliko z diska</button>
           </form>
           <p class="drobno">

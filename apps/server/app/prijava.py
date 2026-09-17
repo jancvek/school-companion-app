@@ -32,6 +32,11 @@ from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatc
 from app.db import PoverilnicaZaPrijavo, PrijavaRepository, SejaUporabnika
 from app.models import VLOGA_OTROK, VLOGA_STARS
 
+#: Poti prijave in odjave. Pod `/admin` sta zato, ker bi ju `ApiKeyMiddleware`
+#: sicer zahteval z glavo `X-API-Key`, ki je brskalnik ne zna poslati.
+POT_PRIJAVE = "/admin/login"
+POT_ODJAVE = "/admin/logout"
+
 #: Ime piškotka s sejo.
 PISKOTEK_SEJE = "seja"
 
@@ -63,7 +68,10 @@ HRAMBA_POSKUSOV = timedelta(days=30)
 
 #: Najkrajše geslo po vlogi (`ADR-035` G). Staršev račun je admin družine na
 #: javnem internetu; otrokov je za mobilno prijavo in do `/admin` ne pride.
-NAJKRAJSE_GESLO = {VLOGA_STARS: 12, VLOGA_OTROK: 4}
+#: Ključ je `str` in ne `Vloga`: vloga pride iz baze kot navaden niz in
+#: vrednost, ki je v tabeli ne bi smelo biti, mora pasti na privzetek za
+#: starša (strožjega), ne na `KeyError`.
+NAJKRAJSE_GESLO: dict[str, int] = {VLOGA_STARS: 12, VLOGA_OTROK: 4}
 
 #: Eno samo sporočilo za vse neuspehe, ki bi sicer izdali, ali račun obstaja.
 SPOROCILO_NEUSPELA_PRIJAVA = (

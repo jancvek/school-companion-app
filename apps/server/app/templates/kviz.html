@@ -97,6 +97,7 @@
        Vmesne potrditvene strani ni: preklic ničesar ne uniči, za razliko od
        brisanja (`ADR-016` F). #}
     <form method="post" action="/admin/quizzes/{{ kviz.id }}/cancel">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
       <button class="gumb" type="submit">Prekliči kviz</button>
     </form>
     <p class="drobno">

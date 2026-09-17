@@ -218,12 +218,13 @@ class TestCaddy:
             _odsek(_servis("caddy"), "volumes", 4)
         )
 
-    def test_domena_in_geslo_sta_obvezna(self) -> None:
-        # `:?` ustavi zagon; `:-` bi Caddyja zagnal brez domene ali z praznim
-        # geslom pred `/admin`.
+    def test_domena_je_obvezna(self) -> None:
+        # `:?` ustavi zagon; `:-` bi Caddyja zagnal brez domene. Gesla pred
+        # `/admin` tu ni več — pade z `basic_auth` v V3-R03 (`ADR-035`).
         okolje = _odsek(_servis("caddy"), "environment", 4)
-        for ime in ("DOMENA", "ADMIN_UPORABNIK", "ADMIN_ZGOSTITEV"):
-            assert _vrednost(okolje, ime).startswith("${" + ime + ":?"), ime
+        assert _vrednost(okolje, "DOMENA").startswith("${DOMENA:?")
+        assert not _ima_kljuc(_servis("caddy"), "ADMIN_UPORABNIK", 6)
+        assert not _ima_kljuc(_servis("caddy"), "ADMIN_ZGOSTITEV", 6)
 
 
 class TestOmrezje:
@@ -267,35 +268,31 @@ class TestCaddyfile:
     def test_brez_preusmeritve_na_vrata_80(self) -> None:
         assert "auto_https disable_redirects" in _ukazi(_blok(_caddyfile(), ""))
 
-    def test_basic_auth_samo_pod_admin(self) -> None:
-        # `/admin*` bi ujel tudi `/administration`; ujemalnik mora biti natanko
-        # `/admin` in `/admin/...`.
-        besedilo = _caddyfile()
-        ukazi = _ukazi(_blok(besedilo, "{$DOMENA}"))
-        assert "@admin path /admin /admin/*" in ukazi
-        assert besedilo.count("basic_auth") == 1
-        assert _blok(besedilo, "basic_auth @admin")
+    def test_cepa_basic_auth_ni_vec(self) -> None:
+        """`ADR-026`: čep pade, ko pride prava prijava (V3-R03).
 
-    def test_zgostitev_ni_v_repozitoriju(self) -> None:
+        Ne samo „ni v bloku spletišča": v datoteki ne sme ostati niti kot
+        zakomentirana vrstica, ki bi jo kdo kdaj vrnil nazaj. Admin odslej
+        varuje `SejaMiddleware`, in dve plasti gesla bi v `V3-R08` trčili.
+        """
         besedilo = _caddyfile()
-        assert _ukazi(_blok(besedilo, "basic_auth @admin")) == [
-            "{$ADMIN_UPORABNIK} {$ADMIN_ZGOSTITEV}"
-        ]
+        assert "basic_auth" not in _ukazi(_blok(besedilo, "{$DOMENA}"))
+        assert "@admin" not in _ukazi(_blok(besedilo, "{$DOMENA}"))
+
+    def test_gesla_ni_ne_v_nastavitvi_ne_v_predlogi_okolja(self) -> None:
         for datoteka in (CADDYFILE, COMPOSE, OKOLJE_PRIMER):
-            assert not BCRYPT.search(datoteka.read_text(encoding="utf-8")), datoteka.name
-
-    def test_cep_je_oznacen_kot_zacasen(self) -> None:
-        vrstice = CADDYFILE.read_text(encoding="utf-8").splitlines()
-        mesto = next(i for i, v in enumerate(vrstice) if v.strip().startswith("basic_auth"))
-        assert any("V3-R03" in v for v in vrstice[max(0, mesto - 6) : mesto])
+            besedilo = datoteka.read_text(encoding="utf-8")
+            assert not BCRYPT.search(besedilo), datoteka.name
+            assert "ADMIN_ZGOSTITEV=" not in besedilo, datoteka.name
 
     def test_promet_gre_na_api(self) -> None:
         assert "reverse_proxy api:8000" in _ukazi(_blok(_caddyfile(), "{$DOMENA}"))
 
     def test_ikono_zavihka_streze_caddy(self) -> None:
-        # Brez tega `/favicon.ico` pride do `api`, ki vrne 401; brskalnik ob tem
-        # pozabi geslo za `/admin` in ga zahteva ob vsakem kliku (najdeno v
-        # živo 16. 9., Chrome in Edge). Odgovor ne sme biti 401 ali 403.
+        # Brez tega `/favicon.ico` pride do `api`, ki zanj vrne 401 (API ključ).
+        # Z `basic_auth` je to brskalniku pobrisalo geslo za `/admin` (najdeno v
+        # živo 16. 9., Chrome in Edge); odkar gesla v Caddyju ni, ostane napaka
+        # v dnevniku ob vsakem odprtju strani. Odgovor ne sme biti 401 ali 403.
         ukazi = _ukazi(_blok(_caddyfile(), "{$DOMENA}"))
         assert "respond /favicon.ico 204" in ukazi
 

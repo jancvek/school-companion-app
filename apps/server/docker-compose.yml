@@ -13,9 +13,9 @@ services:
     image: caddy:2.11.4-alpine
     environment:
       DOMENA: ${DOMENA:?DOMENA ni nastavljena}
-      # ZAČASNO — `basic_auth` pred `/admin` pade v V3-R03 (`ADR-026`).
-      ADMIN_UPORABNIK: ${ADMIN_UPORABNIK:?ADMIN_UPORABNIK ni nastavljen}
-      ADMIN_ZGOSTITEV: ${ADMIN_ZGOSTITEV:?ADMIN_ZGOSTITEV ni nastavljena}
+      # `ADMIN_UPORABNIK` in `ADMIN_ZGOSTITEV` sta padla z `basic_auth` v
+      # V3-R03: admin varuje prijava v aplikaciji (`docs/odlocitve/ADR-035`).
+      # Če sta v `.env` ostala, ju Compose prezre.
     ports:
       # Edina vrata, odprta navzven, in samo TCP. Vrata 80 so Arasova.
       - "443:443"

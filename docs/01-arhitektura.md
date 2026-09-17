@@ -70,26 +70,30 @@ logika testljiva brez naprave.
 | Datoteka | Odgovornost |
 |---|---|
 | `app/main.py` | tovarna aplikacije, življenjski cikel (zagon in ustavitev obdelave) |
+| `app/security.py` | vmesni plasti ob vhodu: `ApiKeyMiddleware` (telefon) in `SejaMiddleware` (seja in CSRF pod `/admin`, V3-R03) |
 | `app/routers/materials.py` | `POST /materials` — prevzem slike s telefona |
 | `app/routers/admin.py` | operaterska stran: predmeti, snov, arhiv, brisanje |
 | `app/routers/kvizi.py` | sestavljalnik kvizov pod `/admin/quizzes` (V2-R01); rezultat rešenega kviza in stran za tisk (V2-R03) |
 | `app/routers/resevanje.py` | poti telefona za kvize: `GET /quizzes/pending`, `POST /quiz-attempts` (V2-R02) |
 | `app/routers/statistika.py` | statistika čez kvize pod `/admin/statistics` (V2-R04) |
 | `app/routers/dnevi.py` | pregled slik po obdobju in predmetih pod `/admin/days` (V2-R07) |
-| `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository` in `StatistikaRepository` (V2-R04, samo bere) — vsak z obvezno družino (V3-R01) — in `DruzineRepository`; edina pot do baze |
-| `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items` in `question_attempts` |
+| `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository` in `StatistikaRepository` (V2-R04, samo bere) — vsak z obvezno družino (V3-R01) — ter `DruzineRepository` in `PrijavaRepository` (V3-R03), edina brez družine; edina pot do baze |
+| `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03) |
 | `app/storage.py` | zapis, meja mape in brisanje slik na disku; mapa družine (V3-R01) |
 | `app/vision.py` | **edini modul, ki uvaža `openai`**: prompt, shema odgovora, klic |
 | `app/obdelava.py` | kaj se zgodi z enim zapisom: prevzem, klic, zapis izida. Sinhron |
 | `app/worker.py` | časovnik: obhodi v presledkih, zagon in ustavitev. Brez poslovne logike |
 | `app/statistika.py` | pravila štetja statistike: razporeditev, izpeljava pravilnosti, razvrstitev, meseci (V2-R04). Brez FastAPI in brez seje |
+| `app/prijava.py` | gesla (argon2id), žetoni sej, CSRF, omejevanje ugibanja, varen `next` — brez FastAPI (V3-R03) |
+| `app/ukazi.py` | `python -m app.ukazi nastavi-geslo <identifikator>`; geslo z `getpass`, nikoli iz argumenta (V3-R03) |
+| `app/routers/vstop.py` | prijava in odjava: `GET/POST /admin/login`, `POST /admin/logout` (V3-R03) |
 | `app/settings.py` | nastavitve iz okolja |
-| `app/dependencies.py` | odvisnosti poti iz `app.state`; začasna izbira družine `daj_druzino` (V3-R01, `ADR-029` A) |
+| `app/dependencies.py` | odvisnosti poti iz `app.state`; družina admina iz seje (`daj_druzino`, V3-R03) in začasna družina telefona (`daj_druzino_telefona`, `ADR-029` A) |
 | `app/subjects.py` | predmeti, slovenske oznake stanj in oznake ocen (`OZNAKE_OCEN`, tu od V2-R04) |
 | `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03); šolsko leto in meseci (V2-R04); današnji dan, meje poljubnega obdobja in ura brez datuma (V2-R07) |
-| `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01) ter 400 (V2-R07) |
+| `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01) ter 400 (V2-R07); obdelovalec konteksta z glavo in CSRF žetonom (V3-R03) |
 | `app/besedilo.py` | slovenske oblike števil (dvojina) |
-| `Caddyfile` | Caddy pred `api`: domena, TLS-ALPN, začasen `basic_auth` pred `/admin`, ikona zavihka (V3-R02) |
+| `Caddyfile` | Caddy pred `api`: domena, TLS-ALPN, ikona zavihka (V3-R02); `basic_auth` je padel z V3-R03 |
 | `varnostna-kopija/` | `kopija.ps1` in `obnova.ps1` (V3-R02) |
 
 `app/casi.py`, `app/strani.py` in `app/besedilo.py` niso nove plasti, ampak
@@ -449,6 +453,26 @@ najprej v `<mapa družine>/.tmp/` pod enoličnim imenom in se na končno mesto p
 atomarno; vrstica v bazi nastane šele za datoteko. Prekinjen prenos zato ne
 pusti polovične slike na mestu, kjer jo bo V1-R03 iskal kot celo.
 
+#### Identiteta: uporabniki, poverilnice in seje (V3-R03)
+
+Model je iz `ADR-027`: **poverilnica ni uporabnik**, zato je Google pozneje
+(`V3-R08`) nova vrstica in ne nova shema.
+
+| Tabela | Stolpci | Opomba |
+|---|---|---|
+| `users` | `id`, `family_id NOT NULL` (FK, indeks), `role` (`parent`\|`child`), `display_name`, `is_system_owner`, `is_active`, `created_at` | oseba brez gesla; `is_active` rabi šele `V3-R06`, a je v shemi že zdaj |
+| `credentials` | `id`, `user_id NOT NULL` (FK, indeks), `kind` (`password`), `identifier` **UNIQUE**, `secret_hash`, `created_at`, `updated_at` | `identifier` je e-naslov starša ali uporabniško ime otroka, enoličen čez celo namestitev; `secret_hash IS NULL` pomeni „geslo ni nastavljeno" |
+| `sessions` | `id`, `user_id NOT NULL` (FK, indeks), `token_hash` **UNIQUE**, `csrf_token`, `created_at`, `expires_at`, `last_used_at`, `device_label` | žetona v bazi ni, samo SHA-256 |
+| `login_attempts` | `id`, `identifier` (indeks), `ip_address`, `created_at` (indeks) | **edina tabela brez družine**: poskus se zabeleži tudi za identifikator, ki ne obstaja |
+
+Migracija `0008_uporabniki` ustvari starša (lastnika sistema, `is_system_owner`)
+in otroka v družini Cvek, **oba brez gesla**. Geslo vpiše lastnik z ukazom;
+privzeto geslo v migraciji bi bilo javno geslo (`ADR-035` G).
+
+`PrijavaRepository` je poleg `DruzineRepository` edini repozitorij brez
+družine, in to neizogibno: prijava pozna samo identifikator in družino šele
+izve. Nobene tabele s podatki družine ne bere.
+
 ## Prenos telefon → strežnik
 
 `POST /materials` sprejme multipart z `id`, `subject`, `taken_at` in `file`.
@@ -593,10 +617,10 @@ nje in to preverja `TestBrezJavaScripta`, ki izvzame samo `snov.html`.
 | `/admin/statistics/subjects/{koda}` | GET | statistika predmeta: po mesecih, snovi, vprašanja od najtežjega (V2-R04) |
 | `/admin/days` | GET | slike dneva ali zadnjih sedmih dni, po dnevu in predmetu; `?dan=YYYY-MM-DD`, `?obdobje=dan\|teden` (V2-R07) |
 
-Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Prijave v
-aplikaciji ni**: do V3-R03 stran varuje začasen `basic_auth` v Caddyju (glej
-„Javni dostop"). CSRF žetona še ni (`docs/odlocitve/ADR-006`); pride z V3-R03.
-Strani kažejo podatke edine družine v bazi (`daj_druzino`, V3-R01).
+Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Vsaka od njih
+zahteva sejo** (V3-R03, glej „Prijava, seje in CSRF"); vsak `POST` nosi CSRF
+žeton. Strani kažejo podatke družine iz seje, glava pa pove, čigava družina je
+to in kdo je prijavljen.
 
 Napake pod `/admin` (404, 405 in 500 izbire družine) izriše prestreznik `StarletteHTTPException`,
 registriran v `create_app`. Izven te predpone se umakne privzetemu, ker morajo
@@ -628,6 +652,51 @@ si nasprotujeta in izbrana je bila stran, ki obstaja.
 datoteka.** Vrstica brez datoteke je pokvarjen vnos, ki ga operater vidi;
 datoteka brez vrstice je nevidna sirota, ki stane samo prostor. Isto pravilo
 velja na telefonu.
+
+## Prijava, seje in CSRF (V3-R03)
+
+Admin stran je na javnem internetu, zato jo varuje prijava v aplikaciji sami.
+Odločitve so v `ADR-027` (model) in `ADR-035` (izvedba).
+
+| Pot | Metoda | Kaj |
+|---|---|---|
+| `/admin/login` | GET | prijavni obrazec; postavi piškotek `csrf_prijava` |
+| `/admin/login` | POST | preveri poverilnico, ustvari sejo, preusmeri na `next` |
+| `/admin/logout` | POST | izbriše sejo te naprave (zahteva sejo in CSRF žeton) |
+
+- **`SejaMiddleware` je plast, ne odvisnost.** Zahteva sejo za vsako pot pod
+  `/admin` razen `/admin/login`; brez nje odgovori s `303` na prijavo z
+  `?next=<zahtevana pot>`. Pot, ki je nihče ni dodal na noben seznam, je zato
+  varovana po privzetku. `next` se sprejme samo kot relativna pot pod `/admin`.
+- **Žeton seje** je `secrets.token_urlsafe(32)`; v bazi je samo njegova
+  SHA-256. Piškotek `seja` je `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`,
+  z veljavnostjo 30 dni. **Rok je drseči** in se osveži največ enkrat na uro.
+- **CSRF žeton živi v vrstici seje** in pride v vsako predlogo prek
+  `context_processors` izrisovalnika. `SejaMiddleware` ga pri `POST` prebere iz
+  telesa (samo `application/x-www-form-urlencoded`, največ 1 MiB), primerja s
+  `secrets.compare_digest` in ob neujemanju odgovori s `403` kot stranjo. Telo
+  vrne nazaj v tok, da ga endpoint prebere kot običajno. Prijavni obrazec seje
+  še nima, zato nosi **dvojno oddan piškotek** `csrf_prijava`.
+- **Omejevanje ugibanja gre po identifikatorju, ne po naslovu** (`ADR-034` A):
+  po 5 neuspehih v 15 minutah vsak nadaljnji poskus čaka 2 sekundi, preden se
+  geslo sploh preveri. To je **upočasnitev, ne zaklep** — zaklep bi pomenil,
+  da lahko kdorkoli z znanim e-naslovom starša tega izklopi iz njegovega
+  admina. Uspešna prijava števce pobriše.
+- **Sporočila ne izdajo, ali račun obstaja.** Neznan identifikator, napačno
+  geslo, nenastavljeno geslo in deaktiviran račun dajo isto besedilo; ob
+  neznanem identifikatorju se zgostitev preveri proti lažni vrednosti, da je
+  tudi odzivni čas enak. Edina izjema je otrokov račun: ta dobi razlago, da se
+  prijavi v mobilni aplikaciji (`ADR-035` F).
+- **Potekle seje in stari poskusi se čistijo ob prijavi** in ob naletu na
+  potekel piškotek — ne v zanki `Obdelovalec`, ker ta brez `OPENAI_API_KEY`
+  sploh ne teče (`ADR-009`).
+- **Geslo nastavi lastnik z ukazom** v vsebniku:
+  `docker compose exec api python -m app.ukazi nastavi-geslo <identifikator>`.
+  Geslo pride z `getpass`, nikoli iz argumenta ali okolja. Najkrajše geslo je
+  12 znakov za starša in 4 za otroka.
+- **Telefon se to ne dotakne.** `X-API-Key` in poti `/materials`,
+  `/quizzes/pending`, `/quiz-attempts` so nespremenjeni; ključ odpade v
+  `V3-R04`, ko isto tabelo `sessions` uporabi z glavo `Authorization: Bearer`.
 
 ## Sestavljalnik kvizov (V2-R01)
 
@@ -951,8 +1020,8 @@ Test „samo pod `/admin`" bere poti iz `app.openapi()["paths"]` in ne iz
   identiteta (`ADR-021` D). Seštevek snovi se ne pretrga.
 - **Stran predmeta bo čez leto dolga.** Popravek, če bo potreben, je
   ostranjevanje, ne tiho krajšanje.
-- **Kdor pozna geslo za `basic_auth`, vidi ves `/admin`**, tudi statistiko
-  (`ADR-021` F). Do V3-R03 geslo pozna samo lastnik.
+- **Kdor je prijavljen kot starš, vidi ves `/admin` svoje družine**, tudi
+  statistiko (`ADR-021` F). Ločenih pravic znotraj admina ni.
 
 ## Kvizi na telefonu (V2-R02)
 
@@ -1122,12 +1191,13 @@ telefon / brskalnik ─HTTPS 443─▶ usmerjevalnik ─▶ stroj:443 ─▶ cad
 - **Obnavljanje certifikata je samodejno.** Certifikati in račun ACME so v
   volumnu `server_caddy-podatki`; brez njega bi vsak zagon prosil za nov
   certifikat in zadel omejitev Let's Encrypt.
-- **`basic_auth` pred `/admin` in `/admin/*` je začasen** in pade v V3-R03.
-  Uporabnik in bcrypt zgostitev prideta iz `.env`.
+- **`basic_auth` pred `/admin` je padel v V3-R03** (`ADR-026`, `ADR-035`).
+  Admin varuje prijava v aplikaciji sami; `ADMIN_UPORABNIK` in
+  `ADMIN_ZGOSTITEV` sta iz `okolje.primer` in Compose odstranjena.
 - **Caddy sam odgovori na `/favicon.ico` s 204.** Brez tega ikona zavihka pride
-  do `api`, ta vrne 401 (API ključ), Chrome in Edge pa geslo za `/admin`
-  pozabita in ga zahtevata ob vsakem kliku. Koren `/` ima isto lastnost, zato
-  se admin odpira z `/admin`.
+  do `api`, ki zanjo vrne 401 (API ključ). Z `basic_auth` je to brskalniku
+  pobrisalo geslo za `/admin` (Chrome, Edge); odkar gesla v Caddyju ni,
+  ostane le napaka v dnevniku ob vsakem odprtju. Admin se odpira z `/admin`.
 - **`api` zaupa proxy glavam samo s Caddyjevega naslova**
   (`--proxy-headers --forwarded-allow-ips 172.30.10.10`, v Compose in v
   `Dockerfile`).
@@ -1139,7 +1209,7 @@ telefon / brskalnik ─HTTPS 443─▶ usmerjevalnik ─▶ stroj:443 ─▶ cad
   `docker compose down -v`.
 - `tests/test_postavitev.py` bere `docker-compose.yml`, `Caddyfile` in
   `Dockerfile` kot besedilo in dokazuje objave vrat, zaupanje proxy glavam,
-  TLS-ALPN, `basic_auth`, ikono zavihka in eno samo spletišče.
+  TLS-ALPN, **odsotnost** `basic_auth`, ikono zavihka in eno samo spletišče.
 
 ### Postavitev na novem stroju
 
@@ -1367,8 +1437,21 @@ docker compose -f apps\server\docker-compose.yml up -d --build
 `.env` prebere **Docker Compose**, da razreši `${API_KEY}` in poda vrednosti
 vsebniku; strežnik sam `.env` ne bere, ker bi bil `env_file` relativen na
 trenutno delovno mapo. `API_KEY` mora imeti vsaj 16 znakov, sicer se strežnik
-ne zažene. Brez `DOMENA`, `ADMIN_UPORABNIK` in `ADMIN_ZGOSTITEV` se Compose ne
-zažene (glej „Javni dostop"). `BIND_ADDRESS` od V3-R02 ne obstaja več.
+ne zažene. Brez `DOMENA` se Compose ne zažene (glej „Javni dostop").
+`BIND_ADDRESS` od V3-R02 ne obstaja več, `ADMIN_UPORABNIK` in
+`ADMIN_ZGOSTITEV` pa od V3-R03 ne.
+
+**Po prvem zagonu `/admin` ni dosegljiv, dokler ni nastavljeno geslo** —
+migracija ustvari uporabnika brez njega (`ADR-035` G):
+
+```powershell
+docker compose -f apps\server\docker-compose.yml exec api `
+  python -m app.ukazi nastavi-geslo dejan.ambrus@gmail.com
+```
+
+Isti ukaz nastavi geslo otroku (identifikator `masa`), ki ga bo potreboval
+`V3-R04`. Piškotek seje ima zastavico `Secure`; brskalniki jo sprejmejo tudi
+na `http://localhost`, zato razvojni zagon mimo Caddyja deluje.
 
 `OPENAI_API_KEY` se obnaša drugače od `API_KEY`: brez njega strežnik **normalno
 steče** in slike sprejema, ne teče pa obdelava. `OPENAI_MODEL` (privzeto

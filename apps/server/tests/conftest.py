@@ -8,7 +8,10 @@ stavkov, ki bi jih poznal samo Postgres.
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from functools import cache
 from pathlib import Path
+from typing import Any
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -17,13 +20,39 @@ from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.db import naredi_tovarno_sej
+from app import prijava
+from app.db import PrijavaRepository, naredi_tovarno_sej
 from app.main import create_app
-from app.models import Base, Family
+from app.models import (
+    POVERILNICA_GESLO,
+    VLOGA_STARS,
+    Base,
+    Credential,
+    Family,
+    User,
+)
 from app.settings import Settings
 
 #: Ključ, ki v testih velja za pravega.
 KLJUC = "kljuc-za-teste-dovolj-dolg"
+
+#: Poverilnici, ki jih uporabljajo testi. Gesli sta dolgi toliko, kot zahteva
+#: `app/prijava.py` za svojo vlogo — prekratko geslo zavrne ukaz, ne prijava,
+#: a test naj ne stoji na kombinaciji, ki v resnici ne more nastati.
+STARS_IDENTIFIKATOR = "stars@primer.test"
+GESLO_STARSA = "geslo-starsa-12"
+OTROK_IDENTIFIKATOR = "otrok"
+GESLO_OTROKA = "masa"
+
+
+@cache
+def zgostitev(geslo: str) -> str:
+    """Zgostitev gesla, izračunana največ enkrat na zagon zbirke.
+
+    argon2 je namenoma počasen (~60 ms). Brez te predpomnilne plasti bi vsak
+    test, ki potrebuje uporabnika, plačal to ceno znova.
+    """
+    return prijava.zgosti_geslo(geslo)
 
 #: Družina, ki jo ima vsaka testna baza (V3-R01). Isti `id` kot Cvek v
 #: migraciji `0007_druzine`, da je baza po `create_all` enaka migrirani.
@@ -146,8 +175,122 @@ def aplikacija(nastavitve: Settings, motor: Engine) -> FastAPI:
     return create_app(nastavitve=nastavitve, motor=motor)
 
 
+class PrijavljenOdjemalec(TestClient):
+    """`TestClient`, ki v obrazce pod `/admin` sam doda CSRF žeton svoje seje.
+
+    Brez tega bi vsak od približno stotih `POST` v zbirki nosil isto vrstico o
+    žetonu, in test bi govoril o CSRF namesto o tem, kar preverja. Žeton se
+    doda **samo, kadar ga test ni podal** — test, ki CSRF preverja, ga poda
+    (napačnega ali praznega) in ga ta razred ne prepiše.
+
+    `/admin/login` je izvzet: tam žeton ne pride iz seje (te še ni), ampak iz
+    piškotka prijavnega obrazca, in ga testi prijave postavijo sami.
+    """
+
+    #: CSRF žeton seje tega odjemalca.
+    csrf: str = ""
+
+    def post(self, url: str, **kwargs: Any) -> Any:  # type: ignore[override]
+        pot = str(url)
+        if pot.startswith("/admin") and pot != prijava.POT_PRIJAVE:
+            podatki = kwargs.get("data")
+            if podatki is None:
+                kwargs["data"] = {"csrf": self.csrf}
+            elif isinstance(podatki, dict) and "csrf" not in podatki:
+                kwargs["data"] = {**podatki, "csrf": self.csrf}
+        return super().post(url, **kwargs)
+
+
+def ustvari_starsa(
+    motor: Engine,
+    *,
+    family_id: str = CVEK_ID,
+    identifikator: str = STARS_IDENTIFIKATOR,
+    prikazno_ime: str = "Dejan",
+    geslo: str | None = GESLO_STARSA,
+    vloga: str = VLOGA_STARS,
+    aktiven: bool = True,
+) -> str:
+    """Ustvari uporabnika s poverilnico in vrne njegov `id`.
+
+    `geslo=None` pomeni račun brez nastavljenega gesla — stanje, v katerem
+    uporabnika pusti migracija `0008_uporabniki`.
+    """
+    user_id = str(uuid4())
+    zdaj = datetime.now(UTC)
+    with Session(motor) as seja:
+        seja.add(
+            User(
+                id=user_id,
+                family_id=family_id,
+                role=vloga,
+                display_name=prikazno_ime,
+                is_system_owner=False,
+                is_active=aktiven,
+                created_at=zdaj,
+            )
+        )
+        seja.add(
+            Credential(
+                id=str(uuid4()),
+                user_id=user_id,
+                kind=POVERILNICA_GESLO,
+                identifier=identifikator,
+                secret_hash=zgostitev(geslo) if geslo is not None else None,
+                created_at=zdaj,
+                updated_at=zdaj,
+            )
+        )
+        seja.commit()
+    return user_id
+
+
+def prijavi(odjemalec: PrijavljenOdjemalec, motor: Engine, user_id: str) -> None:
+    """Postavi sejo danemu uporabniku in jo naloži v odjemalca.
+
+    Seja nastane **mimo prijavne strani**, ker skoraj noben test v zbirki ne
+    preverja prijave, ampak stran za njo; prava prijava bi vsakemu od njih
+    dodala eno zgostitev argon2 (~60 ms) in eno stran brez pomena za test.
+    Prijavna pot ima svoje teste v `tests/test_prijava.py`.
+    """
+    zeton = prijava.nov_zeton()
+    zdaj = datetime.now(UTC)
+    with Session(motor) as seja_baze:
+        repo = PrijavaRepository(seja_baze)
+        repo.ustvari_sejo(
+            user_id=user_id,
+            token_hash=prijava.zgostitev_zetona(zeton),
+            csrf_token=prijava.nov_zeton(),
+            ko=zdaj,
+            potece=zdaj + prijava.TRAJANJE_SEJE,
+            device_label="testi",
+        )
+        seja = repo.seja(prijava.zgostitev_zetona(zeton))
+    assert seja is not None
+    odjemalec.cookies.set(prijava.PISKOTEK_SEJE, zeton)
+    odjemalec.csrf = seja.csrf_token
+
+
 @pytest.fixture
-def odjemalec(aplikacija: FastAPI) -> Iterator[TestClient]:
-    """Odjemalec brez privzetega ključa — vsak test ga pošlje sam."""
-    with TestClient(aplikacija) as odjemalec:
+def stars(motor: Engine) -> str:
+    """Starš družine Cvek, s katerim so prijavljeni testi admin strani."""
+    return ustvari_starsa(motor)
+
+
+@pytest.fixture
+def odjemalec(
+    aplikacija: FastAPI, motor: Engine, stars: str
+) -> Iterator[PrijavljenOdjemalec]:
+    """Odjemalec s sejo starša družine Cvek.
+
+    Ključa ne pošilja: poti telefona ga v vsakem testu podajo same, admin poti
+    pa ga ne potrebujejo (`/admin` je izvzet iz `ApiKeyMiddleware`).
+
+    Naslov je **`https`**, ker ima piškotek seje zastavico `Secure` in ga
+    odjemalec čez `http` ne bi poslal — kar je natanko obnašanje brskalnika.
+    """
+    with PrijavljenOdjemalec(aplikacija, base_url="https://testserver") as odjemalec:
+        prijavi(odjemalec, motor, stars)
         yield odjemalec
+
+

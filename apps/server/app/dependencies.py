@@ -14,6 +14,8 @@ from app.db import (
     DruzineRepository,
     KviziRepository,
     MaterialsRepository,
+    PrijavaRepository,
+    SejaUporabnika,
     StatistikaRepository,
 )
 from app.settings import Settings
@@ -33,16 +35,49 @@ def daj_nastavitve(request: Request) -> Settings:
     return nastavitve
 
 
-def daj_druzino(request: Request) -> str:
-    """`id` družine, katere podatke ta zahteva bere in piše.
+def daj_prijavo(request: Request) -> SejaUporabnika:
+    """Seja, ki jo je za to zahtevo razrešila `SejaMiddleware`.
 
-    **Začasno** (`docs/odlocitve/ADR-029` A): dokler ni prijave, je to edina
-    družina v bazi. `V3-R03` jo za admin stran zamenja z družino seje, `V3-R04`
-    za telefon z družino žetona. Pri nič ali več družinah zahteva pade s `500`
-    in ne ugiba — druga družina pred prijavo je napaka v namestitvi.
+    Dosegljiva je izključno pod `/admin`: drugod plasti ni in je tudi seje ne.
+    Klic zunaj `/admin` je napaka v kodi, ne stanje, ki bi ga smel povzročiti
+    uporabnik — zato `RuntimeError` in ne HTTP odgovor.
+    """
+    seja: SejaUporabnika | None = getattr(request.state, "prijava", None)
+    if seja is None:
+        raise RuntimeError(
+            "Ta pot je zunaj SejaMiddleware in seje nima. Odvisnost daj_prijavo "
+            "sodi samo na poti pod /admin (docs/odlocitve/ADR-035 A)."
+        )
+    return seja
+
+
+def daj_repozitorij_prijave(request: Request) -> Iterator[PrijavaRepository]:
+    """Repozitorij uporabnikov, poverilnic in sej. Ena seja na zahtevo."""
+    tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
+    with tovarna() as seja:
+        yield PrijavaRepository(seja)
+
+
+def daj_druzino(request: Request) -> str:
+    """`id` družine, katere podatke bere in piše zahteva **pod `/admin`**.
+
+    Odloči seja: `SejaMiddleware` jo je razrešila že pred usmerjevalnikom, zato
+    tu ni nobene dodatne poizvedbe. S tem odpade začasna izbira „edina družina
+    v bazi" (`docs/odlocitve/ADR-029` A) — za admin, ne za telefon; ta ima
+    `daj_druzino_telefona`, dokler je `V3-R04` ne zamenja z žetonom.
+    """
+    return daj_prijavo(request).family_id
+
+
+def daj_druzino_telefona(request: Request) -> str:
+    """`id` družine za poti telefona — **začasno** edina družina v bazi.
+
+    `ADR-029` A: dokler telefon nima žetona (`V3-R04`), družine ne pove nihče.
+    Pri nič ali več družinah zahteva pade s `500` in ne ugiba; druga družina
+    pred `V3-R04` je zato stanje, ki telefonske poti ustavi — namenoma.
 
     Preverba je tu in ne ob zagonu strežnika: test tesnjenja potrebuje dve
-    družini v isti aplikaciji in to odvisnost zamenja.
+    družini v isti aplikaciji.
     """
     tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
     with tovarna() as seja:
@@ -59,6 +94,28 @@ def daj_repozitorij(
     tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
     with tovarna() as seja:
         yield MaterialsRepository(seja, family_id)
+
+
+def daj_repozitorij_telefona(
+    request: Request, family_id: Annotated[str, Depends(daj_druzino_telefona)]
+) -> Iterator[MaterialsRepository]:
+    """Kot `daj_repozitorij`, a za poti telefona (`POST /materials` in sorodne).
+
+    Ločena odvisnost in ne zastavica: pot telefona in pot brskalnika družino
+    izvesta na dva različna načina, in prav to razliko `V3-R04` odstrani.
+    """
+    tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
+    with tovarna() as seja:
+        yield MaterialsRepository(seja, family_id)
+
+
+def daj_repozitorij_kvizov_telefona(
+    request: Request, family_id: Annotated[str, Depends(daj_druzino_telefona)]
+) -> Iterator[KviziRepository]:
+    """Kot `daj_repozitorij_kvizov`, a za poti telefona (V2-R02)."""
+    tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
+    with tovarna() as seja:
+        yield KviziRepository(seja, family_id)
 
 
 def daj_repozitorij_kvizov(
