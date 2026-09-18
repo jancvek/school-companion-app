@@ -71,6 +71,7 @@ describe('shranjevanje posnetka', () => {
       subject: 'MAT',
       takenAt: CAS_POSNETKA,
       sourceUri: IZVIRNIK,
+      userId: null,
     });
 
     expect(zapis.user_id).toBeNull();
@@ -83,6 +84,7 @@ describe('shranjevanje posnetka', () => {
       subject: 'MAT',
       takenAt: CAS_POSNETKA,
       sourceUri: IZVIRNIK,
+      userId: null,
     });
 
     expect(zapis.id).toMatch(UUID_V4);
@@ -100,6 +102,7 @@ describe('shranjevanje posnetka', () => {
       subject: 'MAT',
       takenAt: CAS_POSNETKA,
       sourceUri: IZVIRNIK,
+      userId: null,
     });
 
     expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
@@ -111,6 +114,7 @@ describe('shranjevanje posnetka', () => {
       subject: 'MAT',
       takenAt: CAS_POSNETKA,
       sourceUri: IZVIRNIK,
+      userId: null,
     });
 
     await expect(listBySubject(db, 'MAT', null)).resolves.toEqual([zapis]);
@@ -133,7 +137,7 @@ describe('shranjevanje posnetka', () => {
       return undefined;
     });
 
-    await saveCapture(db, { subject: 'MAT', takenAt: CAS_POSNETKA, sourceUri: IZVIRNIK });
+    await saveCapture(db, { subject: 'MAT', takenAt: CAS_POSNETKA, sourceUri: IZVIRNIK, userId: null });
 
     expect(datotekaZapisana).toBe(true);
     expect(vrsticaVstavljena).toBe(true);
@@ -144,7 +148,7 @@ describe('shranjevanje posnetka', () => {
     store.savePhoto.mockRejectedValue(new Error('Na napravi ni prostora'));
 
     await expect(
-      saveCapture(db, { subject: 'MAT', takenAt: CAS_POSNETKA, sourceUri: IZVIRNIK }),
+      saveCapture(db, { subject: 'MAT', takenAt: CAS_POSNETKA, sourceUri: IZVIRNIK, userId: null }),
     ).rejects.toThrow('Na napravi ni prostora');
 
     await expect(listBySubject(db, 'MAT', null)).resolves.toEqual([]);
@@ -157,7 +161,7 @@ describe('shranjevanje posnetka', () => {
       .mockRejectedValue(new Error('baza je zaklenjena'));
 
     await expect(
-      saveCapture(db, { subject: 'MAT', takenAt: CAS_POSNETKA, sourceUri: IZVIRNIK }),
+      saveCapture(db, { subject: 'MAT', takenAt: CAS_POSNETKA, sourceUri: IZVIRNIK, userId: null }),
     ).rejects.toThrow('baza je zaklenjena');
 
     expect(store.discardPhoto).toHaveBeenCalledTimes(1);

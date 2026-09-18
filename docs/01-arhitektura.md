@@ -172,8 +172,12 @@ Test teče nad `SHEMA_VERZIJE_2` — dobesedno kopijo baze po migraciji 2,
 kakršna je na Mašinem telefonu pred V3-R04.
 
 **`NULL` pomeni „nastalo, ko ni bil prijavljen nihče“**, ne „brez
-lastnika za vedno“: tak zapis posvoji prva uspešna prijava
-(`posvojiBrezLastnika`). Brez tega bi bila nadgradnja Mašinega telefona
+lastnika za vedno“: tak zapis posvoji **vsaka razrešena seja**
+(`posvojiBrezLastnika`) — prijava in obnovitev žetona z diska enako. Okno, v
+katerem tak zapis nastane, se ne odpre le ob zagonu, ampak tudi, kadar branje
+ali brisanje iz varne shrambe spodleti; vezanje posvojitve zgolj na prijavo bi
+tak zapis pustilo nedosegljiv za vedno (`ADR-036`, popravki po drugem
+pregledu). Brez tega bi bila nadgradnja Mašinega telefona
 vrsta, ki ne odide nikoli, saj so vse obstoječe vrstice brez lastnika.
 
 Pogoj lastništva je povsod `user_id IS ?` in ne `=`: isti stavek tako
@@ -773,7 +777,8 @@ Izvedbene odločitve so v `ADR-036`.
 - **Lokalni zapis nosi lastnika.** `materials.user_id` in `attempts.user_id`
   v bazi telefona (migracija 3): naprava je skupna, identiteta pa ne.
   Prenaša, šteje in kaže se izključno lastnikovo; zapis brez lastnika
-  posvoji prva uspešna prijava. Podrobnosti so v razdelku o lokalni bazi.
+  posvoji vsaka razrešena seja — prijava in obnovitev žetona z diska.
+  Podrobnosti so v razdelku o lokalni bazi.
 - **`401` ni `failed`.** Zapis ostane `pending` in prenos počaka na
   prijavo; to je edina izjema od pravila `ADR-004` poleg `410`.
 

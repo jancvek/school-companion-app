@@ -190,12 +190,28 @@ vrnejo; **odjava ni brisanje in zaslon to pove**.
 
 ### `prebrano` iz ponudnika prijave odpade
 
-Polje je nastalo kot obramba pred ozkim oknom med zagonom aplikacije in
-koncem asinhronega branja žetona: posnetek, nastal v tem trenutku, dobi
+Polje je nastalo kot obramba pred oknom med zagonom aplikacije in koncem
+asinhronega branja žetona: posnetek, nastal v tem trenutku, dobi
 `user_id = NULL`. Ker ga ni uporabljal nihče, je bil to ostanek
 (merilo dokončanosti), zato je odstranjen.
 
-Okno ostaja in je sprejeto: tak posnetek posvoji prva prijava, kar je za
-otroka, ki je aplikacijo pravkar odprl, prav ta otrok. Zapiranje okna bi
-pomenilo kamero, ki čaka na disk, in to je natanko tisto, čemur se A
-izogiba.
+Okno ostaja in je sprejeto; zapiranje bi pomenilo kamero, ki čaka na disk, in
+to je natanko tisto, čemur se A izogiba.
+
+### Posvoji **vsaka razrešena seja**, ne samo prijava
+
+Prvi zapis tega ADR-ja je posvojitev vezal na prijavo in trdil, da tak zapis
+„posvoji prva prijava". Drugi pregled je pokazal, da to ne drži: sejo je
+mogoče dobiti tudi z **obnovitvijo z diska**, kjer prijave ni. Okno se poleg
+zagona odpre še dvakrat — kadar branje iz varne shrambe spodleti in kadar
+spodleti brisanje ob odjavi (oboje `src/sync/prijava.ts` izrecno požre) —,
+zapis iz njega pa bi ostal nedosegljiv **za vedno**: ne v Zgodovini, ne v
+vrsti za prenos, ne v števcih, slika na disku pa bi ostala.
+
+To je bilo v nasprotju s kriterijem `V3-R04` („ne izgubi nobene lokalno
+shranjene snovi"), zato pravilo odslej ni „prijava posvoji", ampak **„vsaka
+razrešena seja posvoji"** — prijava in obnovitev enako. Cena je ena poizvedba
+ob zagonu, ki nad bazo brez takih vrstic ne naredi ničesar.
+
+Posledica iz B ostaja nespremenjena: posnetek, nastal med odjavo enega in
+prijavo drugega, pripade drugemu.

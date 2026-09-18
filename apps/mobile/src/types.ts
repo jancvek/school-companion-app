@@ -27,7 +27,8 @@ export type Material = {
    * Kdo je bil prijavljen, ko je zapis nastal (V3-R04).
    *
    * `null` pomeni „ni bil prijavljen nihče" in ne „brez lastnika za vedno":
-   * prva uspešna prijava tak zapis posvoji (`docs/odlocitve/ADR-036` B).
+   * tak zapis posvoji vsaka razrešena seja — prijava in obnovitev žetona z
+   * diska (`docs/odlocitve/ADR-036` B).
    * Prenaša se izključno tisto, kar je last prijavljene uporabnice.
    */
   user_id: string | null;

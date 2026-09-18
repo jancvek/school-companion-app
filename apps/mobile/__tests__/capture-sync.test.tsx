@@ -216,9 +216,6 @@ it('posnetek dobi lastnika, ki je ta hip prijavljen (V3-R04)', async () => {
       </SyncProvider>
     </PrijavaProvider>,
   );
-  // Žeton z diska pride asinhrono; dokler ga ni, je zaslon neprijavljen.
-  await waitFor(() => expect(shranjevanje.saveCapture).not.toHaveBeenCalled());
-
   await fireEvent.press(screen.getByText('Fotografiraj'));
   await fireEvent.press(await screen.findByText('Shrani'));
 

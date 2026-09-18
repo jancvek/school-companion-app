@@ -150,7 +150,7 @@ describe('posvojitev zapisov brez lastnika', () => {
 
   afterEach(() => db.close());
 
-  it('prva prijava posvoji snov, ki je nastala pred njo', async () => {
+  it('posvojitev vzame snov, ki je nastala pred njo', async () => {
     // To je Mašin telefon po nadgradnji: vse obstoječe vrstice so brez
     // lastnika in bi brez posvojitve obtičale za vedno (`ADR-036` B).
     await insertMaterial(db, material({ id: 'stara', user_id: null }));

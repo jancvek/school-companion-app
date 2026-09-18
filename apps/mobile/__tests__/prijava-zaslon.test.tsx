@@ -147,6 +147,34 @@ describe('prijavni zaslon', () => {
     });
   });
 
+  it('obnovljena seja posvoji zapise, ki so nastali brez prijave', async () => {
+    // Posnetek, ki nastane, **dokler je aplikacija videti neprijavljena**
+    // (spodletelo branje ali spodletelo brisanje iz varne shrambe), bi brez
+    // tega ostal nedosegljiv za vedno: ne v Zgodovini, ne v vrsti za prenos,
+    // ne v števcih. Kriterij V3-R04 pravi, da se **nobena** lokalno
+    // shranjena snov ne izgubi — zato posvoji vsaka razrešena seja, ne
+    // samo prijava (`docs/odlocitve/ADR-036` B).
+    await insertMaterial(db, material({ id: 'v-oknu', user_id: null }));
+
+    // Zagon z žetonom, ki je že v shrambi: `prijavi()` se ne pokliče.
+    await izrisi(ustvariShrambo(SEJA), true);
+
+    await waitFor(async () => {
+      expect((await listPending(db, SEJA.userId)).map((m) => m.id)).toEqual(['v-oknu']);
+    });
+    expect(await listPending(db, null)).toEqual([]);
+  });
+
+  it('obnovljena seja ne posvoji zapisov druge uporabnice', async () => {
+    // Posvojitev je za zapise **brez** lastnika; tuj zapis ostane tuj.
+    await insertMaterial(db, material({ id: 'jakov', user_id: 'u-jaka' }));
+
+    await izrisi(ustvariShrambo(SEJA), true);
+
+    expect(await listPending(db, SEJA.userId)).toEqual([]);
+    expect((await listPending(db, 'u-jaka')).map((m) => m.id)).toEqual(['jakov']);
+  });
+
   it('napačno geslo pokaže sporočilo v slovenščini in ne shrani ničesar', async () => {
     odgovor.mockResolvedValue({
       ok: false,

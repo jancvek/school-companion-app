@@ -78,21 +78,26 @@ export function PrijavaProvider({
   // Žeton z diska ob zagonu. `preberiSejo` ne vrže nikoli, zato tu ni veje za
   // napako: nedosegljiva shramba pomeni neprijavljeno aplikacijo, ne pokvarjene.
   //
-  // Dokler branje ne konča, je aplikacija videti neprijavljena. Okno je ozko in
-  // sprejeto (`ADR-036`, popravki): posnetek, ki nastane v njem, ostane brez
-  // lastnika in ga posvoji prva prijava — pri otroku, ki je aplikacijo pravkar
-  // odprl, je to on sam. Čakanje bi pomenilo kamero, ki čaka na disk.
+  // Dokler branje ne konča, je aplikacija videti neprijavljena, in posnetek,
+  // ki nastane v tem oknu, ostane brez lastnika. Zato **posvoji tudi obnovitev
+  // seje**, ne samo prijava: okno se ne odpre le ob zagonu, ampak tudi, kadar
+  // branje ali brisanje iz varne shrambe spodleti — in tak zapis bi sicer
+  // ostal nedosegljiv za vedno, ker ga ne vidi ne Zgodovina ne vrsta za
+  // prenos (`docs/odlocitve/ADR-036` B).
   useEffect(() => {
     let velja = true;
     void (async () => {
       const najdena = await preberiSejo(shramba);
+      // Posvojitev teče pred `velja`: tudi če je zaslon medtem odšel, je
+      // vrstica že v bazi in pravi lastnik je znan. Klic je idempotenten.
+      if (najdena !== null) await posvojiBrezLastnika(db, najdena.userId);
       if (!velja) return;
       setSeja(najdena);
     })();
     return () => {
       velja = false;
     };
-  }, [shramba]);
+  }, [db, shramba]);
 
   const prijavi = useCallback(
     async (identifikator: string, geslo: string) => {
@@ -100,7 +105,8 @@ export function PrijavaProvider({
       await shraniSejo(nova, shramba);
       // Posvojitev je del prijave in ne prenosa: zapisi, ki so nastali, ko ni
       // bil prijavljen nihče — na Mašinem telefonu ob nadgradnji vsi —, bi
-      // sicer v vrsti obtičali za vedno (`ADR-036` B).
+      // sicer v vrsti obtičali za vedno (`ADR-036` B). Isto stori obnovitev
+      // seje z diska; pravilo je „vsaka razrešena seja posvoji", ne „prijava".
       await posvojiBrezLastnika(db, nova.userId);
       setSeja(nova);
     },
