@@ -107,9 +107,20 @@ export async function pobrisiKvizeRazen(
   db: MaterialsDatabase,
   ohrani: readonly string[],
   odprti: string | null = null,
+  lastnik: string | null = null,
 ): Promise<number> {
   const ohranjeni = new Set(ohrani);
   if (odprti !== null) ohranjeni.add(odprti);
+
+  // Kviz, na katerem visi neprenesen poskus **koga drugega**, ostane. Seznam s
+  // strežnika je seznam prijavljenega otroka, zato bi bil vsak kviz prejšnjega
+  // uporabnika videti kot preklican — in njegovi poskusi bi obviseli brez
+  // kviza, ki ga bo ta otrok ob vrnitvi spet reševal (`ADR-036` C).
+  const tuji = await db.getAllAsync<{ quiz_id: string }>(
+    'SELECT DISTINCT quiz_id FROM attempts WHERE uploaded_at IS NULL AND user_id IS NOT ?',
+    [lastnik],
+  );
+  for (const vrstica of tuji) ohranjeni.add(vrstica.quiz_id);
 
   const lokalni = await db.getAllAsync<{ id: string }>('SELECT id FROM quizzes', []);
   const zaBrisanje = lokalni.map((vrstica) => vrstica.id).filter((id) => !ohranjeni.has(id));
@@ -142,6 +153,14 @@ export async function pobrisiKvizeRazen(
  * odgovorjena, če ima lokalni poskus **ali** je bila odgovorjena že na
  * strežniku (`ADR-019` E). To je edino mesto, kjer to pravilo živi; števec
  * na domači strani in seznam kvizov ga bereta od tu.
+ *
+ * Stik na `attempts` **namenoma ne filtrira po lastniku**, čeprav ga
+ * `neprenesenePoskuse` (V3-R04). Postavka ima en sam poskus — `UNIQUE
+ * (quiz_item_id)` tu in „prvi zmaga" na strežniku (`ADR-019` E) —, zato bi
+ * filtriran stik drugemu otroku pokazal neodgovorjeno postavko, ki je ne bi
+ * mogel odgovoriti: njegov `INSERT OR IGNORE` bi tiho padel. V V3-R04 je kviz
+ * še last družine, ne otroka; ko ga `V3-R07` nasloví na otroka, se to vprašanje
+ * reši tam, ne s pogojem tukaj.
  */
 export async function cakajociKvizi(db: MaterialsDatabase): Promise<KvizNaSeznamu[]> {
   return db.getAllAsync<KvizNaSeznamu>(
@@ -201,8 +220,9 @@ export async function postavkeKviza(
 export async function zapisiPoskus(db: MaterialsDatabase, poskus: Poskus): Promise<void> {
   await db.runAsync(
     `INSERT OR IGNORE INTO attempts
-       (id, quiz_id, quiz_item_id, mode, rating, shown_at, revealed_at, answered_at, uploaded_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, quiz_id, quiz_item_id, mode, rating, shown_at, revealed_at, answered_at,
+        uploaded_at, user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       poskus.id,
       poskus.quiz_id,
@@ -213,19 +233,33 @@ export async function zapisiPoskus(db: MaterialsDatabase, poskus: Poskus): Promi
       poskus.revealed_at,
       poskus.answered_at,
       poskus.uploaded_at,
+      poskus.user_id,
     ],
   );
 }
 
-/** Poskusi, ki še niso na strežniku, po času ocene. */
-export async function neprenesenePoskuse(db: MaterialsDatabase): Promise<Poskus[]> {
+/**
+ * Poskusi **lastnika**, ki še niso na strežniku, po času ocene.
+ *
+ * Filter po lastniku tu ni previdnost, ampak popravek napake, ki bi sicer
+ * nastala: `pobrisiKvizeRazen` pobriše kvize, ki jih strežnik ne vrača več,
+ * neprenesenih poskusov pa namenoma nikoli (`ADR-012`). Po menjavi uporabnika
+ * je seznam s strežnika seznam **novega** otroka, zato kvizi prejšnjega gredo
+ * ven, njegovi neposlani poskusi pa ostanejo kot sirote — in brez tega pogoja
+ * bi jih naslednji obhod poslal pod žetonom novega otroka
+ * (`docs/odlocitve/ADR-036` C).
+ */
+export async function neprenesenePoskuse(
+  db: MaterialsDatabase,
+  lastnik: string | null,
+): Promise<Poskus[]> {
   return db.getAllAsync<Poskus>(
     `SELECT id, quiz_id, quiz_item_id, mode, rating, shown_at, revealed_at, answered_at,
-            uploaded_at
+            uploaded_at, user_id
        FROM attempts
-      WHERE uploaded_at IS NULL
+      WHERE uploaded_at IS NULL AND user_id IS ?
       ORDER BY answered_at ASC, id ASC`,
-    [],
+    [lastnik],
   );
 }
 

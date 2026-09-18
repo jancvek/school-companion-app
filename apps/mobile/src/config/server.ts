@@ -1,9 +1,13 @@
 /**
- * Nastavitve prenosa, kot so prišle v aplikacijo ob gradnji.
+ * Naslov strežnika, kot je prišel v aplikacijo ob gradnji.
  *
- * Odsotnost ni napaka: brez naslova ali ključa aplikacija deluje natanko tako
- * kot v V1-R01, samo prenašati ne zna (odločitev 11 v planu). Zato vrne
- * `null`, ne vrže izjeme.
+ * Odsotnost ni napaka: brez naslova aplikacija deluje natanko tako kot v
+ * V1-R01, samo prenašati ne zna (odločitev 11 v planu). Zato vrne `null`, ne
+ * vrže izjeme.
+ *
+ * **Ključa tu ni več** (V3-R04): en vgrajen `SERVER_API_KEY` za vse družine je
+ * odpadel z `docs/odlocitve/ADR-027`. Kdo je na napravi prijavljen, ni stvar
+ * gradnje, ampak žetona v varni shrambi (`src/sync/prijava.ts`).
  *
  * Naslov mora imeti shemo `https` (V3-R02, `docs/odlocitve/ADR-034` E).
  * Gradnja nešifriranega prometa ne dovoli več, zato bi naslov s shemo `http`
@@ -20,7 +24,6 @@ import Constants from 'expo-constants';
 export type ServerConfig = {
   /** Osnovni naslov strežnika, brez poševnice na koncu. */
   baseUrl: string;
-  apiKey: string;
 };
 
 /** Shema `https`, ne glede na velikost črk. */
@@ -41,10 +44,9 @@ export function preberiNastavitve(
   extra: Record<string, unknown> | undefined | null = Constants.expoConfig?.extra,
 ): ServerConfig | null {
   const baseUrl = niz(extra?.serverBaseUrl);
-  const apiKey = niz(extra?.apiKey);
 
-  if (baseUrl === null || apiKey === null) return null;
+  if (baseUrl === null) return null;
   if (!HTTPS.test(baseUrl)) return null;
 
-  return { baseUrl: baseUrl.replace(/\/+$/, ''), apiKey };
+  return { baseUrl: baseUrl.replace(/\/+$/, '') };
 }

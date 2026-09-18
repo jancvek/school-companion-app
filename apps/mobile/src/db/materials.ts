@@ -34,14 +34,24 @@ CREATE INDEX IF NOT EXISTS materials_subject_taken_at
 `;
 
 const MATERIAL_COLUMNS =
-  'id, subject, taken_at, file_uri, sync_status, sync_attempts, last_attempt_at, sync_error';
+  'id, subject, taken_at, file_uri, sync_status, sync_attempts, last_attempt_at, sync_error, user_id';
+
+/**
+ * Pogoj lastništva (V3-R04, `docs/odlocitve/ADR-036` B).
+ *
+ * `IS` in ne `=`: `user_id = NULL` v SQL ni nikoli res, `user_id IS NULL` pa
+ * je. Isti stavek zato deluje za prijavljeno uporabnico (njeni zapisi) in za
+ * neprijavljeno aplikacijo (zapisi, ki so nastali, ko ni bil prijavljen
+ * nihče) — brez druge poizvedbe in brez veje v vsaki funkciji.
+ */
+const LASTNIK = 'user_id IS ?';
 
 export async function insertMaterial(
   db: MaterialsDatabase,
   material: Material,
 ): Promise<void> {
   await db.runAsync(
-    `INSERT INTO materials (${MATERIAL_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO materials (${MATERIAL_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       material.id,
       material.subject,
@@ -51,8 +61,25 @@ export async function insertMaterial(
       material.sync_attempts,
       material.last_attempt_at,
       material.sync_error,
+      material.user_id,
     ],
   );
+}
+
+/**
+ * Zapisom brez lastnika pripiše uporabnika, ki se je pravkar prijavil.
+ *
+ * Kliče se ob **uspešni prijavi**, ne ob prenosu: brez tega bi posnetki, ki so
+ * nastali pred prvo prijavo — na Mašinem telefonu vsi obstoječi — ostali v
+ * vrsti za vedno. Zavestna posledica: posnetek, nastal med odjavo enega in
+ * prijavo drugega, pripade drugemu (`ADR-036` B).
+ */
+export async function posvojiBrezLastnika(
+  db: MaterialsDatabase,
+  userId: string,
+): Promise<void> {
+  await db.runAsync('UPDATE materials SET user_id = ? WHERE user_id IS NULL', [userId]);
+  await db.runAsync('UPDATE attempts SET user_id = ? WHERE user_id IS NULL', [userId]);
 }
 
 /** En zapis po `id`, ali `null`, če ga ni. */
@@ -78,14 +105,23 @@ export async function deleteById(db: MaterialsDatabase, id: string): Promise<voi
   await db.runAsync(`DELETE FROM materials WHERE id = ?`, [id]);
 }
 
-/** Posnetki enega predmeta, od najnovejšega navzdol. */
+/**
+ * Posnetki enega predmeta, od najnovejšega navzdol — **samo lastnikovi**.
+ *
+ * Tuj zapis se ne skrije samo iz prenosa, ampak tudi iz Zgodovine: na
+ * skupnem telefonu zvezek ene sestre ni stvar druge, in zapis, ki bi ga
+ * Zgodovina kazala, prenos pa nikoli ne poslal, bi bil videti kot okvara.
+ */
 export async function listBySubject(
   db: MaterialsDatabase,
   subject: string,
+  lastnik: string | null,
 ): Promise<Material[]> {
   return db.getAllAsync<Material>(
-    `SELECT ${MATERIAL_COLUMNS} FROM materials WHERE subject = ? ORDER BY taken_at DESC`,
-    [subject],
+    `SELECT ${MATERIAL_COLUMNS} FROM materials
+      WHERE subject = ? AND ${LASTNIK}
+      ORDER BY taken_at DESC`,
+    [subject, lastnik],
   );
 }
 
@@ -96,20 +132,30 @@ export async function listBySubject(
  * najnovejšega, čakalno vrsto pa oddelaš od najstarejšega, sicer bi ob dolgi
  * vrsti najstarejši posnetek čakal najdlje.
  */
-export async function listPending(db: MaterialsDatabase): Promise<Material[]> {
+export async function listPending(
+  db: MaterialsDatabase,
+  lastnik: string | null,
+): Promise<Material[]> {
   return db.getAllAsync<Material>(
-    `SELECT ${MATERIAL_COLUMNS} FROM materials WHERE sync_status = 'pending' ORDER BY taken_at ASC`,
-    [],
+    `SELECT ${MATERIAL_COLUMNS} FROM materials
+      WHERE sync_status = 'pending' AND ${LASTNIK}
+      ORDER BY taken_at ASC`,
+    [lastnik],
   );
 }
 
 type StevecVrstica = { sync_status: SyncStatus; koliko: number };
 
-/** Koliko zapisov je v katerem stanju prenosa. */
-export async function countByStatus(db: MaterialsDatabase): Promise<SyncPovzetek> {
+/** Koliko **lastnikovih** zapisov je v katerem stanju prenosa. */
+export async function countByStatus(
+  db: MaterialsDatabase,
+  lastnik: string | null,
+): Promise<SyncPovzetek> {
   const vrstice = await db.getAllAsync<StevecVrstica>(
-    'SELECT sync_status, COUNT(*) AS koliko FROM materials GROUP BY sync_status',
-    [],
+    `SELECT sync_status, COUNT(*) AS koliko FROM materials
+      WHERE ${LASTNIK}
+      GROUP BY sync_status`,
+    [lastnik],
   );
 
   const povzetek: SyncPovzetek = { pending: 0, synced: 0, failed: 0 };
@@ -173,11 +219,14 @@ export async function markFailed(
  * če bi se dogajalo samo od sebe, bi bila razlika med `pending` in `failed`
  * brez pomena (ADR-004).
  */
-export async function retryFailed(db: MaterialsDatabase): Promise<void> {
+export async function retryFailed(
+  db: MaterialsDatabase,
+  lastnik: string | null,
+): Promise<void> {
   await db.runAsync(
     `UPDATE materials
         SET sync_status = 'pending', sync_error = NULL, sync_attempts = 0
-      WHERE sync_status = 'failed'`,
-    [],
+      WHERE sync_status = 'failed' AND ${LASTNIK}`,
+    [lastnik],
   );
 }

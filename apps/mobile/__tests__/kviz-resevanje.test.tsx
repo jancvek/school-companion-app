@@ -107,7 +107,7 @@ describe('reševanje kviza', () => {
     expect(await screen.findByText('Vprašanje 2?')).toBeTruthy();
     expect(screen.getByTestId('napredek').props.children).toBe('Vprašanje 2 od 3');
     expect(screen.queryByTestId('odgovor')).toBeNull();
-    const [zapisan] = await neprenesenePoskuse(db);
+    const [zapisan] = await neprenesenePoskuse(db, null);
     expect(zapisan).toEqual(
       expect.objectContaining({
         id: 'uuid-1',
@@ -131,8 +131,8 @@ describe('reševanje kviza', () => {
     jest.setSystemTime(new Date('2026-09-10T15:00:09.000Z'));
     await fireEvent.press(screen.getByText('Lahko'));
 
-    await waitFor(async () => expect(await neprenesenePoskuse(db)).toHaveLength(1));
-    const [zapisan] = await neprenesenePoskuse(db);
+    await waitFor(async () => expect(await neprenesenePoskuse(db, null)).toHaveLength(1));
+    const [zapisan] = await neprenesenePoskuse(db, null);
     expect(zapisan.shown_at).toBe('2026-09-10T15:00:00.000Z');
     expect(zapisan.revealed_at).toBe('2026-09-10T15:00:07.000Z');
     expect(zapisan.answered_at).toBe('2026-09-10T15:00:09.000Z');

@@ -12,8 +12,12 @@ import type { Izid } from '@/sync/upload';
 import type { Material } from '@/types';
 
 import { createMigratedDatabase } from './test-database';
+import type { Seja } from '@/sync/prijava';
 
-const NASTAVITVE = { baseUrl: 'http://sto.ts.net:8000', apiKey: 'kljuc' };
+/** Seja, s katero se v testih izkaže telefon (V3-R04). */
+const SEJA: Seja = { zeton: 'zeton-za-teste', userId: 'maša', ime: 'Maša' };
+
+const NASTAVITVE = { baseUrl: 'https://school-buddy.duckdns.org' };
 
 function material(id: string, overrides: Partial<Material> = {}): Material {
   return {
@@ -25,6 +29,7 @@ function material(id: string, overrides: Partial<Material> = {}): Material {
     sync_attempts: 0,
     last_attempt_at: null,
     sync_error: null,
+  user_id: null,
     ...overrides,
   };
 }
@@ -177,7 +182,7 @@ describe('prenos, ki naleti na arhiviran zapis', () => {
     await insertMaterial(db, material('a', { sync_status: 'pending' }));
     const arhiviran: Izid = { vrsta: 'arhiviran' };
 
-    const povzetek = await prenesiCakajoce(db, async () => arhiviran, async (baza, zapis) =>
+    const povzetek = await prenesiCakajoce(db, async () => arhiviran, null, async (baza, zapis) =>
       pobrisiLokalno(baza, zapis, () => {}),
     );
 
@@ -196,10 +201,10 @@ describe('odjemalec za arhiv', () => {
       return { ok: true, status: 200, json: async () => ({ ids: ['a', 'b'] }) };
     };
 
-    const ids = await ustvariOdjemalca(NASTAVITVE, zahteva).preberiSeznam();
+    const ids = await ustvariOdjemalca(NASTAVITVE, SEJA, zahteva).preberiSeznam();
 
-    expect(videnUrl).toBe('http://sto.ts.net:8000/materials/pending-deletion');
-    expect(videneGlave['X-API-Key']).toBe('kljuc');
+    expect(videnUrl).toBe('https://school-buddy.duckdns.org/materials/pending-deletion');
+    expect(videneGlave['Authorization']).toBe(`Bearer ${SEJA.zeton}`);
     expect(ids).toEqual(['a', 'b']);
   });
 
@@ -213,7 +218,7 @@ describe('odjemalec za arhiv', () => {
     });
 
     await expect(
-      ustvariOdjemalca(NASTAVITVE, zahteva).preberiSeznam(),
+      ustvariOdjemalca(NASTAVITVE, SEJA, zahteva).preberiSeznam(),
     ).rejects.toThrow(/401/);
   });
 
@@ -224,7 +229,7 @@ describe('odjemalec za arhiv', () => {
       json: async () => ({ ids: ['a', 7, null] }),
     });
 
-    expect(await ustvariOdjemalca(NASTAVITVE, zahteva).preberiSeznam()).toEqual(['a']);
+    expect(await ustvariOdjemalca(NASTAVITVE, SEJA, zahteva).preberiSeznam()).toEqual(['a']);
   });
 
   it('potrditev pošlje id-je v telesu', async () => {
@@ -234,7 +239,7 @@ describe('odjemalec za arhiv', () => {
       return { ok: true, status: 200, json: async () => ({ confirmed: 1 }) };
     };
 
-    await ustvariOdjemalca(NASTAVITVE, zahteva).potrdi(['a']);
+    await ustvariOdjemalca(NASTAVITVE, SEJA, zahteva).potrdi(['a']);
 
     expect(JSON.parse(telo)).toEqual({ ids: ['a'] });
   });
@@ -248,7 +253,7 @@ describe('odjemalec za arhiv', () => {
       });
 
     await expect(
-      ustvariOdjemalca(NASTAVITVE, zahteva, 10).preberiSeznam(),
+      ustvariOdjemalca(NASTAVITVE, SEJA, zahteva, 10).preberiSeznam(),
     ).rejects.toThrow();
   });
 });

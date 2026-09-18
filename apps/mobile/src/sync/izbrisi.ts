@@ -18,6 +18,7 @@ import { removePhoto } from '../photos/store';
 import type { ServerConfig } from '../config/server';
 import type { Material } from '../types';
 import { poslji, type Zahteva } from './http';
+import { glaveSeje, type Seja } from './prijava';
 
 // `Zahteva` je do V2-R02 živela tu; obstoječi uvozniki jo dobijo od tu naprej.
 export type { Zahteva } from './http';
@@ -147,10 +148,11 @@ function seznamNizov(telo: unknown): string[] {
  */
 export function ustvariOdjemalca(
   nastavitve: ServerConfig,
+  seja: Seja,
   zahteva: Zahteva = fetch as unknown as Zahteva,
   casovnaOmejitevMs: number = CASOVNA_OMEJITEV_MS,
 ): Odjemalec {
-  const glave = { 'X-API-Key': nastavitve.apiKey, 'Content-Type': 'application/json' };
+  const glave = { ...glaveSeje(seja), 'Content-Type': 'application/json' };
 
   return {
     async preberiSeznam() {

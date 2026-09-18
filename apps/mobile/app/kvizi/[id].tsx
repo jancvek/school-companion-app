@@ -9,6 +9,7 @@ import { OCENE } from '@/constants/ocene';
 import { najdiKviz, postavkeKviza, zapisiPoskus } from '@/db/kvizi';
 import { asMaterialsDatabase } from '@/db/open';
 import { useKvizi } from '@/sync/use-kvizi';
+import { usePrijava } from '@/sync/use-prijava';
 import type { Ocena, PostavkaKviza } from '@/types';
 import { theme } from '@/ui/theme';
 
@@ -33,6 +34,10 @@ export default function ResevanjeKvizaScreen() {
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { odpri, zapri, osvezi, sprozi } = useKvizi();
+  const { seja } = usePrijava();
+  // Glej `slikaj/[subject].tsx`: optional chaining v odvisnostih ne gre skozi
+  // React Compiler.
+  const lastnik = seja?.userId ?? null;
 
   const [kviz, setKviz] = useState<Nalozeno | null>(null);
   const [niga, setNiga] = useState(false);
@@ -111,6 +116,9 @@ export default function ResevanjeKvizaScreen() {
           revealed_at: razkritoOb.current ?? zdaj,
           answered_at: zdaj,
           uploaded_at: null,
+          // Čigav je odgovor (V3-R04). Brez prijave `null`; tak poskus posvoji
+          // prva prijava, tuj pa se ne pošlje (`docs/odlocitve/ADR-036` B).
+          user_id: lastnik,
         });
       } catch {
         // Ocena ni zapisana, zato vprašanje ostane pred njo in odgovor
@@ -132,7 +140,7 @@ export default function ResevanjeKvizaScreen() {
       // če je telefon v domačem omrežju.
       if (postavke.every((postavka) => postavka.odgovorjena)) sprozi();
     },
-    [database, kviz, osvezi, sprozi, trenutna],
+    [database, kviz, lastnik, osvezi, sprozi, trenutna],
   );
 
   if (!id || niga) {

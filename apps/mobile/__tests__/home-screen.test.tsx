@@ -7,10 +7,13 @@ import { preberiNastavitve } from '@/config/server';
 import { SUBJECTS } from '@/constants/subjects';
 import { insertMaterial } from '@/db/materials';
 import { migriraj } from '@/db/migrations';
+import type { Seja } from '@/sync/prijava';
+import { PrijavaProvider } from '@/sync/use-prijava';
 import { SyncProvider } from '@/sync/use-sync';
 import type { Material } from '@/types';
 import { theme } from '@/ui/theme';
 
+import { SEJA, ustvariShrambo } from './shramba';
 import { createTestDatabase } from './test-database';
 import { odmikSpodaj, TEST_INSETS, type RouterMockState } from './screen-mocks';
 
@@ -30,6 +33,8 @@ function material(overrides: Partial<Material> = {}): Material {
     sync_attempts: 0,
     last_attempt_at: null,
     sync_error: null,
+  // Privzeto lastnik seje: tako zapis nastane, ko je kdo prijavljen.
+  user_id: SEJA.userId,
     ...overrides,
   };
 }
@@ -47,7 +52,9 @@ describe('domača stran', () => {
     expect(screen.getByText('Slikaj snov')).toBeTruthy();
     expect(screen.getByText('Zgodovina')).toBeTruthy();
     expect(screen.getByText('Kvizi')).toBeTruthy();
-    expect(screen.getAllByRole('button')).toHaveLength(3);
+    // Četrti je prijava (V3-R04): vnos, ne vrata (ADR-036 A).
+    expect(screen.getByTestId('gumb-prijava')).toBeTruthy();
+    expect(screen.getAllByRole('button')).toHaveLength(4);
   });
 
   it('„Kvizi" pelje na seznam kvizov', async () => {
@@ -135,15 +142,19 @@ describe('stanje prenosa na domači strani', () => {
     db.close();
   });
 
-  /** Domača stran znotraj ponudnika, z bazo in nastavitvami iz testa. */
-  async function izrisi(nastavljen: boolean) {
-    const nastavitve = nastavljen
-      ? { baseUrl: 'http://sto.ts.net:8000', apiKey: 'k' }
-      : null;
+  /** Domača stran znotraj obeh ponudnikov, z bazo in nastavitvami iz testa. */
+  async function izrisi(nastavljen: boolean, seja: Seja | null = SEJA) {
+    const nastavitve = nastavljen ? { baseUrl: 'https://school-buddy.duckdns.org' } : null;
     return render(
-      <SyncProvider db={db} nastavitve={nastavitve} prenesiEno={async () => ({ vrsta: 'pending', razlog: 'test' })}>
-        <HomeScreen />
-      </SyncProvider>,
+      <PrijavaProvider db={db} nastavitve={nastavitve} shramba={ustvariShrambo(seja)}>
+        <SyncProvider
+          db={db}
+          nastavitve={nastavitve}
+          prenesiEno={async () => ({ vrsta: 'pending', razlog: 'test' })}
+        >
+          <HomeScreen />
+        </SyncProvider>
+      </PrijavaProvider>,
     );
   }
 
@@ -200,16 +211,62 @@ describe('stanje prenosa na domači strani', () => {
     // Gradnja nešifriranega prometa ne dovoli več; brez tega bi posnetki večno
     // čakali na prenos in stran bi kazala le števec (`ADR-034` E).
     await insertMaterial(db, material({ id: 'a' }));
-    const nastavitve = preberiNastavitve({ serverBaseUrl: 'http://sto.ts.net:8000', apiKey: 'k' });
+    const nastavitve = preberiNastavitve({ serverBaseUrl: 'http://sto.ts.net:8000' });
 
     await render(
-      <SyncProvider db={db} nastavitve={nastavitve} prenesiEno={async () => ({ vrsta: 'pending', razlog: 'test' })}>
-        <HomeScreen />
-      </SyncProvider>,
+      <PrijavaProvider db={db} nastavitve={nastavitve} shramba={ustvariShrambo(SEJA)}>
+        <SyncProvider
+          db={db}
+          nastavitve={nastavitve}
+          prenesiEno={async () => ({ vrsta: 'pending', razlog: 'test' })}
+        >
+          <HomeScreen />
+        </SyncProvider>
+      </PrijavaProvider>,
     );
 
     expect(await screen.findByTestId('prenos-ni-nastavljen')).toBeTruthy();
     expect(screen.queryByTestId('stevec-cakajocih')).toBeNull();
+  });
+
+
+  it('brez prijave pove, da posnetki čakajo, in števca ne pokaže', async () => {
+    // Prijava ni pogoj za slikanje; blokiran je izključno prenos (ADR-036 A).
+    await insertMaterial(db, material({ id: 'a' }));
+
+    await izrisi(true, null);
+
+    expect(await screen.findByTestId('ni-prijave')).toBeTruthy();
+    expect(screen.queryByTestId('števec-čakajocih')).toBeNull();
+  });
+
+  it('brez prijave domača stran še vedno dela', async () => {
+    await izrisi(true, null);
+
+    await fireEvent.press(screen.getByText('Slikaj snov'));
+
+    expect(usmerjevalnik.stanje.router.push).toHaveBeenCalledWith('/slikaj');
+  });
+
+  it('vnos za prijavo pove, kdo je prijavljen, in pelje na prijavo', async () => {
+    await izrisi(true);
+
+    expect(await screen.findByText('Prijavljena: Maša')).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId('gumb-prijava'));
+
+    expect(usmerjevalnik.stanje.router.push).toHaveBeenCalledWith('/prijava');
+  });
+
+  it('števec ne šteje zapisov druge uporabnice', async () => {
+    // Skupni telefon: Mašin zapis in Jakov. Stran kaže samo Mašinega, ker se
+    // samo ta prenese (ADR-036 B).
+    await insertMaterial(db, material({ id: 'moj', user_id: SEJA.userId }));
+    await insertMaterial(db, material({ id: 'tuj', user_id: 'u-jaka' }));
+
+    await izrisi(true);
+
+    expect(await screen.findByText('Za prenos: 1')).toBeTruthy();
   });
 
   it('brez nastavljenega prenosa domača stran še vedno dela', async () => {

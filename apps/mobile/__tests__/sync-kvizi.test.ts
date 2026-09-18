@@ -19,8 +19,12 @@ import type { KvizStreznika, Poskus } from '@/types';
 
 import { kvizStreznika, poskus } from './kvizi-podatki';
 import { createMigratedDatabase } from './test-database';
+import type { Seja } from '@/sync/prijava';
 
-const NASTAVITVE = { baseUrl: 'http://sto.ts.net:8000', apiKey: 'kljuc' };
+/** Seja, s katero se v testih izkaže telefon (V3-R04). */
+const SEJA: Seja = { zeton: 'zeton-za-teste', userId: 'maša', ime: 'Maša' };
+
+const NASTAVITVE = { baseUrl: 'https://school-buddy.duckdns.org' };
 
 /** Odjemalec, ki vrne dani seznam in si zapomni vrstni red klicev. */
 function odjemalec(kvizi: KvizStreznika[] = []): OdjemalecKvizov & {
@@ -55,7 +59,7 @@ describe('uskladiKvize', () => {
   afterEach(() => db.close());
 
   it('shrani nov kviz s seznama', async () => {
-    const izid = await uskladiKvize(db, odjemalec([kvizStreznika('k1', 3)]));
+    const izid = await uskladiKvize(db, odjemalec([kvizStreznika('k1', 3)]), null);
 
     expect(izid).toEqual({ poslani: 0, naStrezniku: 1, pobrisani: 0 });
     expect((await cakajociKvizi(db)).map((k) => k.id)).toEqual(['k1']);
@@ -64,8 +68,8 @@ describe('uskladiKvize', () => {
   it('ponovno usklajevanje ne podvoji', async () => {
     const streznik = odjemalec([kvizStreznika('k1', 3)]);
 
-    await uskladiKvize(db, streznik);
-    await uskladiKvize(db, streznik);
+    await uskladiKvize(db, streznik, null, null);
+    await uskladiKvize(db, streznik, null, null);
 
     expect(await postavkeKviza(db, 'k1')).toHaveLength(3);
   });
@@ -77,7 +81,7 @@ describe('uskladiKvize', () => {
     await zapisiPoskus(db, poskus('k1', 1));
     const streznik = odjemalec([]);
 
-    await uskladiKvize(db, streznik);
+    await uskladiKvize(db, streznik, null, null);
 
     expect(streznik.klici).toEqual(['poskusi', 'seznam']);
   });
@@ -85,7 +89,7 @@ describe('uskladiKvize', () => {
   it('brez neprenesenih poskusov ne pošlje praznega paketa', async () => {
     const streznik = odjemalec([]);
 
-    await uskladiKvize(db, streznik);
+    await uskladiKvize(db, streznik, null, null);
 
     expect(streznik.posljiPoskuse).not.toHaveBeenCalled();
   });
@@ -95,17 +99,17 @@ describe('uskladiKvize', () => {
     await zapisiPoskus(db, poskus('k1', 1));
     const streznik = odjemalec([kvizStreznika('k1', 2)]);
 
-    await uskladiKvize(db, streznik);
-    await uskladiKvize(db, streznik);
+    await uskladiKvize(db, streznik, null, null);
+    await uskladiKvize(db, streznik, null, null);
 
     expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(1);
-    expect(await neprenesenePoskuse(db)).toEqual([]);
+    expect(await neprenesenePoskuse(db, null)).toEqual([]);
   });
 
   it('kviz, ki ga strežnik ne vrača več, pobriše', async () => {
     await shraniKviz(db, kvizStreznika('k1', 1));
 
-    const izid = await uskladiKvize(db, odjemalec([]));
+    const izid = await uskladiKvize(db, odjemalec([]), null);
 
     expect(izid.pobrisani).toBe(1);
     expect(await cakajociKvizi(db)).toEqual([]);
@@ -114,7 +118,7 @@ describe('uskladiKvize', () => {
   it('odprtega kviza ne pobriše', async () => {
     await shraniKviz(db, kvizStreznika('k1', 2));
 
-    await uskladiKvize(db, odjemalec([]), 'k1');
+    await uskladiKvize(db, odjemalec([]), null, 'k1');
 
     expect(await postavkeKviza(db, 'k1')).toHaveLength(2);
   });
@@ -125,11 +129,11 @@ describe('uskladiKvize', () => {
     await zapisiPoskus(db, poskus('k1', 1));
     const nedosegljiv = odjemalec([]);
     nedosegljiv.posljiPoskuse.mockRejectedValueOnce(new Error('omrežje'));
-    await expect(uskladiKvize(db, nedosegljiv)).rejects.toThrow('omrežje');
+    await expect(uskladiKvize(db, nedosegljiv, null, null)).rejects.toThrow('omrežje');
 
     // Naslednji obhod: poskus gre gor, kviz gre s telefona.
     const streznik = odjemalec([]);
-    await uskladiKvize(db, streznik);
+    await uskladiKvize(db, streznik, null, null);
 
     expect(streznik.poslani).toEqual([[expect.objectContaining({ id: 'k1-a1' })]]);
     expect(await postavkeKviza(db, 'k1')).toEqual([]);
@@ -147,10 +151,10 @@ describe('uskladiKvize', () => {
     const streznik = odjemalec([]);
     streznik.posljiPoskuse.mockRejectedValueOnce(new Error('Strežnik je vrnil 500.'));
 
-    await expect(uskladiKvize(db, streznik)).rejects.toThrow('500');
+    await expect(uskladiKvize(db, streznik, null, null)).rejects.toThrow('500');
 
     expect(streznik.preberiKvize).not.toHaveBeenCalled();
-    expect((await neprenesenePoskuse(db)).map((p) => p.id)).toEqual(['k1-a1']);
+    expect((await neprenesenePoskuse(db, null)).map((p) => p.id)).toEqual(['k1-a1']);
     expect(await postavkeKviza(db, 'k1')).toHaveLength(2);
   });
 
@@ -160,10 +164,10 @@ describe('uskladiKvize', () => {
     const streznik = odjemalec([]);
     streznik.preberiKvize.mockRejectedValueOnce(new Error('omrežje'));
 
-    await expect(uskladiKvize(db, streznik)).rejects.toThrow('omrežje');
+    await expect(uskladiKvize(db, streznik, null, null)).rejects.toThrow('omrežje');
 
     // Poskus je prenesen, a še na telefonu — postavka je odgovorjena.
-    expect(await neprenesenePoskuse(db)).toEqual([]);
+    expect(await neprenesenePoskuse(db, null)).toEqual([]);
     expect(await cakajociKvizi(db)).toEqual([]);
   });
 
@@ -176,7 +180,7 @@ describe('uskladiKvize', () => {
       const streznik = odjemalec([kvizStreznika('k1', 2), kvizStreznika('nov', 1)]);
       streznik.posljiPoskuse.mockRejectedValue(new PaketZavrnjen(422));
 
-      const izid = await uskladiKvize(db, streznik);
+      const izid = await uskladiKvize(db, streznik, null, null);
 
       expect(streznik.preberiKvize).toHaveBeenCalledTimes(1);
       expect((await cakajociKvizi(db)).map((k) => k.id)).toContain('nov');
@@ -189,12 +193,12 @@ describe('uskladiKvize', () => {
       const streznik = odjemalec([]);
       streznik.posljiPoskuse.mockRejectedValue(new PaketZavrnjen(422));
 
-      await uskladiKvize(db, streznik);
-      await uskladiKvize(db, streznik);
+      await uskladiKvize(db, streznik, null, null);
+      await uskladiKvize(db, streznik, null, null);
 
       // Kviza ni več na seznamu, poskus pa ostane in se pošilja znova.
       expect(await postavkeKviza(db, 'k1')).toEqual([]);
-      expect((await neprenesenePoskuse(db)).map((p) => p.id)).toEqual(['k1-a1']);
+      expect((await neprenesenePoskuse(db, null)).map((p) => p.id)).toEqual(['k1-a1']);
       expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(2);
     });
 
@@ -212,10 +216,10 @@ describe('uskladiKvize', () => {
         if (paket.some((p) => p.quiz_id === 'slab')) throw new PaketZavrnjen(422);
       });
 
-      const izid = await uskladiKvize(db, streznik);
+      const izid = await uskladiKvize(db, streznik, null, null);
 
       expect(izid.poslani).toBe(3);
-      expect((await neprenesenePoskuse(db)).map((p) => p.id)).toEqual(['slab-a1']);
+      expect((await neprenesenePoskuse(db, null)).map((p) => p.id)).toEqual(['slab-a1']);
       // En paket s štirimi, nato vsak posebej.
       expect(streznik.poslani.map((p) => p.length)).toEqual([4, 1, 1, 1, 1]);
       expect(streznik.preberiKvize).toHaveBeenCalledTimes(1);
@@ -231,12 +235,12 @@ describe('uskladiKvize', () => {
       const streznik = odjemalec([kvizStreznika('k1', postavk)]);
       streznik.posljiPoskuse.mockRejectedValueOnce(new PaketZavrnjen(422));
 
-      const izid = await uskladiKvize(db, streznik);
+      const izid = await uskladiKvize(db, streznik, null, null);
 
       // Zavrnjen paket, 500 posamičnih, drugi paket.
       expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(NAJVEC_V_PAKETU + 2);
       expect(izid.poslani).toBe(postavk);
-      expect(await neprenesenePoskuse(db)).toEqual([]);
+      expect(await neprenesenePoskuse(db, null)).toEqual([]);
     });
 
     it.each([401, 403, 404])(
@@ -249,12 +253,12 @@ describe('uskladiKvize', () => {
         const streznik = odjemalec([kvizStreznika('k1', 3)]);
         streznik.posljiPoskuse.mockRejectedValue(new PaketZavrnjen(status));
 
-        const izid = await uskladiKvize(db, streznik);
+        const izid = await uskladiKvize(db, streznik, null, null);
 
         expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(1);
         expect(streznik.preberiKvize).toHaveBeenCalledTimes(1);
         expect(izid.poslani).toBe(0);
-        expect(await neprenesenePoskuse(db)).toHaveLength(3);
+        expect(await neprenesenePoskuse(db, null)).toHaveLength(3);
       },
     );
 
@@ -266,11 +270,11 @@ describe('uskladiKvize', () => {
         .mockRejectedValueOnce(new PaketZavrnjen(422))
         .mockRejectedValueOnce(new PaketZavrnjen(401));
 
-      await uskladiKvize(db, streznik);
+      await uskladiKvize(db, streznik, null, null);
 
       // Paket in prvi posamični; ostala dva se ne pošljeta.
       expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(2);
-      expect(await neprenesenePoskuse(db)).toHaveLength(3);
+      expect(await neprenesenePoskuse(db, null)).toHaveLength(3);
       expect(streznik.preberiKvize).toHaveBeenCalledTimes(1);
     });
 
@@ -285,11 +289,11 @@ describe('uskladiKvize', () => {
         .mockResolvedValueOnce(undefined)
         .mockRejectedValueOnce(new PaketZavrnjen(401));
 
-      const izid = await uskladiKvize(db, streznik);
+      const izid = await uskladiKvize(db, streznik, null, null);
 
       expect(izid.poslani).toBe(1);
       expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(3);
-      expect((await neprenesenePoskuse(db)).map((p) => p.id)).toEqual(['k1-a2', 'k1-a3']);
+      expect((await neprenesenePoskuse(db, null)).map((p) => p.id)).toEqual(['k1-a2', 'k1-a3']);
     });
 
     describe('pomnjenje zavrnjenih za čas zagona', () => {
@@ -307,21 +311,21 @@ describe('uskladiKvize', () => {
         });
         const zagon = new Set<string>();
 
-        await uskladiKvize(db, streznik, null, zagon);
+        await uskladiKvize(db, streznik, null, null, zagon);
         // Paket s tremi in trije posamični; dobri gre gor.
         expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(4);
         expect([...zagon].sort()).toEqual(['slab-a1', 'slab-a2']);
 
-        await uskladiKvize(db, streznik, null, zagon);
-        await uskladiKvize(db, streznik, null, zagon);
+        await uskladiKvize(db, streznik, null, null, zagon);
+        await uskladiKvize(db, streznik, null, null, zagon);
 
         // Obhoda brez novih poskusov ne pošljeta ničesar, seznam pa bereta.
         expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(4);
         expect(streznik.preberiKvize).toHaveBeenCalledTimes(3);
-        expect((await neprenesenePoskuse(db)).map((p) => p.id)).toEqual(['slab-a1', 'slab-a2']);
+        expect((await neprenesenePoskuse(db, null)).map((p) => p.id)).toEqual(['slab-a1', 'slab-a2']);
 
         // Nov zagon: prazna množica, zavrnjena se poskusita znova.
-        await uskladiKvize(db, streznik, null, new Set());
+        await uskladiKvize(db, streznik, null, null, new Set());
         expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(7);
       });
 
@@ -334,11 +338,11 @@ describe('uskladiKvize', () => {
           if (paket.some((p) => p.quiz_id === 'slab')) throw new PaketZavrnjen(422);
         });
         const zagon = new Set<string>();
-        await uskladiKvize(db, streznik, null, zagon);
+        await uskladiKvize(db, streznik, null, null, zagon);
 
         await shraniKviz(db, kvizStreznika('k2', 1));
         await zapisiPoskus(db, poskus('k2', 1));
-        const izid = await uskladiKvize(db, streznik, null, zagon);
+        const izid = await uskladiKvize(db, streznik, null, null, zagon);
 
         expect(izid.poslani).toBe(1);
         expect(streznik.poslani.at(-1)?.map((p) => p.id)).toEqual(['k2-a1']);
@@ -357,10 +361,10 @@ describe('uskladiKvize', () => {
           .mockRejectedValueOnce(new PaketZavrnjen(401));
         const zagon = new Set<string>();
 
-        await uskladiKvize(db, streznik, null, zagon);
+        await uskladiKvize(db, streznik, null, null, zagon);
 
         expect(zagon.size).toBe(0);
-        expect(await neprenesenePoskuse(db)).toHaveLength(2);
+        expect(await neprenesenePoskuse(db, null)).toHaveLength(2);
       });
 
       it('enojni paket, zavrnjen s 422, se zapomni', async () => {
@@ -370,11 +374,11 @@ describe('uskladiKvize', () => {
         streznik.posljiPoskuse.mockRejectedValue(new PaketZavrnjen(422));
         const zagon = new Set<string>();
 
-        await uskladiKvize(db, streznik, null, zagon);
-        await uskladiKvize(db, streznik, null, zagon);
+        await uskladiKvize(db, streznik, null, null, zagon);
+        await uskladiKvize(db, streznik, null, null, zagon);
 
         expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(1);
-        expect(await neprenesenePoskuse(db)).toHaveLength(1);
+        expect(await neprenesenePoskuse(db, null)).toHaveLength(1);
       });
 
       it('zavrnitev, ki ni 422, se ne zapomni', async () => {
@@ -387,8 +391,8 @@ describe('uskladiKvize', () => {
         streznik.posljiPoskuse.mockRejectedValue(new PaketZavrnjen(401));
         const zagon = new Set<string>();
 
-        await uskladiKvize(db, streznik, null, zagon);
-        await uskladiKvize(db, streznik, null, zagon);
+        await uskladiKvize(db, streznik, null, null, zagon);
+        await uskladiKvize(db, streznik, null, null, zagon);
 
         expect(zagon.size).toBe(0);
         expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(2);
@@ -401,7 +405,7 @@ describe('uskladiKvize', () => {
       const streznik = odjemalec([]);
       streznik.posljiPoskuse.mockRejectedValue(new PaketZavrnjen(422));
 
-      await uskladiKvize(db, streznik);
+      await uskladiKvize(db, streznik, null, null);
 
       expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(1);
     });
@@ -415,9 +419,9 @@ describe('uskladiKvize', () => {
         .mockResolvedValueOnce(undefined)
         .mockRejectedValueOnce(new Error('omrežje'));
 
-      await expect(uskladiKvize(db, streznik)).rejects.toThrow('omrežje');
+      await expect(uskladiKvize(db, streznik, null, null)).rejects.toThrow('omrežje');
 
-      expect((await neprenesenePoskuse(db)).map((p) => p.id)).toEqual(['k1-a2', 'k1-a3']);
+      expect((await neprenesenePoskuse(db, null)).map((p) => p.id)).toEqual(['k1-a2', 'k1-a3']);
       expect(streznik.preberiKvize).not.toHaveBeenCalled();
       expect(await postavkeKviza(db, 'k1')).toHaveLength(3);
     });
@@ -437,7 +441,7 @@ describe('uskladiKvize', () => {
         json: async () => ({}),
       }));
 
-      const napaka = await ustvariOdjemalcaKvizov(NASTAVITVE, klic)
+      const napaka = await ustvariOdjemalcaKvizov(NASTAVITVE, SEJA, klic)
         .posljiPoskuse([poskus('k1', 1)])
         .catch((e: unknown) => e);
 
@@ -458,9 +462,9 @@ describe('uskladiKvize', () => {
             ? { ok: false, status, json: async () => ({}) }
             : { ok: true, status: 200, json: async () => ({ quizzes: [kvizStreznika('k1', 1)] }) },
         );
-        const streznik = ustvariOdjemalcaKvizov(NASTAVITVE, klic as unknown as Zahteva);
+        const streznik = ustvariOdjemalcaKvizov(NASTAVITVE, SEJA, klic as unknown as Zahteva);
 
-        const obhod = uskladiKvize(db, streznik);
+        const obhod = uskladiKvize(db, streznik, null, null);
         if (seznamPrebran) await expect(obhod).resolves.toBeDefined();
         else await expect(obhod).rejects.toThrow('429');
 
@@ -476,7 +480,7 @@ describe('uskladiKvize', () => {
     for (let i = 1; i <= postavk; i += 1) await zapisiPoskus(db, poskus('k1', i));
     const streznik = odjemalec([]);
 
-    await uskladiKvize(db, streznik);
+    await uskladiKvize(db, streznik, null, null);
 
     expect(streznik.poslani.map((paket) => paket.length)).toEqual([NAJVEC_V_PAKETU, 1]);
   });
@@ -512,27 +516,27 @@ describe('ustvariOdjemalcaKvizov', () => {
     return jest.fn(async () => ({ ok: status >= 200 && status < 300, status, json: async () => telo }));
   }
 
-  it('bere seznam s ključem', async () => {
+  it('bere seznam z žetonom', async () => {
     const klic = zahteva(200, { quizzes: [kvizStreznika('k1', 1)] });
 
-    const kvizi = await ustvariOdjemalcaKvizov(NASTAVITVE, klic).preberiKvize();
+    const kvizi = await ustvariOdjemalcaKvizov(NASTAVITVE, SEJA, klic).preberiKvize();
 
     expect(kvizi.map((k) => k.id)).toEqual(['k1']);
     const [url, moznosti] = klic.mock.calls[0];
-    expect(url).toBe('http://sto.ts.net:8000/quizzes/pending');
+    expect(url).toBe('https://school-buddy.duckdns.org/quizzes/pending');
     expect(moznosti.method).toBe('GET');
-    expect(moznosti.headers['X-API-Key']).toBe('kljuc');
+    expect(moznosti.headers['Authorization']).toBe(`Bearer ${SEJA.zeton}`);
   });
 
   it('pošlje samo polja iz pogodbe', async () => {
     const klic = zahteva(200, { recorded: 1 });
 
-    await ustvariOdjemalcaKvizov(NASTAVITVE, klic).posljiPoskuse([poskus('k1', 1)]);
+    await ustvariOdjemalcaKvizov(NASTAVITVE, SEJA, klic).posljiPoskuse([poskus('k1', 1)]);
 
     const [url, moznosti] = klic.mock.calls[0];
-    expect(url).toBe('http://sto.ts.net:8000/quiz-attempts');
+    expect(url).toBe('https://school-buddy.duckdns.org/quiz-attempts');
     expect(moznosti.method).toBe('POST');
-    expect(moznosti.headers['X-API-Key']).toBe('kljuc');
+    expect(moznosti.headers['Authorization']).toBe(`Bearer ${SEJA.zeton}`);
     expect(JSON.parse(moznosti.body ?? '')).toEqual({
       attempts: [
         {
@@ -551,12 +555,12 @@ describe('ustvariOdjemalcaKvizov', () => {
   it.each([401, 422, 500])('odgovor %d pri poskusih vrže', async (status) => {
     // Vrže, zato poskusi ostanejo nepreneseni — tudi 422 jih ne pobriše.
     await expect(
-      ustvariOdjemalcaKvizov(NASTAVITVE, zahteva(status)).posljiPoskuse([poskus('k1', 1)]),
+      ustvariOdjemalcaKvizov(NASTAVITVE, SEJA, zahteva(status)).posljiPoskuse([poskus('k1', 1)]),
     ).rejects.toThrow(String(status));
   });
 
   it('neuspešen seznam vrže', async () => {
-    await expect(ustvariOdjemalcaKvizov(NASTAVITVE, zahteva(503)).preberiKvize()).rejects.toThrow(
+    await expect(ustvariOdjemalcaKvizov(NASTAVITVE, SEJA, zahteva(503)).preberiKvize()).rejects.toThrow(
       '503',
     );
   });

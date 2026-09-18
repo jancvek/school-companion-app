@@ -15,7 +15,7 @@ import { CREATE_KVIZI_TABLES_SQL } from './kvizi';
 import { CREATE_MATERIALS_TABLE_SQL, type MaterialsDatabase } from './materials';
 
 /** Verzija sheme, ki jo pričakuje ta različica aplikacije. */
-export const SHEMA_VERZIJA = 2;
+export const SHEMA_VERZIJA = 3;
 
 type Migracija = {
   /** Verzija, ki velja, ko se ta korak konča. */
@@ -59,6 +59,29 @@ const MIGRACIJE: Migracija[] = [
     doVerzije: 2,
     async izvedi(db) {
       await db.execAsync(CREATE_KVIZI_TABLES_SQL);
+    },
+  },
+  {
+    // Lastnik zapisa (V3-R04, `docs/odlocitve/ADR-036` B). Naprava je skupna,
+    // identiteta pa ne: brez tega stolpca bi posnetek enega otroka odšel na
+    // strežnik pod žetonom drugega.
+    //
+    // Obstoječe vrstice ostanejo z `NULL` — to pomeni „nastalo, ko ni bil
+    // prijavljen nihče" in ne „brez lastnika za vedno": posvoji jih prva
+    // uspešna prijava (`posvojiBrezLastnika`). Brez tega bi bila nadgradnja
+    // Mašinega telefona vrsta, ki ne odide nikoli.
+    doVerzije: 3,
+    async izvedi(db) {
+      for (const tabela of ['materials', 'attempts']) {
+        const obstojeci = await imenaStolpcev(db, tabela);
+        if (obstojeci.has('user_id')) continue;
+        await db.execAsync(`ALTER TABLE ${tabela} ADD COLUMN user_id TEXT`);
+      }
+      // Vrsta se bere po lastniku, `attempts` pa še po `uploaded_at`.
+      await db.execAsync(`
+        CREATE INDEX IF NOT EXISTS materials_user_id ON materials (user_id);
+        CREATE INDEX IF NOT EXISTS attempts_user_id ON attempts (user_id);
+      `);
     },
   },
 ];

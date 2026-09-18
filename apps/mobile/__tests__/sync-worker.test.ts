@@ -22,6 +22,7 @@ function material(overrides: Partial<Material> = {}): Material {
     sync_attempts: 0,
     last_attempt_at: null,
     sync_error: null,
+    user_id: null,
     ...overrides,
   };
 }
@@ -115,7 +116,7 @@ describe('oddelava čakalne vrste', () => {
     // svoj potek časovne omejitve.
     expect(poskuseni).toEqual(['a']);
     expect(povzetek.cakajoci).toBe(3);
-    expect((await listPending(db)).map((v) => v.id)).toEqual(['a', 'b', 'c']);
+    expect((await listPending(db, null)).map((v) => v.id)).toEqual(['a', 'b', 'c']);
   });
 
   it('zavrnjen zapis ne ustavi vrste', async () => {

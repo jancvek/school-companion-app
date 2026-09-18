@@ -1,6 +1,10 @@
 import type { ServerConfig } from '@/config/server';
 import { prenesi, razvrstiStatus, type NaloziDatoteko } from '@/sync/upload';
 import type { Material } from '@/types';
+import { SPOROCILO_POTEKLA_PRIJAVA, type Seja } from '@/sync/prijava';
+
+/** Seja, s katero se v testih izkaže telefon (V3-R04). */
+const SEJA: Seja = { zeton: 'zeton-za-teste', userId: 'maša', ime: 'Maša' };
 
 // Nativnega modula v testu ni; podtaknemo ga, da uvoz ne pade.
 jest.mock('expo-file-system', () => ({
@@ -9,7 +13,7 @@ jest.mock('expo-file-system', () => ({
   UploadType: { BINARY_CONTENT: 0, MULTIPART: 1 },
 }));
 
-const NASTAVITVE: ServerConfig = { baseUrl: 'http://sto.jedro.ts.net:8000', apiKey: 'skrivnost' };
+const NASTAVITVE: ServerConfig = { baseUrl: 'https://school-buddy.duckdns.org' };
 
 function material(overrides: Partial<Material> = {}): Material {
   return {
@@ -21,6 +25,7 @@ function material(overrides: Partial<Material> = {}): Material {
     sync_attempts: 0,
     last_attempt_at: null,
     sync_error: null,
+  user_id: null,
     ...overrides,
   };
 }
@@ -37,13 +42,14 @@ describe('razvrščanje statusa', () => {
     expect(razvrstiStatus(status).vrsta).toBe('synced');
   });
 
-  it.each([400, 401, 403, 404, 413, 422])('%i je dokončna zavrnitev', (status) => {
+  it.each([400, 403, 404, 413, 422])('%i je dokončna zavrnitev', (status) => {
     expect(razvrstiStatus(status).vrsta).toBe('failed');
   });
 
-  it.each([408, 429])('%i ostane v vrsti, čeprav je 4xx', (status) => {
-    // 408 je potekel čas, 429 prošnja po počasnejšem tempu. Oboje mine samo
-    // od sebe, zato zapis ne sme obtičati kot dokončno neuspel.
+  it.each([408, 429, 401])('%i ostane v vrsti, čeprav je 4xx', (status) => {
+    // 408 je potekel čas, 429 prošnja po počasnejšem tempu, 401 potekla
+    // prijava (V3-R04). Vse troje mine samo od sebe — zadnje s prijavo —,
+    // zato zapis ne sme obtičati kot dokončno neuspel.
     expect(razvrstiStatus(status).vrsta).toBe('pending');
   });
 
@@ -58,32 +64,34 @@ describe('razvrščanje statusa', () => {
     expect(razvrstiStatus(410).vrsta).toBe('arhiviran');
   });
 
-  it('razlog pri zavrnjenem ključu pove, kaj je treba narediti', () => {
+  it('401 pusti zapis v vrsti in pove, naj se prijavi znova', () => {
+    // Kriterij V3-R04: s poteklim žetonom se prenos ustavi, snov pa ne
+    // izgubi. `failed` bi zahteval ročno vrnitev v vrsto (`ADR-036` H).
     const izid = razvrstiStatus(401);
 
-    expect(izid.vrsta).toBe('failed');
+    expect(izid.vrsta).toBe('pending');
     // Zožitev je pozitivna in ne „vse razen synced": od V1-R07 obstaja tudi
     // izid `arhiviran`, ki razloga nima.
-    if (izid.vrsta === 'failed') {
-      expect(izid.razlog).toMatch(/ključ/i);
-      expect(izid.razlog).not.toMatch(/^401$/);
+    if (izid.vrsta === 'pending') {
+      expect(izid.razlog).toBe(SPOROCILO_POTEKLA_PRIJAVA);
+      expect(izid.razlog).toMatch(/prijav/i);
     }
   });
 });
 
 describe('en prenos', () => {
-  it('pošlje ključ v glavi in metapodatke kot polja', async () => {
+  it('pošlje žeton v glavi in metapodatke kot polja', async () => {
     const nalozi = jest.fn<ReturnType<NaloziDatoteko>, Parameters<NaloziDatoteko>>(
       async () => ({ status: 201 }),
     );
 
-    await prenesi(material(), NASTAVITVE, nalozi);
+    await prenesi(material(), NASTAVITVE, SEJA, nalozi);
 
     expect(nalozi).toHaveBeenCalledWith(
       'file:///documents/photos/id-1.jpg',
-      'http://sto.jedro.ts.net:8000/materials',
+      'https://school-buddy.duckdns.org/materials',
       {
-        headers: { 'X-API-Key': 'skrivnost' },
+        headers: { Authorization: `Bearer ${SEJA.zeton}` },
         parameters: {
           id: 'id-1',
           subject: 'MAT',
@@ -95,13 +103,13 @@ describe('en prenos', () => {
   });
 
   it('uspeh vrne synced', async () => {
-    await expect(prenesi(material(), NASTAVITVE, vrni(201))).resolves.toEqual({
+    await expect(prenesi(material(), NASTAVITVE, SEJA, vrni(201))).resolves.toEqual({
       vrsta: 'synced',
     });
   });
 
   it('podvojen prenos (200) je prav tako uspeh', async () => {
-    await expect(prenesi(material(), NASTAVITVE, vrni(200))).resolves.toEqual({
+    await expect(prenesi(material(), NASTAVITVE, SEJA, vrni(200))).resolves.toEqual({
       vrsta: 'synced',
     });
   });
@@ -111,7 +119,7 @@ describe('en prenos', () => {
       throw new Error('Network request failed');
     };
 
-    const izid = await prenesi(material(), NASTAVITVE, nalozi);
+    const izid = await prenesi(material(), NASTAVITVE, SEJA, nalozi);
 
     // Klicatelj je worker, ki teče brez čakanja — vržena napaka bi končala
     // kot nezavrnjena obljuba.
@@ -126,7 +134,7 @@ describe('en prenos', () => {
       throw 'nekaj čisto drugega';
     };
 
-    await expect(prenesi(material(), NASTAVITVE, nalozi)).resolves.toMatchObject({
+    await expect(prenesi(material(), NASTAVITVE, SEJA, nalozi)).resolves.toMatchObject({
       vrsta: 'pending',
     });
   });
@@ -138,7 +146,7 @@ describe('časovna omejitev prenosa', () => {
     // in worker bi bil mrtev do ponovnega zagona aplikacije.
     const nalozi: NaloziDatoteko = () => new Promise(() => {});
 
-    const izid = await prenesi(material(), NASTAVITVE, nalozi, 30);
+    const izid = await prenesi(material(), NASTAVITVE, SEJA, nalozi, 30);
 
     expect(izid.vrsta).toBe('pending');
     if (izid.vrsta === 'pending') {
@@ -153,7 +161,7 @@ describe('časovna omejitev prenosa', () => {
       return new Promise(() => {});
     };
 
-    await prenesi(material(), NASTAVITVE, nalozi, 30);
+    await prenesi(material(), NASTAVITVE, SEJA, nalozi, 30);
 
     // Sicer bi za sabo puščali odprte povezave.
     expect(signal?.aborted).toBe(true);
@@ -166,7 +174,7 @@ describe('časovna omejitev prenosa', () => {
       return { status: 201 };
     };
 
-    const izid = await prenesi(material(), NASTAVITVE, nalozi, 10_000);
+    const izid = await prenesi(material(), NASTAVITVE, SEJA, nalozi, 10_000);
 
     expect(izid.vrsta).toBe('synced');
     expect(signal?.aborted).toBe(false);

@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { opisVerzije } from '@/config/verzija';
 import { useKvizi } from '@/sync/use-kvizi';
+import { usePrijava } from '@/sync/use-prijava';
 import { useSync } from '@/sync/use-sync';
 import { theme } from '@/ui/theme';
 
@@ -11,6 +12,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const { nastavljen, povzetek, osvezi } = useSync();
   const { cakajocih, osvezi: osveziKvize } = useKvizi();
+  const { seja } = usePrijava();
 
   // Števci se osvežijo ob vsakem prihodu na zaslon — po slikanju in po kvizu
   // je to edini trenutek, ko jih uporabnica pogleda.
@@ -63,7 +65,27 @@ export default function HomeScreen() {
         </Text>
       </Pressable>
 
-      <StanjePrenosa nastavljen={nastavljen} pending={povzetek.pending} failed={povzetek.failed} />
+      {/* Prijava je vnos, ne vrata (`docs/odlocitve/ADR-036` A): kamera in
+          Zgodovina delata brez nje, prenos pa ne. */}
+      <Pressable
+        accessibilityRole="button"
+        testID="gumb-prijava"
+        style={({ pressed }) => [
+          styles.button,
+          styles.buttonSecondary,
+          pressed && styles.buttonPressed,
+        ]}
+        onPress={() => router.push('/prijava')}
+      >
+        <Text style={styles.buttonLabel}>{seja ? `Prijavljena: ${seja.ime}` : 'Prijavi se'}</Text>
+      </Pressable>
+
+      <StanjePrenosa
+        nastavljen={nastavljen}
+        prijavljena={seja !== null}
+        pending={povzetek.pending}
+        failed={povzetek.failed}
+      />
 
       {/* Katera gradnja je nameščena (V1-R06). Samo izpis — brez dotika, da
           ne tekmuje z gumboma nad sabo. */}
@@ -76,6 +98,8 @@ export default function HomeScreen() {
 
 type StanjePrenosaProps = {
   nastavljen: boolean;
+  /** Ali je kdo prijavljen; brez prijave prenosa ni (V3-R04). */
+  prijavljena: boolean;
   pending: number;
   failed: number;
 };
@@ -87,12 +111,29 @@ type StanjePrenosaProps = {
  * telefonu. Neuspeli dobijo svojo vrstico, ker se jih drugače ne opazi —
  * števec čakajočih se sam od sebe zmanjšuje, števec neuspelih pa ne.
  */
-export function StanjePrenosa({ nastavljen, pending, failed }: StanjePrenosaProps) {
+export function StanjePrenosa({
+  nastavljen,
+  prijavljena,
+  pending,
+  failed,
+}: StanjePrenosaProps) {
   if (!nastavljen) {
     return (
       <View style={styles.stanje}>
         <Text testID="prenos-ni-nastavljen" style={styles.stanjeBesedilo}>
           Prenos ni nastavljen. Posnetki se shranjujejo na telefon.
+        </Text>
+      </View>
+    );
+  }
+
+  // Ista oblika sporočila kot zgoraj in isti pomen: slikaj naprej, prenos
+  // počaka. Razlika je samo v tem, kaj naj uporabnica naredi.
+  if (!prijavljena) {
+    return (
+      <View style={styles.stanje}>
+        <Text testID="ni-prijave" style={styles.stanjeBesedilo}>
+          Nisi prijavljena. Posnetki se shranjujejo na telefon in se prenesejo po prijavi.
         </Text>
       </View>
     );

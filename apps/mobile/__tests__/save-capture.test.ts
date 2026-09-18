@@ -82,7 +82,7 @@ describe('shranjevanje posnetka', () => {
       sourceUri: IZVIRNIK,
     });
 
-    await expect(listBySubject(db, 'MAT')).resolves.toEqual([zapis]);
+    await expect(listBySubject(db, 'MAT', null)).resolves.toEqual([zapis]);
   });
 
   it('najprej zapiše datoteko, šele nato vrstico', async () => {
@@ -116,7 +116,7 @@ describe('shranjevanje posnetka', () => {
       saveCapture(db, { subject: 'MAT', takenAt: CAS_POSNETKA, sourceUri: IZVIRNIK }),
     ).rejects.toThrow('Na napravi ni prostora');
 
-    await expect(listBySubject(db, 'MAT')).resolves.toEqual([]);
+    await expect(listBySubject(db, 'MAT', null)).resolves.toEqual([]);
     expect(store.discardPhoto).not.toHaveBeenCalled();
   });
 
@@ -135,6 +135,6 @@ describe('shranjevanje posnetka', () => {
     );
 
     vstavljanje.mockRestore();
-    await expect(listBySubject(db, 'MAT')).resolves.toEqual([]);
+    await expect(listBySubject(db, 'MAT', null)).resolves.toEqual([]);
   });
 });

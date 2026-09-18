@@ -43,7 +43,7 @@ const usmerjevalnik = jest.requireMock('expo-router') as { stanje: RouterMockSta
 const kamera = jest.requireMock('expo-camera') as { stanje: CameraMockState };
 const shranjevanje = jest.requireMock('@/materials/save') as { saveCapture: jest.Mock };
 
-const NASTAVITVE = { baseUrl: 'http://sto.ts.net:8000', apiKey: 'kljuc' };
+const NASTAVITVE = { baseUrl: 'https://school-buddy.duckdns.org' };
 
 let db: ReturnType<typeof createTestDatabase>;
 let alert: jest.SpyInstance;
@@ -59,6 +59,7 @@ function material(id: string): Material {
     sync_attempts: 0,
     last_attempt_at: null,
     sync_error: null,
+  user_id: null,
   };
 }
 

@@ -23,6 +23,7 @@ import {
 import type { MaterialsDatabase } from '../db/materials';
 import type { KvizStreznika, Poskus } from '../types';
 import { poslji, type Zahteva } from './http';
+import { glaveSeje, type Seja } from './prijava';
 
 /** Koliko čakamo na en klic; isti razlog kot pri arhivu (`izbrisi.ts`). */
 export const CASOVNA_OMEJITEV_MS = 30_000;
@@ -108,10 +109,13 @@ export type IzidUsklajevanja = {
 export async function uskladiKvize(
   db: MaterialsDatabase,
   odjemalec: OdjemalecKvizov,
+  lastnik: string | null,
   odprti: string | null = null,
   zavrnjeni: Set<string> = new Set(),
 ): Promise<IzidUsklajevanja> {
-  const cakajoci = (await neprenesenePoskuse(db)).filter((poskus) => !zavrnjeni.has(poskus.id));
+  const cakajoci = (await neprenesenePoskuse(db, lastnik)).filter(
+    (poskus) => !zavrnjeni.has(poskus.id),
+  );
   let poslani = 0;
   for (let zacetek = 0; zacetek < cakajoci.length; zacetek += NAJVEC_V_PAKETU) {
     const paket = cakajoci.slice(zacetek, zacetek + NAJVEC_V_PAKETU);
@@ -140,6 +144,7 @@ export async function uskladiKvize(
     db,
     kvizi.map((kviz) => kviz.id),
     odprti,
+    lastnik,
   );
 
   return { poslani, naStrezniku: kvizi.length, pobrisani };
@@ -257,10 +262,11 @@ export function kviziIzOdgovora(telo: unknown): KvizStreznika[] {
  */
 export function ustvariOdjemalcaKvizov(
   nastavitve: ServerConfig,
+  seja: Seja,
   zahteva: Zahteva = fetch as unknown as Zahteva,
   casovnaOmejitevMs: number = CASOVNA_OMEJITEV_MS,
 ): OdjemalecKvizov {
-  const glave = { 'X-API-Key': nastavitve.apiKey, 'Content-Type': 'application/json' };
+  const glave = { ...glaveSeje(seja), 'Content-Type': 'application/json' };
 
   return {
     async posljiPoskuse(poskusi) {

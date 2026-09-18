@@ -14,6 +14,7 @@ import { File, UploadType } from 'expo-file-system';
 
 import type { ServerConfig } from '../config/server';
 import type { Material } from '../types';
+import { SPOROCILO_POTEKLA_PRIJAVA, glaveSeje, type Seja } from './prijava';
 
 /**
  * Izid enega poskusa.
@@ -66,6 +67,12 @@ export function razvrstiStatus(status: number): Izid {
   // ostal na telefonu, dokler ga kdo ročno ne bi vrnil v vrsto.
   if (status === 410) return { vrsta: 'arhiviran' };
 
+  // `401` je drugi 4xx, ki ni sodba o vsebini: prijava je potekla ali je bila
+  // preklicana. To stanje se **more** spremeniti samo od sebe — s prijavo —,
+  // zato zapis ostane `pending` in ne gre v `failed` (`ADR-004` meja,
+  // `docs/odlocitve/ADR-036` H). Snov se ne izgubi in kamera dela naprej.
+  if (status === 401) return { vrsta: 'pending', razlog: SPOROCILO_POTEKLA_PRIJAVA };
+
   if (status >= 200 && status < 300) {
     // 201 je nov zapis, 200 je zapis, ki je na strežniku že bil. Oboje pomeni,
     // da je slika tam — idempotentnost je uspeh, ne napaka.
@@ -82,9 +89,8 @@ export function razvrstiStatus(status: number): Izid {
 /** Sporočilo, ki uporabnici pove, kaj naj naredi — ne le številke. */
 function opisStatusa(status: number): string {
   switch (status) {
-    case 401:
     case 403:
-      return 'Strežnik je zavrnil ključ. Aplikacijo je treba zgraditi znova s pravim ključem.';
+      return 'Strežnik je zahtevo zavrnil. Prijavi se znova; posnetek na telefonu ostane.';
     case 413:
       return 'Slika je za strežnik prevelika.';
     case 422:
@@ -139,6 +145,7 @@ const POTEKLO = Symbol('poteklo');
 export async function prenesi(
   material: Material,
   nastavitve: ServerConfig,
+  seja: Seja,
   nalozi: NaloziDatoteko = privzetoNalozi,
   casovnaOmejitevMs: number = CASOVNA_OMEJITEV_MS,
 ): Promise<Izid> {
@@ -155,7 +162,7 @@ export async function prenesi(
   try {
     const odgovor = await Promise.race([
       nalozi(material.file_uri, `${nastavitve.baseUrl}/materials`, {
-        headers: { 'X-API-Key': nastavitve.apiKey },
+        headers: glaveSeje(seja),
         parameters: {
           id: material.id,
           subject: material.subject,

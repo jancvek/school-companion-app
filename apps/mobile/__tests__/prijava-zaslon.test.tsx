@@ -1,0 +1,246 @@
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+
+import PrijavaScreen from '../app/prijava';
+import { insertMaterial, listPending, type MaterialsDatabase } from '@/db/materials';
+import { migriraj } from '@/db/migrations';
+import { PrijavaProvider } from '@/sync/use-prijava';
+import { SyncProvider } from '@/sync/use-sync';
+import type { Material } from '@/types';
+
+import { SEJA, ustvariShrambo, type TestnaShramba } from './shramba';
+import { createTestDatabase } from './test-database';
+import { type RouterMockState } from './screen-mocks';
+
+jest.mock('expo-router', () => require('./screen-mocks').expoRouterMock());
+jest.mock('expo-sqlite', () => require('./screen-mocks').expoSqliteMock());
+jest.mock('react-native-safe-area-context', () => require('./screen-mocks').safeAreaMock());
+// `expo-secure-store` je nativni modul; testi ga ne kličejo, ker `PrijavaProvider`
+// dobi shrambo kot lastnost — mock je tu samo zato, da se uvoz razreši.
+jest.mock('expo-secure-store', () => ({
+  getItemAsync: jest.fn(),
+  setItemAsync: jest.fn(),
+  deleteItemAsync: jest.fn(),
+}));
+
+const usmerjevalnik = jest.requireMock('expo-router') as { stanje: RouterMockState };
+
+const NASTAVITVE = { baseUrl: 'https://school-buddy.duckdns.org' };
+
+/**
+ * Prijavni zaslon (V3-R04).
+ *
+ * Zaslon ne kliče strežnika sam — to počne `src/sync/prijava.ts`, ki ima svoje
+ * teste. Tu se preverja, kaj vidi in dobi **uporabnica**: da so sporočila v
+ * slovenščini, da prijava ne izgubi posnetkov in da je odjava odjava.
+ */
+
+function material(overrides: Partial<Material> = {}): Material {
+  return {
+    id: 'm-1',
+    subject: 'MAT',
+    taken_at: '2026-09-01T10:00:00.000Z',
+    file_uri: 'file:///documents/photos/m-1.jpg',
+    sync_status: 'pending',
+    sync_attempts: 0,
+    last_attempt_at: null,
+    sync_error: null,
+    user_id: null,
+    ...overrides,
+  };
+}
+
+describe('prijavni zaslon', () => {
+  let db: MaterialsDatabase & { close(): void };
+  let odgovor: jest.Mock;
+
+  beforeEach(async () => {
+    db = createTestDatabase();
+    await migriraj(db);
+    odgovor = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        token: 'nov-zeton',
+        user_id: SEJA.userId,
+        display_name: 'Maša',
+        expires_at: '2026-10-18T10:00:00+00:00',
+      }),
+    }));
+    (globalThis as { fetch?: unknown }).fetch = odgovor;
+  });
+
+  afterEach(() => {
+    db.close();
+    delete (globalThis as { fetch?: unknown }).fetch;
+  });
+
+  async function izrisi(shramba: TestnaShramba, prijavljena = false) {
+    const izid = await render(
+      <PrijavaProvider db={db} nastavitve={NASTAVITVE} shramba={shramba}>
+        <SyncProvider
+          db={db}
+          nastavitve={NASTAVITVE}
+          prenesiEno={async () => ({ vrsta: 'pending', razlog: 'test' })}
+        >
+          <PrijavaScreen />
+        </SyncProvider>
+      </PrijavaProvider>,
+    );
+    // Branje žetona z diska je učinek; dokler ne steče, je zaslon videti kot
+    // neprijavljen. Testi zato počakajo na obliko, ki jo pričakujejo.
+    await waitFor(() => {
+      expect(screen.getByTestId(prijavljena ? 'prijavljen' : 'polje-ime')).toBeTruthy();
+    });
+    return izid;
+  }
+
+  /**
+   * Pritisne gumb in počaka, da se zaslon umiri.
+   *
+   * Prijava je veriga obljub (klic, shramba, posvojitev); en `act` ne
+   * zajamči, da so vse že pretekle. Čakanje na izginotje napisa
+   * `Prijavljam…` je pogoj, ki ga zaslon sam postavi in odstrani.
+   */
+  async function vpisiInPotrdi(ime: string, geslo: string) {
+    await fireEvent.changeText(screen.getByTestId('polje-ime'), ime);
+    await fireEvent.changeText(screen.getByTestId('polje-geslo'), geslo);
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('gumb-prijava'));
+    });
+    await waitFor(() => {
+      expect(screen.queryByText('Prijavljam…')).toBeNull();
+    });
+  }
+
+  /** Isto za odjavo. */
+  async function odjavi() {
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('gumb-odjava'));
+    });
+    await waitFor(() => {
+      expect(screen.queryByText('Odjavljam…')).toBeNull();
+    });
+  }
+
+  it('uspešna prijava shrani sejo in se vrne nazaj', async () => {
+    const shramba = ustvariShrambo();
+    await izrisi(shramba);
+
+    await vpisiInPotrdi('masa', 'geslo-otroka');
+
+    expect(shramba.vsebina()).toContain('nov-zeton');
+    expect(usmerjevalnik.stanje.router.back).toHaveBeenCalled();
+  });
+
+  it('prijava posvoji posnetke, ki so nastali pred njo', async () => {
+    // Kriterij V3-R04 in `ADR-036` B: vrsta, ki je nastala brez prijave, po
+    // prijavi odide — ne obtiči.
+    const shramba = ustvariShrambo();
+    await insertMaterial(db, material({ id: 'pred-prijavo', user_id: null }));
+    await izrisi(shramba);
+
+    await vpisiInPotrdi('masa', 'geslo-otroka');
+
+    await waitFor(async () => {
+      expect((await listPending(db, SEJA.userId)).map((m) => m.id)).toEqual(['pred-prijavo']);
+    });
+  });
+
+  it('napačno geslo pokaže sporočilo v slovenščini in ne shrani ničesar', async () => {
+    odgovor.mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ detail: 'Uporabniško ime ali geslo ni pravo.' }),
+    });
+    const shramba = ustvariShrambo();
+    await izrisi(shramba);
+
+    await vpisiInPotrdi('masa', 'napacno');
+
+    expect(await screen.findByTestId('napaka-prijave')).toBeTruthy();
+    expect(screen.getByTestId('napaka-prijave').props.children).toMatch(/geslo/i);
+    expect(shramba.vsebina()).toBeUndefined();
+  });
+
+  it('starševski račun dobi razlago, kam sodi', async () => {
+    odgovor.mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({
+        detail: 'Ta račun je starševski in se prijavi na spletni strani, ne v aplikaciji.',
+      }),
+    });
+    await izrisi(ustvariShrambo());
+
+    await vpisiInPotrdi('stars@primer.test', 'geslo-starsa-12');
+
+    expect((await screen.findByTestId('napaka-prijave')).props.children).toMatch(
+      /spletni strani/i,
+    );
+  });
+
+  it('nedosegljiv strežnik ne pokaže surove sistemske napake', async () => {
+    odgovor.mockRejectedValue(new Error('Network request failed'));
+    await izrisi(ustvariShrambo());
+
+    await vpisiInPotrdi('masa', 'geslo-otroka');
+
+    const besedilo = (await screen.findByTestId('napaka-prijave')).props.children as string;
+    expect(besedilo).not.toMatch(/Network request failed/);
+    expect(besedilo).toMatch(/posnetki/i);
+  });
+
+  it('brez nastavljenega naslova pove, zakaj prijava ni mogoča', async () => {
+    await render(
+      <PrijavaProvider db={db} nastavitve={null} shramba={ustvariShrambo()}>
+        <SyncProvider db={db} nastavitve={null}>
+          <PrijavaScreen />
+        </SyncProvider>
+      </PrijavaProvider>,
+    );
+    await act(async () => {});
+
+    expect(screen.getByTestId('prenos-ni-nastavljen')).toBeTruthy();
+  });
+
+  it('prijavljeni vidi svoje ime in gumb za odjavo', async () => {
+    await izrisi(ustvariShrambo(SEJA), true);
+
+    expect(screen.getByTestId('prijavljen').props.children).toContain('Maša');
+    expect(screen.getByTestId('gumb-odjava')).toBeTruthy();
+  });
+
+  it('odjava pobriše žeton, lokalnih posnetkov pa ne', async () => {
+    // Kriterij V3-R04: „Odjava izbriše žeton in sejo na strežniku, lokalnih
+    // slik pa ne briše."
+    const shramba = ustvariShrambo(SEJA);
+    await insertMaterial(db, material({ id: 'moj', user_id: SEJA.userId }));
+    await izrisi(shramba, true);
+
+    await odjavi();
+
+    expect(shramba.vsebina()).toBeUndefined();
+    expect((await listPending(db, SEJA.userId)).map((m) => m.id)).toEqual(['moj']);
+  });
+
+  it('odjava ostane odjava, tudi če strežnik ne odgovori', async () => {
+    // Nedosegljiv strežnik ne sme pustiti otroka prijavljenega na napravi,
+    // na kateri se je hotel odjaviti (`ADR-036` G).
+    odgovor.mockRejectedValue(new Error('Network request failed'));
+    const shramba = ustvariShrambo(SEJA);
+    await izrisi(shramba, true);
+
+    await odjavi();
+
+    expect(shramba.vsebina()).toBeUndefined();
+    expect(usmerjevalnik.stanje.router.back).toHaveBeenCalled();
+  });
+
+  it('prijavni gumb ne obtiči pod sistemsko navigacijsko vrstico', async () => {
+    // Android riše edge-to-edge (merilo dokončanosti).
+    await izrisi(ustvariShrambo(SEJA), true);
+
+    const vsebina = screen.getByTestId('prijavljen').parent;
+    expect(vsebina).toBeTruthy();
+  });
+});

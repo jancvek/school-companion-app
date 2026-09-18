@@ -18,6 +18,7 @@ import { captureReducer, initialCaptureState } from '@/capture/session';
 import { findSubject } from '@/constants/subjects';
 import { asMaterialsDatabase } from '@/db/open';
 import { saveCapture } from '@/materials/save';
+import { usePrijava } from '@/sync/use-prijava';
 import { useSync } from '@/sync/use-sync';
 import { theme } from '@/ui/theme';
 
@@ -32,6 +33,10 @@ export default function CaptureScreen() {
   const subject = findSubject(subjectParam);
 
   const { sprozi } = useSync();
+  const { seja } = usePrijava();
+  // Iz `seja` izvlecen prej: `seja?.userId` v seznamu odvisnosti je izraz, ki
+  // ga React Compiler ne sprejme kot odvisnost.
+  const lastnik = seja?.userId ?? null;
   const [permission, requestPermission] = useCameraPermissions();
   const [session, dispatch] = useReducer(captureReducer, initialCaptureState);
   const [busy, setBusy] = useState(false);
@@ -101,6 +106,7 @@ export default function CaptureScreen() {
         subject: subject.value,
         takenAt: photo.takenAt,
         sourceUri: photo.uri,
+        userId: lastnik,
       });
 
       // ADR-003: ostanemo na kameri istega predmeta, da je mogoče zaporedno
@@ -122,7 +128,7 @@ export default function CaptureScreen() {
       zaklep.current = false;
       setBusy(false);
     }
-  }, [database, pokaziPotrditev, session.photo, sprozi, subject]);
+  }, [database, lastnik, pokaziPotrditev, session.photo, sprozi, subject]);
 
   // Sistemska navigacijska vrstica riše čez vsebino (Android je edge-to-edge),
   // zato gumbi potrebujejo odmik, sicer so pod njo.

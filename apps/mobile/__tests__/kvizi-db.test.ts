@@ -128,7 +128,7 @@ describe('lokalni kvizi', () => {
       await zapisiPoskus(db, poskus('k1', 1, { id: 'prvi', rating: 'lahko' }));
       await zapisiPoskus(db, poskus('k1', 1, { id: 'drugi', rating: 'nisem_vedela' }));
 
-      const poskusi = await neprenesenePoskuse(db);
+      const poskusi = await neprenesenePoskuse(db, null);
       expect(poskusi.map((p) => [p.id, p.rating])).toEqual([['prvi', 'lahko']]);
     });
 
@@ -139,7 +139,7 @@ describe('lokalni kvizi', () => {
 
       await oznaciPrenesene(db, ['k1-a1'], '2026-09-10T16:00:00.000Z');
 
-      expect((await neprenesenePoskuse(db)).map((p) => p.id)).toEqual(['k1-a2']);
+      expect((await neprenesenePoskuse(db, null)).map((p) => p.id)).toEqual(['k1-a2']);
       const [vrstica] = await db.getAllAsync<{ uploaded_at: string }>(
         "SELECT uploaded_at FROM attempts WHERE id = 'k1-a1'",
         [],
@@ -189,7 +189,7 @@ describe('lokalni kvizi', () => {
       await pobrisiKvizeRazen(db, []);
 
       expect(await stej(db, 'quizzes')).toBe(0);
-      expect((await neprenesenePoskuse(db)).map((p) => p.id)).toEqual(['k1-a1']);
+      expect((await neprenesenePoskuse(db, null)).map((p) => p.id)).toEqual(['k1-a1']);
     });
 
     it('poskus pobrisanega kviza gre, ko je prenesen', async () => {
