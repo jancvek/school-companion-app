@@ -55,6 +55,14 @@ export type SyncVrednost = {
   sprozi(): void;
   /** Vrne neuspele zapise v vrsto in takoj poskusi znova. */
   poskusiZnova(): Promise<void>;
+  /**
+   * Ali je prenos nazadnje ustavila potekla prijava.
+   *
+   * Domača stran to pove naravnost (kriterij `V3-R04`): to je edino stanje
+   * vrste, ki ga uporabnica more odpraviti sama, in brez tega se od
+   * nedosegljivega strežnika ne loči po ničemer, kar se vidi.
+   */
+  prijavaPotekla: boolean;
 };
 
 const SyncContext = createContext<SyncVrednost | null>(null);
@@ -96,6 +104,10 @@ export function SyncProvider({
   const lastnik = seja?.userId ?? null;
 
   const [povzetek, setPovzetek] = useState<SyncPovzetek>(PRAZEN_POVZETEK);
+  // Čigava prijava je potekla, ne „ali je potekla": ugotovitev velja za tisto
+  // sejo, v kateri je nastala. Izpeljava iz nje je cenejša od učinka, ki bi
+  // stanje ponastavljal ob vsaki menjavi seje.
+  const [poteklaZa, setPoteklaZa] = useState<string | null>(null);
   const razporejevalnik = useRef<Razporejevalnik | null>(null);
 
   // Odjemalec za arhiv nastane samo, kadar je naslov v gradnji **in** je kdo
@@ -142,7 +154,10 @@ export function SyncProvider({
       db,
       lastnik,
       prenesiEno,
-      poCiklu: () => {
+      poCiklu: (izid) => {
+        // Vsak cikel povozi prejšnjo ugotovitev: ko prenos spet steče, mora
+        // sporočilo izginiti samo od sebe.
+        setPoteklaZa(izid.prijavaPotekla ? lastnik : null);
         void osvezi();
       },
     });
@@ -212,9 +227,20 @@ export function SyncProvider({
     razporejevalnik.current?.sprozi();
   }, [db, lastnik, osvezi]);
 
+  // Ob odjavi in ob menjavi uporabnika sporočilo izgine samo od sebe:
+  // ugotovitev je vezana na sejo, v kateri je nastala.
+  const prijavaPotekla = poteklaZa !== null && poteklaZa === lastnik;
+
   const vrednost = useMemo<SyncVrednost>(
-    () => ({ nastavljen: nastavitve !== null, povzetek, osvezi, sprozi, poskusiZnova }),
-    [nastavitve, osvezi, poskusiZnova, povzetek, sprozi],
+    () => ({
+      nastavljen: nastavitve !== null,
+      povzetek,
+      osvezi,
+      sprozi,
+      poskusiZnova,
+      prijavaPotekla,
+    }),
+    [nastavitve, osvezi, poskusiZnova, povzetek, prijavaPotekla, sprozi],
   );
 
   return <SyncContext.Provider value={vrednost}>{children}</SyncContext.Provider>;
@@ -234,5 +260,6 @@ export function useSync(): SyncVrednost {
     osvezi: async () => {},
     sprozi: () => {},
     poskusiZnova: async () => {},
+    prijavaPotekla: false,
   };
 }

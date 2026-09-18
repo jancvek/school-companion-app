@@ -10,7 +10,7 @@ import { theme } from '@/ui/theme';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { nastavljen, povzetek, osvezi } = useSync();
+  const { nastavljen, povzetek, osvezi, prijavaPotekla } = useSync();
   const { cakajocih, osvezi: osveziKvize } = useKvizi();
   const { seja } = usePrijava();
 
@@ -83,6 +83,7 @@ export default function HomeScreen() {
       <StanjePrenosa
         nastavljen={nastavljen}
         prijavljena={seja !== null}
+        prijavaPotekla={prijavaPotekla}
         pending={povzetek.pending}
         failed={povzetek.failed}
       />
@@ -100,6 +101,8 @@ type StanjePrenosaProps = {
   nastavljen: boolean;
   /** Ali je kdo prijavljen; brez prijave prenosa ni (V3-R04). */
   prijavljena: boolean;
+  /** Ali je prenos nazadnje ustavila potekla prijava (V3-R04). */
+  prijavaPotekla: boolean;
   pending: number;
   failed: number;
 };
@@ -114,6 +117,7 @@ type StanjePrenosaProps = {
 export function StanjePrenosa({
   nastavljen,
   prijavljena,
+  prijavaPotekla,
   pending,
   failed,
 }: StanjePrenosaProps) {
@@ -134,6 +138,19 @@ export function StanjePrenosa({
       <View style={styles.stanje}>
         <Text testID="ni-prijave" style={styles.stanjeBesedilo}>
           Nisi prijavljena. Posnetki se shranjujejo na telefon in se prenesejo po prijavi.
+        </Text>
+      </View>
+    );
+  }
+
+  // Potekla prijava je edino stanje vrste, ki ga uporabnica more odpraviti
+  // sama, zato ima svojo vrstico in ne le števca, ki se ne premakne
+  // (kriterij V3-R04). Poudarjena je kot neuspeh, ker terja dejanje.
+  if (prijavaPotekla) {
+    return (
+      <View style={styles.stanje}>
+        <Text testID="prijava-potekla" style={styles.stanjeNapaka}>
+          Prijava je potekla, prijavi se znova. Posnetki ostanejo na telefonu.
         </Text>
       </View>
     );

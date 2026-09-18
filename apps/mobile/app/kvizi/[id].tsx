@@ -117,7 +117,7 @@ export default function ResevanjeKvizaScreen() {
           answered_at: zdaj,
           uploaded_at: null,
           // Čigav je odgovor (V3-R04). Brez prijave `null`; tak poskus posvoji
-          // prva prijava, tuj pa se ne pošlje (`docs/odlocitve/ADR-036` B).
+          // naslednja razrešena seja, tuj pa se ne pošlje (`ADR-036` B).
           user_id: lastnik,
         });
       } catch {

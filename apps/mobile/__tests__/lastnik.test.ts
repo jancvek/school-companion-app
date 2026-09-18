@@ -87,7 +87,7 @@ describe('lastnik snovi', () => {
     );
 
     expect(preneseni).toEqual([]);
-    expect(povzetek).toEqual({ preneseni: 0, cakajoci: 0, neuspeli: 0 });
+    expect(povzetek).toEqual({ preneseni: 0, cakajoci: 0, neuspeli: 0, prijavaPotekla: false });
   });
 
   it('tuj zapis po menjavi uporabnika ostane in ne izgine', async () => {

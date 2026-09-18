@@ -35,6 +35,26 @@ import {
   type VarnaShramba,
 } from './prijava';
 
+/**
+ * Posvojitev, ki **ne vrže** (`docs/odlocitve/ADR-036`, popravki).
+ *
+ * Ista obljuba kot pri `preberiSejo` in `pozabiSejo`: kar je ob robu seje, ne
+ * sme podreti seje same. Padla posvojitev — poln disk, zaklenjena baza — bi
+ * sicer preprečila `setSeja` in aplikacija bi ostala videti neprijavljena,
+ * čeprav veljaven žeton na disku je. To bi bilo hujše od tega, kar posvojitev
+ * popravlja, in uporabnica o tem ne bi izvedela ničesar.
+ *
+ * Izpuščena posvojitev se popravi sama: naslednja razrešena seja jo ponovi,
+ * ker so vrstice še vedno `user_id IS NULL`.
+ */
+async function posvoji(db: MaterialsDatabase, userId: string): Promise<void> {
+  try {
+    await posvojiBrezLastnika(db, userId);
+  } catch {
+    // Glej opis zgoraj.
+  }
+}
+
 export type PrijavaVrednost = {
   /** Trenutna seja, ali `null`, kadar ni prijavljen nihče. */
   seja: Seja | null;
@@ -75,8 +95,9 @@ export function PrijavaProvider({
 
   const [seja, setSeja] = useState<Seja | null>(null);
 
-  // Žeton z diska ob zagonu. `preberiSejo` ne vrže nikoli, zato tu ni veje za
-  // napako: nedosegljiva shramba pomeni neprijavljeno aplikacijo, ne pokvarjene.
+  // Žeton z diska ob zagonu. Ne `preberiSejo` ne `posvoji` ne vržeta, zato tu
+  // ni veje za napako: nedosegljiva shramba ali baza pomeni neprijavljeno
+  // aplikacijo oziroma odloženo posvojitev, ne pokvarjene aplikacije.
   //
   // Dokler branje ne konča, je aplikacija videti neprijavljena, in posnetek,
   // ki nastane v tem oknu, ostane brez lastnika. Zato **posvoji tudi obnovitev
@@ -90,7 +111,7 @@ export function PrijavaProvider({
       const najdena = await preberiSejo(shramba);
       // Posvojitev teče pred `velja`: tudi če je zaslon medtem odšel, je
       // vrstica že v bazi in pravi lastnik je znan. Klic je idempotenten.
-      if (najdena !== null) await posvojiBrezLastnika(db, najdena.userId);
+      if (najdena !== null) await posvoji(db, najdena.userId);
       if (!velja) return;
       setSeja(najdena);
     })();
@@ -107,7 +128,7 @@ export function PrijavaProvider({
       // bil prijavljen nihče — na Mašinem telefonu ob nadgradnji vsi —, bi
       // sicer v vrsti obtičali za vedno (`ADR-036` B). Isto stori obnovitev
       // seje z diska; pravilo je „vsaka razrešena seja posvoji", ne „prijava".
-      await posvojiBrezLastnika(db, nova.userId);
+      await posvoji(db, nova.userId);
       setSeja(nova);
     },
     [db, nastavitve, shramba],

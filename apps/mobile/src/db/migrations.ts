@@ -67,9 +67,10 @@ const MIGRACIJE: Migracija[] = [
     // strežnik pod žetonom drugega.
     //
     // Obstoječe vrstice ostanejo z `NULL` — to pomeni „nastalo, ko ni bil
-    // prijavljen nihče" in ne „brez lastnika za vedno": posvoji jih prva
-    // uspešna prijava (`posvojiBrezLastnika`). Brez tega bi bila nadgradnja
-    // Mašinega telefona vrsta, ki ne odide nikoli.
+    // prijavljen nihče" in ne „brez lastnika za vedno": posvoji jih vsaka
+    // razrešena seja (`posvojiBrezLastnika`), torej prijava ali obnovitev
+    // žetona z diska. Brez tega bi bila nadgradnja Mašinega telefona vrsta,
+    // ki ne odide nikoli.
     doVerzije: 3,
     async izvedi(db) {
       for (const tabela of ['materials', 'attempts']) {

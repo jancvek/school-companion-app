@@ -187,7 +187,7 @@ describe('prenos, ki naleti na arhiviran zapis', () => {
     );
 
     expect(await findById(db, 'a')).toBeNull();
-    expect(povzetek).toEqual({ preneseni: 0, cakajoci: 0, neuspeli: 0 });
+    expect(povzetek).toEqual({ preneseni: 0, cakajoci: 0, neuspeli: 0, prijavaPotekla: false });
   });
 });
 

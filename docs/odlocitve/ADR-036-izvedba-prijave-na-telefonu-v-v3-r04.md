@@ -215,3 +215,36 @@ ob zagonu, ki nad bazo brez takih vrstic ne naredi ničesar.
 
 Posledica iz B ostaja nespremenjena: posnetek, nastal med odjavo enega in
 prijavo drugega, pripade drugemu.
+
+
+## Popravki po tretjem pregledu (19. 9. 2026)
+
+### Sporočilo o potekli prijavi mora priti pred oči, ne v stolpec
+
+`SPOROCILO_POTEKLA_PRIJAVA` je iz `razvrstiStatus(401)` potovalo v
+`materials.sync_error` — in tam obstalo, ker tega stolpca ne izriše nihče. Za
+otroka je bila potekla prijava videti natanko tako kot ugasnjen strežnik:
+števec stoji in nič ne pove, da je treba kaj narediti. Kriterij `V3-R04` to
+zahteva izrecno.
+
+Izid prenosa zato **loči** oboje (`Izid.prijavaPotekla`), povzetek to nese do
+ponudnika, domača stran pa pove: *„Prijava je potekla, prijavi se znova.
+Posnetki ostanejo na telefonu."* Ugotovitev je vezana na sejo, v kateri je
+nastala, zato ob odjavi in ob menjavi uporabnika izgine sama.
+
+**Odjave ob `401` ni.** Ponujala se je — seja je na strežniku mrtva —, a bi
+bila to sprememba vedenja, ki je kriterij ne zahteva: aplikacija naj pove, ne
+ukrepa namesto otroka. Če se pokaže, da je vrstica premalo, je to nova
+odločitev.
+
+### Posvojitev ne sme podreti seje
+
+Popravek iz drugega pregleda je posvojitev postavil pred `setSeja`. Če
+posvojitev zavrne (poln disk, zaklenjena baza), seja s tem ni bila postavljena
+— aplikacija je ostala videti neprijavljena, čeprav je veljaven žeton na disku,
+in to ob **vsakem** naslednjem zagonu. To je bilo hujše od tega, kar popravek
+odpravlja.
+
+Posvojitev ima odslej isto obljubo kot `preberiSejo` in `pozabiSejo`: **ne
+vrže**. Izpuščena posvojitev se popravi sama ob naslednji razrešeni seji, ker
+so vrstice še vedno `user_id IS NULL`.

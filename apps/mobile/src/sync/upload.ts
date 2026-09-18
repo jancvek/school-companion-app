@@ -24,7 +24,13 @@ import { SPOROCILO_POTEKLA_PRIJAVA, glaveSeje, type Seja } from './prijava';
  */
 export type Izid =
   | { vrsta: 'synced' }
-  | { vrsta: 'pending'; razlog: string }
+  /**
+   * `prijavaPotekla` loči „strežnik ni dosegljiv“ od „prijava ne velja“.
+   * Oboje pusti zapis v vrsti, a le drugo more uporabnica odpraviti — in
+   * kriterij `V3-R04` zahteva, da ji to **povemo**, ne da to zapišemo v
+   * `sync_error`, ki ga ne izriše nihče.
+   */
+  | { vrsta: 'pending'; razlog: string; prijavaPotekla?: boolean }
   | { vrsta: 'failed'; razlog: string }
   /**
    * Snov je na strežniku arhivirana. Ni napaka in ni uspeh prenosa —
@@ -71,7 +77,13 @@ export function razvrstiStatus(status: number): Izid {
   // preklicana. To stanje se **more** spremeniti samo od sebe — s prijavo —,
   // zato zapis ostane `pending` in ne gre v `failed` (`ADR-004` meja,
   // `docs/odlocitve/ADR-036` H). Snov se ne izgubi in kamera dela naprej.
-  if (status === 401) return { vrsta: 'pending', razlog: SPOROCILO_POTEKLA_PRIJAVA };
+  if (status === 401) {
+    return {
+      vrsta: 'pending',
+      razlog: SPOROCILO_POTEKLA_PRIJAVA,
+      prijavaPotekla: true,
+    };
+  }
 
   if (status >= 200 && status < 300) {
     // 201 je nov zapis, 200 je zapis, ki je na strežniku že bil. Oboje pomeni,

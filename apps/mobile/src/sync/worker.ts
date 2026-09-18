@@ -34,6 +34,13 @@ export type Povzetek = {
   cakajoci: number;
   /** Koliko jih je strežnik dokončno zavrnil. */
   neuspeli: number;
+  /**
+   * Ali je prenos ustavila **potekla prijava**.
+   *
+   * Ločeno od `cakajoci`, ker je to edino stanje vrste, ki ga uporabnica
+   * more odpraviti sama — in ga mora zato videti (kriterij `V3-R04`).
+   */
+  prijavaPotekla: boolean;
 };
 
 /**
@@ -67,7 +74,12 @@ export async function prenesiCakajoce(
   // telefonu ostane, kjer je, in ne odide pod napačnim žetonom
   // (`docs/odlocitve/ADR-036` B).
   const cakajoci = await listPending(db, lastnik);
-  const povzetek: Povzetek = { preneseni: 0, cakajoci: 0, neuspeli: 0 };
+  const povzetek: Povzetek = {
+    preneseni: 0,
+    cakajoci: 0,
+    neuspeli: 0,
+    prijavaPotekla: false,
+  };
 
   for (const [zaporedna, material] of cakajoci.entries()) {
     const izid = await prenesiEno(material);
@@ -95,6 +107,7 @@ export async function prenesiCakajoce(
 
     await recordAttempt(db, material.id, izid.razlog);
     povzetek.cakajoci = cakajoci.length - zaporedna;
+    povzetek.prijavaPotekla = izid.prijavaPotekla === true;
     return povzetek;
   }
 

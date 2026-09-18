@@ -53,7 +53,7 @@ describe('oddelava čakalne vrste', () => {
 
     const povzetek = await prenesiCakajoce(db, async () => USPEH, null);
 
-    expect(povzetek).toEqual({ preneseni: 1, cakajoci: 0, neuspeli: 0 });
+    expect(povzetek).toEqual({ preneseni: 1, cakajoci: 0, neuspeli: 0, prijavaPotekla: false });
     expect((await stanje(db, 'id-1')).sync_status).toBe('synced');
   });
 
@@ -62,7 +62,7 @@ describe('oddelava čakalne vrste', () => {
 
     const povzetek = await prenesiCakajoce(db, async () => ZAVRNJEN, null);
 
-    expect(povzetek).toEqual({ preneseni: 0, cakajoci: 0, neuspeli: 1 });
+    expect(povzetek).toEqual({ preneseni: 0, cakajoci: 0, neuspeli: 1, prijavaPotekla: false });
     const zapis = await stanje(db, 'id-1');
     expect(zapis.sync_status).toBe('failed');
     expect(zapis.sync_error).toBe('strežnik je zavrnil ključ');
@@ -137,7 +137,7 @@ describe('oddelava čakalne vrste', () => {
       null,
     );
 
-    expect(povzetek).toEqual({ preneseni: 1, cakajoci: 0, neuspeli: 1 });
+    expect(povzetek).toEqual({ preneseni: 1, cakajoci: 0, neuspeli: 1, prijavaPotekla: false });
     expect((await stanje(db, 'b')).sync_status).toBe('synced');
   });
 
@@ -147,7 +147,7 @@ describe('oddelava čakalne vrste', () => {
     const povzetek = await prenesiCakajoce(db, prenesiEno, null);
 
     expect(prenesiEno).not.toHaveBeenCalled();
-    expect(povzetek).toEqual({ preneseni: 0, cakajoci: 0, neuspeli: 0 });
+    expect(povzetek).toEqual({ preneseni: 0, cakajoci: 0, neuspeli: 0, prijavaPotekla: false });
   });
 
   it('preneseni in zavrnjeni se ne poskušajo znova', async () => {
@@ -327,7 +327,7 @@ describe('razporejevalnik', () => {
     r.zazeni();
     await new Promise(process.nextTick);
 
-    expect(poCiklu).toHaveBeenCalledWith({ preneseni: 1, cakajoci: 0, neuspeli: 0 });
+    expect(poCiklu).toHaveBeenCalledWith({ preneseni: 1, cakajoci: 0, neuspeli: 0, prijavaPotekla: false });
     r.ustavi();
   });
 });

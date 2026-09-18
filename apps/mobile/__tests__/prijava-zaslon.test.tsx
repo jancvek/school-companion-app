@@ -165,6 +165,63 @@ describe('prijavni zaslon', () => {
     expect(await listPending(db, null)).toEqual([]);
   });
 
+  it('obnovljena seja preživi padlo posvojitev', async () => {
+    // Posvojitev je ob robu seje, ne seja sama: če pade (poln disk,
+    // zaklenjena baza), mora žeton z diska še vedno obveljati. Sicer bi
+    // aplikacija ostala videti neprijavljena, čeprav veljavna prijava
+    // obstaja — in uporabnica o tem ne bi izvedela ničesar.
+    const pokvarjena = {
+      ...db,
+      runAsync: async (stavek: string, parametri: unknown[]) => {
+        if (stavek.includes('user_id IS NULL')) throw new Error('database is locked');
+        return db.runAsync(stavek, parametri as never);
+      },
+    };
+
+    await render(
+      <PrijavaProvider
+        db={pokvarjena}
+        nastavitve={NASTAVITVE}
+        shramba={ustvariShrambo(SEJA)}
+      >
+        <SyncProvider db={pokvarjena} nastavitve={NASTAVITVE}>
+          <PrijavaScreen />
+        </SyncProvider>
+      </PrijavaProvider>,
+    );
+
+    // Seja je obveljala; posvojitev se ponovi ob naslednji razrešeni seji.
+    expect(await screen.findByTestId('prijavljen')).toBeTruthy();
+  });
+
+  it('prijava uspe, tudi če posvojitev pade', async () => {
+    // Zrcalno: žeton je ob padcu posvojitve že na disku in seja na
+    // strežniku ustvarjena, zato bi bilo sporočilo „Prijava ni uspela“ laž.
+    const pokvarjena = {
+      ...db,
+      runAsync: async (stavek: string, parametri: unknown[]) => {
+        if (stavek.includes('user_id IS NULL')) throw new Error('database is locked');
+        return db.runAsync(stavek, parametri as never);
+      },
+    };
+    const shramba = ustvariShrambo();
+
+    await render(
+      <PrijavaProvider db={pokvarjena} nastavitve={NASTAVITVE} shramba={shramba}>
+        <SyncProvider db={pokvarjena} nastavitve={NASTAVITVE}>
+          <PrijavaScreen />
+        </SyncProvider>
+      </PrijavaProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('polje-ime')).toBeTruthy());
+
+    await vpisiInPotrdi('masa', 'geslo-otroka');
+
+    expect(screen.queryByTestId('napaka-prijave')).toBeNull();
+    expect(shramba.vsebina()).toContain('nov-zeton');
+    expect(usmerjevalnik.stanje.router.back).toHaveBeenCalled();
+  });
+
   it('obnovljena seja ne posvoji zapisov druge uporabnice', async () => {
     // Posvojitev je za zapise **brez** lastnika; tuj zapis ostane tuj.
     await insertMaterial(db, material({ id: 'jakov', user_id: 'u-jaka' }));

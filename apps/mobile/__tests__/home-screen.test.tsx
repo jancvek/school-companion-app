@@ -1,13 +1,15 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { AppState } from 'react-native';
 
 import HomeScreen from '../app/index';
 import PickSubjectForCaptureScreen from '../app/slikaj/index';
 import PickSubjectForHistoryScreen from '../app/zgodovina/index';
 import { preberiNastavitve } from '@/config/server';
 import { SUBJECTS } from '@/constants/subjects';
-import { insertMaterial } from '@/db/materials';
+import { insertMaterial, listPending } from '@/db/materials';
 import { migriraj } from '@/db/migrations';
-import type { Seja } from '@/sync/prijava';
+import { SPOROCILO_POTEKLA_PRIJAVA, type Seja } from '@/sync/prijava';
+import type { Izid } from '@/sync/upload';
 import { PrijavaProvider } from '@/sync/use-prijava';
 import { SyncProvider } from '@/sync/use-sync';
 import type { Material } from '@/types';
@@ -133,25 +135,32 @@ describe('izbira predmeta', () => {
 describe('stanje prenosa na domači strani', () => {
   let db: ReturnType<typeof createTestDatabase>;
 
+  let prvotnoStanje: string;
+
   beforeEach(async () => {
     db = createTestDatabase();
     await migriraj(db);
+    // Brez tega se razporejevalnik ne zažene in `poCiklu` nikoli ne javi
+    // izida — vrstica o potekli prijavi bi manjkala iz napačnega razloga.
+    prvotnoStanje = AppState.currentState;
+    (AppState as { currentState: string }).currentState = 'active';
   });
 
   afterEach(() => {
+    (AppState as { currentState: string }).currentState = prvotnoStanje;
     db.close();
   });
 
   /** Domača stran znotraj obeh ponudnikov, z bazo in nastavitvami iz testa. */
-  async function izrisi(nastavljen: boolean, seja: Seja | null = SEJA) {
+  async function izrisi(
+    nastavljen: boolean,
+    seja: Seja | null = SEJA,
+    izid: Izid = { vrsta: 'pending', razlog: 'test' },
+  ) {
     const nastavitve = nastavljen ? { baseUrl: 'https://school-buddy.duckdns.org' } : null;
     return render(
       <PrijavaProvider db={db} nastavitve={nastavitve} shramba={ustvariShrambo(seja)}>
-        <SyncProvider
-          db={db}
-          nastavitve={nastavitve}
-          prenesiEno={async () => ({ vrsta: 'pending', razlog: 'test' })}
-        >
+        <SyncProvider db={db} nastavitve={nastavitve} prenesiEno={async () => izid}>
           <HomeScreen />
         </SyncProvider>
       </PrijavaProvider>,
@@ -196,6 +205,37 @@ describe('stanje prenosa na domači strani', () => {
 
     await waitFor(() => expect(screen.getByTestId('stevec-cakajocih')).toBeTruthy());
     expect(screen.queryByTestId('stevec-neuspelih')).toBeNull();
+  });
+
+  it('potekla prijava to pove naravnost, ne le v števcu', async () => {
+    // Kriterij V3-R04: „Ob neveljavnem žetonu aplikacija to pove razumljivo
+    // (Prijava je potekla, prijavi se znova) in ne izgubi nobene lokalno
+    // shranjene snovi.“ Zapis v `sync_error` tega ne stori: ne izriše ga
+    // nihče. Brez te vrstice je potekla prijava videti enako kot ugasnjen
+    // strežnik — števec stoji in otrok ne ve, da mora kaj narediti.
+    await insertMaterial(db, material({ id: 'a' }));
+
+    await izrisi(true, SEJA, {
+      vrsta: 'pending',
+      razlog: SPOROCILO_POTEKLA_PRIJAVA,
+      prijavaPotekla: true,
+    });
+
+    const vrstica = await screen.findByTestId('prijava-potekla');
+    expect(vrstica.props.children).toMatch(/prijavi se znova/i);
+    // Snov ostane na telefonu in tega sporočilo tudi pove.
+    expect(vrstica.props.children).toMatch(/ostanejo na telefonu/i);
+    expect((await listPending(db, SEJA.userId)).map((m) => m.id)).toEqual(['a']);
+  });
+
+  it('nedosegljiv strežnik ni videti kot potekla prijava', async () => {
+    // Sicer bi otrok ob vsaki izgubljeni povezavi poskusil ponovno prijavo.
+    await insertMaterial(db, material({ id: 'a' }));
+
+    await izrisi(true, SEJA, { vrsta: 'pending', razlog: 'Strežnik ni dosegljiv.' });
+
+    expect(await screen.findByTestId('stevec-cakajocih')).toBeTruthy();
+    expect(screen.queryByTestId('prijava-potekla')).toBeNull();
   });
 
   it('brez nastavljenega prenosa pove, da posnetki ostajajo na telefonu', async () => {

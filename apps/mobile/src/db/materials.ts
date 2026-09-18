@@ -67,12 +67,16 @@ export async function insertMaterial(
 }
 
 /**
- * Zapisom brez lastnika pripiše uporabnika, ki se je pravkar prijavil.
+ * Zapisom brez lastnika pripiše uporabnika, čigar seja je pravkar razrešena.
  *
- * Kliče se ob **uspešni prijavi**, ne ob prenosu: brez tega bi posnetki, ki so
- * nastali pred prvo prijavo — na Mašinem telefonu vsi obstoječi — ostali v
- * vrsti za vedno. Zavestna posledica: posnetek, nastal med odjavo enega in
- * prijavo drugega, pripade drugemu (`ADR-036` B).
+ * Kliče se ob **vsaki razrešeni seji** — ob prijavi in ob obnovitvi žetona z
+ * diska —, ne ob prenosu. Vezanje zgolj na prijavo bi pustilo zapise, ki so
+ * nastali, dokler je bila aplikacija videti neprijavljena, nedosegljive za
+ * vedno; brez posvojitve nasploh pa bi posnetki, nastali pred prvo prijavo —
+ * na Mašinem telefonu vsi obstoječi — ostali v vrsti za vedno.
+ *
+ * Zavestna posledica: posnetek, nastal med odjavo enega in prijavo drugega,
+ * pripade drugemu (`ADR-036` B in popravki).
  */
 export async function posvojiBrezLastnika(
   db: MaterialsDatabase,

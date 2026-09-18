@@ -780,7 +780,11 @@ Izvedbene odločitve so v `ADR-036`.
   posvoji vsaka razrešena seja — prijava in obnovitev žetona z diska.
   Podrobnosti so v razdelku o lokalni bazi.
 - **`401` ni `failed`.** Zapis ostane `pending` in prenos počaka na
-  prijavo; to je edina izjema od pravila `ADR-004` poleg `410`.
+  prijavo; to je edina izjema od pravila `ADR-004` poleg `410`. Izid ga
+  **loči** od nedosegljivega strežnika (`Izid.prijavaPotekla`), ker je to
+  edino stanje vrste, ki ga uporabnica more odpraviti sama: domača stran
+  pove „Prijava je potekla, prijavi se znova". Odjave ob `401` ni —
+  aplikacija pove, ne ukrepa namesto otroka (`ADR-036`, tretji pregled).
 
 ## Sestavljalnik kvizov (V2-R01)
 
