@@ -32,10 +32,20 @@ from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatc
 from app.db import PoverilnicaZaPrijavo, PrijavaRepository, SejaUporabnika
 from app.models import VLOGA_OTROK, VLOGA_STARS
 
-#: Poti prijave in odjave. Pod `/admin` sta zato, ker bi ju `ApiKeyMiddleware`
-#: sicer zahteval z glavo `X-API-Key`, ki je brskalnik ne zna poslati.
+#: Poti prijave in odjave v brskalniku. Pod `/admin` sta zato, ker sta del
+#: operaterske strani in ker njuna izvzetja iz `SejaMiddleware` ni treba
+#: iskati drugje kot pri ostalih poteh te strani.
 POT_PRIJAVE = "/admin/login"
 POT_ODJAVE = "/admin/logout"
+
+#: Poti prijave in odjave telefona (V3-R04). **Zunaj `/admin`**: tam govori
+#: brskalnik s piškotkom in CSRF žetonom, tu pa telefon z JSON in glavo
+#: `Authorization: Bearer` (`docs/odlocitve/ADR-036` G).
+POT_PRIJAVE_TELEFONA = "/auth/login"
+POT_ODJAVE_TELEFONA = "/auth/logout"
+
+#: Shema, v kateri telefon pošlje žeton.
+SHEMA_ZETONA = "bearer"
 
 #: Ime piškotka s sejo.
 PISKOTEK_SEJE = "seja"
@@ -66,23 +76,28 @@ ZAMIK_SEKUND = 2.0
 #: Kako dolgo se neuspeli poskusi sploh hranijo. Starejši gredo ob prijavi ven.
 HRAMBA_POSKUSOV = timedelta(days=30)
 
-#: Najkrajše geslo po vlogi (`ADR-035` G). Staršev račun je admin družine na
-#: javnem internetu; otrokov je za mobilno prijavo in do `/admin` ne pride.
-#: Ključ je `str` in ne `Vloga`: vloga pride iz baze kot navaden niz in
-#: vrednost, ki je v tabeli ne bi smelo biti, mora pasti na privzetek za
-#: starša (strožjega), ne na `KeyError`.
-NAJKRAJSE_GESLO: dict[str, int] = {VLOGA_STARS: 12, VLOGA_OTROK: 4}
+#: Najkrajše geslo po vlogi. Ključ je `str` in ne `Vloga`: vloga pride iz baze
+#: kot navaden niz in vrednost, ki je v tabeli ne bi smelo biti, mora pasti na
+#: privzetek za starša (strožjega), ne na `KeyError`.
+#:
+#: Otrokovih 8 in ne 4: `ADR-035` G je kratko geslo dovolil z utemeljitvijo,
+#: da otrokov račun služi mobilni prijavi in do `/admin` ne pride — mobilne
+#: prijave takrat ni bilo. Z `V3-R04` nastane in je dosegljiva z javnega
+#: interneta, `ADR-035` E pa priznava, da upočasnitev ne velja za napadalca z
+#: vzporednimi povezavami (`docs/odlocitve/ADR-036` E).
+NAJKRAJSE_GESLO: dict[str, int] = {VLOGA_STARS: 12, VLOGA_OTROK: 8}
 
 #: Eno samo sporočilo za vse neuspehe, ki bi sicer izdali, ali račun obstaja.
 SPOROCILO_NEUSPELA_PRIJAVA = (
-    "E-naslov ali geslo ni pravo. Poskusi znova; po več zaporednih poskusih "
-    "bo prijava počasnejša."
+    "E-naslov ali geslo ni pravo. Poskusi znova; po več zaporednih poskusih bo prijava počasnejša."
 )
 
 #: Izjema od enotnega sporočila (`ADR-035` F): Maša mora razumeti, zakaj ne gre.
-SPOROCILO_OTROK = (
-    "Ta račun je otrokov in se prijavi v mobilni aplikaciji, ne na tej strani."
-)
+SPOROCILO_OTROK = "Ta račun je otrokov in se prijavi v mobilni aplikaciji, ne na tej strani."
+
+#: Zrcalna izjema na telefonu (`ADR-036` D). Cena je ista in se prizna enako:
+#: sporočilo izda vlogo računa, čigar geslo tisti, ki ga vidi, že pozna.
+SPOROCILO_STARS = "Ta račun je starševski in se prijavi na spletni strani, ne v aplikaciji."
 
 _ZGOSCEVALNIK = PasswordHasher()
 
@@ -95,12 +110,53 @@ _ZGOSCEVALNIK = PasswordHasher()
 _LAZNA_ZGOSTITEV_GESLA = _ZGOSCEVALNIK.hash(secrets.token_urlsafe(32))
 
 
+class Vrata(Enum):
+    """Kje se kdo prijavlja.
+
+    Vsaka vloga ima svoja vrata (`docs/00-namen.md`): starš dela izključno v
+    spletnem adminu, otrok izključno v mobilni aplikaciji. Pravilo je **eno**
+    in ne dve zrcalni veji — `ADR-035` F ga je zapisal za admin, `ADR-036` D
+    za telefon, in odkar obstajata oboja vrata, je ena tabela cenejša od dveh
+    posebnih primerov, ki se lahko razideta.
+    """
+
+    ADMIN = "admin"
+    TELEFON = "telefon"
+
+
+#: Katera vloga sodi na katera vrata, in kaj dobi tista, ki pride na napačna.
+_VLOGA_ZA_VRATA: dict[Vrata, str] = {
+    Vrata.ADMIN: VLOGA_STARS,
+    Vrata.TELEFON: VLOGA_OTROK,
+}
+
+_SPOROCILO_NAPACNA_VRATA: dict[Vrata, str] = {
+    Vrata.ADMIN: SPOROCILO_OTROK,
+    Vrata.TELEFON: SPOROCILO_STARS,
+}
+
+
+def vloga_sodi(vloga: str, vrata: Vrata) -> bool:
+    """Ali ta vloga sme skozi ta vrata.
+
+    Preverja se ob **prijavi in ob vsaki uporabi seje**, ne samo ob prijavi.
+    Razlog je nastal prav z `V3-R04`: do takrat otrokove seje ni bilo mogoče
+    ustvariti (admin ga je zavrnil), zato je preverba ob prijavi zadoščala.
+    Odkar telefon seje ustvarja, je žeton otroka resničen niz — in isti niz,
+    prilepljen v piškotek `seja`, bi brez te preverbe odprl celoten `/admin`.
+    Žeton je en pojem z dvema prenosnikoma (`ADR-027`); vrata pa dvoje.
+    """
+    return vloga == _VLOGA_ZA_VRATA[vrata]
+
+
 class Izid(Enum):
     """Kaj se je zgodilo ob poskusu prijave."""
 
     USPEH = "uspeh"
     ZAVRNJENO = "zavrnjeno"
-    OTROK = "otrok"
+    #: Poverilnica je prava, a vloga na ta vrata ne sodi. Do V3-R04 se je ta
+    #: izid imenoval `OTROK` in je obstajal samo za admin stran.
+    NAPACNA_VRATA = "napacna-vrata"
 
 
 @dataclass(frozen=True)
@@ -189,6 +245,7 @@ def preveri_prijavo(
     identifikator: str,
     geslo: str,
     *,
+    vrata: Vrata,
     ip: str | None,
     ko: datetime,
 ) -> IzidPrijave:
@@ -201,6 +258,9 @@ def preveri_prijavo(
     **Čiščenje teče ob vsakem poskusu, ne samo ob uspešnem** (`ADR-035` C).
     Sicer bi v natanko tistem stanju, ki ga pusti migracija — račun brez
     gesla, torej brez uspešne prijave — tabela poskusov rasla brez meje.
+
+    `vrata` povedo, od kod prijava prihaja. Vloga, ki tja ne sodi, dobi
+    `NAPACNA_VRATA` z razlago namesto enotnega sporočila — glej `Vrata`.
     """
     repo.pocisti_stare_poskuse(ko - HRAMBA_POSKUSOV)
     repo.pocisti_potekle_seje(ko)
@@ -216,9 +276,9 @@ def preveri_prijavo(
         repo.zabelezi_neuspeh(identifikator, ip, ko)
         return IzidPrijave(Izid.ZAVRNJENO, SPOROCILO_NEUSPELA_PRIJAVA)
 
-    if poverilnica.role == VLOGA_OTROK:
+    if not vloga_sodi(poverilnica.role, vrata):
         # Geslo je pravo, zato to ni neuspel poskus in se ne šteje.
-        return IzidPrijave(Izid.OTROK, SPOROCILO_OTROK)
+        return IzidPrijave(Izid.NAPACNA_VRATA, _SPOROCILO_NAPACNA_VRATA[vrata])
 
     repo.pozabi_poskuse(identifikator)
     return IzidPrijave(Izid.USPEH, poverilnica=poverilnica)

@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.casi import trajanje
 from app.models import Material, Question, QuestionAttempt, Quiz, QuizItem
-from tests.conftest import CVEK_ID, je_seja
+from tests.conftest import CVEK_ID, SejaTesta, je_seja
 from tests.test_kvizi import UUID_DVA, UUID_ENA, objavi, snov, upokoji
 from tests.test_resevanje import poskus, poslji
 
@@ -42,6 +42,7 @@ def resen_kviz(
     motor: Engine,
     slike: Path,
     ocene: Sequence[str],
+    telefon: SejaTesta,
     *,
     material_id: str = UUID_ENA,
 ) -> str:
@@ -58,6 +59,7 @@ def resen_kviz(
             poskus(postavka_id, rating=ocena)
             for postavka_id, ocena in zip(postavke(motor, quiz_id), ocene, strict=True)
         ],
+        telefon,
     )
     assert odgovor.status_code == 200, odgovor.text
     return quiz_id
@@ -157,16 +159,18 @@ class TestSkupine:
     """Vprašanja po oceni, najtežja zgoraj, s številom v vsaki skupini."""
 
     def test_skupine_so_od_najtezje_navzdol(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         quiz_id = resen_kviz(
-            odjemalec, motor, slike, ["lahko", "nisem_vedela", "tezko", "srednje"]
+            odjemalec, motor, slike, ["lahko", "nisem_vedela", "tezko", "srednje"], telefon
         )
 
         besedilo = stran(odjemalec, quiz_id)
 
-        naslovi = [besedilo.index(f"<h2>{oznaka} · ") for oznaka in
-                   ("Nisem vedela", "Težko", "Srednje", "Lahko")]
+        naslovi = [
+            besedilo.index(f"<h2>{oznaka} · ")
+            for oznaka in ("Nisem vedela", "Težko", "Srednje", "Lahko")
+        ]
         assert naslovi == sorted(naslovi)
         # Vprašanje 2 (nisem vedela) stoji pred vprašanjem 1 (lahko), čeprav
         # je v kvizu za njim.
@@ -175,9 +179,9 @@ class TestSkupine:
         assert besedilo.index(vprasanje(4)) < besedilo.index(vprasanje(1))
 
     def test_stevilo_v_vsaki_skupini_tudi_nic(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko", "tezko", "lahko"])
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko", "tezko", "lahko"], telefon)
 
         besedilo = stran(odjemalec, quiz_id)
 
@@ -188,10 +192,10 @@ class TestSkupine:
         assert "Brez ocene" not in besedilo
 
     def test_znotraj_skupine_po_zaporedju_s_stevilko_v_kvizu(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         quiz_id = resen_kviz(
-            odjemalec, motor, slike, ["srednje", "tezko", "lahko", "srednje", "tezko"]
+            odjemalec, motor, slike, ["srednje", "tezko", "lahko", "srednje", "tezko"], telefon
         )
 
         besedilo = stran(odjemalec, quiz_id)
@@ -200,9 +204,9 @@ class TestSkupine:
         assert [int(st) for st, _ in OSTEVILCENO.findall(tezka)] == [2, 5]
 
     def test_pri_vsakem_vprasanju_je_odgovor(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko", "lahko", "srednje"])
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko", "lahko", "srednje"], telefon)
 
         besedilo = stran(odjemalec, quiz_id)
 
@@ -210,9 +214,9 @@ class TestSkupine:
             assert f"Odgovor {i}." in besedilo
 
     def test_bere_zamrznjeno_besedilo(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
         with Session(motor) as seja:
             najdeno = seja.get(Question, f"{UUID_ENA}-v1")
             assert najdeno is not None
@@ -227,10 +231,10 @@ class TestSkupine:
         assert "PODTAKNJENO" not in besedilo
 
     def test_resen_nepreklican_kviz_se_da_preklicati(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         """Odločitev 2 v planu: rezultat gumba za preklic ne skrije."""
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
 
         besedilo = stran(odjemalec, quiz_id)
 
@@ -238,24 +242,24 @@ class TestSkupine:
         assert f'action="/admin/quizzes/{quiz_id}/cancel"' in besedilo
 
     def test_pove_da_je_samoocena(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
 
         assert "Mašina samoocena" in stran(odjemalec, quiz_id)
 
     def test_rezultat_ponudi_tisk(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
 
         assert f'href="/admin/quizzes/{quiz_id}/print"' in stran(odjemalec, quiz_id)
 
     def test_neprepoznana_ocena_ne_izpade_molce(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         """Strežnik take ocene ne sprejme; če bi v bazi vseeno bila, je vidna."""
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko", "lahko"])
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko", "lahko"], telefon)
         with Session(motor) as seja:
             seja.execute(
                 update(QuestionAttempt)
@@ -303,7 +307,9 @@ class TestTrajanje:
         assert trajanje(naiven, self.ZACETEK + timedelta(seconds=14)) == "14 s"
         assert trajanje(self.ZACETEK, naiven + timedelta(seconds=14)) == "14 s"
 
-    def test_na_strani(self, odjemalec: TestClient, motor: Engine, slike: Path) -> None:
+    def test_na_strani(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
+    ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=1)
         quiz_id = objavi(odjemalec, motor, [UUID_ENA], koliko=1)
         poslji(
@@ -317,6 +323,7 @@ class TestTrajanje:
                     answered_at=(self.ZACETEK + timedelta(seconds=16)).isoformat(),
                 )
             ],
+            telefon,
         )
 
         assert "razmislek 14 s · ocena 2 s" in stran(odjemalec, quiz_id)
@@ -335,8 +342,10 @@ class TestIzvor:
             )
             seja.commit()
 
-    def test_snov_obstaja(self, odjemalec: TestClient, motor: Engine, slike: Path) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+    def test_snov_obstaja(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
+    ) -> None:
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
 
         besedilo = stran(odjemalec, quiz_id)
 
@@ -346,8 +355,10 @@ class TestIzvor:
         assert "slike ni na disku" not in besedilo
         assert "ponovno obdelana" not in besedilo
 
-    def test_snov_v_arhivu(self, odjemalec: TestClient, motor: Engine, slike: Path) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+    def test_snov_v_arhivu(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
+    ) -> None:
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
         self._arhiviraj(motor)
 
         besedilo = stran(odjemalec, quiz_id)
@@ -357,9 +368,9 @@ class TestIzvor:
         assert "počiščena" not in besedilo
 
     def test_arhiv_s_pociscena_sliko(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
         self._arhiviraj(motor)
         (slike / CVEK_ID / f"{UUID_ENA}.jpg").unlink()
 
@@ -369,9 +380,9 @@ class TestIzvor:
         assert "v arhivu, slika počiščena — prepis je na strani snovi" in besedilo
 
     def test_aktivna_snov_brez_slike(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
         (slike / CVEK_ID / f"{UUID_ENA}.jpg").unlink()
 
         besedilo = stran(odjemalec, quiz_id)
@@ -380,10 +391,10 @@ class TestIzvor:
         assert "v arhivu" not in besedilo
 
     def test_slika_zunaj_mape_slik_ni_na_disku(
-        self, odjemalec: TestClient, motor: Engine, slike: Path, tmp_path: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, tmp_path: Path, telefon: SejaTesta
     ) -> None:
         """Isto pravilo kot v izbirniku: datoteka zunaj `images_dir` ne šteje."""
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
         zunaj = tmp_path / "zunaj.jpg"
         zunaj.write_bytes(b"slika")
         with Session(motor) as seja:
@@ -395,9 +406,9 @@ class TestIzvor:
         assert "slike ni na disku" in stran(odjemalec, quiz_id)
 
     def test_dokoncno_izbrisana_snov(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
         with Session(motor) as seja:
             material = seja.get(Material, UUID_ENA)
             assert material is not None
@@ -411,9 +422,9 @@ class TestIzvor:
         assert vprasanje(1) in besedilo
 
     def test_ponovno_obdelana_snov(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
         upokoji(motor, UUID_ENA)
 
         besedilo = stran(odjemalec, quiz_id)
@@ -426,9 +437,9 @@ class TestPreklicanInResen:
     """Preklic ima prednost pri stanju; rezultat se vseeno pokaže (odl. 1)."""
 
     def test_preklic_na_vrhu_rezultat_pod_njim(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
         odjemalec.post(f"/admin/quizzes/{quiz_id}/cancel", follow_redirects=False)
 
         besedilo = stran(odjemalec, quiz_id)
@@ -439,9 +450,9 @@ class TestPreklicanInResen:
         assert "Prekliči kviz" not in besedilo
 
     def test_tisk_preklicanega_in_resenega(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
         odjemalec.post(f"/admin/quizzes/{quiz_id}/cancel", follow_redirects=False)
 
         assert vprasanje(1) in del_za_tisk(tisk(odjemalec, quiz_id))
@@ -459,9 +470,9 @@ class TestTisk:
         return "checked" in element
 
     def test_privzeto_nisem_vedela_in_tezko(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE)
+        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE, telefon)
 
         besedilo = tisk(odjemalec, quiz_id)
         papir = del_za_tisk(besedilo)
@@ -475,8 +486,10 @@ class TestTisk:
         assert not self._obkljukana(besedilo, "srednje")
         assert not self._obkljukana(besedilo, "lahko")
 
-    def test_izbor_ocen(self, odjemalec: TestClient, motor: Engine, slike: Path) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE)
+    def test_izbor_ocen(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
+    ) -> None:
+        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE, telefon)
 
         besedilo = tisk(odjemalec, quiz_id, "?izbor=1&ocena=lahko")
         papir = del_za_tisk(besedilo)
@@ -488,9 +501,9 @@ class TestTisk:
         assert not self._obkljukana(besedilo, "tezko")
 
     def test_vse_odkljukano_ni_privzetek(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE)
+        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE, telefon)
 
         besedilo = tisk(odjemalec, quiz_id, "?izbor=1")
 
@@ -498,8 +511,10 @@ class TestTisk:
         assert 'class="kljuc"' not in besedilo
         assert "ni kaj natisniti" in besedilo
 
-    def test_nic_ne_ustreza(self, odjemalec: TestClient, motor: Engine, slike: Path) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["lahko", "srednje"])
+    def test_nic_ne_ustreza(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
+    ) -> None:
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["lahko", "srednje"], telefon)
 
         besedilo = tisk(odjemalec, quiz_id)
 
@@ -507,9 +522,9 @@ class TestTisk:
         assert "ni kaj natisniti" in besedilo
 
     def test_neznana_koda_se_prezre(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE)
+        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE, telefon)
 
         papir = del_za_tisk(tisk(odjemalec, quiz_id, "?izbor=1&ocena=xyz&ocena=tezko"))
 
@@ -519,9 +534,9 @@ class TestTisk:
         ]
 
     def test_odgovori_so_samo_v_kljucu(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE)
+        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE, telefon)
 
         papir = del_za_tisk(tisk(odjemalec, quiz_id))
         meja = papir.index('<section class="kljuc">')
@@ -531,9 +546,9 @@ class TestTisk:
             assert f"Odgovor {i}." in papir[meja:]
 
     def test_isto_ostevilcenje_od_najtezje(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE)
+        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE, telefon)
 
         papir = del_za_tisk(tisk(odjemalec, quiz_id))
         meja = papir.index('<section class="kljuc">')
@@ -545,9 +560,9 @@ class TestTisk:
         assert kljuc == vprasanja
 
     def test_na_papirju_ni_naslovov_skupin(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE)
+        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE, telefon)
 
         besedilo = tisk(odjemalec, quiz_id)
         papir = del_za_tisk(besedilo)
@@ -557,17 +572,21 @@ class TestTisk:
         assert "Težko" not in papir
         assert "razmislek" not in papir
 
-    def test_prostor_za_odgovor(self, odjemalec: TestClient, motor: Engine, slike: Path) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE)
+    def test_prostor_za_odgovor(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
+    ) -> None:
+        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE, telefon)
 
         papir = del_za_tisk(tisk(odjemalec, quiz_id))
         meja = papir.index('<section class="kljuc">')
 
         assert papir[:meja].count('<div class="prostor"></div>') == 3
 
-    def test_slog_za_tisk(self, odjemalec: TestClient, motor: Engine, slike: Path) -> None:
+    def test_slog_za_tisk(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
+    ) -> None:
         """Postavitve testi ne dokažejo; dokažejo le, da pravila obstajajo."""
-        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE)
+        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE, telefon)
 
         besedilo = tisk(odjemalec, quiz_id)
         slog = besedilo[besedilo.index("@media print") :]
@@ -579,9 +598,7 @@ class TestTisk:
         assert "<script" not in besedilo.lower()
 
     @staticmethod
-    def _poslji_obrazec(
-        odjemalec: TestClient, besedilo: str, obkljukaj: set[str]
-    ) -> str:
+    def _poslji_obrazec(odjemalec: TestClient, besedilo: str, obkljukaj: set[str]) -> str:
         """Pošlje obrazec za izbor ocen, kot bi ga brskalnik.
 
         Vse — cilj, skrita polja, imena in vrednosti kljukic — se prebere iz
@@ -610,9 +627,9 @@ class TestTisk:
         return odgovor.text
 
     def test_obrazec_posreduje_izbrano_oceno(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE)
+        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE, telefon)
 
         besedilo = self._poslji_obrazec(odjemalec, tisk(odjemalec, quiz_id), {"lahko"})
         papir = del_za_tisk(besedilo)
@@ -622,10 +639,10 @@ class TestTisk:
             assert vprasanje(i) not in papir
 
     def test_obrazec_brez_kljukic_ni_privzetek(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         """Odkljukano vse mora ostati odkljukano, ne se vrniti v privzetek."""
-        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE)
+        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE, telefon)
 
         besedilo = self._poslji_obrazec(odjemalec, tisk(odjemalec, quiz_id), set())
 
@@ -637,10 +654,10 @@ class TestTisk:
         )
 
     def test_tisk_bere_zamrznjeno_besedilo(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         """Vprašanja in ključ iz postavke, ne iz `questions` (`ADR-016` E)."""
-        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"])
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
         with Session(motor) as seja:
             najdeno = seja.get(Question, f"{UUID_ENA}-v1")
             assert najdeno is not None
@@ -655,9 +672,9 @@ class TestTisk:
         assert "PODTAKNJEN" not in papir
 
     def test_papir_nosi_ime_kviza(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE)
+        quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE, telefon)
         with Session(motor) as seja:
             kviz = seja.get(Quiz, quiz_id)
             assert kviz is not None
@@ -698,27 +715,27 @@ class TestPoizvedbe:
     """Rezultat ne sme brati poskusa ali snovi na postavko."""
 
     def test_rezultat_je_pet_poizvedb(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         # Družina pride iz seje in ne iz poizvedbe (V3-R03), branja seje pa
         # `stej_poizvedbe` ne šteje — obojega zato tu ni treba zamenjati.
         snov(motor, slike, UUID_ENA, vprasanj=10)
         snov(motor, slike, UUID_DVA, vprasanj=10)
         quiz_id = objavi(odjemalec, motor, [UUID_ENA, UUID_DVA], koliko=10)
-        poslji(odjemalec, [poskus(p, rating="tezko") for p in postavke(motor, quiz_id)])
+        poslji(odjemalec, [poskus(p, rating="tezko") for p in postavke(motor, quiz_id)], telefon)
 
         koliko = stej_poizvedbe(motor, lambda: odjemalec.get(f"/admin/quizzes/{quiz_id}"))
 
         assert koliko <= 5, f"rezultat je opravil {koliko} poizvedb"
 
     def test_nereseni_kviz_ne_placa_poizvedb_rezultata(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=3)
         quiz_id = objavi(odjemalec, motor, [UUID_ENA], koliko=3)
         nereseni = stej_poizvedbe(motor, lambda: odjemalec.get(f"/admin/quizzes/{quiz_id}"))
 
-        poslji(odjemalec, [poskus(p, rating="tezko") for p in postavke(motor, quiz_id)])
+        poslji(odjemalec, [poskus(p, rating="tezko") for p in postavke(motor, quiz_id)], telefon)
         reseni = stej_poizvedbe(motor, lambda: odjemalec.get(f"/admin/quizzes/{quiz_id}"))
 
         # Poskusi in snovi: natanko dve več, obe samo pri rešenem.

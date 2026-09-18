@@ -29,7 +29,7 @@ from app.models import (
     QuizItem,
 )
 from app.routers.kvizi import NAJVEC_IME, NAJVEC_KODA, PRIVZETO_STEVILO
-from tests.conftest import CVEK_ID, KLJUC, je_seja
+from tests.conftest import CVEK_ID, SejaTesta, je_seja
 
 #: Trije stabilni identifikatorji; testi jih berejo iz izrisane strani.
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
@@ -977,10 +977,12 @@ class TestBrezKljuca:
 
         assert odgovor.status_code == 401
 
-    def test_materials_s_pravim_kljucem_se_vedno_dela(self, odjemalec: TestClient) -> None:
+    def test_materials_s_pravim_kljucem_se_vedno_dela(
+        self, odjemalec: TestClient, telefon: SejaTesta
+    ) -> None:
         odgovor = odjemalec.post(
             "/materials",
-            headers={"X-API-Key": KLJUC},
+            headers=telefon.glave,
             data={
                 "id": UUID_TRI,
                 "subject": "MAT",

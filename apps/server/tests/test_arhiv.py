@@ -14,7 +14,7 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from app.models import STATUS_NOV, Material
-from tests.conftest import CVEK_ID, KLJUC
+from tests.conftest import CVEK_ID, SejaTesta
 
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 UUID_DVA = "a1b2c3d4-e5f6-4789-abcd-ef0123456789"
@@ -93,21 +93,21 @@ class TestSeznamZaBrisanje:
     """`GET /materials/pending-deletion`."""
 
     def test_vrne_arhivirane_ki_se_niso_potrjeni(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         zapisi(motor, slike, UUID_ENA, arhivirano=ARHIVIRANO)
         zapisi(motor, slike, UUID_DVA)
         zapisi(motor, slike, UUID_TRI, arhivirano=ARHIVIRANO, potrjeno=POTRJENO)
 
-        odgovor = odjemalec.get("/materials/pending-deletion", headers={"X-API-Key": KLJUC})
+        odgovor = odjemalec.get("/materials/pending-deletion", headers=telefon.glave)
 
         assert odgovor.status_code == 200
         assert odgovor.json() == {"ids": [UUID_ENA]}
 
-    def test_prazen_seznam_ni_napaka(self, odjemalec: TestClient) -> None:
+    def test_prazen_seznam_ni_napaka(self, odjemalec: TestClient, telefon: SejaTesta) -> None:
         # Običajno stanje: nič ni arhiviranega. Telefon mora dobiti prazen
         # seznam in ne 404.
-        odgovor = odjemalec.get("/materials/pending-deletion", headers={"X-API-Key": KLJUC})
+        odgovor = odjemalec.get("/materials/pending-deletion", headers=telefon.glave)
 
         assert odgovor.status_code == 200
         assert odgovor.json() == {"ids": []}
@@ -118,12 +118,12 @@ class TestSeznamZaBrisanje:
         assert odjemalec.get("/materials/pending-deletion").status_code == 401
 
     def test_najstarejse_arhivirani_prvi(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         zapisi(motor, slike, UUID_ENA, arhivirano=datetime(2026, 9, 6, tzinfo=UTC))
         zapisi(motor, slike, UUID_DVA, arhivirano=datetime(2026, 9, 5, tzinfo=UTC))
 
-        odgovor = odjemalec.get("/materials/pending-deletion", headers={"X-API-Key": KLJUC})
+        odgovor = odjemalec.get("/materials/pending-deletion", headers=telefon.glave)
 
         assert odgovor.json()["ids"] == [UUID_DVA, UUID_ENA]
 
@@ -132,27 +132,25 @@ class TestPotrditevBrisanja:
     """`POST /materials/deleted-on-device`."""
 
     def test_zapise_potrditev_in_skrci_seznam(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         zapisi(motor, slike, UUID_ENA, arhivirano=ARHIVIRANO)
 
         odgovor = odjemalec.post(
             "/materials/deleted-on-device",
             json={"ids": [UUID_ENA]},
-            headers={"X-API-Key": KLJUC},
+            headers=telefon.glave,
         )
 
         assert odgovor.status_code == 200
         assert odgovor.json() == {"confirmed": 1}
         assert potrjeno_ob(motor) is not None
 
-        seznam = odjemalec.get(
-            "/materials/pending-deletion", headers={"X-API-Key": KLJUC}
-        ).json()
+        seznam = odjemalec.get("/materials/pending-deletion", headers=telefon.glave).json()
         assert seznam == {"ids": []}
 
     def test_ponovljena_potrditev_ne_premakne_casa(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         # Prenos s telefona je *at-least-once*: ista potrditev bo prišla
         # večkrat in to ni napaka.
@@ -161,27 +159,27 @@ class TestPotrditevBrisanja:
         odgovor = odjemalec.post(
             "/materials/deleted-on-device",
             json={"ids": [UUID_ENA]},
-            headers={"X-API-Key": KLJUC},
+            headers=telefon.glave,
         )
 
         assert odgovor.status_code == 200
         assert odgovor.json() == {"confirmed": 0}
         assert potrjeno_ob(motor) == POTRJENO
 
-    def test_neznan_id_ni_napaka(self, odjemalec: TestClient) -> None:
+    def test_neznan_id_ni_napaka(self, odjemalec: TestClient, telefon: SejaTesta) -> None:
         # Zapis je bil medtem že dokončno izbrisan. Izid je tak, kot ga je
         # telefon hotel, zato 404 tu ne bi bil resničen.
         odgovor = odjemalec.post(
             "/materials/deleted-on-device",
             json={"ids": [UUID_ENA]},
-            headers={"X-API-Key": KLJUC},
+            headers=telefon.glave,
         )
 
         assert odgovor.status_code == 200
         assert odgovor.json() == {"confirmed": 0}
 
     def test_aktiven_zapis_se_ne_potrdi(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         # Potrditev za nearhiviran zapis bi odprla pot dokončnemu brisanju
         # slike, ki je telefon ni nikoli dobil navodila zbrisati.
@@ -190,14 +188,14 @@ class TestPotrditevBrisanja:
         odgovor = odjemalec.post(
             "/materials/deleted-on-device",
             json={"ids": [UUID_ENA]},
-            headers={"X-API-Key": KLJUC},
+            headers=telefon.glave,
         )
 
         assert odgovor.json() == {"confirmed": 0}
         assert potrjeno_ob(motor) is None
 
     def test_paket_potrdi_vec_naenkrat(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         zapisi(motor, slike, UUID_ENA, arhivirano=ARHIVIRANO)
         zapisi(motor, slike, UUID_DVA, arhivirano=ARHIVIRANO)
@@ -205,31 +203,28 @@ class TestPotrditevBrisanja:
         odgovor = odjemalec.post(
             "/materials/deleted-on-device",
             json={"ids": [UUID_ENA, UUID_DVA]},
-            headers={"X-API-Key": KLJUC},
+            headers=telefon.glave,
         )
 
         assert odgovor.json() == {"confirmed": 2}
 
-    def test_prazen_paket_ni_napaka(self, odjemalec: TestClient) -> None:
+    def test_prazen_paket_ni_napaka(self, odjemalec: TestClient, telefon: SejaTesta) -> None:
         odgovor = odjemalec.post(
-            "/materials/deleted-on-device", json={"ids": []}, headers={"X-API-Key": KLJUC}
+            "/materials/deleted-on-device", json={"ids": []}, headers=telefon.glave
         )
 
         assert odgovor.status_code == 200
         assert odgovor.json() == {"confirmed": 0}
 
     def test_brez_kljuca_je_401(self, odjemalec: TestClient) -> None:
-        assert (
-            odjemalec.post("/materials/deleted-on-device", json={"ids": []}).status_code
-            == 401
-        )
+        assert odjemalec.post("/materials/deleted-on-device", json={"ids": []}).status_code == 401
 
 
 class TestPrenosArhiviranega:
     """`POST /materials` za zapis, ki je medtem šel v arhiv."""
 
     def test_vrne_410_in_nicesar_ne_spremeni(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         # Brez tega bi posnetek, ki je na telefonu obtičal v `pending`, tam
         # ostal za vedno: z delovnega seznama je lahko že padel, ker je bilo
@@ -240,7 +235,7 @@ class TestPrenosArhiviranega:
             "/materials",
             data=polja(),
             files=datoteka(),
-            headers={"X-API-Key": KLJUC},
+            headers=telefon.glave,
         )
 
         assert odgovor.status_code == 410
@@ -252,7 +247,7 @@ class TestPrenosArhiviranega:
         assert pot.read_bytes() == b"slika"
 
     def test_nearhiviran_zapis_se_vedno_vrne_200(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         # Idempotentnost iz V1-R02 se ne sme spremeniti.
         zapisi(motor, slike, UUID_ENA)
@@ -261,7 +256,7 @@ class TestPrenosArhiviranega:
             "/materials",
             data=polja(),
             files=datoteka(),
-            headers={"X-API-Key": KLJUC},
+            headers=telefon.glave,
         )
 
         assert odgovor.status_code == 200

@@ -44,7 +44,7 @@ from app.statistika import (
     solska_leta,
 )
 from app.subjects import PREDMETI
-from tests.conftest import CVEK_ID
+from tests.conftest import CVEK_ID, SejaTesta
 from tests.test_kvizi import UUID_DVA, UUID_ENA, UUID_TRI, objavi, snov, upokoji
 from tests.test_resevanje import poskus, poslji
 from tests.test_rezultat import postavke
@@ -66,6 +66,7 @@ def kviz_z_ocenami(
     motor: Engine,
     material_ids: list[str],
     ocene: list[str],
+    telefon: SejaTesta,
     *,
     koliko: int,
     kdaj: datetime = KDAJ,
@@ -91,6 +92,7 @@ def kviz_z_ocenami(
                 )
                 for i, (postavka_id, ocena) in enumerate(zip(idji, ocene, strict=True))
             ],
+            telefon,
         )
         assert odgovor.status_code == 200, odgovor.text
     return quiz_id
@@ -329,12 +331,18 @@ class TestSolskoLeto:
 
 class TestSrecnaPot:
     @pytest.fixture
-    def stanje(self, odjemalec: TestClient, motor: Engine, slike: Path) -> None:
+    def stanje(self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta) -> None:
         """Vprašanje 1 dvakrat (*Nisem vedela*, *Težko*), vprašanje 2 enkrat (*Lahko*)."""
         snov(motor, slike, UUID_ENA, vprasanj=2)
-        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["nisem_vedela", "lahko"], koliko=2)
+        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["nisem_vedela", "lahko"], telefon, koliko=2)
         kviz_z_ocenami(
-            odjemalec, motor, [UUID_ENA], ["tezko"], koliko=1, kdaj=KDAJ + timedelta(days=7)
+            odjemalec,
+            motor,
+            [UUID_ENA],
+            ["tezko"],
+            telefon,
+            koliko=1,
+            kdaj=KDAJ + timedelta(days=7),
         )
 
     @pytest.mark.usefixtures("stanje")
@@ -375,10 +383,10 @@ class TestSrecnaPot:
 
 class TestIzDnevnika:
     def test_poskus_mimo_api_je_takoj_stet(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=2)
-        quiz_id = kviz_z_ocenami(odjemalec, motor, [UUID_ENA], [], koliko=2)
+        quiz_id = kviz_z_ocenami(odjemalec, motor, [UUID_ENA], [], telefon, koliko=2)
         prva, _ = postavke(motor, quiz_id)
 
         assert "0 poskusov" in vrstica(pregled(odjemalec), '<span class="koda">MAT</span>')
@@ -388,10 +396,10 @@ class TestIzDnevnika:
         assert "1 poskus" in vrstica(pregled(odjemalec), '<span class="koda">MAT</span>')
 
     def test_steje_samo_samoocena(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=2)
-        quiz_id = kviz_z_ocenami(odjemalec, motor, [UUID_ENA], [], koliko=2)
+        quiz_id = kviz_z_ocenami(odjemalec, motor, [UUID_ENA], [], telefon, koliko=2)
         prva, druga = postavke(motor, quiz_id)
         vstavi_poskus(motor, prva, rating="lahko")
         vstavi_poskus(motor, druga, rating="nisem_vedela", mode="abc")
@@ -405,10 +413,10 @@ class TestIzDnevnika:
 
 class TestKajSteje:
     def test_preklican_kviz_steje_in_je_oznacen(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=1)
-        quiz_id = kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], koliko=1)
+        quiz_id = kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], telefon, koliko=1)
         preklic = odjemalec.post(f"/admin/quizzes/{quiz_id}/cancel", follow_redirects=False)
         assert preklic.status_code == 303
 
@@ -418,10 +426,10 @@ class TestKajSteje:
         assert "preklican kviz" in besedilo
 
     def test_napol_resen_kviz_steje_samo_ocenjeno(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=3)
-        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["srednje"], koliko=3)
+        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["srednje"], telefon, koliko=3)
 
         mat = vrstica(pregled(odjemalec), '<span class="koda">MAT</span>')
 
@@ -429,10 +437,10 @@ class TestKajSteje:
         assert vprasanje(2) not in predmet(odjemalec)
 
     def test_upokojeno_vprasanje_steje_z_oznako(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=1)
-        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], koliko=1)
+        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], telefon, koliko=1)
         upokoji(motor)
         with Session(motor) as seja:
             seja.add(
@@ -457,14 +465,12 @@ class TestKajSteje:
         assert "Vprašanje iz nove serije?" not in besedilo
 
     def test_arhivirana_snov_steje_z_oznako(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=1)
-        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], koliko=1)
+        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], telefon, koliko=1)
         with Session(motor) as seja:
-            seja.execute(
-                update(Material).where(Material.id == UUID_ENA).values(archived_at=KDAJ)
-            )
+            seja.execute(update(Material).where(Material.id == UUID_ENA).values(archived_at=KDAJ))
             seja.commit()
 
         besedilo = predmet(odjemalec)
@@ -473,10 +479,10 @@ class TestKajSteje:
         assert f"/admin/materials/{UUID_ENA}" in besedilo
 
     def test_izbrisana_snov_steje_brez_povezave(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=1)
-        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], koliko=1)
+        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], telefon, koliko=1)
         with Session(motor) as seja:
             seja.execute(
                 update(Material)
@@ -493,10 +499,10 @@ class TestKajSteje:
         assert f"/admin/materials/{UUID_ENA}" not in besedilo
 
     def test_poskus_brez_vprasanja_ne_izpade_molce(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=1)
-        quiz_id = kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], koliko=1)
+        quiz_id = kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], telefon, koliko=1)
         with Session(motor) as seja:
             seja.execute(
                 update(QuizItem).where(QuizItem.quiz_id == quiz_id).values(question_id=None)
@@ -506,10 +512,10 @@ class TestKajSteje:
         assert "1 poskus brez vprašanja" in pregled(odjemalec)
 
     def test_neprepoznana_ocena_ne_izpade_molce(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=1)
-        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], koliko=1)
+        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], telefon, koliko=1)
         with Session(motor) as seja:
             seja.execute(update(QuestionAttempt).values(rating="xyz"))
             seja.commit()
@@ -522,15 +528,16 @@ class TestKajSteje:
 
 class TestOkno:
     def test_privzeto_je_tekoce_solsko_leto(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=2)
-        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], koliko=1)
+        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], telefon, koliko=1)
         kviz_z_ocenami(
             odjemalec,
             motor,
             [UUID_ENA],
             ["lahko"],
+            telefon,
             koliko=1,
             kdaj=KDAJ.replace(year=TEKOCE - 1),
         )
@@ -544,7 +551,7 @@ class TestOkno:
         )
 
     def test_meja_leta_ob_polnoci(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=2)
         # 23:30 in 00:30 po domačem (poletnem) času.
@@ -553,6 +560,7 @@ class TestOkno:
             motor,
             [UUID_ENA],
             ["tezko"],
+            telefon,
             koliko=1,
             kdaj=datetime(2026, 8, 31, 21, 30, tzinfo=UTC),
         )
@@ -561,6 +569,7 @@ class TestOkno:
             motor,
             [UUID_ENA],
             ["lahko"],
+            telefon,
             koliko=1,
             kdaj=datetime(2026, 8, 31, 22, 30, tzinfo=UTC),
         )
@@ -574,7 +583,7 @@ class TestOkno:
         assert "Lahko 1" in novo
 
     def test_meja_leta_je_polodprta(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         """Poskus **točno** ob lokalni polnoči 1. 9. sodi v novo leto in ne v obe.
 
@@ -586,6 +595,7 @@ class TestOkno:
             motor,
             [UUID_ENA],
             ["tezko"],
+            telefon,
             koliko=1,
             kdaj=datetime(2026, 8, 31, 22, 0, tzinfo=UTC),
         )
@@ -598,10 +608,10 @@ class TestOkno:
         )
 
     def test_leto_samo_s_poskusi_drugega_nacina_ni_ponujeno(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=1)
-        quiz_id = kviz_z_ocenami(odjemalec, motor, [UUID_ENA], [], koliko=1)
+        quiz_id = kviz_z_ocenami(odjemalec, motor, [UUID_ENA], [], telefon, koliko=1)
         [postavka] = postavke(motor, quiz_id)
         vstavi_poskus(motor, postavka, mode="abc", kdaj=KDAJ.replace(year=TEKOCE - 3))
 
@@ -610,15 +620,25 @@ class TestOkno:
         assert f"?leto={TEKOCE - 3}" not in izbira
 
     def test_vse_ima_vrstico_na_solsko_leto(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=2)
         kviz_z_ocenami(
-            odjemalec, motor, [UUID_ENA], ["tezko"], koliko=1,
+            odjemalec,
+            motor,
+            [UUID_ENA],
+            ["tezko"],
+            telefon,
+            koliko=1,
             kdaj=datetime(2025, 10, 1, 8, 0, tzinfo=UTC),
         )
         kviz_z_ocenami(
-            odjemalec, motor, [UUID_ENA], ["lahko"], koliko=1,
+            odjemalec,
+            motor,
+            [UUID_ENA],
+            ["lahko"],
+            telefon,
+            koliko=1,
             kdaj=datetime(2026, 10, 1, 8, 0, tzinfo=UTC),
         )
 
@@ -629,11 +649,16 @@ class TestOkno:
         assert "1 poskus" in vrstica(casovnica, "2026/27")
 
     def test_izbira_ponudi_leta_s_poskusi_tekoce_in_vse(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=2)
         kviz_z_ocenami(
-            odjemalec, motor, [UUID_ENA], ["tezko"], koliko=1,
+            odjemalec,
+            motor,
+            [UUID_ENA],
+            ["tezko"],
+            telefon,
+            koliko=1,
             kdaj=KDAJ.replace(year=TEKOCE - 2),
         )
 
@@ -660,22 +685,30 @@ class TestOkno:
         assert "V tem obdobju ni nobene ocene." in besedilo
 
     def test_povezava_na_predmet_ohrani_okno(self, odjemalec: TestClient) -> None:
-        assert 'href="/admin/statistics/subjects/MAT?leto=vse"' in pregled(
-            odjemalec, "?leto=vse"
-        )
+        assert 'href="/admin/statistics/subjects/MAT?leto=vse"' in pregled(odjemalec, "?leto=vse")
 
 
 class TestCasovnica:
     def test_dvanajst_mesecev_tudi_prazni(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=2)
         kviz_z_ocenami(
-            odjemalec, motor, [UUID_ENA], ["tezko"], koliko=1,
+            odjemalec,
+            motor,
+            [UUID_ENA],
+            ["tezko"],
+            telefon,
+            koliko=1,
             kdaj=datetime(TEKOCE, 9, 15, 8, 0, tzinfo=UTC),
         )
         kviz_z_ocenami(
-            odjemalec, motor, [UUID_ENA], ["lahko"], koliko=1,
+            odjemalec,
+            motor,
+            [UUID_ENA],
+            ["lahko"],
+            telefon,
+            koliko=1,
             kdaj=datetime(TEKOCE, 11, 15, 8, 0, tzinfo=UTC),
         )
 
@@ -689,12 +722,17 @@ class TestCasovnica:
         assert "1 poskus" in vrstica(casovnica, f"november {TEKOCE}")
 
     def test_zaporedje_ocen_z_datumi_in_kvizi(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=1)
         kvizi = [
             kviz_z_ocenami(
-                odjemalec, motor, [UUID_ENA], [ocena], koliko=1,
+                odjemalec,
+                motor,
+                [UUID_ENA],
+                [ocena],
+                telefon,
+                koliko=1,
                 kdaj=datetime(TEKOCE, mesec, 1, 8, 0, tzinfo=UTC),
             )
             for mesec, ocena in ((12, "lahko"), (10, "nisem_vedela"), (11, "tezko"))
@@ -728,10 +766,10 @@ class TestPredmeti:
         assert "Predmeta s to kodo ni" in odgovor.text
 
     def test_neznana_koda_s_poskusi(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, subject="XXX", vprasanj=1)
-        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], koliko=1, subject="XXX")
+        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], telefon, koliko=1, subject="XXX")
 
         besedilo = pregled(odjemalec)
 
@@ -741,22 +779,22 @@ class TestPredmeti:
         assert vprasanje(1) in predmet(odjemalec, "XXX")
 
     def test_neznana_koda_samo_s_poskusi_drugega_nacina_je_404(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, subject="XXX", vprasanj=1)
-        quiz_id = kviz_z_ocenami(odjemalec, motor, [UUID_ENA], [], koliko=1, subject="XXX")
+        quiz_id = kviz_z_ocenami(odjemalec, motor, [UUID_ENA], [], telefon, koliko=1, subject="XXX")
         [postavka] = postavke(motor, quiz_id)
         vstavi_poskus(motor, postavka, mode="abc")
 
         assert odjemalec.get("/admin/statistics/subjects/XXX").status_code == 404
 
     def test_stran_predmeta_kaze_samo_ta_predmet(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=1)
         snov(motor, slike, UUID_DVA, subject="GEO", vprasanj=1)
-        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["lahko"], koliko=1)
-        kviz_z_ocenami(odjemalec, motor, [UUID_DVA], ["tezko"], koliko=1, subject="GEO")
+        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["lahko"], telefon, koliko=1)
+        kviz_z_ocenami(odjemalec, motor, [UUID_DVA], ["tezko"], telefon, koliko=1, subject="GEO")
 
         mat = predmet(odjemalec, "MAT")
 
@@ -769,7 +807,7 @@ class TestPredmeti:
         assert "Težko 1" in vrstica(besedilo, '<span class="koda">GEO</span>')
 
     def test_dnevni_kviz_steje_pod_predmetom_vprasanja(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         """Predmet seštevka je `questions.subject`, ne `quizzes.subject`.
 
@@ -778,7 +816,7 @@ class TestPredmeti:
         """
         snov(motor, slike, UUID_ENA, vprasanj=1)
         kviz_z_ocenami(
-            odjemalec, motor, [UUID_ENA], ["tezko"], koliko=1, subject=None, vstop="danes"
+            odjemalec, motor, [UUID_ENA], ["tezko"], telefon, koliko=1, subject=None, vstop="danes"
         )
         with Session(motor) as seja:
             assert seja.scalars(select(Quiz.subject)).one() is None
@@ -828,20 +866,21 @@ class TestPoizvedbe:
         return stevec
 
     def test_stran_predmeta_je_stalno_stevilo_poizvedb(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         snov(motor, slike, UUID_ENA, vprasanj=1)
-        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], koliko=1)
+        kviz_z_ocenami(odjemalec, motor, [UUID_ENA], ["tezko"], telefon, koliko=1)
         ena = self._stej(motor, lambda: predmet(odjemalec))
 
         for material_id, dan in ((UUID_DVA, 5), (UUID_TRI, 6)):
             snov(
-                motor, slike, material_id, vprasanj=10,
+                motor,
+                slike,
+                material_id,
+                vprasanj=10,
                 taken_at=datetime(2026, 9, dan, 7, 30, tzinfo=UTC),
             )
-        kviz_z_ocenami(
-            odjemalec, motor, [UUID_DVA, UUID_TRI], ["srednje"] * 20, koliko=10
-        )
+        kviz_z_ocenami(odjemalec, motor, [UUID_DVA, UUID_TRI], ["srednje"] * 20, telefon, koliko=10)
         mnogo = self._stej(motor, lambda: predmet(odjemalec))
 
         assert re.search(r"Postavljena enkrat · 21 vprašanj", predmet(odjemalec))

@@ -1,68 +1,85 @@
-"""Testi za primerjavo API ključa.
+"""Testi za razbiranje žetona iz glave in za izvzetost poti.
 
 Ločeni od HTTP testov, ker odjemalec nekaterih vnosov sploh ne pusti do
 strežnika — ne-ASCII niz v glavi zavrne že sam. Skozi HTTP torej ni mogoče
 dokazati, da funkcija tak vnos prenese; tu je.
+
+Do V3-R04 je bil tu ključ (`kljuc_se_ujema`) in z njim vprašanje primerjave v
+konstantnem času. Žeton tega vprašanja nima: ne primerja se tu, ampak v bazi,
+in to prek SHA-256 zgostitve (`app/prijava.py`). Ostane razbiranje glave, ki
+je vnos od zunaj in mora prenesti karkoli.
 """
 
 import pytest
 
-from app.security import je_izvzeta, kljuc_se_ujema
-
-PRAVI = "kljuc-za-teste"
+from app.security import je_izvzeta, zeton_iz_glave
 
 
-def test_enak_kljuc_se_ujema() -> None:
-    assert kljuc_se_ujema(PRAVI, PRAVI) is True
+def test_pravilna_glava_da_zeton() -> None:
+    assert zeton_iz_glave("Bearer abc123") == "abc123"
 
 
 @pytest.mark.parametrize(
-    "ponujeni",
+    "glava",
+    [
+        "bearer abc123",
+        "BEARER abc123",
+        "BeArEr abc123",
+    ],
+)
+def test_shema_se_bere_brez_ozira_na_velikost_crk(glava: str) -> None:
+    """RFC 7235: shema ni občutljiva na velikost črk."""
+    assert zeton_iz_glave(glava) == "abc123"
+
+
+@pytest.mark.parametrize(
+    "glava",
     [
         None,
         "",
-        "tuj-kljuc",
-        "kljuc-za-test",  # za en znak krajši
-        "kljuc-za-testee",
-        " kljuc-za-teste",
-        "KLJUC-ZA-TESTE",
+        "abc123",  # brez sheme
+        "Basic abc123",  # druga shema
+        "Bearer",  # brez presledka in brez žetona
+        "Bearer ",  # prazen žeton
+        "Bearer    ",  # sami presledki
+        "Token abc123",
+        "Bearerabc123",  # shema, zlepljena z žetonom
     ],
 )
-def test_drugacen_kljuc_se_ne_ujema(ponujeni: str | None) -> None:
-    assert kljuc_se_ujema(ponujeni, PRAVI) is False
+def test_neveljavna_glava_ne_da_zetona(glava: str | None) -> None:
+    assert zeton_iz_glave(glava) is None
 
 
-@pytest.mark.parametrize("ponujeni", ["ključ-š-č-ž", "Ä-tuj-kljuc", "日本語"])
-def test_ne_ascii_kljuc_vrne_false_in_ne_vrze_izjeme(ponujeni: str) -> None:
-    # `secrets.compare_digest` nad nizom z ne-ASCII znaki vrže TypeError.
-    # Ključ pride od zunaj, zato tega ne sme povzročiti.
-    assert kljuc_se_ujema(ponujeni, PRAVI) is False
+@pytest.mark.parametrize("glava", ["Bearer žeton-š-č-ž", "Bearer 日本語", "Bearer Ä"])
+def test_ne_ascii_zeton_ne_vrze_izjeme(glava: str) -> None:
+    """Glava je vnos od zunaj in ne sme sesuti strežnika.
+
+    Tak žeton ne bo ustrezal nobeni seji — zgostitev se ne bo ujela —, a to
+    mora ugotoviti baza, ne izjema pri razbiranju.
+    """
+    assert zeton_iz_glave(glava) is not None
 
 
-def test_ne_ascii_kljuc_se_lahko_tudi_ujema() -> None:
-    """Primerjava bajtov ne sme pokvariti ključa, ki je sam ne-ASCII."""
-    assert kljuc_se_ujema("ključ-š-č-ž", "ključ-š-č-ž") is True
-
-
-def test_prazen_pricakovani_kljuc_ne_odpre_streznika() -> None:
-    # `secrets.compare_digest(b"", b"")` vrne True. Brez izrecne obrambe bi
-    # prazen API_KEY pomenil strežnik, odprt vsakomur, ki pošlje prazno glavo.
-    assert kljuc_se_ujema("", "") is False
-    assert kljuc_se_ujema(None, "") is False
-    assert kljuc_se_ujema("karkoli", "") is False
+def test_odvecni_presledki_okoli_zetona_ne_stejejo() -> None:
+    assert zeton_iz_glave("Bearer   abc123   ") == "abc123"
 
 
 @pytest.mark.parametrize(
     ("pot", "pricakovano"),
     [
         ("/health", True),
+        ("/auth/login", True),
         ("/admin", True),
         ("/admin/", True),
         ("/admin/subjects/MAT", True),
         ("/materials", False),
+        ("/quizzes/pending", False),
+        # Odjava telefona **ni** izvzeta: brez veljavnega žetona ni seje, ki bi
+        # jo bilo mogoče izbrisati (`docs/odlocitve/ADR-036` G).
+        ("/auth/logout", False),
         ("/", False),
         # Predpona se ne sme ujeti na pot, ki se le začne enako. Golo
-        # `startswith("/admin")` bi vse tri odprlo brez ključa.
+        # `startswith("/admin")` bi vse tri odprlo brez žetona.
         ("/administration", False),
         ("/admin-nekaj", False),
         ("/adminmaterials", False),
@@ -72,5 +89,5 @@ def test_prazen_pricakovani_kljuc_ne_odpre_streznika() -> None:
 )
 def test_izvzetost_poti(pot: str, pricakovano: bool) -> None:
     assert (
-        je_izvzeta(pot, frozenset({"/health"}), frozenset({"/admin"})) is pricakovano
+        je_izvzeta(pot, frozenset({"/health", "/auth/login"}), frozenset({"/admin"})) is pricakovano
     )

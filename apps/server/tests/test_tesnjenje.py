@@ -40,7 +40,6 @@ from app.db import (
     PoskusZaZapis,
     StatistikaRepository,
 )
-from app.dependencies import daj_druzino_telefona
 from app.models import (
     NACIN_SAMOOCENA,
     STATUS_NOV,
@@ -53,13 +52,18 @@ from app.models import (
     Quiz,
     User,
 )
-from tests.conftest import CVEK_ID, KLJUC, PrijavljenOdjemalec, prijavi, ustvari_starsa
+from tests.conftest import (
+    CVEK_ID,
+    PrijavljenOdjemalec,
+    prijavi,
+    ustvari_otroka,
+    ustvari_sejo,
+    ustvari_starsa,
+)
 from tests.test_druzine import DRUGA_ID, dodaj_druzino
 from tests.test_kvizi import objavi
 from tests.test_resevanje import POKAZANO, poskus, poslji
 from tests.test_rezultat import postavke
-
-GLAVE = {"X-API-Key": KLJUC}
 
 #: Vloge snovi, ki jih ima vsaka družina.
 VLOGE = ("akt", "arh", "za_brisanje", "nova", "obticala")
@@ -156,20 +160,36 @@ def _zgradi(
             seja.add(material)
         seja.commit()
 
-    # Kvizi in poskusi skozi prave poti, v imenu te družine. Admin pot pove
-    # družino prek **seje** (V3-R03), pot telefona prek začasne odvisnosti, ki
-    # jo bo `V3-R04` zamenjal z žetonom — zato tu oboje.
+    # Kvizi in poskusi skozi prave poti, v imenu te družine. **Obe strani
+    # povesta družino prek seje** (`ADR-036` F): admin s piškotkom starša,
+    # telefon z žetonom otroka v glavi. Do V3-R04 je bila druga polovica
+    # začasna odvisnost, ki jo je bilo mogoče podtakniti mimo prijave —
+    # tesnjenje telefona je zato šele odslej tesnjenje prave poti.
     prijavi(odjemalec, motor, ustvari_starsa(motor, family_id=family_id, identifikator=znak))
-    aplikacija.dependency_overrides[daj_druzino_telefona] = lambda: family_id
+    telefon = ustvari_sejo(
+        motor,
+        ustvari_otroka(motor, family_id=family_id, identifikator=f"otrok-{znak}"),
+    )
+    odjemalec.headers.update(telefon.glave)
     resen = objavi(
-        odjemalec, motor, [idji["akt"]], koliko=3, subject=subject, vstop="rocna",
+        odjemalec,
+        motor,
+        [idji["akt"]],
+        koliko=3,
+        subject=subject,
+        vstop="rocna",
         ime=f"Rešen {znak}",
     )
     postavke_resenega = postavke(motor, resen)
     odgovor = poslji(odjemalec, [poskus(p) for p in postavke_resenega])
     assert odgovor.status_code == 200, odgovor.text
     odprt = objavi(
-        odjemalec, motor, [idji["akt"]], koliko=3, subject=subject, vstop="rocna",
+        odjemalec,
+        motor,
+        [idji["akt"]],
+        koliko=3,
+        subject=subject,
+        vstop="rocna",
         ime=f"Odprt {znak}",
     )
     postavke_odprtega = postavke(motor, odprt)
@@ -208,16 +228,30 @@ def druzini(
     dodaj_druzino(motor)
     zdaj = datetime.now(UTC)
     a = _zgradi(
-        aplikacija, odjemalec, motor, slike,
-        family_id=CVEK_ID, subject="ZGO", znak="SKRIVNOST-A", prejeto=zdaj,
+        aplikacija,
+        odjemalec,
+        motor,
+        slike,
+        family_id=CVEK_ID,
+        subject="ZGO",
+        znak="SKRIVNOST-A",
+        prejeto=zdaj,
     )
     b = _zgradi(
-        aplikacija, odjemalec, motor, slike,
-        family_id=DRUGA_ID, subject="MAT", znak="SKRIVNOST-B", prejeto=zdaj - timedelta(hours=2),
+        aplikacija,
+        odjemalec,
+        motor,
+        slike,
+        family_id=DRUGA_ID,
+        subject="MAT",
+        znak="SKRIVNOST-B",
+        prejeto=zdaj - timedelta(hours=2),
     )
-    # `_zgradi` je odjemalca nazadnje prijavil kot starša B in začasno družino
-    # telefona nastavil na B; to je stanje, v katerem testi tečejo.
-    assert aplikacija.dependency_overrides[daj_druzino_telefona]() == b.family_id
+    # `_zgradi` je odjemalca nazadnje prijavil kot starša B in mu v glavo dal
+    # žeton otroka B; to je stanje, v katerem testi tečejo. Odjemalec torej v
+    # isti zahtevi nosi oboje, kar je za ta test prav: dokazuje, da pot vzame
+    # tisto identiteto, ki ji pripada, in ne tiste, ki je pri roki.
+    assert odjemalec.get("/quizzes/pending").status_code == 200
     return a, b
 
 
@@ -379,10 +413,14 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
         a.vprasanja[:3],
     ),
     ("GET", "/admin/quizzes/{quiz_id}"): lambda o, a: (
-        o.get(f"/admin/quizzes/{a.resen_kviz}"), NI, (a.resen_kviz,),
+        o.get(f"/admin/quizzes/{a.resen_kviz}"),
+        NI,
+        (a.resen_kviz,),
     ),
     ("GET", "/admin/quizzes/{quiz_id}/print"): lambda o, a: (
-        o.get(f"/admin/quizzes/{a.resen_kviz}/print"), NI, (a.resen_kviz,),
+        o.get(f"/admin/quizzes/{a.resen_kviz}/print"),
+        NI,
+        (a.resen_kviz,),
     ),
     ("POST", "/admin/quizzes/{quiz_id}/cancel"): lambda o, a: (
         o.post(f"/admin/quizzes/{a.odprt_kviz}/cancel", follow_redirects=False),
@@ -394,36 +432,61 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
     # obstaja, in tuje seje ne sme ne ustvariti ne pobrisati.
     ("GET", "/admin/login"): lambda o, a: (o.get("/admin/login"), OK, ()),
     ("POST", "/admin/login"): lambda o, a: (
-        _prijava_s_tujim_racunom(o, a), frozenset({401}), (a.znak,),
+        _prijava_s_tujim_racunom(o, a),
+        frozenset({401}),
+        (a.znak,),
     ),
     ("POST", "/admin/logout"): lambda o, a: (
-        o.post("/admin/logout", follow_redirects=False), PREUSMERITEV, (),
+        o.post("/admin/logout", follow_redirects=False),
+        PREUSMERITEV,
+        (),
+    ),
+    # Identiteta na telefonu (V3-R04). Isti dve vprašanji kot pri prijavi v
+    # brskalniku, z drugim prenosnikom: ali odgovor izda obstoj tujega računa
+    # in ali se da z njim doseči tujo sejo.
+    ("POST", "/auth/login"): lambda o, a: (
+        o.post(
+            "/auth/login",
+            json={"identifier": f"otrok-{a.znak}", "password": "to-geslo-ni-pravo"},
+        ),
+        frozenset({401}),
+        (a.znak,),
+    ),
+    ("POST", "/auth/logout"): lambda o, a: (
+        o.post("/auth/logout"),
+        OK,
+        (),
     ),
     ("GET", "/admin/statistics"): lambda o, a: (o.get("/admin/statistics?leto=vse"), OK, ()),
     ("GET", "/admin/statistics/subjects/{koda}"): lambda o, a: (
-        o.get(f"/admin/statistics/subjects/{a.subject}?leto=vse"), OK, (),
+        o.get(f"/admin/statistics/subjects/{a.subject}?leto=vse"),
+        OK,
+        (),
     ),
     ("POST", "/materials"): lambda o, a: (
         o.post(
             "/materials",
             data={"id": a.akt, "subject": a.subject, "taken_at": "2026-09-04T07:30:00Z"},
             files={"file": ("posnetek.jpg", b"ponaredek", "image/jpeg")},
-            headers=GLAVE,
         ),
         frozenset({409}),
         (a.akt,),
     ),
     ("GET", "/materials/pending-deletion"): lambda o, a: (
-        o.get("/materials/pending-deletion", headers=GLAVE), OK, (),
+        o.get("/materials/pending-deletion"),
+        OK,
+        (),
     ),
     ("POST", "/materials/deleted-on-device"): lambda o, a: (
-        o.post(
-            "/materials/deleted-on-device", json={"ids": [a.za_brisanje]}, headers=GLAVE
-        ),
+        o.post("/materials/deleted-on-device", json={"ids": [a.za_brisanje]}),
         OK,
         (a.za_brisanje,),
     ),
-    ("GET", "/quizzes/pending"): lambda o, a: (o.get("/quizzes/pending", headers=GLAVE), OK, ()),
+    ("GET", "/quizzes/pending"): lambda o, a: (
+        o.get("/quizzes/pending"),
+        OK,
+        (),
+    ),
     ("POST", "/quiz-attempts"): lambda o, a: (
         poslji(o, [poskus(a.postavka_odprtega)]),
         frozenset({422}),
@@ -470,8 +533,8 @@ def test_druzina_b_na_istih_poteh_vidi_svoje(
     assert b.akt in odjemalec.get(f"/admin/subjects/{b.subject}").text
     assert b.arh in odjemalec.get("/admin/archive").text
     assert b.znak in odjemalec.get(f"/admin/statistics/subjects/{b.subject}?leto=vse").text
-    assert b.odprt_kviz in odjemalec.get("/quizzes/pending", headers=GLAVE).text
-    assert b.za_brisanje in odjemalec.get("/materials/pending-deletion", headers=GLAVE).text
+    assert b.odprt_kviz in odjemalec.get("/quizzes/pending").text
+    assert b.za_brisanje in odjemalec.get("/materials/pending-deletion").text
 
 
 # --- Repozitoriji ---

@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import uuid4
 
 import pytest
@@ -21,10 +21,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app import prijava
-from app.db import PrijavaRepository, naredi_tovarno_sej
+from app.db import PrijavaRepository, SejaUporabnika, naredi_tovarno_sej
 from app.main import create_app
 from app.models import (
     POVERILNICA_GESLO,
+    VLOGA_OTROK,
     VLOGA_STARS,
     Base,
     Credential,
@@ -33,16 +34,14 @@ from app.models import (
 )
 from app.settings import Settings
 
-#: Ključ, ki v testih velja za pravega.
-KLJUC = "kljuc-za-teste-dovolj-dolg"
-
 #: Poverilnici, ki jih uporabljajo testi. Gesli sta dolgi toliko, kot zahteva
 #: `app/prijava.py` za svojo vlogo — prekratko geslo zavrne ukaz, ne prijava,
 #: a test naj ne stoji na kombinaciji, ki v resnici ne more nastati.
+#: Otrokovo je od V3-R04 vsaj 8 znakov (`docs/odlocitve/ADR-036` E).
 STARS_IDENTIFIKATOR = "stars@primer.test"
 GESLO_STARSA = "geslo-starsa-12"
 OTROK_IDENTIFIKATOR = "otrok"
-GESLO_OTROKA = "masa"
+GESLO_OTROKA = "geslo-otroka"
 
 
 @cache
@@ -78,14 +77,13 @@ CVEK_ID = "5b0f6c2e-8d3a-4c7e-9a1b-2f4d6e8c0a13"
 #: Spremenljivke okolja, ki jih `Settings` prebere sama.
 #:
 #: `Settings` je `BaseSettings`: vsako polje, ki ga klicatelj ne poda, pride iz
-#: okolja. Na stroju lastnika sta `OPENAI_API_KEY` in `API_KEY` povsem
-#: pričakovani imeni — in če bi ju zbirka podedovala, bi `create_app` zgradil
-#: **pravi** odjemalec OpenAI, `TestClient` bi pognal življenjski cikel, worker
-#: bi stekel in testne slike bi zares odpotovale na api.openai.com, na račun
-#: lastnika. „Testi ne kličejo omrežja" mora biti lastnost kode, ne lastnost
-#: stroja, na katerem tečejo (CLAUDE.md: zbirka je zelena tudi na svežem klonu).
+#: okolja. Na stroju lastnika je `OPENAI_API_KEY` povsem pričakovano ime — in
+#: če bi ga zbirka podedovala, bi `create_app` zgradil **pravi** odjemalec
+#: OpenAI, `TestClient` bi pognal življenjski cikel, worker bi stekel in testne
+#: slike bi zares odpotovale na api.openai.com, na račun lastnika. „Testi ne
+#: kličejo omrežja" mora biti lastnost kode, ne lastnost stroja, na katerem
+#: tečejo (CLAUDE.md: zbirka je zelena tudi na svežem klonu).
 OKOLJSKE_NASTAVITVE = (
-    "API_KEY",
     "DATABASE_URL",
     "IMAGES_DIR",
     "OPENAI_API_KEY",
@@ -137,7 +135,6 @@ def naredi_testne_nastavitve(slike: Path) -> Settings:
     funkcijo pobral kot testno.
     """
     return Settings(
-        api_key=KLJUC,
         database_url="sqlite://",
         images_dir=slike,
         openai_api_key="",
@@ -262,13 +259,32 @@ def ustvari_starsa(
     return user_id
 
 
-def prijavi(odjemalec: PrijavljenOdjemalec, motor: Engine, user_id: str) -> None:
-    """Postavi sejo danemu uporabniku in jo naloži v odjemalca.
+class SejaTesta(NamedTuple):
+    """Seja, ki jo je postavil test, skupaj z žetonom.
 
-    Seja nastane **mimo prijavne strani**, ker skoraj noben test v zbirki ne
-    preverja prijave, ampak stran za njo; prava prijava bi vsakemu od njih
-    dodala eno zgostitev argon2 (~60 ms) in eno stran brez pomena za test.
-    Prijavna pot ima svoje teste v `tests/test_prijava.py`.
+    Oboje, ker je v bazi samo zgostitev žetona: brskalnik potrebuje `csrf`,
+    telefon pa žeton. Vračanje dvojice je cenejše od globalne preslikave, ki
+    bi živela čez cel zagon zbirke.
+    """
+
+    zeton: str
+    seja: SejaUporabnika
+
+    @property
+    def glave(self) -> dict[str, str]:
+        """Glava, s katero se s to sejo izkaže telefon (V3-R04)."""
+        return {"Authorization": f"Bearer {self.zeton}"}
+
+
+def ustvari_sejo(motor: Engine, user_id: str, *, potece: datetime | None = None) -> SejaTesta:
+    """Postavi sejo danemu uporabniku.
+
+    Seja nastane **mimo prijavne poti**, ker skoraj noben test v zbirki ne
+    preverja prijave, ampak to, kar je za njo; prava prijava bi vsakemu od njih
+    dodala eno zgostitev argon2 (~60 ms) in en korak brez pomena za test.
+    Prijavni poti imata svoje teste v `tests/test_prijava.py`.
+
+    `potece` poda test, ki potrebuje **poteklo** sejo; privzeto je rok običajen.
     """
     zeton = prijava.nov_zeton()
     zdaj = datetime.now(UTC)
@@ -279,13 +295,52 @@ def prijavi(odjemalec: PrijavljenOdjemalec, motor: Engine, user_id: str) -> None
             token_hash=prijava.zgostitev_zetona(zeton),
             csrf_token=prijava.nov_zeton(),
             ko=zdaj,
-            potece=zdaj + prijava.TRAJANJE_SEJE,
+            potece=potece if potece is not None else zdaj + prijava.TRAJANJE_SEJE,
             device_label="testi",
         )
         seja = repo.seja(prijava.zgostitev_zetona(zeton))
     assert seja is not None
-    odjemalec.cookies.set(prijava.PISKOTEK_SEJE, zeton)
-    odjemalec.csrf = seja.csrf_token
+    return SejaTesta(zeton, seja)
+
+
+def prijavi(odjemalec: PrijavljenOdjemalec, motor: Engine, user_id: str) -> None:
+    """Postavi sejo danemu uporabniku in jo naloži v odjemalca brskalnika."""
+    postavljena = ustvari_sejo(motor, user_id)
+    odjemalec.cookies.set(prijava.PISKOTEK_SEJE, postavljena.zeton)
+    odjemalec.csrf = postavljena.seja.csrf_token
+
+
+def ustvari_otroka(
+    motor: Engine,
+    *,
+    family_id: str = CVEK_ID,
+    identifikator: str = OTROK_IDENTIFIKATOR,
+    prikazno_ime: str = "Maša",
+    geslo: str | None = GESLO_OTROKA,
+    aktiven: bool = True,
+) -> str:
+    """Otrok v družini — uporabnik, ki se prijavlja na telefonu (V3-R04)."""
+    return ustvari_starsa(
+        motor,
+        family_id=family_id,
+        identifikator=identifikator,
+        prikazno_ime=prikazno_ime,
+        geslo=geslo,
+        vloga=VLOGA_OTROK,
+        aktiven=aktiven,
+    )
+
+
+@pytest.fixture
+def otrok(motor: Engine) -> str:
+    """Otrok družine Cvek, v čigar imenu govorijo poti telefona."""
+    return ustvari_otroka(motor)
+
+
+@pytest.fixture
+def telefon(motor: Engine, otrok: str) -> SejaTesta:
+    """Veljavna seja telefona; `telefon.glave` gre v vsako zahtevo telefona."""
+    return ustvari_sejo(motor, otrok)
 
 
 @pytest.fixture
@@ -295,9 +350,7 @@ def stars(motor: Engine) -> str:
 
 
 @pytest.fixture
-def odjemalec(
-    aplikacija: FastAPI, motor: Engine, stars: str
-) -> Iterator[PrijavljenOdjemalec]:
+def odjemalec(aplikacija: FastAPI, motor: Engine, stars: str) -> Iterator[PrijavljenOdjemalec]:
     """Odjemalec s sejo starša družine Cvek.
 
     Ključa ne pošilja: poti telefona ga v vsakem testu podajo same, admin poti

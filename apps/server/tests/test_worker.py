@@ -28,7 +28,7 @@ from app.models import STATUS_NOV, STATUS_PRIPRAVLJEN, STATUS_V_OBDELAVI, Materi
 from app.settings import Settings
 from app.vision import IzidKlica
 from app.worker import Obdelovalec, obnovi_obticale
-from tests.conftest import KLJUC, OKOLJSKE_NASTAVITVE, naredi_testne_nastavitve
+from tests.conftest import OKOLJSKE_NASTAVITVE, naredi_testne_nastavitve
 from tests.test_obdelava import UUID_ENA, preberi, uspesen_izid, zapisi
 
 
@@ -195,7 +195,6 @@ class TestPriklopNaAplikacijo:
         izid = uspesen_izid()
 
         nastavitve = Settings(
-            api_key=KLJUC,
             database_url="sqlite://",
             images_dir=slike,
             worker_interval_seconds=0.01,
@@ -233,7 +232,6 @@ class TestPriklopNaAplikacijo:
         bi pomenil, da ime modela iz nastavitev ne pride do klica (ADR-008).
         """
         nastavitve = Settings(
-            api_key=KLJUC,
             database_url="sqlite://",
             images_dir=slike,
             openai_api_key="ta-kljuc-obstaja",

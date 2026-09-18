@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.casi import utc
 from app.db import KviziRepository, PoskusZaZapis
-from app.dependencies import daj_repozitorij_kvizov_telefona
+from app.dependencies import daj_repozitorij_kvizov
 from app.schemas import (
     CakajociKvizi,
     KvizZaTelefonOblika,
@@ -39,7 +39,7 @@ SPOROCILO_NEZNANA_POSTAVKA = (
 
 @router.get("/quizzes/pending", response_model=CakajociKvizi)
 def cakajoci_kvizi(
-    repozitorij: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov_telefona)],
+    repozitorij: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov)],
 ) -> CakajociKvizi:
     """Kvizi, ki čakajo na reševanje, s celotno zamrznjeno vsebino.
 
@@ -71,7 +71,7 @@ def cakajoci_kvizi(
 @router.post("/quiz-attempts", response_model=PoskusiZapisani)
 def zapisi_poskuse(
     telo: PaketPoskusov,
-    repozitorij: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov_telefona)],
+    repozitorij: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov)],
 ) -> PoskusiZapisani:
     """Sprejme paket poskusov; idempotentno po `id`, prvi poskus postavke zmaga.
 
