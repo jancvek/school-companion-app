@@ -40,6 +40,33 @@ Compose, bi tekla kot svoj ukaz; `uvicorn` bi tekel brez nje, brez napake.
 **Kako:** vrednost v `.env` v enojnih narekovajih. `docker compose config` jo
 izpiše z `$$` — to je le ubežni zapis izpisa, ne napaka.
 
+## Prijava in seje (V3-R03)
+
+### `context_processors` prepišejo kontekst klicatelja
+**Kaj:** prijavni obrazec je imel prazen CSRF žeton in vsak poskus prijave je
+vrnil 403 — čeprav ga pot v kontekst izrecno poda.
+**Zakaj:** Starlette obdelovalce konteksta izvede **za** klicateljem in z
+`context.update(...)` njegove vrednosti prepiše. Obdelovalec je brez seje
+vračal prazen `csrf` in s tem pobrisal žeton prijavne strani.
+**Kako:** obdelovalec ključa, ki ga ne pozna, ne vrne (`app/strani.py`). Velja
+za vsak `context_processor`: kar vrne, je močnejše od tega, kar poda pot.
+
+### `app.routes` ne pokaže poti vključenih usmerjevalnikov
+**Kaj:** generirani test dosegljivosti je našel nič poti pod `/admin`.
+**Zakaj:** ta različica FastAPI `include_router` shrani kot ovoj
+(`_IncludedRouter`), ne kot razgrnjen seznam `APIRoute`; usmerjanje dela
+normalno, introspekcija prek `app.routes` pa ne.
+**Kako:** seznam poti se bere iz `app.openapi()["paths"]` — javni vmesnik, ki
+ovoje razgrne. Tako ga berejo `test_prijava.py` in `test_tesnjenje.py`.
+
+### Piškotek s `Secure` in `TestClient`
+**Kaj:** vsak admin test je po uvedbi seje dobil 303 na prijavo.
+**Zakaj:** `TestClient` privzeto govori `http://testserver`, piškotka z
+zastavico `Secure` pa odjemalec čez `http` ne pošlje — enako kot brskalnik.
+**Kako:** testni odjemalec teče na `https://testserver` (`tests/conftest.py`).
+V brskalniku je `http://localhost` izjema in `Secure` piškotke sprejme, zato
+razvojni zagon mimo Caddyja deluje.
+
 ## Orodja na tem stroju
 
 - **`scripts/` je del ograje** in agentu ni dovoljena za pisanje. Nove skripte

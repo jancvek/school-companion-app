@@ -15,10 +15,11 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import Engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app import prijava, strani
 from app.db import naredi_motor, naredi_tovarno_sej
-from app.routers import admin, dnevi, kvizi, materials, resevanje, statistika
+from app.routers import admin, dnevi, kvizi, materials, resevanje, statistika, vstop
 from app.schemas import Zivost
-from app.security import ApiKeyMiddleware
+from app.security import ApiKeyMiddleware, SejaMiddleware
 from app.settings import Settings
 from app.vision import Klicalec, naredi_klicalca
 from app.worker import Obdelovalec
@@ -32,12 +33,18 @@ IZVZETE_POTI = frozenset({"/health"})
 #: Predpone, ki ključa ne zahtevajo.
 #:
 #: Operaterska stran teče v brskalniku, ta pa glave `X-API-Key` ne zna
-#: poslati. Do V3-R03 jo varuje začasen `basic_auth` v Caddyju pred `api`
-#: (`docs/odlocitve/ADR-026`); pred V3-R02 je bila meja Tailscale (`ADR-006`).
+#: poslati. **Izvzetje iz ključa ne pomeni, da je stran odprta:** od V3-R03 jo
+#: varuje `SejaMiddleware` — seja za vsako pot, CSRF žeton za vsak `POST`
+#: (`docs/odlocitve/ADR-035`). Pred tem je bil tu začasen `basic_auth` v
+#: Caddyju (`ADR-026`), pred V3-R02 pa Tailscale (`ADR-006`).
 #:
 #: **Tu ne dodajaj ničesar brez ADR.** Vsaka predpona na tem seznamu je pot,
-#: ki je aplikacija sama ne varuje — strežnik je na javnem internetu.
+#: ki je aplikacija ne varuje s ključem.
 IZVZETE_PREDPONE = frozenset({"/admin"})
+
+#: Poti pod `/admin`, ki seje ne zahtevajo. Sicer se ne bi bilo mogoče
+#: prijaviti. **Odjave tu ni**: ta sejo zahteva kot vsak drug `POST`.
+POTI_BREZ_SEJE = frozenset({prijava.POT_PRIJAVE})
 
 
 @asynccontextmanager
@@ -105,10 +112,18 @@ def create_app(
     app.state.nastavitve = nastavitve
     app.state.motor = motor
     app.state.tovarna_sej = naredi_tovarno_sej(motor)
-    app.state.predloge = Jinja2Templates(directory=str(admin.MAPA_PREDLOG))
+    # `context_processors`: glava z družino in CSRF žeton morata biti v **vsaki**
+    # predlogi, ne v 27 klicih `TemplateResponse` (`docs/odlocitve/ADR-035` D).
+    app.state.predloge = Jinja2Templates(
+        directory=str(admin.MAPA_PREDLOG),
+        context_processors=[strani.kontekst_prijave],
+    )
     app.state.klicalec = klicalec
     app.state.obdelovalec = None
 
+    # Vrstni red plasti: zadnja dodana je zunanja. Ključ je torej pred sejo,
+    # kar pomeni, da pot telefona brez ključa pade, preden se kdo dotakne baze.
+    app.add_middleware(SejaMiddleware, izvzete_poti=POTI_BREZ_SEJE)
     app.add_middleware(
         ApiKeyMiddleware,
         api_key=nastavitve.api_key,
@@ -116,6 +131,9 @@ def create_app(
         izvzete_predpone=IZVZETE_PREDPONE,
     )
 
+    # Prijava in odjava (V3-R03). Prvi med usmerjevalniki pod `/admin`, ker
+    # `/admin/login` ne sme zaiti v ujemalnik `/admin/materials/{id}`.
+    app.include_router(vstop.router)
     app.include_router(materials.router)
     # Poti telefona za kvize (V2-R02). Niso pod `/admin`, zato zahtevajo ključ.
     app.include_router(resevanje.router)

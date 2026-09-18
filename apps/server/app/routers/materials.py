@@ -12,7 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 
 from app.db import MaterialsRepository
-from app.dependencies import daj_nastavitve, daj_repozitorij
+from app.dependencies import daj_nastavitve, daj_repozitorij_telefona
 from app.models import STATUS_NOV, Material
 from app.schemas import (
     BrisanjePotrjeno,
@@ -53,7 +53,7 @@ def prevzemi_material(
     subject: Annotated[str, Form(min_length=1, max_length=16)],
     taken_at: Annotated[datetime, Form()],
     file: Annotated[UploadFile, File()],
-    repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij_telefona)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
 ) -> MaterialPrevzet:
     """Prevzame sliko in metapodatke; idempotentno glede na `id`.
@@ -128,7 +128,7 @@ def prevzemi_material(
 
 @router.get("/materials/pending-deletion", response_model=ZaBrisanjeNaNapravi)
 def za_brisanje_na_napravi(
-    repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij_telefona)],
 ) -> ZaBrisanjeNaNapravi:
     """Materiali, ki jih mora telefon zbrisati pri sebi.
 
@@ -143,7 +143,7 @@ def za_brisanje_na_napravi(
 @router.post("/materials/deleted-on-device", response_model=BrisanjePotrjeno)
 def potrdi_brisanje_na_napravi(
     telo: PotrditevBrisanja,
-    repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij_telefona)],
 ) -> BrisanjePotrjeno:
     """Sprejme potrditve, da danih materialov na napravi ni več.
 

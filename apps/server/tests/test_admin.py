@@ -1198,6 +1198,8 @@ class TestPakiranje:
             "_statistika.html",
             # V2-R07.
             "dnevi.html",
+            # V3-R03.
+            "prijava.html",
         }
 
 

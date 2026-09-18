@@ -13,13 +13,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, event, func, select
 from sqlalchemy.orm import Session
 
 from app.casi import dan_od_do, datum
-from app.dependencies import daj_druzino
 from app.models import (
     STATUS_NAPAKA,
     STATUS_NOV,
@@ -31,7 +29,7 @@ from app.models import (
     QuizItem,
 )
 from app.routers.kvizi import NAJVEC_IME, NAJVEC_KODA, PRIVZETO_STEVILO
-from tests.conftest import CVEK_ID, KLJUC
+from tests.conftest import CVEK_ID, KLJUC, je_seja
 
 #: Trije stabilni identifikatorji; testi jih berejo iz izrisane strani.
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
@@ -1051,12 +1049,20 @@ class TestPoizvedbe:
 
     @staticmethod
     def _stej(motor: Engine, klic: Callable[[], object]) -> int:
-        """Koliko stavkov je proti bazi opravil dani klic."""
+        """Koliko stavkov je proti bazi opravil dani klic.
+
+        Branje seje se ne šteje: od V3-R03 ga opravi `SejaMiddleware` pri
+        **vsaki** zahtevi pod `/admin` in ni poizvedba strani, ki jo test meri
+        (`docs/odlocitve/ADR-035` A). Njegovo ceno varuje `test_druzine.py`.
+        """
         stevec = 0
 
-        def zabelezi(*_args: object, **_kwargs: object) -> None:
+        def zabelezi(
+            _povezava: object, _kazalec: object, stavek: str, *_ostalo: object
+        ) -> None:
             nonlocal stevec
-            stevec += 1
+            if not je_seja(stavek):
+                stevec += 1
 
         event.listen(motor, "before_cursor_execute", zabelezi)
         try:
@@ -1066,12 +1072,10 @@ class TestPoizvedbe:
         return stevec
 
     def test_izbirnik_je_tri_poizvedbe_ne_glede_na_stevilo_snovi(
-        self, aplikacija: FastAPI, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
-        # Izbira družine je ena poizvedba na zahtevo in ni poizvedba te strani
-        # (`docs/odlocitve/ADR-029` A). Tu je zamenjana, da test meri samo stran;
-        # ceno izbire meri `test_druzine.py`.
-        aplikacija.dependency_overrides[daj_druzino] = lambda: CVEK_ID
+        # Družina pride iz seje in ne iz poizvedbe (V3-R03), branja seje pa
+        # `_stej` ne šteje — obojega zato tu ni treba zamenjati.
         for i in range(12):
             snov(motor, slike, f"veliko-{i:02d}", vprasanj=5)
 

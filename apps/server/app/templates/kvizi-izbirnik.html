@@ -23,6 +23,7 @@
        iz predogleda pripelje sem in obkljuka isto. Brez JavaScripta je to
        navaden `POST` s ponovljenim poljem `snov`. #}
     <form method="post" action="/admin/quizzes/preview">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="vstop" value="{{ vstop }}">
       {% if subject %}<input type="hidden" name="subject" value="{{ subject }}">{% endif %}
 

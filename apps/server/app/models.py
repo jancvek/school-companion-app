@@ -515,3 +515,175 @@ class QuestionAttempt(Base):
 
     #: Kdaj je strežnik poskus prevzel.
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+# --- Identiteta (V3-R03) ---------------------------------------------------
+#
+# Model je iz `docs/odlocitve/ADR-027`: **poverilnica ni uporabnik**. Oseba
+# živi v `users`, način prijave v `credentials`, in Google (`V3-R08`) je zato
+# pozneje nova vrstica, ne nova shema. Izvedbene odločitve so v `ADR-035`.
+
+#: Vlogi uporabnika. Starš dela izključno v adminu, otrok izključno v mobilni
+#: aplikaciji (`docs/00-namen.md`); prijava otroka v admin se zavrne
+#: (`ADR-035` F).
+Vloga = Literal["parent", "child"]
+VLOGA_STARS: Vloga = "parent"
+VLOGA_OTROK: Vloga = "child"
+
+#: Vrste poverilnic. V V3 nastane samo `password`; `google` pride z `V3-R08`
+#: kot nova vrstica iste tabele (`ADR-027`).
+VrstaPoverilnice = Literal["password", "google"]
+POVERILNICA_GESLO: VrstaPoverilnice = "password"
+
+
+class User(Base):
+    """Oseba v družini: starš ali otrok.
+
+    Nima ne gesla ne uporabniškega imena — oboje je v `credentials`. Brisanja
+    ni: račun se deaktivira (`is_active`), ker načelo „nič se ne briše, vse se
+    upokoji" velja tudi za osebe (`V3-R06`).
+    """
+
+    __tablename__ = "users"
+
+    #: UUID, generiran na strežniku.
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    #: Družina, ki ji oseba pripada. Obvezna in brez `ondelete`, kot povsod
+    #: (`docs/odlocitve/ADR-025`).
+    family_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("families.id", name="fk_users_family_id"),
+        nullable=False,
+        index=True,
+    )
+
+    #: Ena od `Vloga`.
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    #: Ime, kot ga stran pokaže, npr. `Dejan`.
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    #: Lastnik sistema. **Zaenkrat samo zastavica**: pogledi, ki jo berejo,
+    #: nastanejo v `V3-R05` (`docs/verzije/v3.md`). Do takrat je lastnik
+    #: navaden starš svoje družine.
+    is_system_owner: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    #: Deaktiviran račun se ne more prijaviti, podatki pa ostanejo. Stolpec
+    #: pride že v V3-R03, čeprav ga poti uporabijo šele v `V3-R06`: ista tabela
+    #: naj ne gre v drugo migracijo čez dva tedna.
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class Credential(Base):
+    """Način, s katerim se oseba izkaže. Ena oseba jih ima lahko več."""
+
+    __tablename__ = "credentials"
+
+    __table_args__ = (
+        UniqueConstraint("identifier", name="credentials_identifier_key"),
+    )
+
+    #: UUID, generiran na strežniku.
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", name="fk_credentials_user_id"),
+        nullable=False,
+        index=True,
+    )
+
+    #: Ena od `VrstaPoverilnice`.
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    #: E-naslov starša ali uporabniško ime otroka.
+    #:
+    #: **Enolično čez celotno namestitev**, ne po družini: prijava pozna samo
+    #: identifikator in geslo, zato bi dvoje enakih imen pomenilo, da strežnik
+    #: ne ve, kdo se prijavlja (`docs/verzije/v3.md`, `V3-R06`).
+    identifier: Mapped[str] = mapped_column(String(320), nullable=False)
+
+    #: Zgostitev gesla (argon2id). **`NULL` pomeni, da geslo ni nastavljeno** —
+    #: tak račun obstaja, prijava z njim pa ne uspe nikoli (`ADR-035` G). Tako
+    #: nastaneta uporabnika v migraciji `0008_uporabniki`, brez gesla v
+    #: repozitoriju.
+    secret_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class UserSession(Base):
+    """Ena prijavljena naprava.
+
+    Razred se ne imenuje `Session`: to ime v tem projektu pomeni sejo
+    SQLAlchemy in bi ga v vsaki datoteki zasenčilo. Tabela je `sessions`, kot
+    pravi `ADR-027`.
+
+    Žetona v bazi ni — je samo njegova zgostitev SHA-256. Kdor prebere bazo,
+    se z njo ne more prijaviti (`ADR-035` B).
+    """
+
+    __tablename__ = "sessions"
+
+    __table_args__ = (UniqueConstraint("token_hash", name="sessions_token_hash_key"),)
+
+    #: UUID, generiran na strežniku.
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", name="fk_sessions_user_id"),
+        nullable=False,
+        index=True,
+    )
+
+    #: SHA-256 žetona iz piškotka, zapisana šestnajstiško.
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    #: CSRF žeton te seje. Živi tu in ne v skrivnosti iz okolja: s sejo nastane
+    #: in z njo pade, zato ni nastavitve, ki bi bila lahko napačna
+    #: (`ADR-035` D).
+    csrf_token: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    #: Kdaj seja poteče. Rok je drseči: ob uporabi se odmakne naprej.
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    #: Kdaj je bila seja nazadnje uporabljena. Osveži se največ enkrat na uro,
+    #: sicer bi bila vsaka zahteva `UPDATE` (`ADR-035` B).
+    last_used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    #: Groba oznaka naprave (`User-Agent`, skrajšan), da je seznam sej v
+    #: `V3-R06` berljiv. Ni identiteta in se ne preverja.
+    device_label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+
+class LoginAttempt(Base):
+    """Neuspel poskus prijave. Uspešni se ne zapisujejo.
+
+    Šteje se **samo identifikator**, ne naslov odjemalca: Docker Desktop
+    naslova ne ohrani (`docs/odlocitve/ADR-034` A), zato bi štetje po naslovu
+    upočasnilo vse hkrati. Naslov se vseeno zapiše — za pogled nazaj, ne za
+    odločitev (`ADR-035` E).
+    """
+
+    __tablename__ = "login_attempts"
+
+    #: UUID, generiran na strežniku.
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    #: Identifikator, kakršen je bil poslan — tudi tak, ki ga ni v bazi.
+    identifier: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+
+    #: Naslov, s katerega je poskus prišel, ali `NULL`, kadar ga ni mogoče
+    #: ugotoviti.
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )

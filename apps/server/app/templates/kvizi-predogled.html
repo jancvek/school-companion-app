@@ -64,6 +64,7 @@
        se natanko to, kar je zgoraj; vrnitev nosi izbor snovi, da je ob vrnitvi
        izbor tak, kot je bil. #}
     <form method="post" action="/admin/quizzes">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="vstop" value="{{ vstop }}">
       {% if subject %}<input type="hidden" name="subject" value="{{ subject }}">{% endif %}
       {% for id in vprasanja_idji %}
@@ -86,6 +87,7 @@
     </form>
 
     <form method="post" action="/admin/quizzes/new">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="vstop" value="{{ vstop }}">
       {% if subject %}<input type="hidden" name="subject" value="{{ subject }}">{% endif %}
       <input type="hidden" name="stevilo" value="{{ stevilo }}">

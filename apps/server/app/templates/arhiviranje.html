@@ -29,6 +29,7 @@
       {# Arhiviranje je `POST` in nikoli navadna povezava: brskalniki povezave
          prednalagajo, in ta korak se ne da razveljaviti (ADR-006). #}
       <form method="post" action="/admin/materials/{{ snov.id }}/archive">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
         <button class="gumb" type="submit">Da, arhiviraj</button>
       </form>
 

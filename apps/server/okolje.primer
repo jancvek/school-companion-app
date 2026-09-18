@@ -53,15 +53,14 @@ WORKER_INTERVAL_SECONDS=30
 # pridobi certifikat. Brez nje se Caddy ne zažene.
 DOMENA=school-buddy.duckdns.org
 
-# ZAČASNO — geslo pred `/admin`, dokler V3-R03 ne prinese prave prijave
-# (`docs/odlocitve/ADR-026`). Uporabniško ime izbereš sam.
-ADMIN_UPORABNIK=
-
-# Zgostitev gesla (bcrypt), nikoli geslo samo. Naredi jo z:
-#   docker run --rm -it caddy:2.11.4-alpine caddy hash-password
-# Vrednost zapiši v **enojnih narekovajih**, npr. ADMIN_ZGOSTITEV='$2a$14$...'.
-# Brez njih Compose znake `$` razume kot spremenljivke in zgostitev tiho pokvari.
-ADMIN_ZGOSTITEV=
+# Spremenljivk ADMIN_UPORABNIK in ADMIN_ZGOSTITEV ni več (V3-R03): začasni
+# `basic_auth` v Caddyju je padel, admin varuje prijava v aplikaciji sami
+# (`docs/odlocitve/ADR-035`). Če sta v tvojem `.env` ostali, ju pobriši —
+# nihče ju ne bere.
+#
+# Geslo ni v tej datoteki in ne sme biti. Nastavi ga z ukazom v vsebniku:
+#   docker compose exec api python -m app.ukazi nastavi-geslo dejan.ambrus@gmail.com
+# Dokler geslo ni nastavljeno, prijava v `/admin` ne uspe — to je namerno.
 
 # Nastavitve naslova, na katerem posluša API, ni več: `api` nima vrat na
 # gostitelju in je dosegljiv samo skozi Caddy (V3-R02). Stara vrstica

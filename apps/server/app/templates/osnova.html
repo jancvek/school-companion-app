@@ -29,11 +29,24 @@
       font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
     }
     header {
+      display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem;
+      align-items: baseline; justify-content: space-between;
       padding: 1rem 2rem;
       border-bottom: 1px solid var(--rob);
       background: var(--ploskev);
     }
     header a { color: var(--poudarek); text-decoration: none; font-weight: 600; }
+    /* Kdo je prijavljen in v kateri družini (V3-R03). Odjava je obrazec, ker
+       mora biti `POST` s CSRF žetonom — videti pa sme kot povezava. */
+    .kdo { display: flex; flex-wrap: wrap; gap: 0.9rem; align-items: baseline; }
+    .kdo form { margin: 0; }
+    .kdo .gumb-povezava { margin-top: 0; }
+    .kdo .druzina { font-weight: 600; }
+    .kdo .zamolklo { color: var(--zamolklo); }
+    /* --- Prijava (V3-R03) --- */
+    .prijava { display: flex; flex-direction: column; gap: 0.35rem; max-width: 26rem; }
+    .prijava label { color: var(--zamolklo); font-size: 0.85rem; margin-top: 0.8rem; }
+    .prijava .gumb { align-self: flex-start; }
     main { max-width: 1100px; margin: 0 auto; padding: 2rem; }
     h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
     .pod { color: var(--zamolklo); margin: 0 0 2rem; }
@@ -256,7 +269,21 @@
   </style>
 </head>
 <body>
-  <header><a href="/admin">Šolski pomočnik — pregled snovi</a></header>
+  {# Glava pove, čigavo družino gledaš in kdo si (V3-R03). Brez seje — na
+     prijavni strani — je desna stran prazna. #}
+  <header>
+    <a href="/admin">Šolski pomočnik — pregled snovi</a>
+    {% if prijava %}
+      <span class="kdo">
+        <span class="druzina">{{ prijava.family_name }}</span>
+        <span class="zamolklo">{{ prijava.display_name }}</span>
+        <form method="post" action="/admin/logout">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="gumb-povezava" type="submit">Odjava</button>
+        </form>
+      </span>
+    {% endif %}
+  </header>
   <main>{% block vsebina %}{% endblock %}</main>
 </body>
 </html>

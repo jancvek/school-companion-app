@@ -24,6 +24,25 @@ def daj_predloge(request: Request) -> Jinja2Templates:
     return predloge
 
 
+def kontekst_prijave(request: Request) -> dict[str, object]:
+    """Kdo je prijavljen in kakšen CSRF žeton nosijo obrazci te strani.
+
+    Vpisan je kot `context_processors` izrisovalnika (`app/main.py`), zato
+    velja za **vsako** predlogo — glava z imenom družine in skrito polje v
+    obrazcu tako ne potrebujeta dopolnila v 27 klicih `TemplateResponse`
+    (`docs/odlocitve/ADR-035` D).
+
+    Brez seje se vrne **samo** `prijava: None`, brez ključa `csrf`. Razlog je v
+    Starlette: obdelovalci konteksta tečejo za klicateljem in njegove vrednosti
+    prepišejo. Prazen `csrf` bi torej pobrisal žeton, ki ga prijavna stran poda
+    sama — in prijavni obrazec bi ostal brez žetona, pri vsakem poskusu 403.
+    """
+    seja = getattr(request.state, "prijava", None)
+    if seja is None:
+        return {"prijava": None}
+    return {"prijava": seja, "csrf": seja.csrf_token}
+
+
 def ni_najdeno(predloge: Jinja2Templates, request: Request, sporocilo: str) -> Response:
     """404 kot stran, ne kot JSON.
 

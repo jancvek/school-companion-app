@@ -19,6 +19,7 @@ to mogoče, da tesnjenje velja za stanje, kakršno nastane v produkciji.
 """
 
 import inspect
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -39,7 +40,7 @@ from app.db import (
     PoskusZaZapis,
     StatistikaRepository,
 )
-from app.dependencies import daj_druzino
+from app.dependencies import daj_druzino_telefona
 from app.models import (
     NACIN_SAMOOCENA,
     STATUS_NOV,
@@ -50,8 +51,9 @@ from app.models import (
     Question,
     QuestionAttempt,
     Quiz,
+    User,
 )
-from tests.conftest import CVEK_ID, KLJUC
+from tests.conftest import CVEK_ID, KLJUC, PrijavljenOdjemalec, prijavi, ustvari_starsa
 from tests.test_druzine import DRUGA_ID, dodaj_druzino
 from tests.test_kvizi import objavi
 from tests.test_resevanje import POKAZANO, poskus, poslji
@@ -104,7 +106,7 @@ class Druzina:
 
 def _zgradi(
     aplikacija: FastAPI,
-    odjemalec: TestClient,
+    odjemalec: PrijavljenOdjemalec,
     motor: Engine,
     slike: Path,
     *,
@@ -154,8 +156,11 @@ def _zgradi(
             seja.add(material)
         seja.commit()
 
-    # Kvizi in poskusi skozi prave poti, v imenu te družine.
-    aplikacija.dependency_overrides[daj_druzino] = lambda: family_id
+    # Kvizi in poskusi skozi prave poti, v imenu te družine. Admin pot pove
+    # družino prek **seje** (V3-R03), pot telefona prek začasne odvisnosti, ki
+    # jo bo `V3-R04` zamenjal z žetonom — zato tu oboje.
+    prijavi(odjemalec, motor, ustvari_starsa(motor, family_id=family_id, identifikator=znak))
+    aplikacija.dependency_overrides[daj_druzino_telefona] = lambda: family_id
     resen = objavi(
         odjemalec, motor, [idji["akt"]], koliko=3, subject=subject, vstop="rocna",
         ime=f"Rešen {znak}",
@@ -192,7 +197,7 @@ def _zgradi(
 
 @pytest.fixture
 def druzini(
-    aplikacija: FastAPI, odjemalec: TestClient, motor: Engine, slike: Path
+    aplikacija: FastAPI, odjemalec: PrijavljenOdjemalec, motor: Engine, slike: Path
 ) -> tuple[Druzina, Druzina]:
     """Družini A (Cvek) in B; aplikacija je po vrnitvi v imenu **B**.
 
@@ -210,7 +215,9 @@ def druzini(
         aplikacija, odjemalec, motor, slike,
         family_id=DRUGA_ID, subject="MAT", znak="SKRIVNOST-B", prejeto=zdaj - timedelta(hours=2),
     )
-    aplikacija.dependency_overrides[daj_druzino] = lambda: b.family_id
+    # `_zgradi` je odjemalca nazadnje prijavil kot starša B in začasno družino
+    # telefona nastavil na B; to je stanje, v katerem testi tečejo.
+    assert aplikacija.dependency_overrides[daj_druzino_telefona]() == b.family_id
     return a, b
 
 
@@ -224,6 +231,7 @@ def posnetek_druzine(
     ne glede na to, kaj se v njej zgodi.
     """
     kvizi = Quiz.__table__
+    uporabniki = User.__table__
     vrstice: list[tuple[str, ...]] = []
     with Session(motor) as seja:
         for tabela in Base.metadata.sorted_tables:
@@ -238,6 +246,20 @@ def posnetek_druzine(
                     .join(kvizi, kvizi.c.id == tabela.c.quiz_id)
                     .where(kvizi.c.family_id == family_id)
                 )
+            elif tabela.name in ("credentials", "sessions"):
+                # Identiteta (V3-R03): družina je od uporabnika, ki mu vrstica
+                # pripada. Seja druge družine ne sme ne nastati ne izginiti,
+                # ko po njenih poteh hodi kdo drug.
+                poizvedba = (
+                    select(tabela)
+                    .join(uporabniki, uporabniki.c.id == tabela.c.user_id)
+                    .where(uporabniki.c.family_id == family_id)
+                )
+            elif tabela.name == "login_attempts":
+                # Edina tabela brez družine, in to po `ADR-035` E: neuspel
+                # poskus se zabeleži tudi za identifikator, ki ne obstaja, zato
+                # družine nima na kaj vezati. V posnetek ne sodi.
+                continue
             else:
                 raise AssertionError(f"Za tabelo {tabela.name} ni zapisano, čigava je.")
             vrstice.extend((tabela.name, *map(str, vrstica)) for vrstica in seja.execute(poizvedba))
@@ -266,6 +288,26 @@ PREUSMERITEV = frozenset({303})
 
 #: (odgovor, dovoljeni statusi, poslani identifikatorji tuje družine)
 Klic = Callable[[TestClient, Druzina], tuple[Any, frozenset[int], tuple[str, ...]]]
+
+def _prijava_s_tujim_racunom(odjemalec: TestClient, tuja: Druzina) -> Any:
+    """Poskus prijave z identifikatorjem starša tuje družine in napačnim geslom.
+
+    Gre skozi prijavni obrazec, ker CSRF žeton prijave pride iz piškotka, ki ga
+    postavi šele `GET` (`docs/odlocitve/ADR-035` D).
+    """
+    stran = odjemalec.get("/admin/login")
+    zeton = re.search(r'name="csrf" value="([^"]+)"', stran.text)
+    assert zeton is not None, stran.text
+    return odjemalec.post(
+        "/admin/login",
+        data={
+            "identifikator": tuja.znak,
+            "geslo": "to-geslo-ni-pravo",
+            "csrf": zeton.group(1),
+        },
+        follow_redirects=False,
+    )
+
 
 PRIMERI_POTI: dict[tuple[str, str], Klic] = {
     ("GET", "/health"): lambda o, a: (o.get("/health"), OK, ()),
@@ -346,6 +388,16 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
         o.post(f"/admin/quizzes/{a.odprt_kviz}/cancel", follow_redirects=False),
         NI,
         (a.odprt_kviz,),
+    ),
+    # Identiteta (V3-R03). Prijava je edina pot, na kateri gre identifikator
+    # tuje družine skozi obrazec; njen odgovor ne sme povedati, ali ta račun
+    # obstaja, in tuje seje ne sme ne ustvariti ne pobrisati.
+    ("GET", "/admin/login"): lambda o, a: (o.get("/admin/login"), OK, ()),
+    ("POST", "/admin/login"): lambda o, a: (
+        _prijava_s_tujim_racunom(o, a), frozenset({401}), (a.znak,),
+    ),
+    ("POST", "/admin/logout"): lambda o, a: (
+        o.post("/admin/logout", follow_redirects=False), PREUSMERITEV, (),
     ),
     ("GET", "/admin/statistics"): lambda o, a: (o.get("/admin/statistics?leto=vse"), OK, ()),
     ("GET", "/admin/statistics/subjects/{koda}"): lambda o, a: (
