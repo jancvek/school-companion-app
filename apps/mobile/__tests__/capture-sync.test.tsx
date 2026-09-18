@@ -4,9 +4,11 @@ import { Alert, AppState } from 'react-native';
 import CaptureScreen from '../app/slikaj/[subject]';
 import { insertMaterial } from '@/db/materials';
 import { migriraj } from '@/db/migrations';
+import { PrijavaProvider } from '@/sync/use-prijava';
 import { SyncProvider } from '@/sync/use-sync';
 import type { Material } from '@/types';
 
+import { SEJA, ustvariShrambo } from './shramba';
 import { createTestDatabase } from './test-database';
 import { dovoljenje, type CameraMockState, type RouterMockState } from './screen-mocks';
 
@@ -33,6 +35,13 @@ jest.mock('expo-router', () => require('./screen-mocks').expoRouterMock());
 jest.mock('expo-camera', () => require('./screen-mocks').expoCameraMock());
 jest.mock('expo-sqlite', () => require('./screen-mocks').expoSqliteMock());
 jest.mock('react-native-safe-area-context', () => require('./screen-mocks').safeAreaMock());
+
+jest.mock('expo-secure-store', () => ({
+  __esModule: true,
+  getItemAsync: jest.fn(),
+  setItemAsync: jest.fn(),
+  deleteItemAsync: jest.fn(),
+}));
 
 jest.mock('@/materials/save', () => ({
   __esModule: true,
@@ -191,4 +200,49 @@ it('napaka prenosa ne pokvari shranjevanja', async () => {
   await waitFor(() => expect(prenesiEno).toHaveBeenCalled());
   // Napaka prenosa ni napaka shranjevanja — uporabnice ne sme motiti.
   expect(alert).not.toHaveBeenCalled();
+});
+
+it('posnetek dobi lastnika, ki je ta hip prijavljen (V3-R04)', async () => {
+  // Kriterij V3-R04: zapis enega otroka ne sme oditi pod žetonom drugega.
+  // Prvi korak tega je, da lastnik sploh pride v vrstico — brez tega bi
+  // vsak posnetek nastal brez njega in bi ga `posvojiBrezLastnika` ob
+  // naslednji prijavi pripisal komurkoli (`docs/odlocitve/ADR-036` B).
+  const prenesiEno = jest.fn(() => new Promise<never>(() => {}));
+
+  await render(
+    <PrijavaProvider db={db} nastavitve={NASTAVITVE} shramba={ustvariShrambo(SEJA)}>
+      <SyncProvider db={db} nastavitve={NASTAVITVE} prenesiEno={prenesiEno}>
+        <CaptureScreen />
+      </SyncProvider>
+    </PrijavaProvider>,
+  );
+  // Žeton z diska pride asinhrono; dokler ga ni, je zaslon neprijavljen.
+  await waitFor(() => expect(shranjevanje.saveCapture).not.toHaveBeenCalled());
+
+  await fireEvent.press(screen.getByText('Fotografiraj'));
+  await fireEvent.press(await screen.findByText('Shrani'));
+
+  await waitFor(() => expect(shranjevanje.saveCapture).toHaveBeenCalled());
+  const [, vhod] = shranjevanje.saveCapture.mock.calls[0];
+  expect(vhod.userId).toBe(SEJA.userId);
+});
+
+it('brez prijave posnetek vseeno nastane, le brez lastnika', async () => {
+  // Prijava ni vrata (`ADR-036` A): kamera dela naprej.
+  const prenesiEno = jest.fn(() => new Promise<never>(() => {}));
+
+  await render(
+    <PrijavaProvider db={db} nastavitve={NASTAVITVE} shramba={ustvariShrambo()}>
+      <SyncProvider db={db} nastavitve={NASTAVITVE} prenesiEno={prenesiEno}>
+        <CaptureScreen />
+      </SyncProvider>
+    </PrijavaProvider>,
+  );
+
+  await fireEvent.press(screen.getByText('Fotografiraj'));
+  await fireEvent.press(await screen.findByText('Shrani'));
+
+  await waitFor(() => expect(screen.getByText('Shranjeno')).toBeTruthy());
+  const [, vhod] = shranjevanje.saveCapture.mock.calls[0];
+  expect(vhod.userId).toBeNull();
 });

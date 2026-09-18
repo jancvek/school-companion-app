@@ -161,6 +161,33 @@ class TestNastaviGeslo:
 
         assert koda == 0
 
+    def test_osem_znakov_je_natanko_dovolj(self, motor: Engine, izpisi: list[str]) -> None:
+        """Spodnji rob meje. Brez tega bi mutacija `>=` v `>` ostala zelena."""
+        ustvari_otroka(motor, geslo=None)
+
+        koda = ukazi.nastavi_geslo(
+            OTROK_IDENTIFIKATOR,
+            vprasaj=Tipkovnica("masa1234", "masa1234"),
+            izpisi=izpisi.append,
+            motor=motor,
+        )
+
+        assert koda == 0, izpisi
+
+    def test_sedem_znakov_je_premalo(self, motor: Engine, izpisi: list[str]) -> None:
+        """Zgornji rob meje — prvo geslo, ki še ne sme skozi."""
+        ustvari_otroka(motor, geslo=None)
+
+        koda = ukazi.nastavi_geslo(
+            OTROK_IDENTIFIKATOR,
+            vprasaj=Tipkovnica("masa123", "masa123"),
+            izpisi=izpisi.append,
+            motor=motor,
+        )
+
+        assert koda == ukazi.NAPAKA
+        assert "vsaj 8" in izpisi[0]
+
     def test_stiri_znaki_otroku_ne_zadoscajo_vec(self, motor: Engine, izpisi: list[str]) -> None:
         """Geslo, ki je do V3-R04 veljalo, odslej ne velja več."""
         ustvari_otroka(motor, geslo=None)

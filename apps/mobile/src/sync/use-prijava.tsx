@@ -38,8 +38,6 @@ import {
 export type PrijavaVrednost = {
   /** Trenutna seja, ali `null`, kadar ni prijavljen nihče. */
   seja: Seja | null;
-  /** Ali je bil žeton z diska že prebran; do takrat še ne vemo. */
-  prebrano: boolean;
   /**
    * Prijavi se. Ob neuspehu **vrže** `NapakaPrijave` s slovenskim sporočilom,
    * ki ga zaslon pokaže; ob uspehu posvoji zapise brez lastnika.
@@ -76,17 +74,20 @@ export function PrijavaProvider({
   );
 
   const [seja, setSeja] = useState<Seja | null>(null);
-  const [prebrano, setPrebrano] = useState(false);
 
   // Žeton z diska ob zagonu. `preberiSejo` ne vrže nikoli, zato tu ni veje za
   // napako: nedosegljiva shramba pomeni neprijavljeno aplikacijo, ne pokvarjene.
+  //
+  // Dokler branje ne konča, je aplikacija videti neprijavljena. Okno je ozko in
+  // sprejeto (`ADR-036`, popravki): posnetek, ki nastane v njem, ostane brez
+  // lastnika in ga posvoji prva prijava — pri otroku, ki je aplikacijo pravkar
+  // odprl, je to on sam. Čakanje bi pomenilo kamero, ki čaka na disk.
   useEffect(() => {
     let velja = true;
     void (async () => {
       const najdena = await preberiSejo(shramba);
       if (!velja) return;
       setSeja(najdena);
-      setPrebrano(true);
     })();
     return () => {
       velja = false;
@@ -116,8 +117,8 @@ export function PrijavaProvider({
   }, [nastavitve, seja, shramba]);
 
   const vrednost = useMemo<PrijavaVrednost>(
-    () => ({ seja, prebrano, prijavi, odjavi }),
-    [odjavi, prebrano, prijavi, seja],
+    () => ({ seja, prijavi, odjavi }),
+    [odjavi, prijavi, seja],
   );
 
   return <PrijavaContext.Provider value={vrednost}>{children}</PrijavaContext.Provider>;
@@ -129,7 +130,6 @@ export function PrijavaProvider({
  */
 const BREZ_PONUDNIKA: PrijavaVrednost = {
   seja: null,
-  prebrano: true,
   prijavi: async () => {},
   odjavi: async () => {},
 };

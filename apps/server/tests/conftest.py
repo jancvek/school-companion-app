@@ -353,8 +353,9 @@ def stars(motor: Engine) -> str:
 def odjemalec(aplikacija: FastAPI, motor: Engine, stars: str) -> Iterator[PrijavljenOdjemalec]:
     """Odjemalec s sejo starša družine Cvek.
 
-    Ključa ne pošilja: poti telefona ga v vsakem testu podajo same, admin poti
-    pa ga ne potrebujejo (`/admin` je izvzet iz `ApiKeyMiddleware`).
+    Žetona telefona ne nosi: poti telefona ga v vsakem testu podajo same
+    (fixture `telefon`), admin poti pa ga ne potrebujejo — `/admin` je izvzet
+    iz `ZetonMiddleware` in ima svojo plast.
 
     Naslov je **`https`**, ker ima piškotek seje zastavico `Secure` in ga
     odjemalec čez `http` ne bi poslal — kar je natanko obnašanje brskalnika.

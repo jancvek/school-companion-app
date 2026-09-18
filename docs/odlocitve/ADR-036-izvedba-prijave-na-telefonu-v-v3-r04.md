@@ -154,3 +154,48 @@ izjema zato, ker se to stanje **more** spremeniti samo od sebe — s prijavo.
   sejo telefona), `V3-R07` (lastnik zapisa na telefonu že obstaja),
   `V1-R02` (`ADR-004`: `401` ni več `failed`), `V1-R04` / `ADR-006`
   (regresijski test ključa je prepisan, ne izbrisan).
+
+## Popravki po prvem pregledu (18. 9. 2026)
+
+Pregledovalec je vrnil štiri kritične točke (vse v testih in v
+dokumentaciji, nobene v izvedbi) in nekaj manjših. Spodnje odločitve so
+nastale ob popravkih in **spreminjajo tekst zgoraj**, ne razveljavljajo ga.
+
+### Starš na telefonu dobi `401`, ne `403`
+
+`docs/plan/V3-R04.md` je v tabeli test casov predpisal `403`. Izvedba vrača
+`401` in to je namerno, čeprav bi bil `403` semantično bliže resnici
+(poverilnica je prava, vrata pa napačna).
+
+Razlog je **simetrija z `ADR-035` F**: otrok na admin strani dobi `401`, ne
+`403`. Dvoje vrat z dvema različnima kodama za isto stvar bi bilo dvoje
+pravil tam, kjer je `Vrata` naredil eno. Poleg tega je `401` edina koda, ki
+jo telefon že zna brati kot „prijava ne velja“ (`ADR-036` H); `403` bi
+moral dobiti svojo vejo v `upload.ts`, da ne bi zapisa poslal v `failed`.
+
+Cena: odjemalec iz kode ne loči „geslo ni pravo“ od „ta račun sem ne
+sodi“. Loči ju sporočilo, in to je edina razlika, ki jo uporabnica
+potrebuje.
+
+### Po odjavi Zgodovina pokaže samo zapise brez lastnika
+
+Posledica pravila B, ki v ADR ni bila izpisana in jo je pregled našel:
+`listBySubject` filtrira po lastniku, zato po odjavi ni videti ničesar, kar
+je nastalo **pod prijavo** — tudi lastnega ne.
+
+Ostaja tako. Naprava brez prijavljene osebe ne ve, komu bi smela kazati; da
+bi takrat pokazala vse, bi pomenilo, da je odjava na skupnem telefonu način,
+kako videti sestrine zvezke. Posnetki se ne izgubijo in se po ponovni prijavi
+vrnejo; **odjava ni brisanje in zaslon to pove**.
+
+### `prebrano` iz ponudnika prijave odpade
+
+Polje je nastalo kot obramba pred ozkim oknom med zagonom aplikacije in
+koncem asinhronega branja žetona: posnetek, nastal v tem trenutku, dobi
+`user_id = NULL`. Ker ga ni uporabljal nihče, je bil to ostanek
+(merilo dokončanosti), zato je odstranjen.
+
+Okno ostaja in je sprejeto: tak posnetek posvoji prva prijava, kar je za
+otroka, ki je aplikacijo pravkar odprl, prav ta otrok. Zapiranje okna bi
+pomenilo kamero, ki čaka na disk, in to je natanko tisto, čemur se A
+izogiba.

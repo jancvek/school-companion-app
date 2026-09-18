@@ -111,4 +111,20 @@ describe('žeton živi samo v varni shrambi', () => {
 
     expect(ostanki).toEqual([]);
   });
+
+  it('tudi noben test ne pošilja več glave s ključem', () => {
+    // Testi so pregledani ločeno in po ožjem vzorcu: `app-config` in
+    // `server-config` ključ **morata** imenovati, ker dokazujeta prav
+    // njegovo odsotnost, glava `X-API-Key` pa nima nobene take rabe več.
+    // Ostanek vrednosti v testni nastavitvi je bil resničen (`ADR-036`,
+    // popravki po pregledu) in `tsc` ga ni ujel, ker je bil literal vezan
+    // na `const`.
+    const ostanki = vseDatoteke(join(KOREN, '__tests__'))
+      // Brez te datoteke: vzorec mora nekje pisati, in to je tu.
+      .filter((pot) => !pot.endsWith('zeton-shramba.test.ts'))
+      .filter((pot) => /X-API-Key/.test(brezKomentarjev(pot)))
+      .map(relativno);
+
+    expect(ostanki).toEqual([]);
+  });
 });

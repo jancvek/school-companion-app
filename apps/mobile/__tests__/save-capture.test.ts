@@ -47,6 +47,37 @@ describe('shranjevanje posnetka', () => {
     db.close();
   });
 
+  it('zapiše lastnika, ki je bil prijavljen ob posnetku (V3-R04)', async () => {
+    // Brez tega bi vsak posnetek nastal brez lastnika, `posvojiBrezLastnika`
+    // pa bi ga ob naslednji prijavi pripisal komurkoli — tudi drugemu
+    // otroku na istem telefonu (`docs/odlocitve/ADR-036` B).
+    const zapis = await saveCapture(db, {
+      subject: 'MAT',
+      takenAt: CAS_POSNETKA,
+      sourceUri: IZVIRNIK,
+      userId: 'u-masa',
+    });
+
+    expect(zapis.user_id).toBe('u-masa');
+    const [vrstica] = await listBySubject(db, 'MAT', 'u-masa');
+    expect(vrstica.id).toBe(zapis.id);
+    expect(vrstica.user_id).toBe('u-masa');
+  });
+
+  it('brez prijave zapis nastane brez lastnika in ga prijava posvoji', async () => {
+    // Prijava ni pogoj za slikanje (`ADR-036` A); `null` pomeni „nastalo,
+    // ko ni bil prijavljen nihče“ in ne „brez lastnika za vedno“.
+    const zapis = await saveCapture(db, {
+      subject: 'MAT',
+      takenAt: CAS_POSNETKA,
+      sourceUri: IZVIRNIK,
+    });
+
+    expect(zapis.user_id).toBeNull();
+    expect(await listBySubject(db, 'MAT', 'u-masa')).toEqual([]);
+    expect((await listBySubject(db, 'MAT', null)).map((m) => m.id)).toEqual([zapis.id]);
+  });
+
   it('sestavi zapis z UUID-jem, časom posnetka in stanjem pending', async () => {
     const zapis = await saveCapture(db, {
       subject: 'MAT',

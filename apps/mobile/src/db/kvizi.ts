@@ -106,8 +106,8 @@ export async function shraniKviz(db: MaterialsDatabase, kviz: KvizStreznika): Pr
 export async function pobrisiKvizeRazen(
   db: MaterialsDatabase,
   ohrani: readonly string[],
-  odprti: string | null = null,
-  lastnik: string | null = null,
+  odprti: string | null,
+  lastnik: string | null,
 ): Promise<number> {
   const ohranjeni = new Set(ohrani);
   if (odprti !== null) ohranjeni.add(odprti);

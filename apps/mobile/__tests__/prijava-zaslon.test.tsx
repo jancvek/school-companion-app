@@ -6,10 +6,11 @@ import { migriraj } from '@/db/migrations';
 import { PrijavaProvider } from '@/sync/use-prijava';
 import { SyncProvider } from '@/sync/use-sync';
 import type { Material } from '@/types';
+import { theme } from '@/ui/theme';
 
 import { SEJA, ustvariShrambo, type TestnaShramba } from './shramba';
 import { createTestDatabase } from './test-database';
-import { type RouterMockState } from './screen-mocks';
+import { odmikSpodaj, TEST_INSETS, type RouterMockState } from './screen-mocks';
 
 jest.mock('expo-router', () => require('./screen-mocks').expoRouterMock());
 jest.mock('expo-sqlite', () => require('./screen-mocks').expoSqliteMock());
@@ -236,11 +237,26 @@ describe('prijavni zaslon', () => {
     expect(usmerjevalnik.stanje.router.back).toHaveBeenCalled();
   });
 
-  it('prijavni gumb ne obtiči pod sistemsko navigacijsko vrstico', async () => {
-    // Android riše edge-to-edge (merilo dokončanosti).
+  it('neprijavljena veja ne obtiči pod sistemsko navigacijsko vrstico', async () => {
+    // Android riše edge-to-edge (merilo dokončanosti), zato mora gumb
+    // prišteti spodnji odmik varnega območja — sicer je pod sistemsko
+    // navigacijsko vrstico in ga ni mogoče pritisniti.
+    await izrisi(ustvariShrambo());
+
+    const vsebina = screen.getByTestId('prijava-vsebina');
+
+    expect(odmikSpodaj(vsebina.props.contentContainerStyle)).toBe(
+      theme.spacing + TEST_INSETS.bottom,
+    );
+  });
+
+  it('prijavljena veja ne obtiči pod sistemsko navigacijsko vrstico', async () => {
+    // Gumb za odjavo je v drugi veji istega zaslona in ima svoj odmik;
+    // en test bi drugo vejo pustil nepokrito.
     await izrisi(ustvariShrambo(SEJA), true);
 
-    const vsebina = screen.getByTestId('prijavljen').parent;
-    expect(vsebina).toBeTruthy();
+    const vsebina = screen.getByTestId('odjava-vsebina');
+
+    expect(odmikSpodaj(vsebina.props.style)).toBe(theme.spacing + TEST_INSETS.bottom);
   });
 });

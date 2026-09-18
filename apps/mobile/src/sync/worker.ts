@@ -57,7 +57,7 @@ export type PrenesiEno = (material: Material) => Promise<Izid>;
 export async function prenesiCakajoce(
   db: MaterialsDatabase,
   prenesiEno: PrenesiEno,
-  lastnik: string | null = null,
+  lastnik: string | null,
   pobrisiArhiviranega: (
     db: MaterialsDatabase,
     material: Material,
@@ -129,8 +129,13 @@ export type CasovnikId = ReturnType<typeof setTimeout>;
 
 export type RazporejevalnikOdvisnosti = {
   db: MaterialsDatabase;
-  /** Čigavo vrsto ta razporejevalnik oddela; `null` = ni prijavljen nihče. */
-  lastnik?: string | null;
+  /**
+   * Čigavo vrsto ta razporejevalnik oddela; `null` = ni prijavljen nihče.
+   *
+   * Brez privzetka in obvezen: pozabljen argument bi tiho pomenil „vrsta brez
+   * lastnika" in zapisi prijavljene uporabnice ne bi šli nikamor.
+   */
+  lastnik: string | null;
   prenesiEno: PrenesiEno;
   /** Kliče se po vsakem ciklu, da vmesnik osveži števce. */
   poCiklu?: (povzetek: Povzetek) => void;
@@ -175,7 +180,7 @@ export function ustvariRazporejevalnik(o: RazporejevalnikOdvisnosti): Razporejev
     tece = true;
 
     try {
-      const povzetek = await prenesiCakajoce(o.db, o.prenesiEno, o.lastnik ?? null);
+      const povzetek = await prenesiCakajoce(o.db, o.prenesiEno, o.lastnik);
       odmik = naslednjiOdmik(odmik, povzetek.cakajoci === 0);
       o.poCiklu?.(povzetek);
     } catch {

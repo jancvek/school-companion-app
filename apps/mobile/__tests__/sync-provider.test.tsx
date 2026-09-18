@@ -32,7 +32,7 @@ jest.mock('expo-file-system', () => ({
   UploadType: { MULTIPART: 'multipart' },
 }));
 
-const NASTAVITVE = { baseUrl: 'http://sto.ts.net:8000', apiKey: 'kljuc' };
+const NASTAVITVE = { baseUrl: 'https://school-buddy.duckdns.org' };
 const USPEH: Izid = { vrsta: 'synced' };
 
 let db: ReturnType<typeof createTestDatabase>;

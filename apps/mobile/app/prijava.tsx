@@ -73,7 +73,10 @@ export default function PrijavaScreen() {
 
   if (seja) {
     return (
-      <View style={[styles.container, { paddingBottom: theme.spacing + insets.bottom }]}>
+      <View
+        testID="odjava-vsebina"
+        style={[styles.container, { paddingBottom: theme.spacing + insets.bottom }]}
+      >
         <Text testID="prijavljen" style={styles.naslov}>
           Prijavljena si kot {seja.ime}.
         </Text>
@@ -104,6 +107,7 @@ export default function PrijavaScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView
+        testID="prijava-vsebina"
         contentContainerStyle={[
           styles.vsebina,
           { paddingBottom: theme.spacing + insets.bottom },

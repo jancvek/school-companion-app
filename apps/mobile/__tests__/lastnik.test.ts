@@ -117,6 +117,20 @@ describe('lastnik snovi', () => {
     expect((await listBySubject(db, 'MAT', MASA)).map((m) => m.id)).toEqual(['moj']);
   });
 
+  it('po odjavi Zgodovina ne pokaže zapisov, ki so nastali pod prijavo', async () => {
+    // Zapisana posledica pravila B (`ADR-036`, popravki po pregledu), ne
+    // spregled: naprava brez prijavljene osebe ne ve, komu bi smela kazati,
+    // in odjava na skupnem telefonu ne sme biti način, kako videti sestrine
+    // zvezke. Posnetki ostanejo in se po ponovni prijavi vrnejo.
+    await insertMaterial(db, material({ id: 'masin', user_id: MASA }));
+
+    // Odjavljena aplikacija: lastnika ni.
+    expect(await listBySubject(db, 'MAT', null)).toEqual([]);
+
+    // Zapis je še vedno tam in se po prijavi vrne.
+    expect((await listBySubject(db, 'MAT', MASA)).map((m) => m.id)).toEqual(['masin']);
+  });
+
   it('„Poskusi znova" ne vrne v vrsto tujih neuspelih zapisov', async () => {
     await insertMaterial(db, material({ id: 'tuj', user_id: JAKA, sync_status: 'failed' }));
 

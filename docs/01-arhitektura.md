@@ -736,9 +736,12 @@ Odločitve so v `ADR-027` (model) in `ADR-035` (izvedba).
 - **Geslo nastavi lastnik z ukazom** v vsebniku:
   `docker compose exec api python -m app.ukazi nastavi-geslo <identifikator>`.
   Geslo pride z `getpass`, nikoli iz argumenta ali okolja. Najkrajše geslo je
-  12 znakov za starša in 4 za otroka.
-- **Telefon je do V3-R04 to ni srečal.** Odtlej uporablja isto tabelo
-  `sessions` z glavo `Authorization: Bearer`; glej razdelek spodaj.
+  12 znakov za starša in **8 za otroka** — otrokovih 4 iz `ADR-035` G je
+  razveljavil `ADR-036` E, ko je mobilna prijava postala dosegljiva z javnega
+  interneta.
+- **Telefon se s tem do V3-R04 ni srečal.** Odtlej uporablja isto tabelo
+  `sessions`, le da žeton nosi v glavi `Authorization: Bearer`; glej razdelek
+  spodaj.
 
 ## Prijava na telefonu (V3-R04)
 
