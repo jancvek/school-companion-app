@@ -1,20 +1,28 @@
-"""Dve preverbi ob vhodu: API ključ (telefon) in seja s CSRF (admin stran).
+"""Dve preverbi ob vhodu: žeton telefona in seja s CSRF (admin stran).
+
+Obe stojita na isti tabeli `sessions` in na istem neprozornem žetonu
+(`docs/odlocitve/ADR-027`); razlikujeta se po prenosniku — telefon nosi žeton v
+glavi `Authorization: Bearer`, brskalnik v piškotku — in po tem, kaj naredita,
+ko seje ni: telefon dobi `401` kot JSON, brskalnik `303` na prijavo.
 
 Zakaj vmesni plasti (ASGI middleware) in ne odvisnosti na endpointu:
 
-- **Ključ:** FastAPI telo zahteve prebere, *preden* razreši odvisnosti.
-  Preverba ključa kot odvisnost bi torej pomenila, da strežnik celo
-  večmegabajtno sliko najprej prebere in šele nato ugotovi, da ključ ne velja.
-  Vmesna plast zavrne zahtevo, preden se telo sploh začne brati — kar je tudi
-  edini način, da drži zahteva „401, brez zapisa v bazo in brez datoteke".
+- **Žeton:** FastAPI telo zahteve prebere, *preden* razreši odvisnosti.
+  Preverba kot odvisnost bi torej pomenila, da strežnik celo večmegabajtno
+  sliko najprej prebere in šele nato ugotovi, da žeton ne velja. Vmesna plast
+  zavrne zahtevo, preden se telo sploh začne brati — kar je tudi edini način,
+  da drži zahteva „401, brez zapisa v bazo in brez datoteke".
 - **Seja:** odvisnost je mogoče pozabiti pri novem usmerjevalniku, predpone pa
   ne. Pot pod `/admin`, ki je nihče ni dodal na noben seznam, je varovana po
   privzetku (`docs/odlocitve/ADR-035` A). Generirani test dosegljivosti
   pozabljeno pot sicer ujame, a koda, ki napake ne dopusti, je boljša od testa,
   ki jo prijavi.
+
+Do V3-R04 je bila prva plast `ApiKeyMiddleware` z enim vgrajenim ključem za
+vse družine. Odpadel je ostro, ne postopno (`ADR-027` C2): strežnik ne sprejema
+obojega, ker bi obdobje, ko veljata oba načina, trajalo dlje od same zamenjave.
 """
 
-import secrets
 from datetime import UTC, datetime
 from urllib.parse import parse_qs, urlencode
 
@@ -25,35 +33,35 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app import prijava
-from app.db import PrijavaRepository
+from app.db import PrijavaRepository, SejaUporabnika
 
-#: Glava, v kateri telefon pošlje ključ.
-API_KEY_HEADER = "x-api-key"
+#: Glava, v kateri telefon pošlje žeton.
+GLAVA_ZETONA = "authorization"
 
-SPOROCILO_NEVELJAVEN_KLJUC = (
-    "Neveljaven ali manjkajoč API ključ. Preveri nastavitev SERVER_API_KEY v aplikaciji."
+SPOROCILO_NEVELJAVEN_ZETON = (
+    "Prijava je potekla ali ni veljavna. Prijavi se v aplikaciji znova; "
+    "posnetki na telefonu ostanejo in se prenesejo po prijavi."
 )
 
 
-def kljuc_se_ujema(ponujeni: str | None, pricakovani: str) -> bool:
-    """Primerja ključa v konstantnem času.
+def zeton_iz_glave(glava: str | None) -> str | None:
+    """Žeton iz glave `Authorization: Bearer <žeton>`, ali `None`.
 
-    `compare_digest` nad nizom zahteva same znake ASCII in ob drugačnem vnosu
-    vrže `TypeError`, zato primerjamo bajte — ključ iz glave je poljuben vnos
-    od zunaj in ne sme sesuti strežnika.
-
-    Prazen pričakovani ključ ne velja nikoli. `compare_digest(b"", b"")` sicer
-    vrne `True`, kar bi pomenilo strežnik, odprt vsakomur, ki pošlje prazno
-    glavo. `Settings` tak ključ zavrne že ob zagonu; ta vrstica je druga
-    ograja, za primer, ko bi kdo plast nastavitev obšel.
+    Shema se primerja brez ozira na velikost črk, kot zahteva RFC 7235. Vse
+    ostalo (druga shema, glava brez presledka, prazen žeton) je `None` —
+    molk je zavrnitev, ne izjema: glava je poljuben vnos od zunaj.
     """
-    if ponujeni is None or not pricakovani:
-        return False
-    return secrets.compare_digest(ponujeni.encode("utf-8"), pricakovani.encode("utf-8"))
+    if not glava:
+        return None
+    shema, _, vrednost = glava.partition(" ")
+    if shema.lower() != prijava.SHEMA_ZETONA:
+        return None
+    zeton = vrednost.strip()
+    return zeton or None
 
 
 def je_izvzeta(pot: str, poti: frozenset[str], predpone: frozenset[str]) -> bool:
-    """Ali je pot izvzeta iz preverbe ključa.
+    """Ali je pot izvzeta iz preverbe žetona.
 
     Predpona se ujame samo na sami sebi in na tem, kar ji sledi za poševnico:
     `/admin` in `/admin/karkoli`, **ne** pa `/administration`. Golo
@@ -66,18 +74,30 @@ def je_izvzeta(pot: str, poti: frozenset[str], predpone: frozenset[str]) -> bool
     return any(pot == predpona or pot.startswith(f"{predpona}/") for predpona in predpone)
 
 
-class ApiKeyMiddleware:
-    """Zavrne vsako zahtevo brez veljavnega ključa, razen na izvzetih poteh."""
+def _razresi_sejo(scope: Scope, zeton: str | None) -> SejaUporabnika | None:
+    """Seja za dani žeton, z lastno sejo baze. Skupno obema plastema."""
+    tovarna: sessionmaker[Session] = scope["app"].state.tovarna_sej
+    with tovarna() as seja_baze:
+        return prijava.seja_za_zeton(PrijavaRepository(seja_baze), zeton, datetime.now(UTC))
+
+
+class ZetonMiddleware:
+    """Zahteva veljavno sejo otroka za vsako pot telefona.
+
+    Poleg veljavnosti seje preverja tudi **vrata**: skozi to plast sme le
+    vloga, ki na telefon sodi (`prijava.vloga_sodi`). Brez te vrstice bi
+    starš, ki bi vrednost svojega piškotka prilepil v glavo, prišel na poti
+    telefona — in, kar je huje, zrcalna preverba v `SejaMiddleware` bi
+    manjkala tudi v drugo smer. Glej `docs/odlocitve/ADR-036` D.
+    """
 
     def __init__(
         self,
         app: ASGIApp,
-        api_key: str,
         izvzete_poti: frozenset[str],
         izvzete_predpone: frozenset[str] = frozenset(),
     ) -> None:
         self.app = app
-        self.api_key = api_key
         self.izvzete_poti = izvzete_poti
         self.izvzete_predpone = izvzete_predpone
 
@@ -88,14 +108,20 @@ class ApiKeyMiddleware:
             await self.app(scope, receive, send)
             return
 
-        ponujeni = Headers(scope=scope).get(API_KEY_HEADER)
-        if not kljuc_se_ujema(ponujeni, self.api_key):
+        zeton = zeton_iz_glave(Headers(scope=scope).get(GLAVA_ZETONA))
+        seja = _razresi_sejo(scope, zeton)
+
+        if seja is None or not prijava.vloga_sodi(seja.role, prijava.Vrata.TELEFON):
             odgovor = JSONResponse(
-                {"detail": SPOROCILO_NEVELJAVEN_KLJUC},
+                {"detail": SPOROCILO_NEVELJAVEN_ZETON},
                 status_code=401,
             )
             await odgovor(scope, receive, send)
             return
+
+        # Družino odslej pove seja, ne „edina družina v bazi" (`ADR-029` A je
+        # s tem razveljavljen, `ADR-036` F). Odvisnosti je ne berejo znova.
+        scope.setdefault("state", {})["prijava"] = seja
 
         await self.app(scope, receive, send)
 
@@ -152,8 +178,10 @@ class SejaMiddleware:
     Kaj plast naredi, po vrsti:
 
     1. Poti zunaj `/admin` spusti nedotaknjene — telefon te plasti ne sreča.
-    2. Brez veljavne seje odgovori s `303` na prijavo in `next`. Ne `401`:
-       odgovor gleda človek v brskalniku, ne program.
+    2. Brez veljavne seje **starša** odgovori s `303` na prijavo in `next`. Ne
+       `401`: odgovor gleda človek v brskalniku, ne program. Otrokova seja tu
+       velja za odsotno; glej `prijava.vloga_sodi` za razlog, zakaj vrata ne
+       zadoščajo samo ob prijavi.
     3. Z veljavno sejo jo poda naprej v `scope["state"]["prijava"]`, da je
        usmerjevalniki ne berejo še enkrat.
     4. Pri nevarni metodi prebere telo, primerja CSRF žeton s tistim iz vrstice
@@ -188,13 +216,13 @@ class SejaMiddleware:
             return
 
         zahteva = Request(scope)
-        tovarna: sessionmaker[Session] = scope["app"].state.tovarna_sej
-        with tovarna() as seja_baze:
-            seja = prijava.seja_za_zeton(
-                PrijavaRepository(seja_baze),
-                zahteva.cookies.get(prijava.PISKOTEK_SEJE),
-                datetime.now(UTC),
-            )
+        seja = _razresi_sejo(scope, zahteva.cookies.get(prijava.PISKOTEK_SEJE))
+
+        # Vrata se preverijo tudi tu, ne le ob prijavi: od V3-R04 otrokove
+        # seje obstajajo, in njen žeton, prilepljen v piškotek `seja`, bi brez
+        # te vrstice odprl celoten `/admin` (`prijava.vloga_sodi`).
+        if seja is not None and not prijava.vloga_sodi(seja.role, prijava.Vrata.ADMIN):
+            seja = None
 
         if seja is None:
             odgovor = RedirectResponse(_naslov_prijave(scope), status_code=303)

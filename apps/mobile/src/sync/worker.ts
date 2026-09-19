@@ -34,6 +34,13 @@ export type Povzetek = {
   cakajoci: number;
   /** Koliko jih je strežnik dokončno zavrnil. */
   neuspeli: number;
+  /**
+   * Ali je prenos ustavila **potekla prijava**.
+   *
+   * Ločeno od `cakajoci`, ker je to edino stanje vrste, ki ga uporabnica
+   * more odpraviti sama — in ga mora zato videti (kriterij `V3-R04`).
+   */
+  prijavaPotekla: boolean;
 };
 
 /**
@@ -57,13 +64,22 @@ export type PrenesiEno = (material: Material) => Promise<Izid>;
 export async function prenesiCakajoce(
   db: MaterialsDatabase,
   prenesiEno: PrenesiEno,
+  lastnik: string | null,
   pobrisiArhiviranega: (
     db: MaterialsDatabase,
     material: Material,
   ) => Promise<void> = pobrisiLokalno,
 ): Promise<Povzetek> {
-  const cakajoci = await listPending(db);
-  const povzetek: Povzetek = { preneseni: 0, cakajoci: 0, neuspeli: 0 };
+  // Vrsta je **lastnikova** (V3-R04). Zapis drugega otroka na skupnem
+  // telefonu ostane, kjer je, in ne odide pod napačnim žetonom
+  // (`docs/odlocitve/ADR-036` B).
+  const cakajoci = await listPending(db, lastnik);
+  const povzetek: Povzetek = {
+    preneseni: 0,
+    cakajoci: 0,
+    neuspeli: 0,
+    prijavaPotekla: false,
+  };
 
   for (const [zaporedna, material] of cakajoci.entries()) {
     const izid = await prenesiEno(material);
@@ -91,6 +107,7 @@ export async function prenesiCakajoce(
 
     await recordAttempt(db, material.id, izid.razlog);
     povzetek.cakajoci = cakajoci.length - zaporedna;
+    povzetek.prijavaPotekla = izid.prijavaPotekla === true;
     return povzetek;
   }
 
@@ -125,6 +142,13 @@ export type CasovnikId = ReturnType<typeof setTimeout>;
 
 export type RazporejevalnikOdvisnosti = {
   db: MaterialsDatabase;
+  /**
+   * Čigavo vrsto ta razporejevalnik oddela; `null` = ni prijavljen nihče.
+   *
+   * Brez privzetka in obvezen: pozabljen argument bi tiho pomenil „vrsta brez
+   * lastnika" in zapisi prijavljene uporabnice ne bi šli nikamor.
+   */
+  lastnik: string | null;
   prenesiEno: PrenesiEno;
   /** Kliče se po vsakem ciklu, da vmesnik osveži števce. */
   poCiklu?: (povzetek: Povzetek) => void;
@@ -169,7 +193,7 @@ export function ustvariRazporejevalnik(o: RazporejevalnikOdvisnosti): Razporejev
     tece = true;
 
     try {
-      const povzetek = await prenesiCakajoce(o.db, o.prenesiEno);
+      const povzetek = await prenesiCakajoce(o.db, o.prenesiEno, o.lastnik);
       odmik = naslednjiOdmik(odmik, povzetek.cakajoci === 0);
       o.poCiklu?.(povzetek);
     } catch {

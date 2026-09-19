@@ -1,6 +1,6 @@
 import { insertMaterial, listPending, type MaterialsDatabase } from '@/db/materials';
 import { migriraj } from '@/db/migrations';
-import type { Izid } from '@/sync/upload';
+import { razvrstiStatus, type Izid } from '@/sync/upload';
 import {
   INTERVAL_MS,
   NAJVECJI_ODMIK_MS,
@@ -22,6 +22,7 @@ function material(overrides: Partial<Material> = {}): Material {
     sync_attempts: 0,
     last_attempt_at: null,
     sync_error: null,
+    user_id: null,
     ...overrides,
   };
 }
@@ -50,18 +51,18 @@ describe('oddelava čakalne vrste', () => {
   it('uspešen prenos postavi synced', async () => {
     await insertMaterial(db, material());
 
-    const povzetek = await prenesiCakajoce(db, async () => USPEH);
+    const povzetek = await prenesiCakajoce(db, async () => USPEH, null);
 
-    expect(povzetek).toEqual({ preneseni: 1, cakajoci: 0, neuspeli: 0 });
+    expect(povzetek).toEqual({ preneseni: 1, cakajoci: 0, neuspeli: 0, prijavaPotekla: false });
     expect((await stanje(db, 'id-1')).sync_status).toBe('synced');
   });
 
   it('zavrnjen prenos postavi failed in zapiše razlog', async () => {
     await insertMaterial(db, material());
 
-    const povzetek = await prenesiCakajoce(db, async () => ZAVRNJEN);
+    const povzetek = await prenesiCakajoce(db, async () => ZAVRNJEN, null);
 
-    expect(povzetek).toEqual({ preneseni: 0, cakajoci: 0, neuspeli: 1 });
+    expect(povzetek).toEqual({ preneseni: 0, cakajoci: 0, neuspeli: 1, prijavaPotekla: false });
     const zapis = await stanje(db, 'id-1');
     expect(zapis.sync_status).toBe('failed');
     expect(zapis.sync_error).toBe('strežnik je zavrnil ključ');
@@ -70,7 +71,7 @@ describe('oddelava čakalne vrste', () => {
   it('nedosegljiv strežnik pusti zapis v vrsti in prišteje poskus', async () => {
     await insertMaterial(db, material());
 
-    const povzetek = await prenesiCakajoce(db, async () => CAKA);
+    const povzetek = await prenesiCakajoce(db, async () => CAKA, null);
 
     expect(povzetek.cakajoci).toBe(1);
     const zapis = await stanje(db, 'id-1');
@@ -87,14 +88,18 @@ describe('oddelava čakalne vrste', () => {
     let najvec = 0;
     const vrstniRed: string[] = [];
 
-    await prenesiCakajoce(db, async (m) => {
-      hkratnih += 1;
-      najvec = Math.max(najvec, hkratnih);
-      vrstniRed.push(m.id);
-      await new Promise((r) => setTimeout(r, 1));
-      hkratnih -= 1;
-      return USPEH;
-    });
+    await prenesiCakajoce(
+      db,
+      async (m) => {
+        hkratnih += 1;
+        najvec = Math.max(najvec, hkratnih);
+        vrstniRed.push(m.id);
+        await new Promise((r) => setTimeout(r, 1));
+        hkratnih -= 1;
+        return USPEH;
+      },
+      null,
+    );
 
     expect(najvec).toBe(1);
     expect(vrstniRed).toEqual(['a', 'b']);
@@ -106,37 +111,64 @@ describe('oddelava čakalne vrste', () => {
     await insertMaterial(db, material({ id: 'c', taken_at: '2026-09-03T08:00:00.000Z' }));
 
     const poskuseni: string[] = [];
-    const povzetek = await prenesiCakajoce(db, async (m) => {
-      poskuseni.push(m.id);
-      return CAKA;
-    });
+    const povzetek = await prenesiCakajoce(
+      db,
+      async (m) => {
+        poskuseni.push(m.id);
+        return CAKA;
+      },
+      null,
+    );
 
     // Če ni šlo za prvo sliko, ne bo šlo niti za tretjo, vsaka pa bi stala
     // svoj potek časovne omejitve.
     expect(poskuseni).toEqual(['a']);
     expect(povzetek.cakajoci).toBe(3);
-    expect((await listPending(db)).map((v) => v.id)).toEqual(['a', 'b', 'c']);
+    expect((await listPending(db, null)).map((v) => v.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('potekla prijava pride v povzetek, ne le v razlog', async () => {
+    // Vmesni člen verige od `401` do domače strani: `Povzetek` je edino, kar
+    // ponudnik vidi. Brez tega bi zastavica lahko obstala v `Izid` in
+    // sporočilo bi spet končalo samo v `materials.sync_error`, ki ga ne
+    // izriše nihče (`docs/odlocitve/ADR-036`, tretji pregled).
+    await insertMaterial(db, material({ id: 'a' }));
+
+    const povzetek = await prenesiCakajoce(db, async () => razvrstiStatus(401), null);
+
+    expect(povzetek.prijavaPotekla).toBe(true);
+    expect(povzetek.cakajoci).toBe(1);
+  });
+
+  it('nedosegljiv strežnik potekle prijave ne javi', async () => {
+    await insertMaterial(db, material({ id: 'a' }));
+
+    const povzetek = await prenesiCakajoce(db, async () => CAKA, null);
+
+    expect(povzetek.prijavaPotekla).toBe(false);
   });
 
   it('zavrnjen zapis ne ustavi vrste', async () => {
     await insertMaterial(db, material({ id: 'a', taken_at: '2026-09-01T08:00:00.000Z' }));
     await insertMaterial(db, material({ id: 'b', taken_at: '2026-09-02T08:00:00.000Z' }));
 
-    const povzetek = await prenesiCakajoce(db, async (m) =>
-      m.id === 'a' ? ZAVRNJEN : USPEH,
+    const povzetek = await prenesiCakajoce(
+      db,
+      async (m) => (m.id === 'a' ? ZAVRNJEN : USPEH),
+      null,
     );
 
-    expect(povzetek).toEqual({ preneseni: 1, cakajoci: 0, neuspeli: 1 });
+    expect(povzetek).toEqual({ preneseni: 1, cakajoci: 0, neuspeli: 1, prijavaPotekla: false });
     expect((await stanje(db, 'b')).sync_status).toBe('synced');
   });
 
   it('prazna vrsta ne naredi ničesar', async () => {
     const prenesiEno = jest.fn();
 
-    const povzetek = await prenesiCakajoce(db, prenesiEno);
+    const povzetek = await prenesiCakajoce(db, prenesiEno, null);
 
     expect(prenesiEno).not.toHaveBeenCalled();
-    expect(povzetek).toEqual({ preneseni: 0, cakajoci: 0, neuspeli: 0 });
+    expect(povzetek).toEqual({ preneseni: 0, cakajoci: 0, neuspeli: 0, prijavaPotekla: false });
   });
 
   it('preneseni in zavrnjeni se ne poskušajo znova', async () => {
@@ -144,7 +176,7 @@ describe('oddelava čakalne vrste', () => {
     await insertMaterial(db, material({ id: 'b', sync_status: 'failed' }));
     const prenesiEno = jest.fn();
 
-    await prenesiCakajoce(db, prenesiEno);
+    await prenesiCakajoce(db, prenesiEno, null);
 
     expect(prenesiEno).not.toHaveBeenCalled();
   });
@@ -204,7 +236,7 @@ describe('razporejevalnik', () => {
     const c = casovnik();
     const prenesiEno = jest.fn(async () => USPEH);
 
-    const r = ustvariRazporejevalnik({ db, prenesiEno, ...c });
+    const r = ustvariRazporejevalnik({ db, lastnik: null, prenesiEno, ...c });
     r.zazeni();
     await new Promise(process.nextTick);
 
@@ -216,7 +248,7 @@ describe('razporejevalnik', () => {
     await insertMaterial(db, material());
     const c = casovnik();
 
-    const r = ustvariRazporejevalnik({ db, prenesiEno: async () => USPEH, ...c });
+    const r = ustvariRazporejevalnik({ db, lastnik: null, prenesiEno: async () => USPEH, ...c });
     r.zazeni();
     await new Promise(process.nextTick);
 
@@ -228,7 +260,7 @@ describe('razporejevalnik', () => {
     await insertMaterial(db, material());
     const c = casovnik();
 
-    const r = ustvariRazporejevalnik({ db, prenesiEno: async () => CAKA, ...c });
+    const r = ustvariRazporejevalnik({ db, lastnik: null, prenesiEno: async () => CAKA, ...c });
     r.zazeni();
     await new Promise(process.nextTick);
 
@@ -240,7 +272,7 @@ describe('razporejevalnik', () => {
     await insertMaterial(db, material());
     const c = casovnik();
 
-    const r = ustvariRazporejevalnik({ db, prenesiEno: async () => USPEH, ...c });
+    const r = ustvariRazporejevalnik({ db, lastnik: null, prenesiEno: async () => USPEH, ...c });
     r.zazeni();
     await new Promise(process.nextTick);
     const koliko = c.naloge.length;
@@ -260,6 +292,7 @@ describe('razporejevalnik', () => {
     let najvec = 0;
     const r = ustvariRazporejevalnik({
       db,
+      lastnik: null,
       prenesiEno: async () => {
         hkratnih += 1;
         najvec = Math.max(najvec, hkratnih);
@@ -293,6 +326,7 @@ describe('razporejevalnik', () => {
 
     const r = ustvariRazporejevalnik({
       db: pokvarjena,
+      lastnik: null,
       prenesiEno: async () => USPEH,
       ...c,
     });
@@ -310,11 +344,11 @@ describe('razporejevalnik', () => {
     const c = casovnik();
     const poCiklu = jest.fn();
 
-    const r = ustvariRazporejevalnik({ db, prenesiEno: async () => USPEH, poCiklu, ...c });
+    const r = ustvariRazporejevalnik({ db, lastnik: null, prenesiEno: async () => USPEH, poCiklu, ...c });
     r.zazeni();
     await new Promise(process.nextTick);
 
-    expect(poCiklu).toHaveBeenCalledWith({ preneseni: 1, cakajoci: 0, neuspeli: 0 });
+    expect(poCiklu).toHaveBeenCalledWith({ preneseni: 1, cakajoci: 0, neuspeli: 0, prijavaPotekla: false });
     r.ustavi();
   });
 });

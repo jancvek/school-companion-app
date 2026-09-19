@@ -12,6 +12,7 @@ kadar vzorca ne najde — tih prazen izid bi test naredil zelen iz napačnega
 razloga.
 """
 
+import ast
 import asyncio
 import ipaddress
 import json
@@ -20,6 +21,8 @@ from pathlib import Path
 from typing import Any
 
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+from app.settings import Settings
 
 MAPA_STREZNIKA = Path(__file__).resolve().parent.parent
 COMPOSE = MAPA_STREZNIKA / "docker-compose.yml"
@@ -416,3 +419,78 @@ class TestZaupanjeProxyGlavam:
         # Brez tega bi bili zgornji testi zeleni tudi, če glava ne bi veljala
         # nikoli — na primer ob tipkarski napaki v naslovu.
         assert _odjemalec_za_aplikacijo(_naslov_caddyja(), _zaupano_v_compose()) == "198.51.100.7"
+
+
+#: `API_KEY` telefona, ne pa `OPENAI_API_KEY`. Druga je ključ do **tuje**
+#: storitve in ostaja; prva je bila ključ do te in je odpadla.
+KLJUC_TELEFONA = re.compile(r"(?<!OPENAI_)\bAPI_KEY\b|X-API-Key")
+
+
+def _brez_razlage(vsebina: str) -> str:
+    """Vsebina brez vrstic, ki so same komentar."""
+    return "\n".join(
+        vrstica
+        for vrstica in vsebina.splitlines()
+        if not vrstica.lstrip().startswith("#")
+    )
+
+
+def _brez_dokumentacije(pot: Path) -> str:
+    """Koda modula brez komentarjev in brez docstringov.
+
+    Zgodovino — zakaj ključa **ni** — je prav, da koda pove; varovalo, ki bi
+    padlo na razlagi, bi razlago izgnalo. Docstringi se odstranijo prek `ast`
+    in ne z ugibanjem po narekovajih: niz **v kodi** mora ostati preverjen,
+    ker bi prav tam ključ lahko zares oživel.
+    """
+    vsebina = pot.read_text(encoding="utf-8")
+    drevo = ast.parse(vsebina)
+    vrstice = vsebina.splitlines()
+    for vozlisce in ast.walk(drevo):
+        if not isinstance(
+            vozlisce, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+        ):
+            continue
+        prvi = vozlisce.body[0] if vozlisce.body else None
+        if (
+            isinstance(prvi, ast.Expr)
+            and isinstance(prvi.value, ast.Constant)
+            and isinstance(prvi.value.value, str)
+            and prvi.end_lineno is not None
+        ):
+            for stevilka in range(prvi.lineno - 1, prvi.end_lineno):
+                vrstice[stevilka] = ""
+    return _brez_razlage("\n".join(vrstice))
+
+
+class TestKljucaNiVecNikjer:
+    """Prehod z API ključa je oster, ne postopen (`ADR-027` C2, `ADR-036`).
+
+    Ključ, ki bi ostal kot neuporabljena nastavitev, bi bil skrivnost, ki je
+    nihče ne vzdržuje — in prva stvar, ki bi jo kdo poskusil oživet, ko kaj ne
+    bi delalo. Zato ga ne sme biti nikjer: ne v kodi, ne v Compose, ne v
+    predlogi okolja. `OPENAI_API_KEY` je nekaj drugega in ostaja.
+    """
+
+    def test_v_kodi_ga_ni(self) -> None:
+        najdeno = [
+            str(pot.relative_to(MAPA_STREZNIKA))
+            for mapa in ("app", "alembic")
+            for pot in (MAPA_STREZNIKA / mapa).rglob("*.py")
+            if KLJUC_TELEFONA.search(_brez_dokumentacije(pot))
+        ]
+
+        assert najdeno == []
+
+    def test_v_compose_ga_ni(self) -> None:
+        assert KLJUC_TELEFONA.search(_brez_razlage(COMPOSE.read_text(encoding="utf-8"))) is None
+
+    def test_v_predlogi_okolja_ga_ni(self) -> None:
+        okolje = (MAPA_STREZNIKA / "okolje.primer").read_text(encoding="utf-8")
+
+        assert KLJUC_TELEFONA.search(_brez_razlage(okolje)) is None
+
+    def test_nastavitve_polja_nimajo(self) -> None:
+        # Brez tega bi ga bilo mogoče vrniti kot polje s privzetkom, ne da bi
+        # katerikoli od zgornjih testov to opazil.
+        assert "api_key" not in Settings.model_fields

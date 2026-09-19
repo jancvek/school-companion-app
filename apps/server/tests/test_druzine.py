@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, delete, event, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -24,23 +23,19 @@ from app.db import (
     MaterialsRepository,
     StatistikaRepository,
 )
-from app.dependencies import SPOROCILO_NI_ENE_DRUZINE, daj_druzino_telefona
 from app.models import (
     STATUS_NAPAKA,
     STATUS_NOV,
     STATUS_PRIPRAVLJEN,
     STATUS_V_OBDELAVI,
-    Credential,
     Family,
     Material,
     Question,
-    User,
 )
-from app.models import UserSession as Session_
 from app.obdelava import obdelaj_cakajoce
 from app.routers.materials import SPOROCILO_TUJ_ID
 from app.worker import obnovi_obticale
-from tests.conftest import CVEK_ID, KLJUC
+from tests.conftest import CVEK_ID, SejaTesta
 from tests.test_kvizi import objavi
 from tests.test_obdelava import klicalec_vrne, uspesen_izid
 from tests.test_resevanje import poskus, poslji
@@ -52,7 +47,6 @@ DRUGA_ID = "9d4c2b1a-7e6f-4d5c-8b3a-1f2e3d4c5b6a"
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 UUID_DVA = "a1b2c3d4-e5f6-4789-abcd-ef0123456789"
 
-GLAVE = {"X-API-Key": KLJUC}
 
 REPOZITORIJI = (MaterialsRepository, KviziRepository, StatistikaRepository)
 
@@ -176,11 +170,12 @@ class TestDruzineRepository:
 
 
 class TestIzbiraDruzine:
-    """Od kod pot izve družino: admin iz seje (V3-R03), telefon še začasno.
+    """Od kod pot izve družino: iz seje, na obeh straneh.
 
-    `ADR-029` A je izbiro „edina družina v bazi" uvedel za obe strani in
-    napovedal, da jo `V3-R03` za admin zamenja s sejo, `V3-R04` pa za telefon z
-    žetonom. Prvi korak je narejen; drugi še ne (`ADR-035` H).
+    `ADR-029` A je izbiro „edina družina v bazi" uvedel kot **začasno** za obe
+    strani in napovedal, da jo `V3-R03` za admin zamenja s sejo, `V3-R04` pa za
+    telefon z žetonom. Oba koraka sta narejena, zato je `daj_druzino_telefona`
+    odpadel in z njim izid `500`, ki ga je znal proizvesti (`ADR-036` F).
     """
 
     def test_admin_druzine_ne_isce_v_bazi_ampak_v_seji(
@@ -209,48 +204,60 @@ class TestIzbiraDruzine:
 
         assert odgovor.status_code == 200
 
-    def test_z_dvema_druzinama_telefon_dobi_json_500(
-        self, odjemalec: TestClient, motor: Engine
+    def test_telefon_druzine_ne_isce_v_bazi_ampak_v_seji(
+        self, odjemalec: TestClient, motor: Engine, telefon: SejaTesta
     ) -> None:
-        """Druga družina pred žetonom telefona je napaka v namestitvi, ne ugibanje."""
+        """Zrcalno adminu: družino pove žeton, poizvedbe po `families` ni.
+
+        Če se `FROM families` na tej poti kdaj vrne, je to tiha vrnitev
+        začasnega pravila `ADR-029` A, ki ga je `ADR-036` F razveljavil.
+        """
+        odgovori = []
+        stavki = stavki_med(
+            motor,
+            lambda: odgovori.append(odjemalec.get("/quizzes/pending", headers=telefon.glave)),
+        )
+
+        assert odgovori[0].status_code == 200
+        assert [stavek for stavek in stavki if "FROM families" in stavek] == []
+        assert sum("FROM sessions" in stavek for stavek in stavki) == 1
+
+    def test_druga_druzina_v_bazi_ne_ustavi_telefona(
+        self, odjemalec: TestClient, motor: Engine, telefon: SejaTesta
+    ) -> None:
+        """Pred V3-R04 je bil to `500`; odkar odloča žeton, druga družina ne moti.
+
+        To je pogoj, ki ga je `V3-R05` postavil pred prvo tujo družino: dokler
+        je druga vrstica v `families` ustavljala telefon, večdružinskosti ni
+        bilo mogoče niti preizkusiti v resnici.
+        """
         dodaj_druzino(motor)
 
-        odgovor = odjemalec.get("/quizzes/pending", headers=GLAVE)
+        odgovor = odjemalec.get("/quizzes/pending", headers=telefon.glave)
 
-        assert odgovor.status_code == 500
-        assert odgovor.json() == {"detail": SPOROCILO_NI_ENE_DRUZINE}
+        assert odgovor.status_code == 200
 
-    def test_brez_druzine_telefon_dobi_json_500(
-        self, odjemalec: TestClient, motor: Engine
-    ) -> None:
-        with Session(motor) as seja:
-            seja.execute(delete(Session_))
-            seja.execute(delete(Credential))
-            seja.execute(delete(User))
-            seja.execute(delete(Family))
-            seja.commit()
+    def test_telefon_brez_zetona_ne_pride_do_druzine(self, odjemalec: TestClient) -> None:
+        """Brez seje ni družine — in tudi ne poti do podatkov."""
+        odgovor = odjemalec.get("/quizzes/pending")
 
-        odgovor = odjemalec.get("/quizzes/pending", headers=GLAVE)
-
-        assert odgovor.status_code == 500
-        assert odgovor.json() == {"detail": SPOROCILO_NI_ENE_DRUZINE}
+        assert odgovor.status_code == 401
 
 
 class TestPrevzemTujegaId:
     """`POST /materials` z `id`, ki pripada drugi družini (`ADR-029` D)."""
 
     def test_vrne_409_in_ne_zapise_ne_vrstice_ne_datoteke(
-        self, aplikacija: FastAPI, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         dodaj_druzino(motor)
         tuja_slika = snov_druzine(motor, slike, DRUGA_ID, UUID_ENA)
-        aplikacija.dependency_overrides[daj_druzino_telefona] = lambda: CVEK_ID
 
         odgovor = odjemalec.post(
             "/materials",
             data={"id": UUID_ENA, "subject": "MAT", "taken_at": "2026-09-04T07:30:00Z"},
             files={"file": ("posnetek.jpg", b"ponaredek", "image/jpeg")},
-            headers=GLAVE,
+            headers=telefon.glave,
         )
 
         assert odgovor.status_code == 409
@@ -433,11 +440,11 @@ class TestMejaMapeVUsmerjevalnikih:
 
     @pytest.mark.parametrize("kje", KJE)
     def test_rezultat_kviza_pozna_sliko_samo_iz_mape_druzine(
-        self, odjemalec: TestClient, motor: Engine, slike: Path, kje: str
+        self, odjemalec: TestClient, motor: Engine, slike: Path, kje: str, telefon: SejaTesta
     ) -> None:
         self._snov(motor, self._slika(slike, kje))
         quiz_id = objavi(odjemalec, motor, [UUID_ENA], koliko=3, subject="MAT", vstop="rocna")
-        oddano = poslji(odjemalec, [poskus(p) for p in postavke(motor, quiz_id)])
+        oddano = poslji(odjemalec, [poskus(p) for p in postavke(motor, quiz_id)], telefon)
         assert oddano.status_code == 200, oddano.text
 
         besedilo = odjemalec.get(f"/admin/quizzes/{quiz_id}").text

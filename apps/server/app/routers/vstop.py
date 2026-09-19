@@ -1,11 +1,22 @@
-"""Prijava in odjava na operaterski strani (V3-R03).
+"""Prijava in odjava — v brskalniku (V3-R03) in na telefonu (V3-R04).
 
-Poti sta pod `/admin`, ker brskalnik glave `X-API-Key` ne zna poslati in bi ju
-`ApiKeyMiddleware` sicer zavrnil (`app/security.py`). `GET/POST /admin/login`
-sta edini izvzeti iz `SejaMiddleware` — vse ostalo pod `/admin` brez seje
-konča tu.
+Oboje je tu in ne v dveh usmerjevalnikih, ker je pod obojim ista preverba
+(`prijava.preveri_prijavo`), ista tabela `sessions` in isto omejevanje
+ugibanja. Razlikuje se prenosnik in oblika odgovora:
 
-Odjava je izvzeta **ni**: zahteva sejo in CSRF žeton kot vsak drug `POST`.
+| | brskalnik | telefon |
+|---|---|---|
+| poti | `/admin/login`, `/admin/logout` | `/auth/login`, `/auth/logout` |
+| žeton potuje v | piškotku `seja` | glavi `Authorization: Bearer` |
+| vsebina | obrazec in HTML | JSON |
+| CSRF | da (dvojno oddan piškotek) | **ne** — brez piškotka ga ni treba |
+| vloga, ki sme skozi | starš | otrok |
+
+Poti brskalnika sta pod `/admin`, ker sta del operaterske strani; poti telefona
+sta zunaj nje, ker bi ju `SejaMiddleware` sicer zahteval s piškotkom in CSRF
+žetonom (`docs/odlocitve/ADR-036` G).
+
+Nobena od odjav ni izvzeta iz svoje plasti: obe zahtevata veljavno sejo.
 Odjava prek `GET` bi pomenila, da te lahko tuja stran s sliko odjavi.
 """
 
@@ -16,12 +27,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import RedirectResponse, Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from app import prijava
 from app.db import PrijavaRepository, SejaUporabnika
 from app.dependencies import daj_prijavo, daj_repozitorij_prijave
-from app.prijava import Izid
+from app.prijava import Izid, Vrata
+from app.schemas import OdjavaOpravljena, PrijavaTelefona, ZetonPrijave
 from app.strani import daj_predloge
 
 router = APIRouter(tags=["prijava"])
@@ -32,8 +44,7 @@ router = APIRouter(tags=["prijava"])
 PISKOTEK_SEKUND = int(prijava.TRAJANJE_SEJE.total_seconds())
 
 SPOROCILO_CSRF = (
-    "Prijavni obrazec je potekel ali ni prišel s te strani. Osveži stran in "
-    "poskusi znova."
+    "Prijavni obrazec je potekel ali ni prišel s te strani. Osveži stran in poskusi znova."
 )
 
 
@@ -109,12 +120,8 @@ async def prijavi(
     """
     varen = prijava.varen_cilj(cilj)
 
-    if not prijava.zetona_se_ujemata(
-        csrf, request.cookies.get(prijava.PISKOTEK_CSRF_PRIJAVE)
-    ):
-        return _stran_prijave(
-            predloge, request, cilj=varen, sporocilo=SPOROCILO_CSRF, koda=403
-        )
+    if not prijava.zetona_se_ujemata(csrf, request.cookies.get(prijava.PISKOTEK_CSRF_PRIJAVE)):
+        return _stran_prijave(predloge, request, cilj=varen, sporocilo=SPOROCILO_CSRF, koda=403)
 
     zdaj = datetime.now(UTC)
     zamik = prijava.koliko_cakati(repo, identifikator, zdaj)
@@ -129,14 +136,13 @@ async def prijavi(
         repo,
         identifikator,
         geslo,
+        vrata=Vrata.ADMIN,
         ip=request.client.host if request.client else None,
         ko=datetime.now(UTC),
     )
 
     if izid.izid is not Izid.USPEH or izid.poverilnica is None:
-        return _stran_prijave(
-            predloge, request, cilj=varen, sporocilo=izid.sporocilo, koda=401
-        )
+        return _stran_prijave(predloge, request, cilj=varen, sporocilo=izid.sporocilo, koda=401)
 
     zeton = prijava.ustvari_sejo(
         repo,
@@ -160,3 +166,76 @@ def odjavi(
     odgovor = RedirectResponse(prijava.POT_PRIJAVE, status_code=303)
     odgovor.delete_cookie(prijava.PISKOTEK_SEJE, path="/")
     return odgovor
+
+
+# --- Telefon (V3-R04) ------------------------------------------------------
+
+
+@router.post(
+    prijava.POT_PRIJAVE_TELEFONA,
+    response_model=ZetonPrijave,
+    responses={401: {"description": "Poverilnica ni prava"}},
+    tags=["telefon"],
+)
+async def prijavi_telefon(
+    request: Request,
+    telo: PrijavaTelefona,
+    repo: Annotated[PrijavaRepository, Depends(daj_repozitorij_prijave)],
+) -> Response:
+    """Preveri poverilnico otroka in vrne žeton za glavo `Authorization`.
+
+    Isto zaporedje kot v brskalniku, brez koraka s CSRF: zamik pred preverbo
+    gesla, ne po njej, in zgoščevanje v niti, ker je argon2 sinhronih ~60 ms
+    in bi na zanki dogodkov ustavil vse ostale zahteve — tudi prenos slike.
+
+    Zavrnitev je vedno `401`, tudi za starša (`ADR-036` D). Koda ne loči
+    primerov; loči jih sporočilo, in to samo tam, kjer je bilo to zavestno
+    dovoljeno.
+    """
+    zamik = prijava.koliko_cakati(repo, telo.identifier, datetime.now(UTC))
+    if zamik:
+        await asyncio.sleep(zamik)
+
+    izid = await run_in_threadpool(
+        prijava.preveri_prijavo,
+        repo,
+        telo.identifier,
+        telo.password,
+        vrata=Vrata.TELEFON,
+        ip=request.client.host if request.client else None,
+        ko=datetime.now(UTC),
+    )
+
+    if izid.izid is not Izid.USPEH or izid.poverilnica is None:
+        return JSONResponse({"detail": izid.sporocilo}, status_code=401)
+
+    zdaj = datetime.now(UTC)
+    zeton = prijava.ustvari_sejo(
+        repo,
+        izid.poverilnica,
+        ko=zdaj,
+        oznaka_naprave=request.headers.get("user-agent", "")[:200] or None,
+    )
+    return JSONResponse(
+        ZetonPrijave(
+            token=zeton,
+            user_id=izid.poverilnica.user_id,
+            display_name=izid.poverilnica.display_name,
+            expires_at=zdaj + prijava.TRAJANJE_SEJE,
+        ).model_dump(mode="json")
+    )
+
+
+@router.post(prijava.POT_ODJAVE_TELEFONA, response_model=OdjavaOpravljena, tags=["telefon"])
+def odjavi_telefon(
+    repo: Annotated[PrijavaRepository, Depends(daj_repozitorij_prijave)],
+    seja: Annotated[SejaUporabnika, Depends(daj_prijavo)],
+) -> OdjavaOpravljena:
+    """Izbriše sejo te naprave. Lokalnih slik na telefonu se ne dotakne.
+
+    Pot **ni** izvzeta iz `ZetonMiddleware`: brez veljavnega žetona ni seje,
+    ki bi jo bilo mogoče izbrisati. Telefon zato ob `401` svoj žeton preprosto
+    zavrže — odjava je najprej lokalna (`ADR-036` G).
+    """
+    repo.izbrisi_sejo(seja.session_id)
+    return OdjavaOpravljena()

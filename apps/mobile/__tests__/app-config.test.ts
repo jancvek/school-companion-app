@@ -32,12 +32,11 @@ afterEach(() => {
 });
 
 describe('app.config.ts', () => {
-  it('vsa tri polja pridejo v extra in podedovano preživi', () => {
+  it('obe polji prideta v extra in podedovano preživi', () => {
     // `extra.eas.projectId` pride iz `app.json` in veže projekt na EAS. Če bi
     // se izgubil, gradnja ne ve, kateri projekt gradi — in nič v aplikaciji
     // tega ne bi pokazalo.
     process.env.SERVER_BASE_URL = 'https://school-buddy.duckdns.org';
-    process.env.SERVER_API_KEY = 'skrivnost';
     process.env.EAS_BUILD_ID = '317bdcd1-c7db-4c2c-8a6b-1cb1ce15ea29';
 
     const izid = appConfig(kontekst({ eas: { projectId: 'projekt-1' } }));
@@ -45,9 +44,22 @@ describe('app.config.ts', () => {
     expect(izid.extra).toEqual({
       eas: { projectId: 'projekt-1' },
       serverBaseUrl: 'https://school-buddy.duckdns.org',
-      apiKey: 'skrivnost',
       buildId: '317bdcd1-c7db-4c2c-8a6b-1cb1ce15ea29',
     });
+  });
+
+  it('ključa ne vzame niti, kadar je v okolju (V3-R04)', () => {
+    // Spremenljivka na expo.dev lahko ostane tam, dokler je lastnik ne
+    // pobriše. V APK ne sme priti: skrivnost, ki je nihče ne bere, je še
+    // vedno skrivnost v datoteki (`docs/odlocitve/ADR-036`).
+    process.env.SERVER_BASE_URL = 'https://school-buddy.duckdns.org';
+    process.env.SERVER_API_KEY = 'star-kljuc-na-expo-dev';
+    delete process.env.EAS_BUILD_ID;
+
+    const izid = appConfig(kontekst());
+
+    expect(izid.extra).not.toHaveProperty('apiKey');
+    expect(JSON.stringify(izid)).not.toContain('star-kljuc-na-expo-dev');
   });
 
   it('brez spremenljivk okolja so polja null, podedovano ostane', () => {
@@ -60,7 +72,6 @@ describe('app.config.ts', () => {
     expect(izid.extra).toEqual({
       eas: { projectId: 'projekt-1' },
       serverBaseUrl: null,
-      apiKey: null,
       buildId: null,
     });
   });

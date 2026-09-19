@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.db import MaterialsRepository
 from app.models import Material
 from app.storage import ZACASNA_PODMAPA
-from tests.conftest import CVEK_ID, KLJUC
+from tests.conftest import CVEK_ID, SejaTesta
 
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 UUID_DVA = "a1b2c3d4-e5f6-4789-abcd-ef0123456789"
@@ -50,13 +50,13 @@ class TestUspesenPrenos:
     """Srečna pot."""
 
     def test_vrne_201_in_zapise_vrstico_ter_datoteko(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         odgovor = odjemalec.post(
             "/materials",
             data=polja(),
             files=datoteka(),
-            headers={"X-API-Key": KLJUC},
+            headers=telefon.glave,
         )
 
         assert odgovor.status_code == 201
@@ -76,13 +76,13 @@ class TestUspesenPrenos:
         assert (slike / CVEK_ID / f"{UUID_ENA}.jpg").read_bytes() == b"slika-ena"
 
     def test_taken_at_se_shrani_kot_trenutek_v_utc(
-        self, odjemalec: TestClient, motor: Engine
+        self, odjemalec: TestClient, motor: Engine, telefon: SejaTesta
     ) -> None:
         odjemalec.post(
             "/materials",
             data=polja() | {"taken_at": "2026-09-04T09:30:00+02:00"},
             files=datoteka(),
-            headers={"X-API-Key": KLJUC},
+            headers=telefon.glave,
         )
 
         with Session(motor) as seja:
@@ -98,13 +98,13 @@ class TestIdempotentnost:
     """Isti `id` dvakrat ne sme dati dveh zapisov."""
 
     def test_drugi_prenos_vrne_200_in_ne_podvoji(
-        self, odjemalec: TestClient, motor: Engine
+        self, odjemalec: TestClient, motor: Engine, telefon: SejaTesta
     ) -> None:
         prvi = odjemalec.post(
-            "/materials", data=polja(), files=datoteka(b"prva"), headers={"X-API-Key": KLJUC}
+            "/materials", data=polja(), files=datoteka(b"prva"), headers=telefon.glave
         )
         drugi = odjemalec.post(
-            "/materials", data=polja(), files=datoteka(b"druga"), headers={"X-API-Key": KLJUC}
+            "/materials", data=polja(), files=datoteka(b"druga"), headers=telefon.glave
         )
 
         assert prvi.status_code == 201
@@ -114,40 +114,39 @@ class TestIdempotentnost:
         assert stevilo_vrstic(motor) == 1
 
     def test_drugi_prenos_ne_povozi_prve_slike(
-        self, odjemalec: TestClient, slike: Path
+        self, odjemalec: TestClient, slike: Path, telefon: SejaTesta
     ) -> None:
-        odjemalec.post(
-            "/materials", data=polja(), files=datoteka(b"prva"), headers={"X-API-Key": KLJUC}
-        )
-        odjemalec.post(
-            "/materials", data=polja(), files=datoteka(b"druga"), headers={"X-API-Key": KLJUC}
-        )
+        odjemalec.post("/materials", data=polja(), files=datoteka(b"prva"), headers=telefon.glave)
+        odjemalec.post("/materials", data=polja(), files=datoteka(b"druga"), headers=telefon.glave)
 
         assert (slike / CVEK_ID / f"{UUID_ENA}.jpg").read_bytes() == b"prva"
 
     def test_razlicna_id_dasta_dve_vrstici(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        odjemalec.post(
-            "/materials", data=polja(UUID_ENA), files=datoteka(), headers={"X-API-Key": KLJUC}
-        )
-        odjemalec.post(
-            "/materials", data=polja(UUID_DVA), files=datoteka(), headers={"X-API-Key": KLJUC}
-        )
+        odjemalec.post("/materials", data=polja(UUID_ENA), files=datoteka(), headers=telefon.glave)
+        odjemalec.post("/materials", data=polja(UUID_DVA), files=datoteka(), headers=telefon.glave)
 
         assert stevilo_vrstic(motor) == 2
         assert len(slike_na_disku(slike / CVEK_ID)) == 2
 
 
-class TestKljuc:
-    """Brez veljavnega ključa ne sme nastati nič."""
+class TestPrijava:
+    """Brez veljavne prijave ne sme nastati nič.
+
+    Primeri s staro glavo `X-API-Key` niso ostanek: od V3-R04 dokazujejo,
+    da je prehod oster in da stara skrivnost ne odpre več ničesar
+    (`docs/odlocitve/ADR-027` C2).
+    """
 
     @pytest.mark.parametrize(
         ("opis", "glave"),
         [
             ("brez glave", {}),
-            ("napacen kljuc", {"X-API-Key": "tuj-kljuc"}),
-            ("prazen kljuc", {"X-API-Key": ""}),
+            ("star kljuc", {"X-API-Key": "star-kljuc"}),
+            ("prazen star kljuc", {"X-API-Key": ""}),
+            ("tuja shema", {"Authorization": "Basic karkoli"}),
+            ("zeton, ki ga ni", {"Authorization": "Bearer zeton-ki-ga-ni"}),
         ],
     )
     def test_vrne_401_brez_vrstice_in_brez_datoteke(
@@ -164,32 +163,34 @@ class TestKljuc:
         assert stevilo_vrstic(motor) == 0
         assert slike_na_disku(slike / CVEK_ID) == []
 
-    def test_kljuc_z_ne_ascii_znaki_ne_sesuje_streznika(self, odjemalec: TestClient) -> None:
-        # Starlette glave dekodira kot latin-1, zato je lahko ključ, ki pride
-        # z omrežja, ne-ASCII niz. `compare_digest` nad takim nizom vrže
-        # TypeError; brez primerjave bajtov bi bila to 500, ne 401.
+    def test_glava_z_ne_ascii_znaki_ne_sesuje_streznika(self, odjemalec: TestClient) -> None:
+        # Starlette glave dekodira kot latin-1, zato je lahko žeton, ki pride
+        # z omrežja, ne-ASCII niz. Glava je vnos od zunaj in ne sme sesuti
+        # strežnika: pričakujemo 401, ne 500.
+        #
+        # Do V3-R04 je isti primer varoval `compare_digest` nad ključem, ki nad
+        # ne-ASCII nizom vrže `TypeError`. Ključa ni več, pot pa je ostala —
+        # samo drugo glavo ima, zato test **preide** na `Authorization`.
+        # Preverjanje s staro glavo brez tega ne bi dokazovalo več ničesar:
+        # `X-API-Key` se odslej samo prezre.
         #
         # Glava je podana kot bajti, ker odjemalec ne-ASCII niza sploh ne bi
-        # poslal — omejitev je na njegovi strani, ne na strežnikovi.
-        #
-        # Bajti so tudi v ključu glave, ne le v vrednosti: odjemalec sprejme
-        # preslikavo nizov ali preslikavo bajtov, ne pa mešanice. Mešanica je
-        # tekla, dokler je bil tip ohlapnejši, in je zdaj napaka `mypy`.
-        # Popravljeno pri V1-R04, ker je blokiralo `verify`; vsebina testa je
-        # nespremenjena.
+        # poslal — omejitev je na njegovi strani, ne na strežnikovi. Bajti so
+        # tudi v imenu glave, ne le v vrednosti: odjemalec sprejme preslikavo
+        # nizov ali preslikavo bajtov, ne pa mešanice.
         odgovor = odjemalec.post(
             "/materials",
             data=polja(),
             files=datoteka(),
-            headers={b"X-API-Key": b"\xc4-tuj-kljuc"},
+            headers={b"Authorization": b"Bearer \xc4-tuj-zeton"},
         )
 
         assert odgovor.status_code == 401
 
-    def test_kljuc_se_preveri_pred_branjem_telesa(self, odjemalec: TestClient) -> None:
+    def test_prijava_se_preveri_pred_branjem_telesa(self, odjemalec: TestClient) -> None:
         # Zahtevek je brez obveznih polj: če bi se telo bralo prej, bi bil
-        # odgovor 422. Ker je 401, je ključ res prva stvar na poti.
-        odgovor = odjemalec.post("/materials", headers={"X-API-Key": "tuj-kljuc"})
+        # odgovor 422. Ker je 401, je prijava res prva stvar na poti.
+        odgovor = odjemalec.post("/materials", headers={"Authorization": "Bearer tuj-zeton"})
 
         assert odgovor.status_code == 401
 
@@ -198,31 +199,33 @@ class TestNeveljavenZahtevek:
     """Manjkajoča ali pokvarjena polja."""
 
     def test_manjkajoc_subject_da_422(
-        self, odjemalec: TestClient, motor: Engine, slike: Path
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         vhod = polja()
         del vhod["subject"]
 
-        odgovor = odjemalec.post(
-            "/materials", data=vhod, files=datoteka(), headers={"X-API-Key": KLJUC}
-        )
+        odgovor = odjemalec.post("/materials", data=vhod, files=datoteka(), headers=telefon.glave)
 
         assert odgovor.status_code == 422
         assert stevilo_vrstic(motor) == 0
         assert slike_na_disku(slike / CVEK_ID) == []
 
-    def test_manjkajoca_datoteka_da_422(self, odjemalec: TestClient, motor: Engine) -> None:
-        odgovor = odjemalec.post("/materials", data=polja(), headers={"X-API-Key": KLJUC})
+    def test_manjkajoca_datoteka_da_422(
+        self, odjemalec: TestClient, motor: Engine, telefon: SejaTesta
+    ) -> None:
+        odgovor = odjemalec.post("/materials", data=polja(), headers=telefon.glave)
 
         assert odgovor.status_code == 422
         assert stevilo_vrstic(motor) == 0
 
-    def test_neveljaven_taken_at_da_422(self, odjemalec: TestClient, motor: Engine) -> None:
+    def test_neveljaven_taken_at_da_422(
+        self, odjemalec: TestClient, motor: Engine, telefon: SejaTesta
+    ) -> None:
         odgovor = odjemalec.post(
             "/materials",
             data=polja() | {"taken_at": "jutri popoldne"},
             files=datoteka(),
-            headers={"X-API-Key": KLJUC},
+            headers=telefon.glave,
         )
 
         assert odgovor.status_code == 422
@@ -230,7 +233,7 @@ class TestNeveljavenZahtevek:
 
     @pytest.mark.parametrize("nakazen_id", ["../pobegni", "ni-uuid", "", "a" * 40])
     def test_id_ki_ni_uuid_da_422_in_ne_zapise_nicesar(
-        self, odjemalec: TestClient, motor: Engine, slike: Path, nakazen_id: str
+        self, odjemalec: TestClient, motor: Engine, slike: Path, nakazen_id: str, telefon: SejaTesta
     ) -> None:
         # Iz `id` nastane ime datoteke. Nepreverjen niz bi dovolil pisanje
         # izven mape s slikami, zato je oblika UUID pogoj, ne okras.
@@ -238,7 +241,7 @@ class TestNeveljavenZahtevek:
             "/materials",
             data=polja(nakazen_id),
             files=datoteka(),
-            headers={"X-API-Key": KLJUC},
+            headers=telefon.glave,
         )
 
         assert odgovor.status_code == 422
@@ -255,6 +258,7 @@ class TestNapakaPriZapisu:
         motor: Engine,
         slike: Path,
         monkeypatch: pytest.MonkeyPatch,
+        telefon: SejaTesta,
     ) -> None:
         def pade(*_args: object, **_kwargs: object) -> Path:
             raise OSError("na disku ni prostora")
@@ -262,9 +266,7 @@ class TestNapakaPriZapisu:
         monkeypatch.setattr("app.routers.materials.shrani_sliko", pade)
 
         with pytest.raises(OSError, match="na disku ni prostora"):
-            odjemalec.post(
-                "/materials", data=polja(), files=datoteka(), headers={"X-API-Key": KLJUC}
-            )
+            odjemalec.post("/materials", data=polja(), files=datoteka(), headers=telefon.glave)
 
         assert stevilo_vrstic(motor) == 0
         assert slike_na_disku(slike / CVEK_ID) == []
@@ -275,18 +277,15 @@ class TestNapakaPriZapisu:
         motor: Engine,
         slike: Path,
         monkeypatch: pytest.MonkeyPatch,
+        telefon: SejaTesta,
     ) -> None:
         def pade(*_args: object, **_kwargs: object) -> bool:
             raise RuntimeError("baza je odpovedala")
 
-        monkeypatch.setattr(
-            "app.db.MaterialsRepository.vstavi_ce_ga_ni", pade, raising=True
-        )
+        monkeypatch.setattr("app.db.MaterialsRepository.vstavi_ce_ga_ni", pade, raising=True)
 
         with pytest.raises(RuntimeError, match="baza je odpovedala"):
-            odjemalec.post(
-                "/materials", data=polja(), files=datoteka(), headers={"X-API-Key": KLJUC}
-            )
+            odjemalec.post("/materials", data=polja(), files=datoteka(), headers=telefon.glave)
 
         # Slika brez vrstice je sirota, ki je nihče nikoli ne pogleda.
         assert stevilo_vrstic(motor) == 0
@@ -297,11 +296,9 @@ class TestAtomarnost:
     """Na končni poti nikoli ni polovične datoteke."""
 
     def test_po_uspehu_v_zacasni_podmapi_ni_ostankov(
-        self, odjemalec: TestClient, slike: Path
+        self, odjemalec: TestClient, slike: Path, telefon: SejaTesta
     ) -> None:
-        odjemalec.post(
-            "/materials", data=polja(), files=datoteka(), headers={"X-API-Key": KLJUC}
-        )
+        odjemalec.post("/materials", data=polja(), files=datoteka(), headers=telefon.glave)
 
         zacasna = slike / CVEK_ID / ZACASNA_PODMAPA
         assert list(zacasna.iterdir()) == []
@@ -321,11 +318,9 @@ class TestOdgovorOdrazaZapis:
     """Idempotentni odgovor mora povedati stanje zapisa, ne domneve."""
 
     def test_status_se_bere_iz_zapisa_ne_vpise_na_trdo(
-        self, odjemalec: TestClient, motor: Engine
+        self, odjemalec: TestClient, motor: Engine, telefon: SejaTesta
     ) -> None:
-        odjemalec.post(
-            "/materials", data=polja(), files=datoteka(), headers={"X-API-Key": KLJUC}
-        )
+        odjemalec.post("/materials", data=polja(), files=datoteka(), headers=telefon.glave)
 
         # V1-R03 bo zapis premaknila naprej; odgovor na ponoven prenos mora
         # takrat povedati resnično stanje, ne „new".
@@ -336,7 +331,7 @@ class TestOdgovorOdrazaZapis:
             seja.commit()
 
         odgovor = odjemalec.post(
-            "/materials", data=polja(), files=datoteka(), headers={"X-API-Key": KLJUC}
+            "/materials", data=polja(), files=datoteka(), headers=telefon.glave
         )
 
         assert odgovor.status_code == 200
@@ -352,6 +347,7 @@ class TestOdgovorOdrazaZapis:
         odjemalec: TestClient,
         motor: Engine,
         monkeypatch: pytest.MonkeyPatch,
+        telefon: SejaTesta,
     ) -> None:
         """Veja, v katero pridemo samo ob dveh hkratnih zahtevah z istim `id`.
 
@@ -393,7 +389,7 @@ class TestOdgovorOdrazaZapis:
         )
 
         odgovor = odjemalec.post(
-            "/materials", data=polja(), files=datoteka(), headers={"X-API-Key": KLJUC}
+            "/materials", data=polja(), files=datoteka(), headers=telefon.glave
         )
 
         assert odgovor.status_code == 200

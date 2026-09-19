@@ -51,7 +51,6 @@ services:
   api:
     build: .
     environment:
-      API_KEY: ${API_KEY:?API_KEY ni nastavljen}
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://solski:${POSTGRES_PASSWORD}@db:5432/solski}
       IMAGES_DIR: /data/images
       # Brez tega ključa strežnik vseeno steče in slike sprejema — ne teče

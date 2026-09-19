@@ -23,6 +23,15 @@ export type Material = {
   last_attempt_at: string | null;
   /** Zakaj zadnji poskus ni uspel; `null`, če ni bilo napake. */
   sync_error: string | null;
+  /**
+   * Kdo je bil prijavljen, ko je zapis nastal (V3-R04).
+   *
+   * `null` pomeni „ni bil prijavljen nihče" in ne „brez lastnika za vedno":
+   * tak zapis posvoji vsaka razrešena seja — prijava in obnovitev žetona z
+   * diska (`docs/odlocitve/ADR-036` B).
+   * Prenaša se izključno tisto, kar je last prijavljene uporabnice.
+   */
+  user_id: string | null;
 };
 
 /** Koliko zapisov je v katerem stanju prenosa. */
@@ -94,4 +103,6 @@ export type Poskus = {
   answered_at: string;
   /** Kdaj ga je strežnik sprejel; `null`, dokler ni prenesen. */
   uploaded_at: string | null;
+  /** Kdo je odgovoril; `null`, če ni bil prijavljen nihče (`ADR-036` B). */
+  user_id: string | null;
 };

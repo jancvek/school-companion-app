@@ -25,7 +25,7 @@ from app.models import (
     Material,
     Question,
 )
-from tests.conftest import CVEK_ID, KLJUC
+from tests.conftest import CVEK_ID, SejaTesta
 
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 UUID_DVA = "a1b2c3d4-e5f6-4789-abcd-ef0123456789"
@@ -937,19 +937,23 @@ class TestDokoncnoBrisanje:
         assert stevilo_vrstic(motor) == 0
 
 
-class TestKljucOstajaZahtevanDrugod:
-    """Regresija: izvzetje `/admin` ne sme odpreti ničesar drugega.
+class TestPrijavaOstajaZahtevanaDrugod:
+    """Regresija iz `ADR-006`, prepisana po `ADR-027`: izvzetje `/admin` ne
+    sme odpreti ničesar drugega.
 
     Ta razred je razlog, da izvzetje predpone sploh sme obstajati. Če pade,
     je strežnik odprt — ne glede na to, ali admin stran deluje.
+
+    Besedilo se je z V3-R04 spremenilo iz „brez ključa“ v
+    „brez veljavnega žetona“, namen pa ne. Test s **starim ključem** je
+    pri tem pridobil nov pomen: dokazuje, da prehod ni postopen in da stara
+    skrivnost ne odpre več ničesar (`ADR-036`).
     """
 
-    def test_admin_je_dosegljiv_brez_kljuca(self, odjemalec: TestClient) -> None:
+    def test_admin_je_dosegljiv_brez_zetona(self, odjemalec: TestClient) -> None:
         assert odjemalec.get("/admin").status_code == 200
 
-    def test_materials_brez_kljuca_ostaja_401(
-        self, odjemalec: TestClient, motor: Engine
-    ) -> None:
+    def test_materials_brez_zetona_ostaja_401(self, odjemalec: TestClient, motor: Engine) -> None:
         odgovor = odjemalec.post(
             "/materials",
             data={"id": UUID_ENA, "subject": "MAT", "taken_at": "2026-09-04T07:30:00Z"},
@@ -959,12 +963,14 @@ class TestKljucOstajaZahtevanDrugod:
         assert odgovor.status_code == 401
         assert stevilo_vrstic(motor) == 0
 
-    def test_materials_z_napacnim_kljucem_ostaja_401(
+    def test_materials_s_starim_kljucem_ostaja_401(
         self, odjemalec: TestClient, motor: Engine
     ) -> None:
+        # Glava, s katero je telefon govoril do V3-R04. Prehod je oster:
+        # ključ ne velja nikjer več in ne sme biti nadomestna pot.
         odgovor = odjemalec.post(
             "/materials",
-            headers={"X-API-Key": "napacen-kljuc-a-dovolj-dolg"},
+            headers={"X-API-Key": "star-kljuc-a-dovolj-dolg"},
             data={"id": UUID_ENA, "subject": "MAT", "taken_at": "2026-09-04T07:30:00Z"},
             files={"file": ("posnetek.jpg", b"slika", "image/jpeg")},
         )
@@ -972,14 +978,14 @@ class TestKljucOstajaZahtevanDrugod:
         assert odgovor.status_code == 401
         assert stevilo_vrstic(motor) == 0
 
-    def test_materials_s_pravim_kljucem_se_vedno_dela(
-        self, odjemalec: TestClient, motor: Engine
+    def test_materials_z_veljavnim_zetonom_se_vedno_dela(
+        self, odjemalec: TestClient, motor: Engine, telefon: SejaTesta
     ) -> None:
         # Brez tega bi prejšnja dva testa ostala zelena tudi, če bi bila pot
         # pokvarjena in bi vračala 401 vsem.
         odgovor = odjemalec.post(
             "/materials",
-            headers={"X-API-Key": KLJUC},
+            headers=telefon.glave,
             data={"id": UUID_ENA, "subject": "MAT", "taken_at": "2026-09-04T07:30:00Z"},
             files={"file": ("posnetek.jpg", b"slika", "image/jpeg")},
         )
@@ -988,11 +994,11 @@ class TestKljucOstajaZahtevanDrugod:
         assert stevilo_vrstic(motor) == 1
 
     def test_pot_ki_se_le_zacne_kot_admin_ni_izvzeta(self, odjemalec: TestClient) -> None:
-        # Golo `startswith("/admin")` bi to pot spustilo skozi preverbo ključa.
+        # Golo `startswith("/admin")` bi to pot spustilo skozi preverbo žetona.
         for pot in ("/administration", "/admin-nekaj", "/adminmaterials"):
             assert odjemalec.get(pot).status_code == 401, pot
 
-    def test_health_ostaja_dosegljiv_brez_kljuca(self, odjemalec: TestClient) -> None:
+    def test_health_ostaja_dosegljiv_brez_zetona(self, odjemalec: TestClient) -> None:
         assert odjemalec.get("/health").status_code == 200
 
 
@@ -1148,9 +1154,11 @@ class TestNeznanePoti:
         assert "text/html" in odgovor.headers["content-type"]
         assert '"detail"' not in odgovor.text
 
-    def test_napake_izven_admin_ostanejo_json(self, odjemalec: TestClient) -> None:
+    def test_napake_izven_admin_ostanejo_json(
+        self, odjemalec: TestClient, telefon: SejaTesta
+    ) -> None:
         # Prestreznik je globalen; za telefon se mora umakniti privzetemu.
-        odgovor = odjemalec.get("/materials", headers={"X-API-Key": KLJUC})
+        odgovor = odjemalec.get("/materials", headers=telefon.glave)
 
         assert odgovor.status_code == 405
         assert "application/json" in odgovor.headers["content-type"]

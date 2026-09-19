@@ -24,6 +24,7 @@ function material(overrides: Partial<Material> = {}): Material {
     sync_attempts: 0,
     last_attempt_at: null,
     sync_error: null,
+    user_id: null,
     ...overrides,
   };
 }
@@ -51,7 +52,7 @@ describe('tabela materials', () => {
   it('vstavi natanko eno vrstico z danim id', async () => {
     await insertMaterial(db, material());
 
-    const vrstice = await listBySubject(db, 'MAT');
+    const vrstice = await listBySubject(db, 'MAT', null);
 
     expect(vrstice).toEqual([material()]);
   });
@@ -61,7 +62,7 @@ describe('tabela materials', () => {
     await insertMaterial(db, material({ id: 'najstarejsi', taken_at: '2026-09-01T08:00:00.000Z' }));
     await insertMaterial(db, material({ id: 'najnovejsi', taken_at: '2026-09-03T08:00:00.000Z' }));
 
-    const vrstice = await listBySubject(db, 'MAT');
+    const vrstice = await listBySubject(db, 'MAT', null);
 
     expect(vrstice.map((v) => v.id)).toEqual(['najnovejsi', 'srednji', 'najstarejsi']);
   });
@@ -76,7 +77,7 @@ describe('tabela materials', () => {
     await insertMaterial(db, material({ id: 'najstarejsi', taken_at: '2026-09-01T08:00:00.000Z' }));
     await insertMaterial(db, material({ id: 'najnovejsi', taken_at: '2026-09-03T08:00:00.000Z' }));
 
-    const vrstice = await listBySubject(db, 'MAT');
+    const vrstice = await listBySubject(db, 'MAT', null);
 
     expect(vrstice.map((v) => v.id)).toEqual(['najnovejsi', 'srednji', 'najstarejsi']);
   });
@@ -85,20 +86,20 @@ describe('tabela materials', () => {
     await insertMaterial(db, material({ id: 'mat-1', subject: 'MAT' }));
     await insertMaterial(db, material({ id: 'slj-1', subject: 'SLJ' }));
 
-    const vrstice = await listBySubject(db, 'MAT');
+    const vrstice = await listBySubject(db, 'MAT', null);
 
     expect(vrstice.map((v) => v.id)).toEqual(['mat-1']);
     expect(vrstice.every((v) => v.subject === 'MAT')).toBe(true);
   });
 
   it('vrne prazen seznam za predmet brez posnetkov, brez napake', async () => {
-    await expect(listBySubject(db, 'GUM')).resolves.toEqual([]);
+    await expect(listBySubject(db, 'GUM', null)).resolves.toEqual([]);
   });
 
   it('ohrani sync_status pending', async () => {
     await insertMaterial(db, material());
 
-    const [vrstica] = await listBySubject(db, 'MAT');
+    const [vrstica] = await listBySubject(db, 'MAT', null);
 
     expect(vrstica.sync_status).toBe('pending');
   });
@@ -113,7 +114,7 @@ describe('tabela materials', () => {
     await insertMaterial(db, material());
     await migriraj(db);
 
-    expect(await listBySubject(db, 'MAT')).toHaveLength(1);
+    expect(await listBySubject(db, 'MAT', null)).toHaveLength(1);
   });
 });
 
@@ -141,7 +142,7 @@ describe('čakalna vrsta za prenos', () => {
       material({ id: 'neuspel', taken_at: '2026-09-02T09:00:00.000Z', sync_status: 'failed' }),
     );
 
-    const cakajoci = await listPending(db);
+    const cakajoci = await listPending(db, null);
 
     // Zgodovina se bere od najnovejšega, vrsta pa oddela od najstarejšega —
     // sicer bi najstarejši posnetek čakal najdlje.
@@ -153,7 +154,7 @@ describe('čakalna vrsta za prenos', () => {
     await insertMaterial(db, material({ id: 'nov', taken_at: '2026-09-03T08:00:00.000Z' }));
     await insertMaterial(db, material({ id: 'star', taken_at: '2026-09-01T08:00:00.000Z' }));
 
-    expect((await listPending(db)).map((v) => v.id)).toEqual(['star', 'nov']);
+    expect((await listPending(db, null)).map((v) => v.id)).toEqual(['star', 'nov']);
   });
 
   it('prešteje zapise po stanjih', async () => {
@@ -162,11 +163,11 @@ describe('čakalna vrsta za prenos', () => {
     await insertMaterial(db, material({ id: 'c', sync_status: 'synced' }));
     await insertMaterial(db, material({ id: 'd', sync_status: 'failed' }));
 
-    expect(await countByStatus(db)).toEqual({ pending: 2, synced: 1, failed: 1 });
+    expect(await countByStatus(db, null)).toEqual({ pending: 2, synced: 1, failed: 1 });
   });
 
   it('prazna baza da same ničle', async () => {
-    expect(await countByStatus(db)).toEqual({ pending: 0, synced: 0, failed: 0 });
+    expect(await countByStatus(db, null)).toEqual({ pending: 0, synced: 0, failed: 0 });
   });
 
   it('markSynced postavi synced in počisti napako', async () => {
@@ -200,7 +201,7 @@ describe('čakalna vrsta za prenos', () => {
     const zapis = await vrstica(db, 'id-1');
     expect(zapis.sync_status).toBe('failed');
     expect(zapis.sync_error).toBe('strežnik je zavrnil ključ');
-    expect(await listPending(db)).toEqual([]);
+    expect(await listPending(db, null)).toEqual([]);
   });
 
   it('retryFailed vrne neuspele v vrsto in počisti napako', async () => {
@@ -210,9 +211,9 @@ describe('čakalna vrsta za prenos', () => {
     );
     await insertMaterial(db, material({ id: 'prenesen', sync_status: 'synced' }));
 
-    await retryFailed(db);
+    await retryFailed(db, null);
 
-    expect((await listPending(db)).map((v) => v.id)).toEqual(['neuspel']);
+    expect((await listPending(db, null)).map((v) => v.id)).toEqual(['neuspel']);
     expect((await vrstica(db, 'neuspel')).sync_error).toBeNull();
     // Preneseni se ne smejo prenašati znova.
     expect((await vrstica(db, 'prenesen')).sync_status).toBe('synced');

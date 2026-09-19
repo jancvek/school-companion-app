@@ -1,6 +1,13 @@
 import { migriraj, preberiVerzijo, SHEMA_VERZIJA } from '@/db/migrations';
+import { jeOdjavaNedokoncana } from '@/db/naprava';
 
-import { createTestDatabase, SHEMA_V1_R01, SHEMA_VERZIJE_1 } from './test-database';
+import {
+  createTestDatabase,
+  SHEMA_V1_R01,
+  SHEMA_VERZIJE_1,
+  SHEMA_VERZIJE_2,
+  SHEMA_VERZIJE_3,
+} from './test-database';
 
 /** Tabele, ki jih prinese migracija 2 (V2-R02). */
 const TABELE_KVIZOV = ['quizzes', 'quiz_items', 'attempts'];
@@ -35,6 +42,21 @@ async function imenaStolpcev(
 ): Promise<string[]> {
   const vrstice = await db.getAllAsync<StolpecVrstica>('PRAGMA table_info(materials)', []);
   return vrstice.map((vrstica) => vrstica.name);
+}
+
+/** Stavki, ki jih `migriraj` izvede nad to bazo. */
+async function opazujIzvedene(
+  db: ReturnType<typeof createTestDatabase>,
+): Promise<string[]> {
+  const izvedeni: string[] = [];
+  await migriraj({
+    ...db,
+    execAsync: async (sql: string) => {
+      izvedeni.push(sql);
+      await db.execAsync(sql);
+    },
+  });
+  return izvedeni;
 }
 
 describe('migracija lokalne sheme', () => {
@@ -133,7 +155,7 @@ describe('migracija lokalne sheme', () => {
 
         await migriraj(db);
 
-        expect(await preberiVerzijo(db)).toBe(2);
+        expect(await preberiVerzijo(db)).toBe(SHEMA_VERZIJA);
         const vrstice = await db.getAllAsync<Record<string, unknown>>(
           'SELECT * FROM materials ORDER BY id',
           [],
@@ -148,6 +170,9 @@ describe('migracija lokalne sheme', () => {
             sync_attempts: 3,
             last_attempt_at: '2026-09-02T08:00:00.000Z',
             sync_error: 'Strežnik je zahtevo zavrnil (413).',
+            // Migracija 3: zapis iz časa pred prijavo nima lastnika in ga
+            // dobi šele s prvo prijavo (ADR-036 B).
+            user_id: null,
           },
           {
             id: 'b',
@@ -158,6 +183,7 @@ describe('migracija lokalne sheme', () => {
             sync_attempts: 0,
             last_attempt_at: null,
             sync_error: null,
+            user_id: null,
           },
         ]);
         const tabele = await imenaTabel(db);
@@ -169,23 +195,172 @@ describe('migracija lokalne sheme', () => {
 
     it('migracije 1 ne požene znova', async () => {
       // Stare migracije se ne ponavljajo: telefon, ki je bil na verziji 1,
-      // gre samo skozi korak 2.
+      // gre samo skozi koraka 2 in 3.
       const db = createTestDatabase();
       try {
         await db.execAsync(SHEMA_VERZIJE_1);
-        const izvedeni: string[] = [];
-        const opazovana = {
-          ...db,
-          execAsync: async (sql: string) => {
-            izvedeni.push(sql);
-            await db.execAsync(sql);
-          },
-        };
 
-        await migriraj(opazovana);
+        const izvedeni = await opazujIzvedene(db);
 
-        expect(izvedeni.some((sql) => sql.includes('ALTER TABLE materials'))).toBe(false);
-        expect(izvedeni.some((sql) => sql.includes('CREATE TABLE IF NOT EXISTS quizzes'))).toBe(true);
+        // Stolpci migracije 1 se ne dodajajo znova; `user_id` iz migracije 3
+        // pa se doda, in prav zato se ALTER tu ne sme iskati kar po ključni
+        // besedi.
+        expect(izvedeni.some((sql) => sql.includes('ADD COLUMN sync_attempts'))).toBe(false);
+        expect(izvedeni.some((sql) => sql.includes('CREATE TABLE IF NOT EXISTS quizzes'))).toBe(
+          true,
+        );
+        expect(izvedeni.some((sql) => sql.includes('ADD COLUMN user_id'))).toBe(true);
+      } finally {
+        db.close();
+      }
+    });
+  });
+
+  describe('nad bazo verzije 2 (stanje pred V3-R04)', () => {
+    /** Vrstice, kakršne so na Mašinem telefonu pred nadgradnjo. */
+    async function napolni(db: ReturnType<typeof createTestDatabase>): Promise<void> {
+      await db.execAsync(SHEMA_VERZIJE_2);
+      await db.runAsync(
+        'INSERT INTO materials (id, subject, taken_at, file_uri, sync_status, sync_attempts)' +
+          ' VALUES (?, ?, ?, ?, ?, ?)',
+        ['a', 'MAT', '2026-09-01T08:00:00.000Z', 'file:///a.jpg', 'pending', 1],
+      );
+      await db.runAsync('INSERT INTO quizzes (id, name, created_at) VALUES (?, ?, ?)', [
+        'k1',
+        'MAT',
+        '2026-09-10T08:00:00.000Z',
+      ]);
+      await db.runAsync(
+        'INSERT INTO attempts (id, quiz_id, quiz_item_id, mode, rating, shown_at,' +
+          ' revealed_at, answered_at, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          'p1',
+          'k1',
+          'k1-i1',
+          'samoocena',
+          'tezko',
+          '2026-09-10T15:00:00.000Z',
+          '2026-09-10T15:00:07.000Z',
+          '2026-09-10T15:00:09.000Z',
+          null,
+        ],
+      );
+    }
+
+    it('doda lastnika obema tabelama in ne izgubi vrstic', async () => {
+      // To je Mašin telefon danes. Neprenesen poskus je tu namenoma: prav ta
+      // se v V3-R04 ne sme izgubiti in ne sme oditi pod tujim žetonom.
+      const db = createTestDatabase();
+      try {
+        await napolni(db);
+        expect(await preberiVerzijo(db)).toBe(2);
+
+        await migriraj(db);
+
+        expect(await preberiVerzijo(db)).toBe(SHEMA_VERZIJA);
+        expect(await imenaStolpcev(db)).toContain('user_id');
+        expect(await stolpciTabele(db, 'attempts')).toContain('user_id');
+
+        const snov = await db.getAllAsync<Record<string, unknown>>(
+          'SELECT id, sync_status, sync_attempts, user_id FROM materials',
+          [],
+        );
+        expect(snov).toEqual([
+          { id: 'a', sync_status: 'pending', sync_attempts: 1, user_id: null },
+        ]);
+
+        const poskusi = await db.getAllAsync<Record<string, unknown>>(
+          'SELECT id, quiz_item_id, rating, uploaded_at, user_id FROM attempts',
+          [],
+        );
+        expect(poskusi).toEqual([
+          { id: 'p1', quiz_item_id: 'k1-i1', rating: 'tezko', uploaded_at: null, user_id: null },
+        ]);
+      } finally {
+        db.close();
+      }
+    });
+
+    it('migracij 1 in 2 ne požene znova', async () => {
+      const db = createTestDatabase();
+      try {
+        await napolni(db);
+
+        const izvedeni = await opazujIzvedene(db);
+
+        expect(izvedeni.some((sql) => sql.includes('ADD COLUMN sync_attempts'))).toBe(false);
+        expect(izvedeni.some((sql) => sql.includes('CREATE TABLE IF NOT EXISTS quizzes'))).toBe(
+          false,
+        );
+        expect(izvedeni.some((sql) => sql.includes('ADD COLUMN user_id'))).toBe(true);
+      } finally {
+        db.close();
+      }
+    });
+
+    it('drugi zagon ne doda stolpca še enkrat', async () => {
+      // Korak mora biti ponovljiv: aplikacija se lahko ubije med `ALTER` in
+      // zapisom `user_version`, `ADD COLUMN` na obstoječem stolpcu pa vrže.
+      const db = createTestDatabase();
+      try {
+        await napolni(db);
+        await migriraj(db);
+
+        await expect(migriraj(db)).resolves.toBe(SHEMA_VERZIJA);
+      } finally {
+        db.close();
+      }
+    });
+  });
+
+  describe('nad bazo verzije 3 (stanje sredi V3-R04)', () => {
+    it('doda tabelo `naprava` in ne izgubi lastnikov', async () => {
+      // Telefon, ki je dobil že prvi del V3-R04 (APK iz te veje pred
+      // `ADR-037`). Migracija 4 doda samo sled o odjavi.
+      const db = createTestDatabase();
+      try {
+        await db.execAsync(SHEMA_VERZIJE_3);
+        await db.runAsync(
+          'INSERT INTO materials (id, subject, taken_at, file_uri, sync_status,' +
+            ' sync_attempts, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          ['a', 'MAT', '2026-09-01T08:00:00.000Z', 'file:///a.jpg', 'pending', 0, 'u-masa'],
+        );
+        expect(await preberiVerzijo(db)).toBe(3);
+
+        await migriraj(db);
+
+        expect(await preberiVerzijo(db)).toBe(SHEMA_VERZIJA);
+        expect(await imenaTabel(db)).toContain('naprava');
+        const snov = await db.getAllAsync<Record<string, unknown>>(
+          'SELECT id, user_id FROM materials',
+          [],
+        );
+        expect(snov).toEqual([{ id: 'a', user_id: 'u-masa' }]);
+      } finally {
+        db.close();
+      }
+    });
+
+    it('sveža baza nima oznake o odjavi', async () => {
+      // Naprava, na kateri se ni odjavil še nihče, nima česa
+      // razveljavljati (`docs/odlocitve/ADR-037`).
+      const db = createTestDatabase();
+      try {
+        await migriraj(db);
+
+        expect(await jeOdjavaNedokoncana(db)).toBe(false);
+      } finally {
+        db.close();
+      }
+    });
+
+    it('drugi zagon tabele ne ustvari še enkrat', async () => {
+      const db = createTestDatabase();
+      try {
+        await db.execAsync(SHEMA_VERZIJE_3);
+        await migriraj(db);
+
+        await expect(migriraj(db)).resolves.toBe(SHEMA_VERZIJA);
       } finally {
         db.close();
       }
@@ -198,7 +373,7 @@ describe('migracija lokalne sheme', () => {
       const nadgrajena = createTestDatabase();
       try {
         await migriraj(sveza);
-        await nadgrajena.execAsync(SHEMA_VERZIJE_1);
+        await nadgrajena.execAsync(SHEMA_VERZIJE_3);
         await migriraj(nadgrajena);
 
         expect(await imenaTabel(sveza)).toEqual(await imenaTabel(nadgrajena));
@@ -246,6 +421,7 @@ describe('migracija lokalne sheme', () => {
           'sync_attempts',
           'last_attempt_at',
           'sync_error',
+          'user_id',
         ]);
       } finally {
         db.close();

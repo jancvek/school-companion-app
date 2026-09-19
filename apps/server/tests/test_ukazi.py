@@ -13,13 +13,14 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from app import ukazi
-from app.models import VLOGA_OTROK, Credential
+from app.models import Credential
 from app.prijava import geslo_se_ujema
 from tests.conftest import (
     GESLO_STARSA,
     OTROK_IDENTIFIKATOR,
     STARS_IDENTIFIKATOR,
     PrijavljenOdjemalec,
+    ustvari_otroka,
     ustvari_starsa,
 )
 from tests.test_prijava import prijavi_se
@@ -141,11 +142,55 @@ class TestNastaviGeslo:
         assert "vsaj 12" in izpisi[0]
         assert zgostitev_v_bazi(motor, STARS_IDENTIFIKATOR) is None
 
-    def test_otrokovo_geslo_sme_biti_kratko(self, motor: Engine, izpisi: list[str]) -> None:
-        """`ADR-026`: otrokovo geslo je kratko in bo ostalo kratko."""
-        ustvari_starsa(
-            motor, identifikator=OTROK_IDENTIFIKATOR, geslo=None, vloga=VLOGA_OTROK
+    def test_otrokovo_geslo_sme_biti_krajse_od_starsevega(
+        self, motor: Engine, izpisi: list[str]
+    ) -> None:
+        """Osem znakov, ne dvanajst — a tudi ne štirje (`ADR-036` E).
+
+        `ADR-035` G je otroku dovolil štiri, ker njegov račun takrat ni imel
+        poti na javni internet. Z `V3-R04` jo dobi.
+        """
+        ustvari_otroka(motor, geslo=None)
+
+        koda = ukazi.nastavi_geslo(
+            OTROK_IDENTIFIKATOR,
+            vprasaj=Tipkovnica("masa-maša", "masa-maša"),
+            izpisi=izpisi.append,
+            motor=motor,
         )
+
+        assert koda == 0
+
+    def test_osem_znakov_je_natanko_dovolj(self, motor: Engine, izpisi: list[str]) -> None:
+        """Spodnji rob meje. Brez tega bi mutacija `>=` v `>` ostala zelena."""
+        ustvari_otroka(motor, geslo=None)
+
+        koda = ukazi.nastavi_geslo(
+            OTROK_IDENTIFIKATOR,
+            vprasaj=Tipkovnica("masa1234", "masa1234"),
+            izpisi=izpisi.append,
+            motor=motor,
+        )
+
+        assert koda == 0, izpisi
+
+    def test_sedem_znakov_je_premalo(self, motor: Engine, izpisi: list[str]) -> None:
+        """Zgornji rob meje — prvo geslo, ki še ne sme skozi."""
+        ustvari_otroka(motor, geslo=None)
+
+        koda = ukazi.nastavi_geslo(
+            OTROK_IDENTIFIKATOR,
+            vprasaj=Tipkovnica("masa123", "masa123"),
+            izpisi=izpisi.append,
+            motor=motor,
+        )
+
+        assert koda == ukazi.NAPAKA
+        assert "vsaj 8" in izpisi[0]
+
+    def test_stiri_znaki_otroku_ne_zadoscajo_vec(self, motor: Engine, izpisi: list[str]) -> None:
+        """Geslo, ki je do V3-R04 veljalo, odslej ne velja več."""
+        ustvari_otroka(motor, geslo=None)
 
         koda = ukazi.nastavi_geslo(
             OTROK_IDENTIFIKATOR,
@@ -154,28 +199,12 @@ class TestNastaviGeslo:
             motor=motor,
         )
 
-        assert koda == 0
-
-    def test_tri_znaki_so_premalo_tudi_otroku(self, motor: Engine, izpisi: list[str]) -> None:
-        ustvari_starsa(
-            motor, identifikator=OTROK_IDENTIFIKATOR, geslo=None, vloga=VLOGA_OTROK
-        )
-
-        koda = ukazi.nastavi_geslo(
-            OTROK_IDENTIFIKATOR,
-            vprasaj=Tipkovnica("mas", "mas"),
-            izpisi=izpisi.append,
-            motor=motor,
-        )
-
         assert koda == ukazi.NAPAKA
-        assert "vsaj 4" in izpisi[0]
+        assert "vsaj 8" in izpisi[0]
 
 
 class TestUkaznaVrstica:
-    def test_geslo_v_argumentu_se_zavrne(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_geslo_v_argumentu_se_zavrne(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Argument bi ostal v zgodovini lupine in v seznamu procesov."""
         koda = ukazi.glavni(["nastavi-geslo", STARS_IDENTIFIKATOR, "geslo-v-argumentu"])
 

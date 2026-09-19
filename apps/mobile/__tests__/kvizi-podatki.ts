@@ -40,6 +40,7 @@ export function poskus(quizId: string, postavka: number, overrides: Partial<Posk
     revealed_at: '2026-09-10T15:00:07.000Z',
     answered_at: '2026-09-10T15:00:09.000Z',
     uploaded_at: null,
+    user_id: null,
     ...overrides,
   };
 }

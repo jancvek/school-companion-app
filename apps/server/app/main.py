@@ -1,9 +1,8 @@
 """Sestavljanje aplikacije.
 
-`create_app` je tovarna, ne modulska spremenljivka. Razloga sta dva: strežnik
-ob uvozu modula ne sme zahtevati `API_KEY` (sicer se ne da uvoziti niti za
-test), vsak test pa dobi svojo aplikacijo s svojo bazo in svojim ključem.
-Uvicorn jo zato zažene z zastavico `--factory`.
+`create_app` je tovarna, ne modulska spremenljivka: vsak test dobi svojo
+aplikacijo s svojo bazo, svojo mapo slik in svojim klicalcem, brez globalnega
+stanja na ravni modula. Uvicorn jo zato zažene z zastavico `--factory`.
 """
 
 import logging
@@ -19,27 +18,31 @@ from app import prijava, strani
 from app.db import naredi_motor, naredi_tovarno_sej
 from app.routers import admin, dnevi, kvizi, materials, resevanje, statistika, vstop
 from app.schemas import Zivost
-from app.security import ApiKeyMiddleware, SejaMiddleware
+from app.security import SejaMiddleware, ZetonMiddleware
 from app.settings import Settings
 from app.vision import Klicalec, naredi_klicalca
 from app.worker import Obdelovalec
 
 dnevnik = logging.getLogger(__name__)
 
-#: Poti, ki ključa ne zahtevajo. `GET /health` mora odgovoriti tudi brez njega,
-#: sicer preverba živosti ne loči „strežnik ne teče" od „ključ ni pravi".
-IZVZETE_POTI = frozenset({"/health"})
-
-#: Predpone, ki ključa ne zahtevajo.
+#: Poti, ki žetona ne zahtevajo.
 #:
-#: Operaterska stran teče v brskalniku, ta pa glave `X-API-Key` ne zna
-#: poslati. **Izvzetje iz ključa ne pomeni, da je stran odprta:** od V3-R03 jo
-#: varuje `SejaMiddleware` — seja za vsako pot, CSRF žeton za vsak `POST`
-#: (`docs/odlocitve/ADR-035`). Pred tem je bil tu začasen `basic_auth` v
+#: `GET /health` mora odgovoriti tudi brez njega, sicer preverba živosti ne
+#: loči „strežnik ne teče" od „prijava ni veljavna". `POST /auth/login` je
+#: pot, na kateri žeton šele nastane; **odjave tu ni** — ta zahteva žeton kot
+#: vsaka druga pot telefona (`docs/odlocitve/ADR-036` G).
+IZVZETE_POTI = frozenset({"/health", prijava.POT_PRIJAVE_TELEFONA})
+
+#: Predpone, ki žetona ne zahtevajo.
+#:
+#: Operaterska stran teče v brskalniku, ki žetona ne nosi v glavi, ampak v
+#: piškotku. **Izvzetje iz žetona ne pomeni, da je stran odprta:** varuje jo
+#: `SejaMiddleware` — seja za vsako pot, CSRF žeton za vsako nevarno metodo
+#: (`docs/odlocitve/ADR-035`). Pred V3-R03 je bil tu začasen `basic_auth` v
 #: Caddyju (`ADR-026`), pred V3-R02 pa Tailscale (`ADR-006`).
 #:
 #: **Tu ne dodajaj ničesar brez ADR.** Vsaka predpona na tem seznamu je pot,
-#: ki je aplikacija ne varuje s ključem.
+#: ki je `ZetonMiddleware` ne varuje.
 IZVZETE_PREDPONE = frozenset({"/admin"})
 
 #: Poti pod `/admin`, ki seje ne zahtevajo. Sicer se ne bi bilo mogoče
@@ -98,7 +101,7 @@ def create_app(
     omrežja. Brez njega si ga aplikacija zgradi sama — a le, če ključ je.
     """
     if nastavitve is None:
-        nastavitve = Settings()  # type: ignore[call-arg]  # polja pridejo iz okolja
+        nastavitve = Settings()  # vsa polja imajo privzetek; okolje jih le prepiše
     if motor is None:
         motor = naredi_motor(nastavitve.database_url)
     if klicalec is None and nastavitve.openai_api_key:
@@ -121,21 +124,24 @@ def create_app(
     app.state.klicalec = klicalec
     app.state.obdelovalec = None
 
-    # Vrstni red plasti: zadnja dodana je zunanja. Ključ je torej pred sejo,
-    # kar pomeni, da pot telefona brez ključa pade, preden se kdo dotakne baze.
+    # Vrstni red plasti: zadnja dodana je zunanja. Žeton je torej pred sejo.
+    # Vsaka od obeh plasti obdela svoje poti in tuje spusti naprej nedotaknjene
+    # (`ZetonMiddleware` izvzame predpono `/admin`, `SejaMiddleware` se ujame
+    # samo nanjo), zato se ne prekrivata in nobena zahteva ne prebere seje
+    # dvakrat.
     app.add_middleware(SejaMiddleware, izvzete_poti=POTI_BREZ_SEJE)
     app.add_middleware(
-        ApiKeyMiddleware,
-        api_key=nastavitve.api_key,
+        ZetonMiddleware,
         izvzete_poti=IZVZETE_POTI,
         izvzete_predpone=IZVZETE_PREDPONE,
     )
 
-    # Prijava in odjava (V3-R03). Prvi med usmerjevalniki pod `/admin`, ker
-    # `/admin/login` ne sme zaiti v ujemalnik `/admin/materials/{id}`.
+    # Prijava in odjava brskalnika (V3-R03) ter telefona (V3-R04). Prvi med
+    # usmerjevalniki pod `/admin`, ker `/admin/login` ne sme zaiti v ujemalnik
+    # `/admin/materials/{id}`.
     app.include_router(vstop.router)
     app.include_router(materials.router)
-    # Poti telefona za kvize (V2-R02). Niso pod `/admin`, zato zahtevajo ključ.
+    # Poti telefona za kvize (V2-R02). Niso pod `/admin`, zato zahtevajo žeton.
     app.include_router(resevanje.router)
     app.include_router(admin.router)
     # Za `admin.router` in ne pred njim: `kvizi` doda poti pod isto

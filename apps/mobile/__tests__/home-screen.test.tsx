@@ -1,16 +1,21 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { AppState } from 'react-native';
 
 import HomeScreen from '../app/index';
 import PickSubjectForCaptureScreen from '../app/slikaj/index';
 import PickSubjectForHistoryScreen from '../app/zgodovina/index';
 import { preberiNastavitve } from '@/config/server';
 import { SUBJECTS } from '@/constants/subjects';
-import { insertMaterial } from '@/db/materials';
+import { insertMaterial, listPending } from '@/db/materials';
 import { migriraj } from '@/db/migrations';
+import { SPOROCILO_POTEKLA_PRIJAVA, type Seja } from '@/sync/prijava';
+import type { Izid } from '@/sync/upload';
+import { PrijavaProvider } from '@/sync/use-prijava';
 import { SyncProvider } from '@/sync/use-sync';
 import type { Material } from '@/types';
 import { theme } from '@/ui/theme';
 
+import { SEJA, ustvariShrambo } from './shramba';
 import { createTestDatabase } from './test-database';
 import { odmikSpodaj, TEST_INSETS, type RouterMockState } from './screen-mocks';
 
@@ -30,6 +35,8 @@ function material(overrides: Partial<Material> = {}): Material {
     sync_attempts: 0,
     last_attempt_at: null,
     sync_error: null,
+  // Privzeto lastnik seje: tako zapis nastane, ko je kdo prijavljen.
+  user_id: SEJA.userId,
     ...overrides,
   };
 }
@@ -47,7 +54,9 @@ describe('domača stran', () => {
     expect(screen.getByText('Slikaj snov')).toBeTruthy();
     expect(screen.getByText('Zgodovina')).toBeTruthy();
     expect(screen.getByText('Kvizi')).toBeTruthy();
-    expect(screen.getAllByRole('button')).toHaveLength(3);
+    // Četrti je prijava (V3-R04): vnos, ne vrata (ADR-036 A).
+    expect(screen.getByTestId('gumb-prijava')).toBeTruthy();
+    expect(screen.getAllByRole('button')).toHaveLength(4);
   });
 
   it('„Kvizi" pelje na seznam kvizov', async () => {
@@ -126,24 +135,35 @@ describe('izbira predmeta', () => {
 describe('stanje prenosa na domači strani', () => {
   let db: ReturnType<typeof createTestDatabase>;
 
+  let prvotnoStanje: string;
+
   beforeEach(async () => {
     db = createTestDatabase();
     await migriraj(db);
+    // Brez tega se razporejevalnik ne zažene in `poCiklu` nikoli ne javi
+    // izida — vrstica o potekli prijavi bi manjkala iz napačnega razloga.
+    prvotnoStanje = AppState.currentState;
+    (AppState as { currentState: string }).currentState = 'active';
   });
 
   afterEach(() => {
+    (AppState as { currentState: string }).currentState = prvotnoStanje;
     db.close();
   });
 
-  /** Domača stran znotraj ponudnika, z bazo in nastavitvami iz testa. */
-  async function izrisi(nastavljen: boolean) {
-    const nastavitve = nastavljen
-      ? { baseUrl: 'http://sto.ts.net:8000', apiKey: 'k' }
-      : null;
+  /** Domača stran znotraj obeh ponudnikov, z bazo in nastavitvami iz testa. */
+  async function izrisi(
+    nastavljen: boolean,
+    seja: Seja | null = SEJA,
+    izid: Izid = { vrsta: 'pending', razlog: 'test' },
+  ) {
+    const nastavitve = nastavljen ? { baseUrl: 'https://school-buddy.duckdns.org' } : null;
     return render(
-      <SyncProvider db={db} nastavitve={nastavitve} prenesiEno={async () => ({ vrsta: 'pending', razlog: 'test' })}>
-        <HomeScreen />
-      </SyncProvider>,
+      <PrijavaProvider db={db} nastavitve={nastavitve} shramba={ustvariShrambo(seja)}>
+        <SyncProvider db={db} nastavitve={nastavitve} prenesiEno={async () => izid}>
+          <HomeScreen />
+        </SyncProvider>
+      </PrijavaProvider>,
     );
   }
 
@@ -187,6 +207,37 @@ describe('stanje prenosa na domači strani', () => {
     expect(screen.queryByTestId('stevec-neuspelih')).toBeNull();
   });
 
+  it('potekla prijava to pove naravnost, ne le v števcu', async () => {
+    // Kriterij V3-R04: „Ob neveljavnem žetonu aplikacija to pove razumljivo
+    // (Prijava je potekla, prijavi se znova) in ne izgubi nobene lokalno
+    // shranjene snovi.“ Zapis v `sync_error` tega ne stori: ne izriše ga
+    // nihče. Brez te vrstice je potekla prijava videti enako kot ugasnjen
+    // strežnik — števec stoji in otrok ne ve, da mora kaj narediti.
+    await insertMaterial(db, material({ id: 'a' }));
+
+    await izrisi(true, SEJA, {
+      vrsta: 'pending',
+      razlog: SPOROCILO_POTEKLA_PRIJAVA,
+      prijavaPotekla: true,
+    });
+
+    const vrstica = await screen.findByTestId('prijava-potekla');
+    expect(vrstica.props.children).toMatch(/prijavi se znova/i);
+    // Snov ostane na telefonu in tega sporočilo tudi pove.
+    expect(vrstica.props.children).toMatch(/ostanejo na telefonu/i);
+    expect((await listPending(db, SEJA.userId)).map((m) => m.id)).toEqual(['a']);
+  });
+
+  it('nedosegljiv strežnik ni videti kot potekla prijava', async () => {
+    // Sicer bi otrok ob vsaki izgubljeni povezavi poskusil ponovno prijavo.
+    await insertMaterial(db, material({ id: 'a' }));
+
+    await izrisi(true, SEJA, { vrsta: 'pending', razlog: 'Strežnik ni dosegljiv.' });
+
+    expect(await screen.findByTestId('stevec-cakajocih')).toBeTruthy();
+    expect(screen.queryByTestId('prijava-potekla')).toBeNull();
+  });
+
   it('brez nastavljenega prenosa pove, da posnetki ostajajo na telefonu', async () => {
     await insertMaterial(db, material({ id: 'a' }));
 
@@ -200,16 +251,62 @@ describe('stanje prenosa na domači strani', () => {
     // Gradnja nešifriranega prometa ne dovoli več; brez tega bi posnetki večno
     // čakali na prenos in stran bi kazala le števec (`ADR-034` E).
     await insertMaterial(db, material({ id: 'a' }));
-    const nastavitve = preberiNastavitve({ serverBaseUrl: 'http://sto.ts.net:8000', apiKey: 'k' });
+    const nastavitve = preberiNastavitve({ serverBaseUrl: 'http://sto.ts.net:8000' });
 
     await render(
-      <SyncProvider db={db} nastavitve={nastavitve} prenesiEno={async () => ({ vrsta: 'pending', razlog: 'test' })}>
-        <HomeScreen />
-      </SyncProvider>,
+      <PrijavaProvider db={db} nastavitve={nastavitve} shramba={ustvariShrambo(SEJA)}>
+        <SyncProvider
+          db={db}
+          nastavitve={nastavitve}
+          prenesiEno={async () => ({ vrsta: 'pending', razlog: 'test' })}
+        >
+          <HomeScreen />
+        </SyncProvider>
+      </PrijavaProvider>,
     );
 
     expect(await screen.findByTestId('prenos-ni-nastavljen')).toBeTruthy();
     expect(screen.queryByTestId('stevec-cakajocih')).toBeNull();
+  });
+
+
+  it('brez prijave pove, da posnetki čakajo, in števca ne pokaže', async () => {
+    // Prijava ni pogoj za slikanje; blokiran je izključno prenos (ADR-036 A).
+    await insertMaterial(db, material({ id: 'a' }));
+
+    await izrisi(true, null);
+
+    expect(await screen.findByTestId('ni-prijave')).toBeTruthy();
+    expect(screen.queryByTestId('števec-čakajocih')).toBeNull();
+  });
+
+  it('brez prijave domača stran še vedno dela', async () => {
+    await izrisi(true, null);
+
+    await fireEvent.press(screen.getByText('Slikaj snov'));
+
+    expect(usmerjevalnik.stanje.router.push).toHaveBeenCalledWith('/slikaj');
+  });
+
+  it('vnos za prijavo pove, kdo je prijavljen, in pelje na prijavo', async () => {
+    await izrisi(true);
+
+    expect(await screen.findByText('Prijavljena: Maša')).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId('gumb-prijava'));
+
+    expect(usmerjevalnik.stanje.router.push).toHaveBeenCalledWith('/prijava');
+  });
+
+  it('števec ne šteje zapisov druge uporabnice', async () => {
+    // Skupni telefon: Mašin zapis in Jakov. Stran kaže samo Mašinega, ker se
+    // samo ta prenese (ADR-036 B).
+    await insertMaterial(db, material({ id: 'moj', user_id: SEJA.userId }));
+    await insertMaterial(db, material({ id: 'tuj', user_id: 'u-jaka' }));
+
+    await izrisi(true);
+
+    expect(await screen.findByText('Za prenos: 1')).toBeTruthy();
   });
 
   it('brez nastavljenega prenosa domača stran še vedno dela', async () => {

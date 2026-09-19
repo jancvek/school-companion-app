@@ -31,14 +31,17 @@ from app import prijava
 from app.models import VLOGA_OTROK, LoginAttempt, Material, UserSession
 from app.routers import admin, dnevi, kvizi, statistika, vstop
 from app.routers.admin import MAPA_PREDLOG
-from app.security import SPOROCILO_BREZ_CSRF
+from app.security import SPOROCILO_BREZ_CSRF, SPOROCILO_NEVELJAVEN_ZETON
 from tests.conftest import (
     GESLO_OTROKA,
     GESLO_STARSA,
     OTROK_IDENTIFIKATOR,
     STARS_IDENTIFIKATOR,
     PrijavljenOdjemalec,
+    SejaTesta,
     prijavi,
+    ustvari_otroka,
+    ustvari_sejo,
     ustvari_starsa,
 )
 from tests.test_kvizi import UUID_ENA, snov
@@ -179,16 +182,20 @@ class TestDosegljivost:
         """`GET /health` ne sme zahtevati ne ključa ne seje."""
         assert brez_prijave.get("/health").status_code == 200
 
-    def test_pot_telefona_seje_ne_zahteva(self, brez_prijave: TestClient) -> None:
-        """Pogodba s telefonom se v tej zahtevi ne spremeni (V3-R04 jo bo)."""
-        from tests.conftest import KLJUC
-
-        odgovor = brez_prijave.get("/quizzes/pending", headers={"X-API-Key": KLJUC})
+    def test_pot_telefona_seje_brskalnika_ne_zahteva(
+        self, brez_prijave: TestClient, telefon: SejaTesta
+    ) -> None:
+        """Telefon se izkaže z žetonom v glavi, ne s piškotkom (V3-R04)."""
+        odgovor = brez_prijave.get("/quizzes/pending", headers=telefon.glave)
 
         assert odgovor.status_code == 200
 
-    def test_pot_telefona_brez_kljuca_ostane_401(self, brez_prijave: TestClient) -> None:
-        """Regresija iz `ADR-006`: izvzetje `/admin` ni izvzelo telefona."""
+    def test_pot_telefona_brez_zetona_ostane_401(self, brez_prijave: TestClient) -> None:
+        """Regresija iz `ADR-006`, prepisana po `ADR-027`.
+
+        Besedilo se je spremenilo iz „brez ključa" v „brez veljavnega žetona",
+        namen pa ne: dokazati, da izvzetje `/admin` ni izvzelo telefona.
+        """
         odgovor = brez_prijave.post(
             "/materials",
             data={"id": UUID_ENA, "subject": "MAT", "taken_at": "2026-09-04T07:30:00Z"},
@@ -242,9 +249,7 @@ class TestUspesnaPrijava:
             "/admin/days?dan=2026-09-04&obdobje=dan",
         ],
     )
-    def test_vrne_se_na_zahtevano_pot(
-        self, brez_prijave: TestClient, zahtevana: str
-    ) -> None:
+    def test_vrne_se_na_zahtevano_pot(self, brez_prijave: TestClient, zahtevana: str) -> None:
         preusmeritev = brez_prijave.get(zahtevana, follow_redirects=False)
         assert preusmeritev.status_code == 303
 
@@ -304,9 +309,7 @@ class TestNeuspesnaPrijava:
         assert odgovor.status_code == 401
         assert prijava.SPOROCILO_NEUSPELA_PRIJAVA in odgovor.text
 
-    def test_geslo_ni_nastavljeno(
-        self, aplikacija: FastAPI, motor: Engine
-    ) -> None:
+    def test_geslo_ni_nastavljeno(self, aplikacija: FastAPI, motor: Engine) -> None:
         """Tako stanje pusti migracija `0008_uporabniki` (`ADR-035` G)."""
         ustvari_starsa(motor, identifikator="brez-gesla@primer.test", geslo=None)
 
@@ -329,9 +332,7 @@ class TestNeuspesnaPrijava:
         assert prijava.SPOROCILO_NEUSPELA_PRIJAVA in odgovor.text
         assert sej_v_bazi(motor) == 0
 
-    def test_otrok_dobi_razlago_in_ne_seje(
-        self, aplikacija: FastAPI, motor: Engine
-    ) -> None:
+    def test_otrok_dobi_razlago_in_ne_seje(self, aplikacija: FastAPI, motor: Engine) -> None:
         """Edina izjema od enotnega sporočila (`ADR-035` F)."""
         ustvari_starsa(
             motor,
@@ -342,9 +343,7 @@ class TestNeuspesnaPrijava:
         )
 
         with PrijavljenOdjemalec(aplikacija, base_url="https://testserver") as odjemalec:
-            odgovor = prijavi_se(
-                odjemalec, identifikator=OTROK_IDENTIFIKATOR, geslo=GESLO_OTROKA
-            )
+            odgovor = prijavi_se(odjemalec, identifikator=OTROK_IDENTIFIKATOR, geslo=GESLO_OTROKA)
 
         assert odgovor.status_code == 401
         assert prijava.SPOROCILO_OTROK in odgovor.text
@@ -522,9 +521,7 @@ class TestEnakStrosekNeuspeha:
         klici = self._stej_preverbe(monkeypatch)
 
         with PrijavljenOdjemalec(aplikacija, base_url="https://testserver") as odjemalec:
-            prijavi_se(
-                odjemalec, identifikator="brez-gesla@primer.test", geslo="karkoli-12345"
-            )
+            prijavi_se(odjemalec, identifikator="brez-gesla@primer.test", geslo="karkoli-12345")
 
         assert len(klici) == 1
 
@@ -585,9 +582,7 @@ class TestSeja:
         assert sej_v_bazi(motor) == 0
         assert odjemalec.get("/admin", follow_redirects=False).status_code == 303
 
-    def test_odjava_brez_zetona_ne_odjavi(
-        self, odjemalec: TestClient, motor: Engine
-    ) -> None:
+    def test_odjava_brez_zetona_ne_odjavi(self, odjemalec: TestClient, motor: Engine) -> None:
         odgovor = odjemalec.post(prijava.POT_ODJAVE, data={"csrf": "napacen"})
 
         assert odgovor.status_code == 403
@@ -660,9 +655,7 @@ class TestSeja:
 class TestCsrfPodAdminom:
     """Kriterij: `POST` brez žetona vrne 403 — na **vsaki** poti pod `/admin`."""
 
-    def test_vsak_post_brez_zetona_je_403(
-        self, aplikacija: FastAPI, odjemalec: TestClient
-    ) -> None:
+    def test_vsak_post_brez_zetona_je_403(self, aplikacija: FastAPI, odjemalec: TestClient) -> None:
         posti = [(m, p) for m, p in poti_pod_adminom(aplikacija) if m == "POST"]
         assert len(posti) >= 7, "seznam POST poti je sumljivo kratek"
 
@@ -697,18 +690,14 @@ class TestCsrfPodAdminom:
         """Test zgoraj ni prazen: z žetonom ista pot deluje."""
         snov(motor, slike, UUID_ENA)
 
-        odgovor = odjemalec.post(
-            f"/admin/materials/{UUID_ENA}/archive", follow_redirects=False
-        )
+        odgovor = odjemalec.post(f"/admin/materials/{UUID_ENA}/archive", follow_redirects=False)
 
         assert odgovor.status_code == 303
         with Session(motor) as seja:
             assert seja.scalars(select(Material.archived_at)).one() is not None
 
     @pytest.mark.parametrize("metoda", ["DELETE", "PUT", "PATCH"])
-    def test_nevarna_metoda_brez_zetona_je_403(
-        self, odjemalec: TestClient, metoda: str
-    ) -> None:
+    def test_nevarna_metoda_brez_zetona_je_403(self, odjemalec: TestClient, metoda: str) -> None:
         """Pravilo je „vse razen `GET`/`HEAD`", ne „samo `POST`".
 
         Takih poti pod `/admin` danes ni; `V3-R06` jih bo dodajal in plast, ki
@@ -752,3 +741,194 @@ class TestGlavaStrani:
         assert f'action="{prijava.POT_ODJAVE}"' not in besedilo
         assert '<span class="druzina">' not in besedilo
         assert "Cvek" not in besedilo
+
+
+class TestPrijavaTelefona:
+    """`POST /auth/login` in `POST /auth/logout` (V3-R04, `ADR-036` G).
+
+    Ista preverba kot v brskalniku, drug prenosnik: JSON namesto obrazca,
+    žeton v odgovoru namesto piškotka, in brez CSRF — brez piškotka ga ni
+    treba. Kar tu ni podvojeno iz razredov zgoraj, je to, kar je za obe poti
+    isto (omejevanje, enak strošek neuspeha, čiščenje poteklih sej): tega ne
+    določa prenosnik, ampak `app/prijava.py`.
+    """
+
+    def prijavi(
+        self,
+        odjemalec: TestClient,
+        identifikator: str = OTROK_IDENTIFIKATOR,
+        geslo: str = GESLO_OTROKA,
+    ) -> Any:
+        return odjemalec.post(
+            prijava.POT_PRIJAVE_TELEFONA,
+            json={"identifier": identifikator, "password": geslo},
+        )
+
+    def test_otrok_dobi_zeton_in_svoje_ime(self, brez_prijave: TestClient, motor: Engine) -> None:
+        user_id = ustvari_otroka(motor)
+
+        odgovor = self.prijavi(brez_prijave)
+
+        assert odgovor.status_code == 200
+        telo = odgovor.json()
+        assert telo["user_id"] == user_id
+        assert telo["display_name"] == "Maša"
+        assert len(telo["token"]) >= 32
+        assert sej_v_bazi(motor) == 1
+
+    def test_zeton_v_odgovoru_odpre_poti_telefona(
+        self, brez_prijave: TestClient, motor: Engine
+    ) -> None:
+        ustvari_otroka(motor)
+        zeton = self.prijavi(brez_prijave).json()["token"]
+
+        odgovor = brez_prijave.get("/quizzes/pending", headers={"Authorization": f"Bearer {zeton}"})
+
+        assert odgovor.status_code == 200
+
+    def test_v_bazi_je_samo_zgostitev_zetona(self, brez_prijave: TestClient, motor: Engine) -> None:
+        """Kdor prebere bazo, se z njeno vsebino ne more prijaviti (`ADR-035` B)."""
+        ustvari_otroka(motor)
+        zeton = self.prijavi(brez_prijave).json()["token"]
+
+        with Session(motor) as seja:
+            zgostitve = list(seja.scalars(select(UserSession.token_hash)))
+
+        assert zgostitve == [prijava.zgostitev_zetona(zeton)]
+        assert zeton not in zgostitve
+
+    def test_piskotka_ne_postavi(self, brez_prijave: TestClient, motor: Engine) -> None:
+        """Telefon piškotkov nima; postavljen piškotek bi bil tiha druga pot."""
+        ustvari_otroka(motor)
+
+        odgovor = self.prijavi(brez_prijave)
+
+        assert odgovor.cookies.get(prijava.PISKOTEK_SEJE) is None
+
+    def test_stars_je_zavrnjen_z_razlago_in_brez_seje(
+        self, brez_prijave: TestClient, motor: Engine
+    ) -> None:
+        """Zrcalno `ADR-035` F: vsaka vloga ima svoja vrata (`ADR-036` D)."""
+        odgovor = self.prijavi(brez_prijave, identifikator=STARS_IDENTIFIKATOR, geslo=GESLO_STARSA)
+
+        assert odgovor.status_code == 401
+        assert odgovor.json()["detail"] == prijava.SPOROCILO_STARS
+        assert sej_v_bazi(motor) == 0
+
+    def test_pravo_geslo_starsa_ne_steje_kot_neuspeh(
+        self, brez_prijave: TestClient, motor: Engine
+    ) -> None:
+        """Geslo je pravo, le vrata so napačna — to ni ugibanje."""
+        self.prijavi(brez_prijave, identifikator=STARS_IDENTIFIKATOR, geslo=GESLO_STARSA)
+
+        with Session(motor) as seja:
+            assert list(seja.scalars(select(LoginAttempt.id))) == []
+
+    @pytest.mark.parametrize(
+        ("identifikator", "geslo"),
+        [
+            (OTROK_IDENTIFIKATOR, "to-geslo-ni-pravo"),
+            ("otrok-ki-ga-ni", GESLO_OTROKA),
+        ],
+    )
+    def test_napacno_geslo_in_neznano_ime_dasta_isto_sporocilo(
+        self, brez_prijave: TestClient, motor: Engine, identifikator: str, geslo: str
+    ) -> None:
+        ustvari_otroka(motor)
+
+        odgovor = self.prijavi(brez_prijave, identifikator=identifikator, geslo=geslo)
+
+        assert odgovor.status_code == 401
+        assert odgovor.json()["detail"] == prijava.SPOROCILO_NEUSPELA_PRIJAVA
+        assert sej_v_bazi(motor) == 0
+
+    def test_deaktiviran_otrok_se_ne_prijavi(self, brez_prijave: TestClient, motor: Engine) -> None:
+        """Deaktivacija pride z `V3-R06`; zastavica obstaja že od `V3-R03`."""
+        ustvari_otroka(motor, aktiven=False)
+
+        odgovor = self.prijavi(brez_prijave)
+
+        assert odgovor.status_code == 401
+        assert odgovor.json()["detail"] == prijava.SPOROCILO_NEUSPELA_PRIJAVA
+        assert sej_v_bazi(motor) == 0
+
+    def test_otrok_brez_nastavljenega_gesla_se_ne_prijavi(
+        self, brez_prijave: TestClient, motor: Engine
+    ) -> None:
+        """Stanje, v katerem uporabnika pusti migracija (`ADR-035` G)."""
+        ustvari_otroka(motor, geslo=None)
+
+        odgovor = self.prijavi(brez_prijave, geslo="karkoli-pac")
+
+        assert odgovor.status_code == 401
+        assert sej_v_bazi(motor) == 0
+
+    def test_neuspeh_se_steje_v_omejevanje(self, brez_prijave: TestClient, motor: Engine) -> None:
+        """Ugibanje na telefonu gre v isto tabelo kot ugibanje v brskalniku."""
+        ustvari_otroka(motor)
+
+        self.prijavi(brez_prijave, geslo="to-geslo-ni-pravo")
+
+        with Session(motor) as seja:
+            identifikatorji = list(seja.scalars(select(LoginAttempt.identifier)))
+        assert identifikatorji == [OTROK_IDENTIFIKATOR]
+
+    def test_odjava_pobrise_sejo_in_zeton_neha_veljati(
+        self, brez_prijave: TestClient, motor: Engine
+    ) -> None:
+        ustvari_otroka(motor)
+        zeton = self.prijavi(brez_prijave).json()["token"]
+        glave = {"Authorization": f"Bearer {zeton}"}
+
+        odgovor = brez_prijave.post(prijava.POT_ODJAVE_TELEFONA, headers=glave)
+
+        assert odgovor.status_code == 200
+        assert odgovor.json() == {"logged_out": True}
+        assert sej_v_bazi(motor) == 0
+        assert brez_prijave.get("/quizzes/pending", headers=glave).status_code == 401
+
+    def test_odjava_brez_zetona_je_401(self, brez_prijave: TestClient) -> None:
+        """Brez seje ni ničesar za odjaviti; telefon žeton preprosto zavrže."""
+        assert brez_prijave.post(prijava.POT_ODJAVE_TELEFONA).status_code == 401
+
+    def test_odjava_pusti_seje_drugih_naprav(self, brez_prijave: TestClient, motor: Engine) -> None:
+        """Ena naprava, ena seja. Odjava telefona ni odjava vseh naprav."""
+        ustvari_otroka(motor)
+        prva = self.prijavi(brez_prijave).json()["token"]
+        self.prijavi(brez_prijave)
+
+        brez_prijave.post(prijava.POT_ODJAVE_TELEFONA, headers={"Authorization": f"Bearer {prva}"})
+
+        assert sej_v_bazi(motor) == 1
+
+
+class TestVrataVeljajoTudiZaZeNastaloSejo:
+    """Vloga se preveri ob **vsaki uporabi** seje, ne samo ob prijavi.
+
+    Ta razred varuje luknjo, ki jo je odprla prav `V3-R04`: do nje otrokove
+    seje ni bilo mogoče ustvariti, ker jo je admin zavrnil, zato je preverba ob
+    prijavi zadoščala. Odkar telefon seje ustvarja, je isti neprozoren niz
+    uporaben v obeh prenosnikih (`ADR-027`) — in brez te preverbe bi otrok s
+    svojim žetonom v piškotku odprl celoten `/admin`.
+    """
+
+    def test_otrokov_zeton_v_piskotku_ne_odpre_admina(
+        self, brez_prijave: TestClient, motor: Engine
+    ) -> None:
+        telefon = ustvari_sejo(motor, ustvari_otroka(motor))
+        brez_prijave.cookies.set(prijava.PISKOTEK_SEJE, telefon.zeton)
+
+        odgovor = brez_prijave.get("/admin", follow_redirects=False)
+
+        assert odgovor.status_code == 303
+        assert odgovor.headers["location"].startswith(prijava.POT_PRIJAVE)
+
+    def test_starsev_zeton_v_glavi_ne_odpre_poti_telefona(
+        self, brez_prijave: TestClient, motor: Engine
+    ) -> None:
+        brskalnik = ustvari_sejo(motor, ustvari_starsa(motor, identifikator="drug@primer.test"))
+
+        odgovor = brez_prijave.get("/quizzes/pending", headers=brskalnik.glave)
+
+        assert odgovor.status_code == 401
+        assert odgovor.json()["detail"] == SPOROCILO_NEVELJAVEN_ZETON

@@ -28,6 +28,7 @@ import type { MaterialsDatabase } from '../db/materials';
 import { asMaterialsDatabase } from '../db/open';
 import { ustvariPonavljalnik, type Ponavljalnik } from './izbrisi';
 import { uskladiKvize, ustvariOdjemalcaKvizov, type OdjemalecKvizov } from './kvizi';
+import { usePrijava } from './use-prijava';
 
 export type KviziVrednost = {
   /** Koliko kvizov čaka na reševanje — iz lokalne baze. */
@@ -70,11 +71,16 @@ export function KviziProvider({
     [nastavitveLastnost],
   );
 
-  // Brez naslova in ključa odjemalca ni: kvizi ne pridejo, aplikacija pa
-  // deluje naprej kot pred V2-R02.
+  const { seja } = usePrijava();
+  const lastnik = seja?.userId ?? null;
+
+  // Brez naslova ali brez prijave odjemalca ni: kvizi ne pridejo, aplikacija
+  // pa deluje naprej kot pred V2-R02 (`docs/odlocitve/ADR-036` A).
   const odjemalec = useMemo<OdjemalecKvizov | null>(
-    () => odjemalecLastnost ?? (nastavitve ? ustvariOdjemalcaKvizov(nastavitve) : null),
-    [nastavitve, odjemalecLastnost],
+    () =>
+      odjemalecLastnost ??
+      (nastavitve && seja ? ustvariOdjemalcaKvizov(nastavitve, seja) : null),
+    [nastavitve, odjemalecLastnost, seja],
   );
 
   const [cakajocih, setCakajocih] = useState(0);
@@ -99,7 +105,7 @@ export function KviziProvider({
 
     const nov = ustvariPonavljalnik({
       naloga: async () => {
-        await uskladiKvize(db, odjemalec, odprti.current, zavrnjeni.current);
+        await uskladiKvize(db, odjemalec, lastnik, odprti.current, zavrnjeni.current);
         await osvezi();
       },
     });
@@ -120,7 +126,7 @@ export function KviziProvider({
       nov.ustavi();
       ponavljalnik.current = null;
     };
-  }, [db, odjemalec, osvezi]);
+  }, [db, lastnik, odjemalec, osvezi]);
 
   const sprozi = useCallback(() => {
     // `zazeni` pri tekočem obhodu ne naredi ničesar (zapora v ponavljalniku),

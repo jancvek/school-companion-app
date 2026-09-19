@@ -11,6 +11,16 @@ export type SaveCaptureInput = {
   takenAt: string;
   /** Začasni naslov, ki ga vrne kamera. */
   sourceUri: string;
+  /**
+   * Kdo je bil prijavljen ob posnetku; `null`, če nihče (V3-R04).
+   *
+   * **Obvezno, čeprav sme biti `null`.** Prijava ni pogoj za slikanje
+   * (`docs/odlocitve/ADR-036` A), zato je `null` veljavna vrednost — a
+   * privzetek bi pomenil, da pozabljen argument tiho naredi zapis brez
+   * lastnika, in to na najbolj občutljivem mestu: ob nastanku vrstice.
+   * Isti razlog kot pri `lastnik` v `src/sync/worker.ts`.
+   */
+  userId: string | null;
 };
 
 /**
@@ -24,7 +34,7 @@ export type SaveCaptureInput = {
  */
 export async function saveCapture(
   db: MaterialsDatabase,
-  { subject, takenAt, sourceUri }: SaveCaptureInput,
+  { subject, takenAt, sourceUri, userId }: SaveCaptureInput,
 ): Promise<Material> {
   const id = Crypto.randomUUID();
 
@@ -39,6 +49,7 @@ export async function saveCapture(
     sync_attempts: 0,
     last_attempt_at: null,
     sync_error: null,
+    user_id: userId,
   };
 
   try {

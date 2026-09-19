@@ -34,7 +34,7 @@ običajnim orodjem (`npm`/`package.json` v `apps/mobile`,
 |---|---|
 | `app/` | zasloni; usmerjanje je datotečno (`expo-router`) |
 | `src/constants/` | seznam desetih predmetov (`{ value, label }`); od V2-R02 še štiri ocene samoocene (`ocene.ts`) |
-| `src/config/` | kar pride v aplikacijo ob gradnji: naslov strežnika (samo `https`, od V3-R02), API ključ in oznaka gradnje |
+| `src/config/` | kar pride v aplikacijo ob gradnji: naslov strežnika (samo `https`, od V3-R02) in oznaka gradnje; ključa od V3-R04 ni več |
 | `src/db/` | verzionirana shema (migracije) in poizvedbe nad tabelo `materials`; od V2-R02 še nad tabelami kvizov (`kvizi.ts`) |
 | `src/sync/` | prenos na strežnik: en prenos, čakalna vrsta, priklop na življenjski cikel; od V1-R07 tudi brisanje snovi, ki so na strežniku arhivirane; od V2-R02 usklajevanje kvizov in poskusov (`kvizi.ts`, `use-kvizi.tsx`) in skupni klic s časovno omejitvijo (`http.ts`). **Edina mapa v aplikaciji z omrežnim klicem.** |
 | `src/photos/` | stiskanje slike in zapis v `documentDirectory/photos/` |
@@ -70,7 +70,7 @@ logika testljiva brez naprave.
 | Datoteka | Odgovornost |
 |---|---|
 | `app/main.py` | tovarna aplikacije, življenjski cikel (zagon in ustavitev obdelave) |
-| `app/security.py` | vmesni plasti ob vhodu: `ApiKeyMiddleware` (telefon) in `SejaMiddleware` (seja in CSRF pod `/admin`, V3-R03) |
+| `app/security.py` | vmesni plasti ob vhodu: `ZetonMiddleware` (telefon, `Authorization: Bearer`, V3-R04) in `SejaMiddleware` (seja in CSRF pod `/admin`, V3-R03) |
 | `app/routers/materials.py` | `POST /materials` — prevzem slike s telefona |
 | `app/routers/admin.py` | operaterska stran: predmeti, snov, arhiv, brisanje |
 | `app/routers/kvizi.py` | sestavljalnik kvizov pod `/admin/quizzes` (V2-R01); rezultat rešenega kviza in stran za tisk (V2-R03) |
@@ -84,11 +84,11 @@ logika testljiva brez naprave.
 | `app/obdelava.py` | kaj se zgodi z enim zapisom: prevzem, klic, zapis izida. Sinhron |
 | `app/worker.py` | časovnik: obhodi v presledkih, zagon in ustavitev. Brez poslovne logike |
 | `app/statistika.py` | pravila štetja statistike: razporeditev, izpeljava pravilnosti, razvrstitev, meseci (V2-R04). Brez FastAPI in brez seje |
-| `app/prijava.py` | gesla (argon2id), žetoni sej, CSRF, omejevanje ugibanja, varen `next` — brez FastAPI (V3-R03) |
+| `app/prijava.py` | gesla (argon2id), žetoni sej, CSRF, omejevanje ugibanja, varen `next` — brez FastAPI (V3-R03); `Vrata` in `vloga_sodi`: katera vloga sme kam (V3-R04) |
 | `app/ukazi.py` | `python -m app.ukazi nastavi-geslo <identifikator>`; geslo z `getpass`, nikoli iz argumenta (V3-R03) |
-| `app/routers/vstop.py` | prijava in odjava: `GET/POST /admin/login`, `POST /admin/logout` (V3-R03) |
+| `app/routers/vstop.py` | prijava in odjava: `GET/POST /admin/login`, `POST /admin/logout` (V3-R03); `POST /auth/login` in `POST /auth/logout` za telefon (V3-R04) |
 | `app/settings.py` | nastavitve iz okolja |
-| `app/dependencies.py` | odvisnosti poti iz `app.state`; družina admina iz seje (`daj_druzino`, V3-R03) in začasna družina telefona (`daj_druzino_telefona`, `ADR-029` A) |
+| `app/dependencies.py` | odvisnosti poti iz `app.state`; družina iz seje — ene same, za obe strani (`daj_druzino`, V3-R04; začasne `daj_druzino_telefona` ni več) |
 | `app/subjects.py` | predmeti, slovenske oznake stanj in oznake ocen (`OZNAKE_OCEN`, tu od V2-R04) |
 | `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03); šolsko leto in meseci (V2-R04); današnji dan, meje poljubnega obdobja in ura brez datuma (V2-R07) |
 | `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01) ter 400 (V2-R07); obdelovalec konteksta z glavo in CSRF žetonom (V3-R03) |
@@ -145,7 +145,7 @@ vrne samo gumb „Poskusi znova". Glej `docs/odlocitve/ADR-004`.
 #### Migracije lokalne sheme
 
 Shema je verzionirana prek `PRAGMA user_version` (`src/db/migrations.ts`);
-trenutna verzija je **2**. `CREATE TABLE IF NOT EXISTS` obstoječi tabeli
+trenutna verzija je **4**. `CREATE TABLE IF NOT EXISTS` obstoječi tabeli
 novega stolpca ne doda in tega ne javi, zato bi se brez migracij telefon z
 zapisi iz V1-R01 tiho pokvaril, testi nad svežo bazo pa bi bili zeleni.
 
@@ -163,7 +163,54 @@ preverjal nad tem, kar sam ustvari.
 
 Isto velja za migracijo 2: `CREATE_KVIZI_TABLES_SQL` v `src/db/kvizi.ts` je
 zamrznjena, test pa teče nad `SHEMA_VERZIJE_1` — dobesedno kopijo baze po
-migraciji 1, z vrsticami, kakršna je na Mašinem telefonu pred V2-R02.
+migraciji 1.
+
+#### Lastnik zapisa (migracija 3, V3-R04)
+
+`materials` in `attempts` dobita `user_id TEXT` (indeksiran, `NULL`-abilen).
+Test teče nad `SHEMA_VERZIJE_2` — dobesedno kopijo baze po migraciji 2,
+kakršna je na Mašinem telefonu pred V3-R04.
+
+**`NULL` pomeni „nastalo, ko ni bil prijavljen nihče“**, ne „brez
+lastnika za vedno“: tak zapis posvoji **vsaka razrešena seja**
+(`posvojiBrezLastnika`) — prijava in obnovitev žetona z diska enako. Okno, v
+katerem tak zapis nastane, se ne odpre le ob zagonu, ampak tudi, kadar branje
+ali brisanje iz varne shrambe spodleti; vezanje posvojitve zgolj na prijavo bi
+tak zapis pustilo nedosegljiv za vedno (`ADR-036`, popravki po drugem
+pregledu). Brez tega bi bila nadgradnja Mašinega telefona
+vrsta, ki ne odide nikoli, saj so vse obstoječe vrstice brez lastnika.
+
+Pogoj lastništva je povsod `user_id IS ?` in ne `=`: isti stavek tako
+velja za prijavljeno uporabnico in za neprijavljeno aplikacijo. Filtrirajo
+vrsta (`listPending`), števci (`countByStatus`), Zgodovina
+(`listBySubject`), vrnitev v vrsto (`retryFailed`) in nepreneseni poskusi
+(`neprenesenePoskuse`).
+
+**Stik na `attempts` v `cakajociKvizi` in `postavkeKviza` lastnika
+namenoma ne filtrira.** Postavka ima en sam poskus (`UNIQUE (quiz_item_id)`
+tu in „prvi zmaga“ na strežniku, `ADR-019` E), zato bi filtriran stik
+drugemu otroku pokazal neodgovorjeno postavko, ki je ne bi mogel
+odgovoriti. V V3-R04 je kviz še last družine; `V3-R07` to reši tam.
+
+`pobrisiKvizeRazen` ne pobriše kviza, na katerem visi **tuj neprenesen
+poskus**: seznam s strežnika je seznam prijavljenega otroka, zato bi bil
+vsak kviz prejšnjega videti kot preklican (`ADR-036` C).
+
+#### Sled o nedokončani odjavi (migracija 4, V3-R04)
+
+Tabela `naprava` (`id = 1`, `odjava_ob`) — ena sama vrstica, ki jo jamči
+`CHECK (id = 1)`. Postavi jo odjava **pred** brisanjem iz varne shrambe in
+počisti takoj, ko brisanje uspe; obstaja torej samo takrat, kadar je odjava
+ostala nedokončana.
+
+Žeton, ki ga ob zagonu sreča postavljena oznaka, je **ostanek in ne seja**:
+zavrže se, brisanje se poskusi znova, aplikacija ostane neprijavljena. Brez
+tega bi se po spodleteli odjavi prejšnja seja obnovila in posvojila posnetke,
+ki jih je med tem naredil kdo drug (`ADR-037`).
+
+Oznaka je v tej bazi in ne v varni shrambi prav zato, ker obstaja za primer,
+ko odpove varna shramba. Prijava jo počisti — nova prijava prekliče vsako
+nedokončano odjavo pred njo.
 
 #### Tabele kvizov (migracija 2, V2-R02)
 
@@ -205,11 +252,12 @@ brez njega ostalo brez družine (`ADR-029` C). Primarni ključi ostanejo globaln
   `family_id` v konstruktorju, brez privzetka; prazen niz je `ValueError`. Seja
   je zasebna, `Session.get` se nad podatki ne uporablja, vsaka poizvedba in
   vsak `UPDATE` ima pogoj družine. Nove vrstice dobijo družino od repozitorija.
-- `DruzineRepository` bere samo `families` (za obdelavo in izbiro družine).
-- **Izbira družine je začasna** (`ADR-029` A): `daj_druzino` vrne edino
-  družino v bazi, pri nič ali več vrže `500` s slovenskim sporočilom. Ena
-  poizvedba na zahtevo. Zamenjata jo seja (`V3-R03`) in žeton (`V3-R04`);
-  do takrat druga družina v bazi ustavi vse poti.
+- `DruzineRepository` bere samo `families` (za obdelavo).
+- **Družino pove seja, na obeh straneh** (V3-R04): `daj_druzino` vrne
+  `family_id` iz seje, ki jo je razrešila vmesna plast — brez poizvedbe.
+  Začasna izbira „edina družina v bazi" (`ADR-029` A) je odpadla skupaj z
+  API ključem (`ADR-036` F); druga družina v bazi zato ne ustavi več ničesar,
+  kar je bil pogoj za `V3-R05`.
 - `tests/test_tesnjenje.py` pošlje identifikatorje ene družine v imenu druge
   na vsako pot in v vsako javno metodo repozitorijev. Varovali zahtevata, da
   ima vsaka pot in metoda svoj primer; posnetek družine zavrne tabelo brez
@@ -490,15 +538,24 @@ Od V3-R01 obstaja četrti izid: **409** za `id`, ki na strežniku obstaja v
 družini zapisa ni; pravkar zapisana datoteka se pobriše. Pravilno delujoč
 telefon tega izida ne vidi.
 
-Ključ preverja **ASGI vmesna plast**, ne odvisnost endpointa: FastAPI telo
-zahteve prebere pred razreševanjem odvisnosti, zato bi strežnik večmegabajtno
-sliko najprej prebral in šele nato ugotovil, da ključ ne velja. Izvzeta sta
-`GET /health` in celotna predpona `/admin`.
+Od V3-R04 obstaja peti izid: **401** za zahtevo brez veljavnega žetona. Telefon
+ga **ne** šteje za sodbo o vsebini: zapis ostane `pending` in prenos počaka na
+prijavo (`ADR-036` H). To je izjema od pravila `ADR-004`, ker se to stanje more
+spremeniti samo od sebe.
+
+**Žeton** preverja **ASGI vmesna plast** (`ZetonMiddleware`, od V3-R04), ne
+odvisnost endpointa: FastAPI telo zahteve prebere pred razreševanjem
+odvisnosti, zato bi strežnik večmegabajtno sliko najprej prebral in šele nato
+ugotovil, da prijava ne velja. Izvzeti so `GET /health`, `POST /auth/login` in
+celotna predpona `/admin`; odjava telefona izvzeta **ni**.
+
+Do V3-R04 je bil tu en sam vgrajen `API_KEY` za vse družine. Odpadel je ostro,
+ne postopno (`ADR-027` C2, `ADR-036`): strežnik ne sprejema obojega.
 
 Izvzetje predpone je **varnostna meja, ne priročnost**: ujame se na `/admin`
 in na `/admin/...`, nikoli na pot, ki se le začne enako (`/administration`).
 Da izvzetje ne odpre ničesar drugega, dokazuje razred
-`TestKljucOstajaZahtevanDrugod` v `tests/test_admin.py` — brez njega bi bila
+`TestPrijavaOstajaZahtevanaDrugod` v `tests/test_admin.py` — brez njega bi bila
 sprememba te vrstice nevidna do dneva, ko bi bilo prepozno.
 
 Na telefonu prenos teče prek `File.upload` iz `expo-file-system` (nativni
@@ -700,10 +757,53 @@ Odločitve so v `ADR-027` (model) in `ADR-035` (izvedba).
 - **Geslo nastavi lastnik z ukazom** v vsebniku:
   `docker compose exec api python -m app.ukazi nastavi-geslo <identifikator>`.
   Geslo pride z `getpass`, nikoli iz argumenta ali okolja. Najkrajše geslo je
-  12 znakov za starša in 4 za otroka.
-- **Telefon se to ne dotakne.** `X-API-Key` in poti `/materials`,
-  `/quizzes/pending`, `/quiz-attempts` so nespremenjeni; ključ odpade v
-  `V3-R04`, ko isto tabelo `sessions` uporabi z glavo `Authorization: Bearer`.
+  12 znakov za starša in **8 za otroka** — otrokovih 4 iz `ADR-035` G je
+  razveljavil `ADR-036` E, ko je mobilna prijava postala dosegljiva z javnega
+  interneta.
+- **Telefon se s tem do V3-R04 ni srečal.** Odtlej uporablja isto tabelo
+  `sessions`, le da žeton nosi v glavi `Authorization: Bearer`; glej razdelek
+  spodaj.
+
+## Prijava na telefonu (V3-R04)
+
+Isti model identitete kot v brskalniku (`ADR-027`), drug prenosnik.
+Izvedbene odločitve so v `ADR-036`.
+
+| Pot | Metoda | Kaj |
+|---|---|---|
+| `/auth/login` | POST | JSON `{identifier, password}` → žeton, `user_id`, ime |
+| `/auth/logout` | POST | izbriše sejo te naprave (zahteva žeton) |
+
+- **`ZetonMiddleware` je plast, ne odvisnost**, iz istega razloga kot
+  `SejaMiddleware`: telo zahteve se bere pred odvisnostmi, zato bi bila
+  večmegabajtna slika prebrana, preden bi se izkazalo, da prijave ni.
+  Sejo razreši enkrat in jo poda v `scope["state"]`, od koder družino
+  prebere `daj_druzino` — ista odvisnost kot za admin.
+- **Vsaka vloga ima svoja vrata** (`prijava.Vrata`), in vrata se preverijo
+  **ob vsaki uporabi seje**, ne le ob prijavi. Do V3-R04 otrokove seje ni
+  bilo mogoče ustvariti, zato je preverba ob prijavi zadoščala; odkar
+  telefon seje ustvarja, bi isti žeton, prilepljen v piškotek `seja`,
+  brez te vrstice odprl celoten `/admin`.
+- **CSRF tu ni** in ga ni treba: brez piškotka ni zahteve, ki bi jo
+  brskalnik poslal sam od sebe.
+- **Omejevanje ugibanja je skupno** z brskalnikom — ista tabela
+  `login_attempts`, isti prag, isti zamik (`ADR-035` E).
+- **Odjava je najprej lokalna.** Telefon žeton zavrže v vsakem primeru;
+  klic na strežnik je najboljši poskus. Nedosegljiv strežnik ne sme
+  pustiti otroka prijavljenega na napravi. Če brisanje iz varne shrambe
+  spodleti, to zabeleži tabela `naprava` in naslednji zagon tak žeton
+  zavrže (`ADR-037`).
+- **Lokalni zapis nosi lastnika.** `materials.user_id` in `attempts.user_id`
+  v bazi telefona (migracija 3): naprava je skupna, identiteta pa ne.
+  Prenaša, šteje in kaže se izključno lastnikovo; zapis brez lastnika
+  posvoji vsaka razrešena seja — prijava in obnovitev žetona z diska.
+  Podrobnosti so v razdelku o lokalni bazi.
+- **`401` ni `failed`.** Zapis ostane `pending` in prenos počaka na
+  prijavo; to je edina izjema od pravila `ADR-004` poleg `410`. Izid ga
+  **loči** od nedosegljivega strežnika (`Izid.prijavaPotekla`), ker je to
+  edino stanje vrste, ki ga uporabnica more odpraviti sama: domača stran
+  pove „Prijava je potekla, prijavi se znova". Odjave ob `401` ni —
+  aplikacija pove, ne ukrepa namesto otroka (`ADR-036`, tretji pregled).
 
 ## Sestavljalnik kvizov (V2-R01)
 
@@ -1042,8 +1142,8 @@ omrežja. Splošne sinhronizacije vprašanj ni (`ADR-016`, posledice).
 | `GET /quizzes/pending` | **celoten delovni seznam** nepreklicanih in nerešenih kvizov, najstarejši prvi, s postavkami; besedilo je zamrznjeno iz `quiz_items`, ne iz `questions`; pri vsaki postavki `answered` |
 | `POST /quiz-attempts` | paket do 1000 poskusov; odgovor `200` z `recorded` = koliko jih je bilo res zapisanih |
 
-Obe poti zahtevata API ključ — nista pod `/admin` in izvzetje (`ADR-006`) se ni
-razširilo. Vzorec je isti kot pri arhivu: brez kazalca in brez časa zadnje
+Obe poti zahtevata **veljaven žeton otroka** (V3-R04) — nista pod `/admin`
+in izvzetje (`ADR-006`) se ni razširilo. Vzorec je isti kot pri arhivu: brez kazalca in brez časa zadnje
 sinhronizacije (`ADR-011`). Kviz, ki ga na seznamu ni več, je rešen ali
 preklican.
 
@@ -1202,9 +1302,10 @@ telefon / brskalnik ─HTTPS 443─▶ usmerjevalnik ─▶ stroj:443 ─▶ cad
   Admin varuje prijava v aplikaciji sami; `ADMIN_UPORABNIK` in
   `ADMIN_ZGOSTITEV` sta iz `okolje.primer` in Compose odstranjena.
 - **Caddy sam odgovori na `/favicon.ico` s 204.** Brez tega ikona zavihka pride
-  do `api`, ki zanjo vrne 401 (API ključ). Z `basic_auth` je to brskalniku
-  pobrisalo geslo za `/admin` (Chrome, Edge); odkar gesla v Caddyju ni,
-  ostane le napaka v dnevniku ob vsakem odprtju. Admin se odpira z `/admin`.
+  do `api`, ki zanjo vrne 401 — do V3-R04 zaradi API ključa, odtlej zaradi
+  manjkajočega žetona. Z `basic_auth` je to brskalniku pobrisalo geslo za
+  `/admin` (Chrome, Edge); odkar gesla v Caddyju ni, ostane le napaka v
+  dnevniku ob vsakem odprtju. Admin se odpira z `/admin`.
 - **`api` zaupa proxy glavam samo s Caddyjevega naslova**
   (`--proxy-headers --forwarded-allow-ips 172.30.10.10`, v Compose in v
   `Dockerfile`).
@@ -1287,6 +1388,7 @@ Sklop zunaj repozitorija, po vrsti:
 | `expo-file-system` | `documentDirectory/photos/`, premik in brisanje datotek | V1-R01 |
 | `expo-image-manipulator` | pomanjšanje na 1600 px in JPEG 0.8 | V1-R01 |
 | `expo-crypto` | UUID, generiran na telefonu | V1-R01 |
+| `expo-secure-store` | žeton seje; `expo-sqlite` in `AsyncStorage` nista šifrirana in žeton ne sme ležati ob slikah (`ADR-027`) | V3-R04 |
 | `react-native`, `react`, `react-dom` | osnova | V1-R01 |
 | `react-native-safe-area-context` | odmiki varnega območja; koda ga uvaža neposredno (`useSafeAreaInsets`) | V1-R01 |
 | `expo-constants`, `expo-linking`, `react-native-screens`, `react-native-gesture-handler`, `react-native-reanimated`, `react-native-worklets` | `peerDependencies` paketa `expo-router`; koda jih ne uvaža neposredno | V1-R01 |
@@ -1296,6 +1398,10 @@ V1-R02 telefonu ni dodala nobene odvisnosti — prenos teče prek
 `expo-file-system`, nastavitve pa prek `expo-constants`, oba že iz V1-R01.
 Tudi V2-R02 ni dodala nobene, ne telefonu ne strežniku: UUID poskusa pride iz
 `expo-crypto`, ki je v projektu od V1-R01.
+
+`expo-secure-store` je nativni modul in zahteva vpis med `plugins` v
+`app.json`; v testih se ne uporablja, ker ponudnik prijave dobi shrambo kot
+lastnost.
 
 ### `apps/server` (Python 3.12)
 
@@ -1344,13 +1450,16 @@ pravilna — svež klon je nima in je čist. Znova jo ustvari
 `npx expo customize tsconfig.json` (ali `npm start`); nobene sledene datoteke
 ob tem ne spremeni. Odkrito v V2-R02.
 
-Naslov strežnika in API ključ prideta v aplikacijo **ob gradnji**, iz
-spremenljivk okolja `SERVER_BASE_URL` in `SERVER_API_KEY` (Expo naloži `.env`
-sam, `app.config.ts` ju prepiše v `extra`). Brez njiju se worker ne zažene,
-aplikacija pa deluje kot v V1-R01 in to tudi pove. Naslov brez sheme `https`
-šteje enako kot manjkajoč (V3-R02, `ADR-034` E). Ključ s tem konča vgrajen v
-APK — to je zavestno, ker potuje samo prek HTTPS in ga V3-R04 zamenja z
-žetonom; cena je, da zamenjava ključa zahteva novo gradnjo.
+Naslov strežnika pride v aplikacijo **ob gradnji**, iz spremenljivke okolja
+`SERVER_BASE_URL` (Expo naloži `.env` sam, `app.config.ts` jo prepiše v
+`extra`). Brez nje se worker ne zažene, aplikacija pa deluje kot v V1-R01 in
+to tudi pove. Naslov brez sheme `https` šteje enako kot manjkajoč (V3-R02,
+`ADR-034` E).
+
+**`SERVER_API_KEY` od V3-R04 ne obstaja več.** Skrivnosti v gradnji ni;
+kdo je prijavljen, pove žeton v varni shrambi. Spremenljivko je treba
+pobrisati tudi na expo.dev — v APK ne pride, dokler pa je tam, je
+skrivnost, ki je nihče ne vzdržuje.
 
 Po isti poti pride tudi **oznaka gradnje** (V1-R06): `app.config.ts` prepiše
 `EAS_BUILD_ID` v `extra.buildId`, domača stran pa jo izpiše kot
@@ -1390,10 +1499,10 @@ unzip -o app.apk AndroidManifest.xml   # kaj je v resnici v zgrajeni APK
 ```
 
 Prva pokaže v nekaj sekundah in brez gradnje, kaj pride v manifest; od V3-R02
-`<application>` nima `usesCleartextTraffic`. **Njen izpis vsebuje
-`extra.apiKey` in naslov strežnika v čisti obliki** — ne lepi ga v prijave
-napak in ne shranjuj v dnevnik; kadar gre le za manifest, ga poženi z
-`EXPO_NO_DOTENV=1` in praznima `SERVER_API_KEY` in `SERVER_BASE_URL`.
+`<application>` nima `usesCleartextTraffic`. Njen izpis vsebuje **naslov
+strežnika** v čisti obliki; od V3-R04 v njem ni več nobene skrivnosti
+(`extra.apiKey` je odpadel). Kadar gre le za manifest, ga poženi z
+`EXPO_NO_DOTENV=1` in praznim `SERVER_BASE_URL`.
 
 Druga pove, kaj je v zgrajeni APK. `AndroidManifest.xml` je tam **binarni
 AXML**: ime atributa je v nizovnem bazenu in ga `grep -a` najde, vrednost pa ni
@@ -1441,12 +1550,12 @@ copy apps\server\okolje.primer apps\server\.env   # nato izpolni
 docker compose -f apps\server\docker-compose.yml up -d --build
 ```
 
-`.env` prebere **Docker Compose**, da razreši `${API_KEY}` in poda vrednosti
-vsebniku; strežnik sam `.env` ne bere, ker bi bil `env_file` relativen na
-trenutno delovno mapo. `API_KEY` mora imeti vsaj 16 znakov, sicer se strežnik
-ne zažene. Brez `DOMENA` se Compose ne zažene (glej „Javni dostop").
-`BIND_ADDRESS` od V3-R02 ne obstaja več, `ADMIN_UPORABNIK` in
-`ADMIN_ZGOSTITEV` pa od V3-R03 ne.
+`.env` prebere **Docker Compose**, da razreši `${DATABASE_URL}` in poda
+vrednosti vsebniku; strežnik sam `.env` ne bere, ker bi bil `env_file`
+relativen na trenutno delovno mapo. Brez `DOMENA` se Compose ne zažene
+(glej „Javni dostop"). `BIND_ADDRESS` od V3-R02 ne obstaja več,
+`ADMIN_UPORABNIK` in `ADMIN_ZGOSTITEV` od V3-R03 ne, `API_KEY` pa od
+V3-R04 ne.
 
 **Po prvem zagonu `/admin` ni dosegljiv, dokler ni nastavljeno geslo** —
 migracija ustvari uporabnika brez njega (`ADR-035` G):
@@ -1456,12 +1565,14 @@ docker compose -f apps\server\docker-compose.yml exec api `
   python -m app.ukazi nastavi-geslo dejan.ambrus@gmail.com
 ```
 
-Isti ukaz nastavi geslo otroku (identifikator `masa`), ki ga bo potreboval
-`V3-R04`. Piškotek seje ima zastavico `Secure`; brskalniki jo sprejmejo tudi
-na `http://localhost`, zato razvojni zagon mimo Caddyja deluje.
+Isti ukaz nastavi geslo otroku (identifikator `masa`). **Od V3-R04 ni več
+izbiren:** brez njega se otrok ne more prijaviti v aplikacijo in prenos ne
+teče. Najkrajše otrokovo geslo je 8 znakov, starševo 12 (`ADR-036` E).
+Piškotek seje ima zastavico `Secure`; brskalniki jo sprejmejo tudi na
+`http://localhost`, zato razvojni zagon mimo Caddyja deluje.
 
-`OPENAI_API_KEY` se obnaša drugače od `API_KEY`: brez njega strežnik **normalno
-steče** in slike sprejema, ne teče pa obdelava. `OPENAI_MODEL` (privzeto
+`OPENAI_API_KEY` je ključ do **tuje** storitve in ostaja. Brez njega
+strežnik **normalno steče** in slike sprejema, ne teče pa obdelava. `OPENAI_MODEL` (privzeto
 `gpt-4.1`), `OPENAI_TIMEOUT_SECONDS` (120) in `WORKER_INTERVAL_SECONDS` (30) so
 neobvezni.
 

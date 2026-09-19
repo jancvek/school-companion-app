@@ -39,13 +39,29 @@ import {
   type Odjemalec,
   type Ponavljalnik,
 } from './izbrisi';
+import { usePrijava } from './use-prijava';
 import { prenesi, type Izid } from './upload';
 import { ustvariRazporejevalnik, type PrenesiEno, type Razporejevalnik } from './worker';
 
 const PRAZEN_POVZETEK: SyncPovzetek = { pending: 0, synced: 0, failed: 0 };
 
+/**
+ * Ali ugotovitev o potekli prijavi še velja.
+ *
+ * Ugotovitev nosi **čigava** prijava je potekla, ne le „ali je". Velja samo,
+ * dokler je prijavljen isti človek: ob odjavi in ob menjavi uporabnika mora
+ * sporočilo izginiti samo od sebe, sicer bi Jaka takoj po uspešni prijavi
+ * videl, da je njegova prijava potekla.
+ *
+ * Svoja funkcija in ne izraz v telesu ponudnika, da je pravilo mogoče trditi
+ * brez izrisa in brez menjave seje sredi testa.
+ */
+export function sporociloVelja(poteklaZa: string | null, lastnik: string | null): boolean {
+  return poteklaZa !== null && poteklaZa === lastnik;
+}
+
 export type SyncVrednost = {
-  /** Ali sta naslov strežnika in ključ sploh prišla v to gradnjo. */
+  /** Ali je naslov strežnika sploh prišel v to gradnjo. */
   nastavljen: boolean;
   povzetek: SyncPovzetek;
   /** Znova prebere števce iz baze. */
@@ -54,6 +70,14 @@ export type SyncVrednost = {
   sprozi(): void;
   /** Vrne neuspele zapise v vrsto in takoj poskusi znova. */
   poskusiZnova(): Promise<void>;
+  /**
+   * Ali je prenos nazadnje ustavila potekla prijava.
+   *
+   * Domača stran to pove naravnost (kriterij `V3-R04`): to je edino stanje
+   * vrste, ki ga uporabnica more odpraviti sama, in brez tega se od
+   * nedosegljivega strežnika ne loči po ničemer, kar se vidi.
+   */
+  prijavaPotekla: boolean;
 };
 
 const SyncContext = createContext<SyncVrednost | null>(null);
@@ -88,32 +112,44 @@ export function SyncProvider({
     [nastavitveLastnost],
   );
 
+  const { seja } = usePrijava();
+  // Lastnik zapisov, ki jih ta naprava ta hip prenaša in šteje. `null` pomeni
+  // „ni prijavljen nihče" in ne „vsi": tuj zapis ni ne štet ne poslan
+  // (`docs/odlocitve/ADR-036` B).
+  const lastnik = seja?.userId ?? null;
+
   const [povzetek, setPovzetek] = useState<SyncPovzetek>(PRAZEN_POVZETEK);
+  // Čigava prijava je potekla, ne „ali je potekla": ugotovitev velja za tisto
+  // sejo, v kateri je nastala. Izpeljava iz nje je cenejša od učinka, ki bi
+  // stanje ponastavljal ob vsaki menjavi seje.
+  const [poteklaZa, setPoteklaZa] = useState<string | null>(null);
   const razporejevalnik = useRef<Razporejevalnik | null>(null);
 
-  // Odjemalec za arhiv nastane samo, kadar sta naslov in ključ v gradnji.
-  // Brez njiju aplikacija deluje kot v V1-R01 in nima s kom govoriti.
+  // Odjemalec za arhiv nastane samo, kadar je naslov v gradnji **in** je kdo
+  // prijavljen. Brez enega ali drugega aplikacija deluje kot v V1-R01 in nima
+  // s kom govoriti.
   const odjemalec = useMemo<Odjemalec | null>(
-    () => odjemalecLastnost ?? (nastavitve ? ustvariOdjemalca(nastavitve) : null),
-    [nastavitve, odjemalecLastnost],
+    () => odjemalecLastnost ?? (nastavitve && seja ? ustvariOdjemalca(nastavitve, seja) : null),
+    [nastavitve, odjemalecLastnost, seja],
   );
 
   const osvezi = useCallback(async () => {
     try {
-      setPovzetek(await countByStatus(db));
+      setPovzetek(await countByStatus(db, lastnik));
     } catch {
       // Števec je postranska informacija. Če je ni, zaslon še vedno dela —
       // napaka pri štetju ne sme podreti domače strani.
     }
-  }, [db]);
+  }, [db, lastnik]);
 
   const prenesiEno = useCallback<PrenesiEno>(
     async (material): Promise<Izid> => {
       if (prenesiEnoLastnost) return prenesiEnoLastnost(material);
       if (!nastavitve) return { vrsta: 'pending', razlog: 'Prenos ni nastavljen.' };
-      return prenesi(material, nastavitve);
+      if (!seja) return { vrsta: 'pending', razlog: 'Nisi prijavljena.' };
+      return prenesi(material, nastavitve, seja);
     },
-    [nastavitve, prenesiEnoLastnost],
+    [nastavitve, prenesiEnoLastnost, seja],
   );
 
   // Prvega branja števcev tu ni namenoma: zaslon, ki jih kaže, jih prebere ob
@@ -121,17 +157,22 @@ export function SyncProvider({
   // vpetju ponudnika bi bilo tretja pot do iste stvari — in setState v telesu
   // učinka, ki ga React Compiler upravičeno javi.
   useEffect(() => {
-    // Brez naslova ali ključa se worker sploh ne zažene. Aplikacija deluje
-    // naprej kot v V1-R01, zapisi pa mirno čakajo (odločitev 11).
-    if (!nastavitve && !prenesiEnoLastnost) {
+    // Brez naslova ali brez prijave se worker sploh ne zažene. Aplikacija
+    // deluje naprej kot v V1-R01, zapisi pa mirno čakajo (odločitev 11;
+    // `ADR-036` A za prijavo).
+    if (!(nastavitve && seja) && !prenesiEnoLastnost) {
       razporejevalnik.current = null;
       return;
     }
 
     const nov = ustvariRazporejevalnik({
       db,
+      lastnik,
       prenesiEno,
-      poCiklu: () => {
+      poCiklu: (izid) => {
+        // Vsak cikel povozi prejšnjo ugotovitev: ko prenos spet steče, mora
+        // sporočilo izginiti samo od sebe.
+        setPoteklaZa(izid.prijavaPotekla ? lastnik : null);
         void osvezi();
       },
     });
@@ -152,7 +193,7 @@ export function SyncProvider({
       nov.ustavi();
       razporejevalnik.current = null;
     };
-  }, [db, nastavitve, osvezi, prenesiEno, prenesiEnoLastnost]);
+  }, [db, lastnik, nastavitve, osvezi, prenesiEno, prenesiEnoLastnost, seja]);
 
   // Preverjanje arhiva (V1-R07). Svoj učinek in ne veja v zgornjem: ritma
   // sta različna, ustavljanje pa je isto — oboje teče samo v ospredju.
@@ -196,14 +237,25 @@ export function SyncProvider({
   }, []);
 
   const poskusiZnova = useCallback(async () => {
-    await retryFailed(db);
+    await retryFailed(db, lastnik);
     await osvezi();
     razporejevalnik.current?.sprozi();
-  }, [db, osvezi]);
+  }, [db, lastnik, osvezi]);
+
+  // Ob odjavi in ob menjavi uporabnika sporočilo izgine samo od sebe:
+  // ugotovitev je vezana na sejo, v kateri je nastala.
+  const prijavaPotekla = sporociloVelja(poteklaZa, lastnik);
 
   const vrednost = useMemo<SyncVrednost>(
-    () => ({ nastavljen: nastavitve !== null, povzetek, osvezi, sprozi, poskusiZnova }),
-    [nastavitve, osvezi, poskusiZnova, povzetek, sprozi],
+    () => ({
+      nastavljen: nastavitve !== null,
+      povzetek,
+      osvezi,
+      sprozi,
+      poskusiZnova,
+      prijavaPotekla,
+    }),
+    [nastavitve, osvezi, poskusiZnova, povzetek, prijavaPotekla, sprozi],
   );
 
   return <SyncContext.Provider value={vrednost}>{children}</SyncContext.Provider>;
@@ -223,5 +275,6 @@ export function useSync(): SyncVrednost {
     osvezi: async () => {},
     sprozi: () => {},
     poskusiZnova: async () => {},
+    prijavaPotekla: false,
   };
 }

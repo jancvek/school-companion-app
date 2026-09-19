@@ -27,6 +27,7 @@ function material(overrides: Partial<Material> = {}): Material {
     sync_attempts: 0,
     last_attempt_at: null,
     sync_error: null,
+  user_id: null,
     ...overrides,
   };
   // Ime datoteke sledi id-ju, tako kot v `saveCapture`.

@@ -130,3 +130,44 @@ class Zivost(BaseModel):
     """Odgovor na `GET /health`."""
 
     status: str
+
+
+class PrijavaTelefona(BaseModel):
+    """Telo `POST /auth/login` (V3-R04)."""
+
+    #: Uporabniško ime otroka. Enolično čez celotno namestitev (`ADR-027`).
+    identifier: str = Field(min_length=1, max_length=320)
+
+    #: Geslo v čitljivi obliki. Po HTTPS in nikamor zapisano (`ADR-026`).
+    #: Zgornja meja je tu, da zahteva ne more naročiti poljubno dolge argon2
+    #: preverbe; spodnje ni — prekratko geslo zavrne `app/ukazi.py` ob
+    #: nastavitvi, prijava pa mora odgovoriti enako na vsako napačno geslo.
+    password: str = Field(max_length=1024)
+
+
+class ZetonPrijave(BaseModel):
+    """Odgovor na uspešen `POST /auth/login` (V3-R04).
+
+    Žeton je neprozoren niz; telefon ga ne razčlenjuje in iz njega ničesar ne
+    izve (`ADR-027` B2). Kdo je prijavljen, zato pove ta odgovor izrecno —
+    aplikacija prikazno ime potrebuje na domači strani, `user_id` pa za
+    lastnika lokalnih zapisov (`ADR-036` B).
+    """
+
+    token: str
+
+    #: `id` prijavljenega uporabnika. Lastnik zapisov v lokalni bazi telefona.
+    user_id: str
+
+    #: Ime, kot ga aplikacija pokaže, npr. `Maša`.
+    display_name: str
+
+    #: Kdaj seja poteče, če se ne uporablja. Rok je drseči (`ADR-035` B).
+    expires_at: AwareDatetime
+
+
+class OdjavaOpravljena(BaseModel):
+    """Odgovor na `POST /auth/logout` (V3-R04)."""
+
+    #: Vedno `True`. Polje je tu, da odgovor ni prazen objekt brez pomena.
+    logged_out: bool = True

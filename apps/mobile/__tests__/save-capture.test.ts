@@ -47,11 +47,44 @@ describe('shranjevanje posnetka', () => {
     db.close();
   });
 
+  it('zapiše lastnika, ki je bil prijavljen ob posnetku (V3-R04)', async () => {
+    // Brez tega bi vsak posnetek nastal brez lastnika, `posvojiBrezLastnika`
+    // pa bi ga ob naslednji prijavi pripisal komurkoli — tudi drugemu
+    // otroku na istem telefonu (`docs/odlocitve/ADR-036` B).
+    const zapis = await saveCapture(db, {
+      subject: 'MAT',
+      takenAt: CAS_POSNETKA,
+      sourceUri: IZVIRNIK,
+      userId: 'u-masa',
+    });
+
+    expect(zapis.user_id).toBe('u-masa');
+    const [vrstica] = await listBySubject(db, 'MAT', 'u-masa');
+    expect(vrstica.id).toBe(zapis.id);
+    expect(vrstica.user_id).toBe('u-masa');
+  });
+
+  it('brez prijave zapis nastane brez lastnika in ga prijava posvoji', async () => {
+    // Prijava ni pogoj za slikanje (`ADR-036` A); `null` pomeni „nastalo,
+    // ko ni bil prijavljen nihče“ in ne „brez lastnika za vedno“.
+    const zapis = await saveCapture(db, {
+      subject: 'MAT',
+      takenAt: CAS_POSNETKA,
+      sourceUri: IZVIRNIK,
+      userId: null,
+    });
+
+    expect(zapis.user_id).toBeNull();
+    expect(await listBySubject(db, 'MAT', 'u-masa')).toEqual([]);
+    expect((await listBySubject(db, 'MAT', null)).map((m) => m.id)).toEqual([zapis.id]);
+  });
+
   it('sestavi zapis z UUID-jem, časom posnetka in stanjem pending', async () => {
     const zapis = await saveCapture(db, {
       subject: 'MAT',
       takenAt: CAS_POSNETKA,
       sourceUri: IZVIRNIK,
+      userId: null,
     });
 
     expect(zapis.id).toMatch(UUID_V4);
@@ -69,6 +102,7 @@ describe('shranjevanje posnetka', () => {
       subject: 'MAT',
       takenAt: CAS_POSNETKA,
       sourceUri: IZVIRNIK,
+      userId: null,
     });
 
     expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
@@ -80,9 +114,10 @@ describe('shranjevanje posnetka', () => {
       subject: 'MAT',
       takenAt: CAS_POSNETKA,
       sourceUri: IZVIRNIK,
+      userId: null,
     });
 
-    await expect(listBySubject(db, 'MAT')).resolves.toEqual([zapis]);
+    await expect(listBySubject(db, 'MAT', null)).resolves.toEqual([zapis]);
   });
 
   it('najprej zapiše datoteko, šele nato vrstico', async () => {
@@ -102,7 +137,7 @@ describe('shranjevanje posnetka', () => {
       return undefined;
     });
 
-    await saveCapture(db, { subject: 'MAT', takenAt: CAS_POSNETKA, sourceUri: IZVIRNIK });
+    await saveCapture(db, { subject: 'MAT', takenAt: CAS_POSNETKA, sourceUri: IZVIRNIK, userId: null });
 
     expect(datotekaZapisana).toBe(true);
     expect(vrsticaVstavljena).toBe(true);
@@ -113,10 +148,10 @@ describe('shranjevanje posnetka', () => {
     store.savePhoto.mockRejectedValue(new Error('Na napravi ni prostora'));
 
     await expect(
-      saveCapture(db, { subject: 'MAT', takenAt: CAS_POSNETKA, sourceUri: IZVIRNIK }),
+      saveCapture(db, { subject: 'MAT', takenAt: CAS_POSNETKA, sourceUri: IZVIRNIK, userId: null }),
     ).rejects.toThrow('Na napravi ni prostora');
 
-    await expect(listBySubject(db, 'MAT')).resolves.toEqual([]);
+    await expect(listBySubject(db, 'MAT', null)).resolves.toEqual([]);
     expect(store.discardPhoto).not.toHaveBeenCalled();
   });
 
@@ -126,7 +161,7 @@ describe('shranjevanje posnetka', () => {
       .mockRejectedValue(new Error('baza je zaklenjena'));
 
     await expect(
-      saveCapture(db, { subject: 'MAT', takenAt: CAS_POSNETKA, sourceUri: IZVIRNIK }),
+      saveCapture(db, { subject: 'MAT', takenAt: CAS_POSNETKA, sourceUri: IZVIRNIK, userId: null }),
     ).rejects.toThrow('baza je zaklenjena');
 
     expect(store.discardPhoto).toHaveBeenCalledTimes(1);
@@ -135,6 +170,6 @@ describe('shranjevanje posnetka', () => {
     );
 
     vstavljanje.mockRestore();
-    await expect(listBySubject(db, 'MAT')).resolves.toEqual([]);
+    await expect(listBySubject(db, 'MAT', null)).resolves.toEqual([]);
   });
 });

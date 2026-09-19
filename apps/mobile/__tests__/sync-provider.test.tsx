@@ -3,12 +3,14 @@ import { AppState, Text, type AppStateStatus } from 'react-native';
 
 import { findById, insertMaterial } from '@/db/materials';
 import { migriraj } from '@/db/migrations';
-import { SyncProvider } from '@/sync/use-sync';
+import { sporociloVelja, SyncProvider, useSync } from '@/sync/use-sync';
+import { PrijavaProvider } from '@/sync/use-prijava';
 import type { Odjemalec } from '@/sync/izbrisi';
 import type { Izid } from '@/sync/upload';
 import { INTERVAL_MS } from '@/sync/worker';
 import type { Material } from '@/types';
 
+import { SEJA, ustvariShrambo } from './shramba';
 import { createTestDatabase } from './test-database';
 
 /**
@@ -19,6 +21,14 @@ import { createTestDatabase } from './test-database';
  */
 
 jest.mock('expo-sqlite', () => require('./screen-mocks').expoSqliteMock());
+
+// Nativni modul; `PrijavaProvider` dobi shrambo kot lastnost.
+jest.mock('expo-secure-store', () => ({
+  __esModule: true,
+  getItemAsync: jest.fn(),
+  setItemAsync: jest.fn(),
+  deleteItemAsync: jest.fn(),
+}));
 
 // Brisanje arhivirane snovi se dotakne datoteke prek `expo-file-system`.
 // Podtaknemo ga, da ta test govori o priklopu na življenjski cikel in ne o
@@ -32,7 +42,7 @@ jest.mock('expo-file-system', () => ({
   UploadType: { MULTIPART: 'multipart' },
 }));
 
-const NASTAVITVE = { baseUrl: 'http://sto.ts.net:8000', apiKey: 'kljuc' };
+const NASTAVITVE = { baseUrl: 'https://school-buddy.duckdns.org' };
 const USPEH: Izid = { vrsta: 'synced' };
 
 let db: ReturnType<typeof createTestDatabase>;
@@ -67,6 +77,7 @@ function material(id: string): Material {
     sync_attempts: 0,
     last_attempt_at: null,
     sync_error: null,
+    user_id: null,
   };
 }
 
@@ -257,4 +268,121 @@ it('ob vrnitvi v ospredje spet preveri arhiv', async () => {
   sporociStanje('active');
 
   await waitFor(async () => expect(await findById(db, 'a')).toBeNull());
+});
+
+/**
+ * Kdaj sporočilo o potekli prijavi velja (V3-R04, `docs/odlocitve/ADR-036`).
+ *
+ * Pravilo je svoja funkcija prav zato, da se da trditi brez izrisa in brez
+ * menjave seje sredi testa — sicer bi ostalo zapisano v komentarju in ne
+ * varovano.
+ */
+describe('veljavnost sporočila o potekli prijavi', () => {
+  it('velja za tistega, čigava prijava je potekla', () => {
+    expect(sporociloVelja('u-masa', 'u-masa')).toBe(true);
+  });
+
+  it('po menjavi uporabnika ne velja', () => {
+    // Sicer bi Jaka takoj po uspešni prijavi videl, da je njegova prijava
+    // potekla.
+    expect(sporociloVelja('u-masa', 'u-jaka')).toBe(false);
+  });
+
+  it('po odjavi ne velja', () => {
+    expect(sporociloVelja('u-masa', null)).toBe(false);
+  });
+
+  it('brez ugotovitve ne velja', () => {
+    expect(sporociloVelja(null, 'u-masa')).toBe(false);
+    expect(sporociloVelja(null, null)).toBe(false);
+  });
+});
+
+/** Bere stanje prenosa in ga izriše, da ga test lahko prebere. */
+function Sonda() {
+  const { prijavaPotekla } = useSync();
+  return <Text testID="potekla">{prijavaPotekla ? 'da' : 'ne'}</Text>;
+}
+
+it('sporočilo o potekli prijavi ugasne, ko prenos spet steče', async () => {
+  // Zapisana cena v `ADR-036` pravi, da ugotovitev velja za zadnji obhod.
+  // Brez te trditve bi smela obstati za vedno — tudi potem, ko vse dela.
+  (AppState as { currentState: string }).currentState = 'active';
+  await insertMaterial(db, material('a'));
+
+  const POTEKLA: Izid = { vrsta: 'pending', razlog: 'potekla', prijavaPotekla: true };
+  const potekla = jest.fn(async () => POTEKLA);
+  const uspesen = jest.fn(async () => USPEH);
+
+  function drevo(prenesiEno: jest.Mock) {
+    return (
+      <PrijavaProvider db={db} nastavitve={NASTAVITVE} shramba={ustvariShrambo(SEJA)}>
+        <SyncProvider
+          db={db}
+          nastavitve={NASTAVITVE}
+          prenesiEno={prenesiEno}
+          odjemalec={MIREN_ODJEMALEC}
+        >
+          <Sonda />
+        </SyncProvider>
+      </PrijavaProvider>
+    );
+  }
+
+  const { getByTestId, rerender } = await render(drevo(potekla));
+
+  // Prvi obhodi stečejo, preden je žeton prebran z diska; ugotovitev dobi
+  // lastnika šele, ko se seja razreši, in takrat sporočilo vzide.
+  await waitFor(() => expect(getByTestId('potekla').props.children).toBe('da'));
+
+  // Zamenjan `prenesiEno` požene nov razporejevalnik in z njim nov obhod —
+  // brez čakanja na uro, ki v tem testu ne teče.
+  await act(async () => {
+    rerender(drevo(uspesen));
+  });
+
+  await waitFor(() => expect(getByTestId('potekla').props.children).toBe('ne'));
+  expect(uspesen).toHaveBeenCalled();
+});
+
+it('sporočilo o potekli prijavi ne preživi menjave uporabnika', async () => {
+  // Ugotovitev nosi, **čigava** prijava je potekla. Ob menjavi uporabnika mora
+  // izginiti **takoj**, ne šele ob naslednjem obhodu: v resnični rabi se to
+  // zgodi natanko tako — Maši potekče prijava, Jaka se prijavi in domača
+  // stran se izriše, preden nov obhod karkoli javi.
+  //
+  // Aplikacija je med menjavo v ozadju, da noben obhod ne stopi vmes. Brez
+  // tega bi test meril dirko med izrisom in obhodom, ne pravila.
+  (AppState as { currentState: string }).currentState = 'active';
+  await insertMaterial(db, material('a'));
+
+  const POTEKLA: Izid = { vrsta: 'pending', razlog: 'potekla', prijavaPotekla: true };
+  const prenesiEno = jest.fn(async () => POTEKLA);
+
+  function drevo(shramba: ReturnType<typeof ustvariShrambo>) {
+    return (
+      <PrijavaProvider db={db} nastavitve={NASTAVITVE} shramba={shramba}>
+        <SyncProvider
+          db={db}
+          nastavitve={NASTAVITVE}
+          prenesiEno={prenesiEno}
+          odjemalec={MIREN_ODJEMALEC}
+        >
+          <Sonda />
+        </SyncProvider>
+      </PrijavaProvider>
+    );
+  }
+
+  const { getByTestId, rerender } = await render(drevo(ustvariShrambo(SEJA)));
+  await waitFor(() => expect(getByTestId('potekla').props.children).toBe('da'));
+
+  // Menjava uporabnika: druga shramba, drug človek.
+  (AppState as { currentState: string }).currentState = 'background';
+  const drugi = { ...SEJA, zeton: 'zeton-jaka', userId: 'u-jaka', ime: 'Jaka' };
+  await act(async () => {
+    rerender(drevo(ustvariShrambo(drugi)));
+  });
+
+  await waitFor(() => expect(getByTestId('potekla').props.children).toBe('ne'));
 });

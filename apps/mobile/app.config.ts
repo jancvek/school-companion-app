@@ -1,13 +1,15 @@
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 
 /**
- * Naslov strežnika in API ključ prideta v aplikacijo **ob gradnji**, iz
- * spremenljivk okolja (Expo naloži `.env` sam). V aplikaciji ni zaslona z
- * nastavitvami — odločitev 10 v `docs/plan/V1-R02.md`.
+ * Naslov strežnika pride v aplikacijo **ob gradnji**, iz spremenljivke okolja
+ * (Expo naloži `.env` sam). V aplikaciji ni zaslona z nastavitvami —
+ * odločitev 10 v `docs/plan/V1-R02.md`.
  *
- * Ključ s tem konča vgrajen v APK. To je zavestno: gre za en družinski ključ,
- * ki od V3-R02 potuje samo prek HTTPS in ga V3-R04 zamenja z žetonom. Cena je,
- * da zamenjava ključa zahteva novo gradnjo.
+ * `SERVER_API_KEY` tu ni več (V3-R04). En vgrajen ključ za vse družine je bil
+ * skrivnost, ki jo je nosil vsak APK; zamenjal ga je žeton, ki nastane ob
+ * prijavi in živi v varni shrambi (`docs/odlocitve/ADR-027`, `ADR-036`).
+ * Spremenljivko je treba pobrisati tudi na expo.dev, sicer ostane v okolju
+ * gradnje, čeprav je nihče ne bere.
  *
  * `SERVER_BASE_URL` mora biti `https://`; drugačen naslov aplikacija šteje za
  * nenastavljen prenos (`src/config/server.ts`, `docs/odlocitve/ADR-034` E).
@@ -26,7 +28,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   extra: {
     ...config.extra,
     serverBaseUrl: process.env.SERVER_BASE_URL ?? null,
-    apiKey: process.env.SERVER_API_KEY ?? null,
     buildId: process.env.EAS_BUILD_ID ?? null,
   },
 });

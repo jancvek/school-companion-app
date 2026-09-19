@@ -130,6 +130,12 @@ račun je admin družine na javnem internetu; otrokov je za mobilno prijavo,
 varuje ga omejevanje iz E in do `/admin` ne pride. `ADR-026` je kratko
 otrokovo geslo že predvidel.
 
+> **Razveljavljeno z `ADR-036` E (18. 9. 2026):** otrokovo geslo je odslej
+> najmanj **8** znakov. Utemeljitev zgoraj je stala na tem, da otrokov račun
+> služi mobilni prijavi, ki je takrat še ni bilo; z `V3-R04` nastane in je
+> dosegljiva z javnega interneta. Ostalo v tej točki (starš 12, ukaz z
+> `getpass`, migracija brez gesla) velja naprej.
+
 ### H — družina iz seje
 
 `daj_druzino` (`ADR-029` A, edina družina v bazi) ostane **samo za poti

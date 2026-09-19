@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { findSubject } from '@/constants/subjects';
 import { listBySubject } from '@/db/materials';
 import { asMaterialsDatabase } from '@/db/open';
+import { usePrijava } from '@/sync/use-prijava';
 import { useSync } from '@/sync/use-sync';
 import type { Material } from '@/types';
 import { SyncBadge } from '@/ui/sync-badge';
@@ -27,6 +28,8 @@ export default function HistoryForSubjectScreen() {
   const { subject: subjectParam } = useLocalSearchParams<{ subject: string }>();
   const subject = findSubject(subjectParam);
   const { poskusiZnova } = useSync();
+  const { seja } = usePrijava();
+  const lastnik = seja?.userId ?? null;
 
   const [materials, setMaterials] = useState<Material[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +39,7 @@ export default function HistoryForSubjectScreen() {
     if (!subject) return;
 
     let aktiven = true;
-    listBySubject(asMaterialsDatabase(database), subject.value)
+    listBySubject(asMaterialsDatabase(database), subject.value, lastnik)
       .then((vrstice) => {
         if (aktiven) setMaterials(vrstice);
       })
@@ -48,7 +51,7 @@ export default function HistoryForSubjectScreen() {
     return () => {
       aktiven = false;
     };
-  }, [database, subject, osvezitev]);
+  }, [database, lastnik, subject, osvezitev]);
 
   const naPoskusiZnova = useCallback(async () => {
     await poskusiZnova();

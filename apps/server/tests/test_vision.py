@@ -36,7 +36,6 @@ from app.vision import (
     razcleni_odgovor,
     sestavi_sporocila,
 )
-from tests.conftest import KLJUC
 
 SLIKA = b"\xff\xd8\xff\xe0-nekaj-bajtov-slike"
 
@@ -55,7 +54,6 @@ VELJAVEN_ODGOVOR: dict[str, Any] = {
 def nastavitve_z(model: str = "gpt-4.1", timeout: float = 120.0) -> Settings:
     """Nastavitve, ki jih klicalec potrebuje."""
     return Settings(
-        api_key=KLJUC,
         database_url="sqlite://",
         openai_api_key="test-openai-kljuc",
         openai_model=model,

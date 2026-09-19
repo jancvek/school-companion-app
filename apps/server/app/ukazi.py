@@ -71,7 +71,7 @@ def nastavi_geslo(
     """
     if motor is None:
         if nastavitve is None:
-            nastavitve = Settings()  # type: ignore[call-arg]  # polja pridejo iz okolja
+            nastavitve = Settings()  # vsa polja imajo privzetek; okolje jih le prepiše
         motor = naredi_motor(nastavitve.database_url)
 
     with Session(motor) as seja:

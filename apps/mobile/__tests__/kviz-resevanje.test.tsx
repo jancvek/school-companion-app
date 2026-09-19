@@ -6,11 +6,13 @@ import { neprenesenePoskuse, postavkeKviza, shraniKviz, zapisiPoskus } from '@/d
 import { migriraj } from '@/db/migrations';
 import type { OdjemalecKvizov } from '@/sync/kvizi';
 import { KviziProvider } from '@/sync/use-kvizi';
+import { PrijavaProvider } from '@/sync/use-prijava';
 import type { KvizStreznika, Poskus } from '@/types';
 import { theme } from '@/ui/theme';
 
 import { kvizStreznika, poskus } from './kvizi-podatki';
 import { odmikSpodaj, TEST_INSETS, type RouterMockState } from './screen-mocks';
+import { SEJA, ustvariShrambo } from './shramba';
 import { createTestDatabase } from './test-database';
 
 jest.mock('expo-router', () => require('./screen-mocks').expoRouterMock());
@@ -20,6 +22,13 @@ jest.mock('react-native-safe-area-context', () => require('./screen-mocks').safe
 // Predpona `mock` ni okras: jest tovarni v `jest.mock` dovoli samo zunanje
 // spremenljivke s tem imenom, ker se tovarna dvigne nad uvoze.
 let mockStevec = 0;
+jest.mock('expo-secure-store', () => ({
+  __esModule: true,
+  getItemAsync: jest.fn(),
+  setItemAsync: jest.fn(),
+  deleteItemAsync: jest.fn(),
+}));
+
 jest.mock('expo-crypto', () => ({
   __esModule: true,
   randomUUID: () => {
@@ -107,7 +116,7 @@ describe('reševanje kviza', () => {
     expect(await screen.findByText('Vprašanje 2?')).toBeTruthy();
     expect(screen.getByTestId('napredek').props.children).toBe('Vprašanje 2 od 3');
     expect(screen.queryByTestId('odgovor')).toBeNull();
-    const [zapisan] = await neprenesenePoskuse(db);
+    const [zapisan] = await neprenesenePoskuse(db, null);
     expect(zapisan).toEqual(
       expect.objectContaining({
         id: 'uuid-1',
@@ -118,6 +127,31 @@ describe('reševanje kviza', () => {
         uploaded_at: null,
       }),
     );
+  });
+
+  it('poskus dobi lastnika, ki je ta hip prijavljen (V3-R04)', async () => {
+    // Zrcalno posnetku: brez lastnika na poskusu bi ga `neprenesenePoskuse`
+    // za prijavljenega otroka spregledala ali pa bi ga posvojila napačna
+    // prijava — in ocena enega otroka bi pristala v statistiki drugega
+    // (`docs/odlocitve/ADR-036` B in C).
+    await shraniKviz(db, kvizStreznika('k1', 2));
+    await render(
+      <PrijavaProvider db={db} nastavitve={null} shramba={ustvariShrambo(SEJA)}>
+        <KviziProvider db={db} nastavitve={null}>
+          <ResevanjeKvizaScreen />
+        </KviziProvider>
+      </PrijavaProvider>,
+    );
+    await screen.findByText('Vprašanje 1?');
+
+    await fireEvent.press(screen.getByText('Pokaži odgovor'));
+    await fireEvent.press(screen.getByText('Srednje'));
+
+    await waitFor(async () =>
+      expect(await neprenesenePoskuse(db, SEJA.userId)).toHaveLength(1),
+    );
+    // In ne „brez lastnika“: tak poskus bi posvojila katerakoli prijava.
+    expect(await neprenesenePoskuse(db, null)).toEqual([]);
   });
 
   it('zapiše tri žige: pokazano, razkrito, ocenjeno', async () => {
@@ -131,8 +165,8 @@ describe('reševanje kviza', () => {
     jest.setSystemTime(new Date('2026-09-10T15:00:09.000Z'));
     await fireEvent.press(screen.getByText('Lahko'));
 
-    await waitFor(async () => expect(await neprenesenePoskuse(db)).toHaveLength(1));
-    const [zapisan] = await neprenesenePoskuse(db);
+    await waitFor(async () => expect(await neprenesenePoskuse(db, null)).toHaveLength(1));
+    const [zapisan] = await neprenesenePoskuse(db, null);
     expect(zapisan.shown_at).toBe('2026-09-10T15:00:00.000Z');
     expect(zapisan.revealed_at).toBe('2026-09-10T15:00:07.000Z');
     expect(zapisan.answered_at).toBe('2026-09-10T15:00:09.000Z');
