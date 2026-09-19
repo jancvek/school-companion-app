@@ -13,9 +13,10 @@
 
 import { CREATE_KVIZI_TABLES_SQL } from './kvizi';
 import { CREATE_MATERIALS_TABLE_SQL, type MaterialsDatabase } from './materials';
+import { CREATE_NAPRAVA_TABLE_SQL } from './naprava';
 
 /** Verzija sheme, ki jo pričakuje ta različica aplikacije. */
-export const SHEMA_VERZIJA = 3;
+export const SHEMA_VERZIJA = 4;
 
 type Migracija = {
   /** Verzija, ki velja, ko se ta korak konča. */
@@ -83,6 +84,18 @@ const MIGRACIJE: Migracija[] = [
         CREATE INDEX IF NOT EXISTS materials_user_id ON materials (user_id);
         CREATE INDEX IF NOT EXISTS attempts_user_id ON attempts (user_id);
       `);
+    },
+  },
+  {
+    // Sled o nedokončani odjavi (V3-R04, `docs/odlocitve/ADR-037`). Oznaka
+    // sodi v to bazo prav zato, ker obstaja za primer, ko odpove varna
+    // shramba: brez nje bi žeton, ki ga odjava ni uspela pobrisati, ob
+    // naslednjem zagonu obveljal kot seja.
+    //
+    // Samo nova tabela; `materials` in `attempts` se ne dotakne.
+    doVerzije: 4,
+    async izvedi(db) {
+      await db.execAsync(CREATE_NAPRAVA_TABLE_SQL);
     },
   },
 ];

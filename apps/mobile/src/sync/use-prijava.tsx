@@ -23,6 +23,7 @@ import {
 
 import { preberiNastavitve, type ServerConfig } from '../config/server';
 import { posvojiBrezLastnika, type MaterialsDatabase } from '../db/materials';
+import { jeOdjavaNedokoncana, koncajOdjavo, zacniOdjavo } from '../db/naprava';
 import { asMaterialsDatabase } from '../db/open';
 import { useSQLiteContext } from 'expo-sqlite';
 import {
@@ -34,6 +35,40 @@ import {
   type Seja,
   type VarnaShramba,
 } from './prijava';
+
+/**
+ * Oznaka o nedokončani odjavi — tri funkcije, ki **ne vržejo**.
+ *
+ * Ista obljuba kot pri `posvoji` in iz istega razloga: to je stanje ob robu
+ * seje, ne seja sama. Baza, ki oznake ne zapiše, ne sme preprečiti odjave;
+ * baza, ki je ne zna prebrati, ne sme preprečiti zagona. Ob dvomu se šteje,
+ * da odjave ni bilo — to je izid, ki ohrani sejo in ničesar ne pripiše
+ * napačnemu otroku (`docs/odlocitve/ADR-037`).
+ */
+async function zacni(db: MaterialsDatabase): Promise<void> {
+  try {
+    await zacniOdjavo(db, new Date().toISOString());
+  } catch {
+    // Glej opis zgoraj.
+  }
+}
+
+async function koncaj(db: MaterialsDatabase): Promise<void> {
+  try {
+    await koncajOdjavo(db);
+  } catch {
+    // Glej opis zgoraj. Oznaka ostane; naslednji zagon žeton zavrže še enkrat,
+    // kar je neprijetno, a varno.
+  }
+}
+
+async function ostanekOdjave(db: MaterialsDatabase): Promise<boolean> {
+  try {
+    return await jeOdjavaNedokoncana(db);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Posvojitev, ki **ne vrže** (`docs/odlocitve/ADR-036`, popravki).
@@ -109,6 +144,16 @@ export function PrijavaProvider({
     let velja = true;
     void (async () => {
       const najdena = await preberiSejo(shramba);
+      // Žeton, ki ga sreča oznaka o nedokončani odjavi, je **ostanek** in ne
+      // seja (`docs/odlocitve/ADR-037`). Brez tega bi se po spodleteli odjavi
+      // prejšnja seja obnovila in posvojila posnetke, ki jih je med tem
+      // naredil kdo drug.
+      if (najdena !== null && (await ostanekOdjave(db))) {
+        if (await pozabiSejo(shramba)) await koncaj(db);
+        if (!velja) return;
+        setSeja(null);
+        return;
+      }
       // Posvojitev teče pred `velja`: tudi če je zaslon medtem odšel, je
       // vrstica že v bazi in pravi lastnik je znan. Klic je idempotenten.
       if (najdena !== null) await posvoji(db, najdena.userId);
@@ -129,6 +174,9 @@ export function PrijavaProvider({
       // sicer v vrsti obtičali za vedno (`ADR-036` B). Isto stori obnovitev
       // seje z diska; pravilo je „vsaka razrešena seja posvoji", ne „prijava".
       await posvoji(db, nova.userId);
+      // Nova prijava prekliče vsako nedokončano odjavo pred njo: žeton na
+      // disku je odslej ta, ne prejšnji (`ADR-037`).
+      await koncaj(db);
       setSeja(nova);
     },
     [db, nastavitve, shramba],
@@ -136,12 +184,16 @@ export function PrijavaProvider({
 
   const odjavi = useCallback(async () => {
     const prejsnja = seja;
-    // Najprej lokalno: nedosegljiv strežnik ne sme pustiti otroka
+    // Oznaka **pred** brisanjem: obratni vrstni red bi pustil okno, v katerem
+    // je žeton že izbrisan, oznake pa še ni — in prav v tem oknu uporabnica
+    // aplikacijo najpogosteje zapre (`docs/odlocitve/ADR-037`).
+    await zacni(db);
+    // Nato lokalno: nedosegljiva shramba ali strežnik ne smeta pustiti otroka
     // prijavljenega na napravi, na kateri se je hotel odjaviti (`ADR-036` G).
     setSeja(null);
-    await pozabiSejo(shramba);
+    if (await pozabiSejo(shramba)) await koncaj(db);
     if (prejsnja !== null) await odjaviSe(nastavitve, prejsnja);
-  }, [nastavitve, seja, shramba]);
+  }, [db, nastavitve, seja, shramba]);
 
   const vrednost = useMemo<PrijavaVrednost>(
     () => ({ seja, prijavi, odjavi }),

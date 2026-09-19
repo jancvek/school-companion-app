@@ -16,6 +16,8 @@ export type TestnaShramba = VarnaShramba & {
   vsebina(): string | undefined;
   /** Od zdaj naprej vsak dostop vrže. */
   pokvari(): void;
+  /** Spet dela — za zaporedja, v katerih odpoved ni trajna. */
+  popravi(): void;
 };
 
 /** Seja, s katero se v testih izkaže telefon. */
@@ -34,6 +36,9 @@ export function ustvariShrambo(zacetna: Seja | null = null): TestnaShramba {
     vsebina: () => zapisi.get(KLJUC_SEJE),
     pokvari: () => {
       pokvarjena = true;
+    },
+    popravi: () => {
+      pokvarjena = false;
     },
     getItemAsync: async (kljuc) => {
       preveri();

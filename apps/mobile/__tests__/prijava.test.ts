@@ -171,19 +171,21 @@ describe('shramba seje', () => {
     expect(await preberiSejo(shramba)).toBeNull();
   });
 
-  it('odjava pobriše zapis', async () => {
+  it('odjava pobriše zapis in to potrdi', async () => {
     const shramba = ustvariShrambo(SEJA);
 
-    await pozabiSejo(shramba);
+    await expect(pozabiSejo(shramba)).resolves.toBe(true);
 
     expect(shramba.vsebina()).toBeUndefined();
   });
 
-  it('odjava ne vrže, tudi če je shramba nedosegljiva', async () => {
+  it('odjava ne vrže, tudi če je shramba nedosegljiva — pove pa, da ni uspela', async () => {
+    // Izid potrebuje klicatelj: ob neuspehu žeton ostane na disku in ga mora
+    // naslednji zagon prepoznati kot ostanek (`docs/odlocitve/ADR-037`).
     const shramba = ustvariShrambo(SEJA);
     shramba.pokvari();
 
-    await expect(pozabiSejo(shramba)).resolves.toBeUndefined();
+    await expect(pozabiSejo(shramba)).resolves.toBe(false);
   });
 });
 

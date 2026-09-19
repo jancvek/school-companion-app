@@ -113,13 +113,20 @@ describe('prijavni zaslon', () => {
     });
   }
 
-  /** Isto za odjavo. */
+  /**
+   * Isto za odjavo.
+   *
+   * Čaka na prijavni obrazec in ne le na izginotje napisa `Odjavljam…`:
+   * odjava je veriga obljub (oznaka, shramba, strežnik), zaslon pa je
+   * odjavljen šele, ko pokaže obrazec. Brez tega bi se naslednji `render` v
+   * istem testu prepletel z nedokončanim `act`.
+   */
   async function odjavi() {
     await act(async () => {
       fireEvent.press(screen.getByTestId('gumb-odjava'));
     });
     await waitFor(() => {
-      expect(screen.queryByText('Odjavljam…')).toBeNull();
+      expect(screen.getByTestId('polje-ime')).toBeTruthy();
     });
   }
 
@@ -163,6 +170,50 @@ describe('prijavni zaslon', () => {
       expect((await listPending(db, SEJA.userId)).map((m) => m.id)).toEqual(['v-oknu']);
     });
     expect(await listPending(db, null)).toEqual([]);
+  });
+
+  it('žeton, ki ga je pustila spodletela odjava, ne obvelja kot seja', async () => {
+    // Jedro `ADR-037`. Zaporedje: Maša se odjavi, brisanje iz varne
+    // shrambe tiho pade, Jaka slika, aplikacija se zapre in znova odpre.
+    // Brez oznake bi se Mašina seja obnovila in posvojila Jakove posnetke.
+    const shramba = ustvariShrambo(SEJA);
+    await izrisi(shramba, true);
+
+    // Brisanje iz varne shrambe spodleti; žeton ostane na disku.
+    shramba.pokvari();
+    await odjavi();
+    expect(shramba.vsebina()).toContain(SEJA.zeton);
+
+    // Jakov posnetek, nastal po odjavi: brez lastnika.
+    await insertMaterial(db, material({ id: 'jakov', user_id: null }));
+    shramba.popravi();
+
+    // Nov zagon: ista shramba, isti žeton. Prejšnjega drevesa ne odklapljamo
+    // ročno — `screen` kaže na zadnji izris, pospravi pa ju oba `cleanup`.
+    await izrisi(shramba);
+
+    // Aplikacija je neprijavljena in Jakov posnetek čaka na **njegovo**
+    // prijavo, ne na Mašino.
+    expect(screen.getByTestId('polje-ime')).toBeTruthy();
+    expect(await listPending(db, SEJA.userId)).toEqual([]);
+    expect((await listPending(db, null)).map((m) => m.id)).toEqual(['jakov']);
+  });
+
+  it('uspešna odjava oznake ne pusti za sabo', async () => {
+    // Sicer bi naslednja prijava na isti napravi ostala brez posvojitve,
+    // ker bi oznaka že veljavno sejo razglasila za ostanek.
+    const shramba = ustvariShrambo(SEJA);
+    await izrisi(shramba, true);
+
+    await odjavi();
+    await insertMaterial(db, material({ id: 'po-odjavi', user_id: null }));
+
+    await izrisi(shramba);
+    await vpisiInPotrdi('masa', 'geslo-otroka');
+
+    await waitFor(async () => {
+      expect((await listPending(db, SEJA.userId)).map((m) => m.id)).toEqual(['po-odjavi']);
+    });
   });
 
   it('obnovljena seja preživi padlo posvojitev', async () => {

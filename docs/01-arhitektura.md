@@ -145,7 +145,7 @@ vrne samo gumb „Poskusi znova". Glej `docs/odlocitve/ADR-004`.
 #### Migracije lokalne sheme
 
 Shema je verzionirana prek `PRAGMA user_version` (`src/db/migrations.ts`);
-trenutna verzija je **3**. `CREATE TABLE IF NOT EXISTS` obstoječi tabeli
+trenutna verzija je **4**. `CREATE TABLE IF NOT EXISTS` obstoječi tabeli
 novega stolpca ne doda in tega ne javi, zato bi se brez migracij telefon z
 zapisi iz V1-R01 tiho pokvaril, testi nad svežo bazo pa bi bili zeleni.
 
@@ -185,6 +185,22 @@ velja za prijavljeno uporabnico in za neprijavljeno aplikacijo. Filtrirajo
 vrsta (`listPending`), števci (`countByStatus`), Zgodovina
 (`listBySubject`), vrnitev v vrsto (`retryFailed`) in nepreneseni poskusi
 (`neprenesenePoskuse`).
+
+#### Sled o nedokončani odjavi (migracija 4, V3-R04)
+
+Tabela `naprava` (`id = 1`, `odjava_ob`) — ena sama vrstica, ki jo jamči
+`CHECK (id = 1)`. Postavi jo odjava **pred** brisanjem iz varne shrambe in
+počisti takoj, ko brisanje uspe; obstaja torej samo takrat, kadar je odjava
+ostala nedokončana.
+
+Žeton, ki ga ob zagonu sreča postavljena oznaka, je **ostanek in ne seja**:
+zavrže se, brisanje se poskusi znova, aplikacija ostane neprijavljena. Brez
+tega bi se po spodleteli odjavi prejšnja seja obnovila in posvojila posnetke,
+ki jih je med tem naredil kdo drug (`ADR-037`).
+
+Oznaka je v tej bazi in ne v varni shrambi prav zato, ker obstaja za primer,
+ko odpove varna shramba. Prijava jo počisti — nova prijava prekliče vsako
+nedokončano odjavo pred njo.
 
 **Stik na `attempts` v `cakajociKvizi` in `postavkeKviza` lastnika
 namenoma ne filtrira.** Postavka ima en sam poskus (`UNIQUE (quiz_item_id)`
@@ -773,7 +789,9 @@ Izvedbene odločitve so v `ADR-036`.
   `login_attempts`, isti prag, isti zamik (`ADR-035` E).
 - **Odjava je najprej lokalna.** Telefon žeton zavrže v vsakem primeru;
   klic na strežnik je najboljši poskus. Nedosegljiv strežnik ne sme
-  pustiti otroka prijavljenega na napravi.
+  pustiti otroka prijavljenega na napravi. Če brisanje iz varne shrambe
+  spodleti, to zabeleži tabela `naprava` in naslednji zagon tak žeton
+  zavrže (`ADR-037`).
 - **Lokalni zapis nosi lastnika.** `materials.user_id` in `attempts.user_id`
   v bazi telefona (migracija 3): naprava je skupna, identiteta pa ne.
   Prenaša, šteje in kaže se izključno lastnikovo; zapis brez lastnika

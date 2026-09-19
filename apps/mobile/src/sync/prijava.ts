@@ -112,17 +112,23 @@ export async function shraniSejo(
 }
 
 /**
- * Pobriše sejo iz varne shrambe.
+ * Pobriše sejo iz varne shrambe. Vrne, **ali je uspelo**.
  *
  * **Ne vrže.** Odjava, ki bi padla, bi pustila otroka prijavljenega na
- * napravi, na kateri se je hotel odjaviti.
+ * napravi, na kateri se je hotel odjaviti — zato seja v pomnilniku pade v
+ * vsakem primeru.
+ *
+ * Izid pa klicatelj potrebuje: ob neuspehu žeton ostane na disku in ga mora
+ * naslednji zagon prepoznati kot **ostanek**, ne kot sejo. To ve po oznaki v
+ * lokalni bazi (`src/db/naprava.ts`, `docs/odlocitve/ADR-037`), ki se sme
+ * počistiti samo takrat, kadar je brisanje res uspelo.
  */
-export async function pozabiSejo(shramba: VarnaShramba = privzetaShramba): Promise<void> {
+export async function pozabiSejo(shramba: VarnaShramba = privzetaShramba): Promise<boolean> {
   try {
     await shramba.deleteItemAsync(KLJUC_SEJE);
+    return true;
   } catch {
-    // Shramba je nedosegljiva. Seja v pomnilniku vseeno pade; ob naslednjem
-    // zagonu bo žeton morda spet tu, a strežnik ga po odjavi ne prizna več.
+    return false;
   }
 }
 

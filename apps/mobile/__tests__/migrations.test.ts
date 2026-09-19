@@ -1,10 +1,12 @@
 import { migriraj, preberiVerzijo, SHEMA_VERZIJA } from '@/db/migrations';
+import { jeOdjavaNedokoncana } from '@/db/naprava';
 
 import {
   createTestDatabase,
   SHEMA_V1_R01,
   SHEMA_VERZIJE_1,
   SHEMA_VERZIJE_2,
+  SHEMA_VERZIJE_3,
 } from './test-database';
 
 /** Tabele, ki jih prinese migracija 2 (V2-R02). */
@@ -311,13 +313,67 @@ describe('migracija lokalne sheme', () => {
     });
   });
 
+  describe('nad bazo verzije 3 (stanje sredi V3-R04)', () => {
+    it('doda tabelo `naprava` in ne izgubi lastnikov', async () => {
+      // Telefon, ki je dobil že prvi del V3-R04 (APK iz te veje pred
+      // `ADR-037`). Migracija 4 doda samo sled o odjavi.
+      const db = createTestDatabase();
+      try {
+        await db.execAsync(SHEMA_VERZIJE_3);
+        await db.runAsync(
+          'INSERT INTO materials (id, subject, taken_at, file_uri, sync_status,' +
+            ' sync_attempts, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          ['a', 'MAT', '2026-09-01T08:00:00.000Z', 'file:///a.jpg', 'pending', 0, 'u-masa'],
+        );
+        expect(await preberiVerzijo(db)).toBe(3);
+
+        await migriraj(db);
+
+        expect(await preberiVerzijo(db)).toBe(SHEMA_VERZIJA);
+        expect(await imenaTabel(db)).toContain('naprava');
+        const snov = await db.getAllAsync<Record<string, unknown>>(
+          'SELECT id, user_id FROM materials',
+          [],
+        );
+        expect(snov).toEqual([{ id: 'a', user_id: 'u-masa' }]);
+      } finally {
+        db.close();
+      }
+    });
+
+    it('sveža baza nima oznake o odjavi', async () => {
+      // Naprava, na kateri se ni odjavil še nihče, nima česa
+      // razveljavljati (`docs/odlocitve/ADR-037`).
+      const db = createTestDatabase();
+      try {
+        await migriraj(db);
+
+        expect(await jeOdjavaNedokoncana(db)).toBe(false);
+      } finally {
+        db.close();
+      }
+    });
+
+    it('drugi zagon tabele ne ustvari še enkrat', async () => {
+      const db = createTestDatabase();
+      try {
+        await db.execAsync(SHEMA_VERZIJE_3);
+        await migriraj(db);
+
+        await expect(migriraj(db)).resolves.toBe(SHEMA_VERZIJA);
+      } finally {
+        db.close();
+      }
+    });
+  });
+
   describe('nad svežo bazo', () => {
     it('ima tudi tabele za kvize, enake kot nadgrajena', async () => {
       const sveza = createTestDatabase();
       const nadgrajena = createTestDatabase();
       try {
         await migriraj(sveza);
-        await nadgrajena.execAsync(SHEMA_VERZIJE_2);
+        await nadgrajena.execAsync(SHEMA_VERZIJE_3);
         await migriraj(nadgrajena);
 
         expect(await imenaTabel(sveza)).toEqual(await imenaTabel(nadgrajena));

@@ -106,3 +106,17 @@ CREATE TABLE IF NOT EXISTS attempts (
 );
 PRAGMA user_version = 2;
 `;
+
+/**
+ * Baza, kakršna je na telefonu po migraciji 3 (V3-R04, prvi del) — spet
+ * **dobesedna kopija, ki se ne posodablja**.
+ *
+ * Migracija 4 mora čezenj brez izgube posnetkov, poskusov in lastnikov.
+ */
+export const SHEMA_VERZIJE_3 = `${SHEMA_VERZIJE_2}
+ALTER TABLE materials ADD COLUMN user_id TEXT;
+ALTER TABLE attempts ADD COLUMN user_id TEXT;
+CREATE INDEX IF NOT EXISTS materials_user_id ON materials (user_id);
+CREATE INDEX IF NOT EXISTS attempts_user_id ON attempts (user_id);
+PRAGMA user_version = 3;
+`;
