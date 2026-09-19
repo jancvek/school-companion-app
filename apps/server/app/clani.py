@@ -187,6 +187,21 @@ def zakaj_ne_sme_deaktivirati(
 
     `aktivnih_starsev` je število aktivnih staršev družine **vključno s
     članom**, ki ga deaktiviramo; prav zato je meja `<= 1` in ne `< 1`.
+
+    **Tretje pravilo danes po nobeni poti ni dosegljivo, in to je namerno.**
+    Klicatelj je vedno aktiven starš te družine — sejo ima samo tak
+    (`prijava.seja_za_zeton` neaktivnemu sejo izbriše, `vloga_sodi` otroka ne
+    spusti) — zato tuj **aktiven** starš pomeni, da sta aktivna vsaj dva, ob
+    cilju „jaz" pa prej ugrizne prvo pravilo. Kriterij „zadnjega starša ni
+    mogoče deaktivirati" torej danes drži po zaslugi pravila „sebe ne".
+
+    Pravilo kljub temu ostane in ni mrtva koda: `V3-R05` pripelje klicatelja
+    **zunaj družine** (lastnik sistema deaktivira starša tuje družine), in
+    takrat je to edino pravilo, ki družino obvaruje pred tem, da ostane brez
+    nekoga, ki jo ureja. Brez njega bi ga bilo treba takrat napisati na novo —
+    in napisati na novo bi pomenilo tudi ugotoviti na novo, da je potreben.
+    Da je **priklopljeno** na pravo število, dokazuje test nad
+    `routers.clani._zavrnitev_deaktivacije`; pot čez HTTP tega ne more.
     """
     if clan_id == izvajalec_id:
         return SPOROCILO_NE_SEBE

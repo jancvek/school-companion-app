@@ -68,7 +68,7 @@
       <label for="otrok-uporabnisko-ime">Uporabniško ime za prijavo v aplikacijo</label>
       <input class="ime" type="text" id="otrok-uporabnisko-ime" name="uporabnisko_ime"
              value="{{ vnos.identifikator if obrazec == 'otrok' else '' }}" autocomplete="off">
-      <label for="otrok-geslo">Začetno geslo (vsaj 8 znakov)</label>
+      <label for="otrok-geslo">Začetno geslo (vsaj {{ najmanj_otrok }} znakov)</label>
       <input class="ime" type="password" id="otrok-geslo" name="geslo" autocomplete="new-password">
       <label for="otrok-geslo-znova">Isto geslo še enkrat</label>
       <input class="ime" type="password" id="otrok-geslo-znova" name="geslo_znova"
@@ -94,7 +94,7 @@
       <label for="stars-enaslov">E-naslov za prijavo na tej strani</label>
       <input class="ime" type="text" id="stars-enaslov" name="enaslov"
              value="{{ vnos.identifikator if obrazec == 'stars' else '' }}" autocomplete="off">
-      <label for="stars-geslo">Začetno geslo (vsaj 12 znakov)</label>
+      <label for="stars-geslo">Začetno geslo (vsaj {{ najmanj_stars }} znakov)</label>
       <input class="ime" type="password" id="stars-geslo" name="geslo" autocomplete="new-password">
       <label for="stars-geslo-znova">Isto geslo še enkrat</label>
       <input class="ime" type="password" id="stars-geslo-znova" name="geslo_znova"

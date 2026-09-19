@@ -147,6 +147,12 @@ def _stran_seznama(
             "napaka": napaka,
             "obrazec": obrazec,
             "vnos": vnos or {},
+            # Nalepka o najkrajšem geslu pride iz istega mesta kot zavrnitev
+            # (`prijava.NAJKRAJSE_GESLO`). Vtipkana v predlogo bi se z njo
+            # razšla in nihče ne bi opazil: zavrnitev bi govorila resnico,
+            # obrazec pa bi lagal.
+            "najmanj_otrok": prijava.NAJKRAJSE_GESLO[VLOGA_OTROK],
+            "najmanj_stars": prijava.NAJKRAJSE_GESLO[VLOGA_STARS],
         },
         status_code=koda,
     )
@@ -311,6 +317,9 @@ def _stran_gesla(
         {
             "clan": _pogled(clan, seja=seja, aktivnih_starsev=repo.aktivnih_starsev()),
             "napaka": napaka,
+            "najmanj": prijava.NAJKRAJSE_GESLO.get(
+                clan.role, prijava.NAJKRAJSE_GESLO[VLOGA_STARS]
+            ),
         },
         status_code=koda,
     )

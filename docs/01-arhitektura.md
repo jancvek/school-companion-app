@@ -830,6 +830,11 @@ tabele ni — `users`, `credentials` in `sessions` so postavljene v V3-R03.
   starša), `403` za dejanje, ki ni tvoje (sebe, lastnik sistema, zadnji aktivni
   starš), `409` za stanje, ki že je tako. Seznam dejanja, ki bi bilo zavrnjeno,
   sploh ne ponudi; odloči isto pravilo, ki ga tudi zavrne.
+- **Pravilo o zadnjem staršu po nobeni od teh poti ni dosegljivo** in ostane
+  za `V3-R05`: klicatelj je vedno aktiven starš te družine, zato tuj aktiven
+  starš pomeni vsaj dva, ob cilju „jaz" pa prej ugrizne „sebe ne". Kriterij
+  danes drži po zaslugi drugega pravila; podrobnosti in razlog, zakaj pravilo
+  vseeno ostane, so v `ADR-038` („Popravki po prvem pregledu").
 - **Ponastavitev gesla in deaktivacija v isti transakciji izbrišeta vse seje
   člana.** Ponastavitev, po kateri bi kje ostala veljavna seja, ne bi bila
   ponastavitev. Velja brez izjeme tudi zase: starš, ki ponastavi lastno geslo,

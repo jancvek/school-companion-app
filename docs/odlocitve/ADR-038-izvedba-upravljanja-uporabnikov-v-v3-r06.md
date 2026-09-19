@@ -84,11 +84,11 @@ se poskusi vstaviti in `IntegrityError` se prevede v slovensko sporočilo.
 To ni samo skladnost z `ADR-025` — poizvedba pred vstavljanjem je tekma, ki jo
 baza tako ali tako razsodi.
 
-**Sporočilo ne izda tuje družine:** „To uporabniško ime je že zasedeno, izberi
-drugo." Kriterij 2 zahteva jasnost, kriterij 6 pa pravi, da obstoj tujega
-uporabnika ni podatek za starša. Nekaj informacije je pri globalni enoličnosti
-neizogibno; besedilo brez „pri kom" in brez razlike med „zaseden e-naslov" in
-„zasedeno uporabniško ime" je najmanjši možen izid.
+**Sporočilo ne izda tuje družine:** „To ime je že zasedeno. Izberi drugo."
+Kriterij 2 zahteva jasnost, kriterij 6 pa pravi, da obstoj tujega uporabnika ni
+podatek za starša. Nekaj informacije je pri globalni enoličnosti neizogibno;
+besedilo brez „pri kom" in brez razlike med e-naslovom in uporabniškim imenom
+je najmanjši možen izid.
 
 **Normalizacija.** Identifikator se ob nastanku **in ob prijavi** poravna na
 male črke in obrezane robove. Brez tega enoličnost ne drži v pomenu, ki ga
@@ -142,9 +142,12 @@ Stolpec ostane: pisan je ob vsaki prijavi in bo seznam, ko in če bo, nosil.
   dodati samo pogled čez družine. `V3-R07` dobi več otrok v družini kot
   resnično stanje in ne le kot možnost v shemi.
 - **Kaj to oteži:**
-  - `app/routers/vstop.py` in `app/ukazi.py` se dotakneta zaradi E in C,
-    čeprav sta iz `V3-R03`. Normalizacija ob prijavi je sprememba obnašanja
-    poti, ki je ta zahteva sicer ne bi odpirala.
+  - `app/prijava.py` in `app/ukazi.py` se dotakneta zaradi E in C, čeprav sta
+    iz `V3-R03`. Normalizacija ob prijavi je sprememba obnašanja poti, ki je ta
+    zahteva sicer ne bi odpirala. Sedi v `preveri_prijavo` in `koliko_cakati`
+    in ne v `app/routers/vstop.py`, kot je predvideval plan: pravilo mora
+    veljati za obe vrati in za vsak zapis v `login_attempts`, pravilo, ki bi ga
+    moral ponoviti vsak klicatelj, pa bo kdo kdaj pozabil.
   - Nove poti morajo dobiti vnos v `tests/test_tesnjenje.py` (`PRIMERI_POTI`)
     in nov repozitorij v `PRIMERI_REPOZITORIJEV`; brez tega zbirka pade. Tako
     je varovalo mišljeno in to je cena, ki jo `ADR-025` zavestno plačuje.
@@ -153,3 +156,39 @@ Stolpec ostane: pisan je ob vsaki prijavi in bo seznam, ko in če bo, nosil.
 - **Zavestno izpuščeno:** urejanje članov (B), seznam naprav (H), obnovitev
   gesla po e-pošti (`ADR-027`, ni SMTP), premik člana v drugo družino in
   sprememba vloge. Vse to so nove zahteve, če bodo.
+
+## Popravki po prvem pregledu (19. 9. 2026)
+
+Pregledovalec je našel, da kriterij „zadnjega starša v družini ni mogoče
+deaktivirati" nima testa, ki bi padel ob pokvarjeni izvedbi. Ob popravku se je
+pokazalo več od manjkajočega testa, zato to zapisujemo sem in ne samo v kodo.
+
+**Pravilo o zadnjem staršu po nobeni od devetih poti ni dosegljivo.** Klicatelj
+je vedno **aktiven starš te družine** — sejo ima samo tak, ker jo
+`prijava.seja_za_zeton` neaktivnemu izbriše in `vloga_sodi` otroka ne spusti.
+Zato velja: če je cilj tuj **aktiven** starš, sta aktivna vsaj dva in pravilo
+ne ugrizne; če je cilj on sam, prej ugrizne pravilo „sebe ne". Kriterij danes
+drži **po zaslugi pravila „sebe ne"**, ne po zaslugi štetja staršev.
+
+Pravilo kljub temu **ostane**. `V3-R05` pripelje klicatelja zunaj družine
+(lastnik sistema deaktivira starša tuje družine) in takrat je to edino pravilo,
+ki družino obvaruje pred tem, da ostane brez nekoga, ki jo ureja. Odstraniti ga
+zdaj bi pomenilo, da ga bo treba takrat napisati na novo — in napisati na novo
+bi pomenilo tudi **ugotoviti na novo**, da je potreben.
+
+Ker čez HTTP dokaza ni, je priklop pribit tam, kjer bo pravilo dejansko
+uporabljeno: test kliče `routers.clani._zavrnitev_deaktivacije` s klicateljem
+zunaj družine in pade, če se `aktivnih_starsev` zamenja s konstanto. Zraven
+stoji test, da `ClaniRepository.aktivnih_starsev` šteje pravo reč (ne otrok, ne
+deaktiviranih, ne tuje družine).
+
+Iz istega pregleda še troje, manjšega:
+
+- **Najkrajše geslo je v obrazcu izpisano iz `prijava.NAJKRAJSE_GESLO`**, ne
+  vtipkano v predlogo. Vtipkana bi se z zavrnitvijo razšla in nalepka bi lagala,
+  ne da bi kak test padel.
+- **Stran za ponastavitev gesla pove mejo, preden je geslo vtipkano** dvakrat.
+- **`IntegrityError` se v „to ime je že zasedeno" prevede samo takrat, kadar je
+  kršitev res enoličnost identifikatorja** (`db.je_zaseden_identifikator`).
+  Prej bi vsaka kršitev integritete — na Postgresu tudi tuji ključ na družino —
+  poslala uporabnico iskat drugo ime, ki ni bilo težava.

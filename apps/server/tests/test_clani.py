@@ -21,11 +21,18 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from sqlalchemy import Engine, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import clani, prijava
-from app.db import PrijavaRepository
+from app.db import (
+    ClaniRepository,
+    PrijavaRepository,
+    SejaUporabnika,
+    je_zaseden_identifikator,
+)
 from app.models import VLOGA_OTROK, VLOGA_STARS, Credential, Material, User, UserSession
+from app.routers.clani import _zavrnitev_deaktivacije
 from tests.conftest import (
     CVEK_ID,
     GESLO_OTROKA,
@@ -39,6 +46,7 @@ from tests.conftest import (
     ustvari_sejo,
     ustvari_starsa,
 )
+from tests.test_druzine import DRUGA_ID, dodaj_druzino
 from tests.test_kvizi import UUID_ENA, snov
 from tests.test_prijava import prijavi_se
 
@@ -477,24 +485,80 @@ class TestDeaktivacija:
             oseba = seja.get(User, stars)
             assert oseba is not None and oseba.is_active is True
 
-    def test_zadnjega_aktivnega_starsa_ni_mogoce_deaktivirati(
+    def test_drug_aktiven_stars_se_da_deaktivirati(
         self, aplikacija: FastAPI, odjemalec: PrijavljenOdjemalec, motor: Engine, stars: str
     ) -> None:
-        """Drugi starš ga sme deaktivirati **šele**, ko v družini ostane še kdo."""
+        """Dokler sta aktivna dva, en pade — pravilo o zadnjem staršu ne ovira."""
         drugi = ustvari_starsa(motor, identifikator="druga@primer.test", prikazno_ime="Druga")
         with PrijavljenOdjemalec(aplikacija, base_url="https://testserver") as drug:
             prijavi(drug, motor, drugi)
-            # Zdaj sta aktivna dva: prvi pade.
-            assert drug.post(
-                pot_clana(stars, "deactivate"), follow_redirects=False
-            ).status_code == 303
-            # Ostal je en sam aktiven starš — in to je ta, ki kliče.
-            zavrnjeno = drug.post(pot_clana(drugi, "deactivate"))
 
-        assert zavrnjeno.status_code == 403
+            odgovor = drug.post(pot_clana(stars, "deactivate"), follow_redirects=False)
+
+        assert odgovor.status_code == 303
         with Session(motor) as seja:
-            oseba = seja.get(User, drugi)
-            assert oseba is not None and oseba.is_active is True
+            oseba = seja.get(User, stars)
+            assert oseba is not None and oseba.is_active is False
+
+    def test_zadnji_aktiven_stars_ostane_ceprav_je_klicatelj_zunaj_druzine(
+        self, motor: Engine, stars: str
+    ) -> None:
+        """Pravilo o zadnjem staršu je **priklopljeno na pravo število**.
+
+        Čez HTTP tega ni mogoče dokazati: klicatelj je vedno aktiven starš te
+        družine, zato tuj aktiven starš pomeni, da sta aktivna vsaj dva, ob
+        cilju „jaz" pa prej ugrizne pravilo „sebe ne" (`app/clani.py`).
+        Pravilo zato kličemo tam, kjer bo klicatelj zunaj družine — v `V3-R05`
+        — in preverimo natanko vrstico, ki število prebere iz repozitorija.
+
+        Brez tega testa je mogoče `aktivnih_starsev` zamenjati s poljubno
+        konstanto in zbirka ostane zelena; prav to je pregled V3-R06 našel.
+        """
+        seja_tujca = SejaUporabnika(
+            session_id="x",
+            user_id="lastnik-sistema-zunaj-te-druzine",
+            family_id=CVEK_ID,
+            family_name="Cvek",
+            role=VLOGA_STARS,
+            display_name="Lastnik",
+            is_active=True,
+            is_system_owner=True,
+            csrf_token="x",
+            expires_at=datetime.now(UTC),
+            last_used_at=datetime.now(UTC),
+        )
+
+        with Session(motor) as seja:
+            repo = ClaniRepository(seja, CVEK_ID)
+            clan = repo.clan(stars)
+            assert clan is not None
+            assert repo.aktivnih_starsev() == 1
+
+            razlog = _zavrnitev_deaktivacije(repo, clan, seja_tujca)
+
+        assert razlog == clani.SPOROCILO_ZADNJI_STARS
+
+    def test_aktivnih_starsev_steje_samo_aktivne_starse_te_druzine(
+        self, motor: Engine, stars: str, otrok: str
+    ) -> None:
+        """Število, na katerem pravilo stoji, mora šteti pravo stvar."""
+        ustvari_starsa(
+            motor, identifikator="bivsa@primer.test", prikazno_ime="Bivša", aktiven=False
+        )
+        dodaj_druzino(motor)
+        ustvari_starsa(
+            motor, family_id=DRUGA_ID, identifikator="tuj@primer.test", prikazno_ime="Tuj"
+        )
+
+        with Session(motor) as seja:
+            koliko = ClaniRepository(seja, CVEK_ID).aktivnih_starsev()
+
+        # Otrok ni starš, deaktivirana ni aktivna, tuja ni naša.
+        assert koliko == 1
+
+        ustvari_starsa(motor, identifikator="druga@primer.test", prikazno_ime="Druga")
+        with Session(motor) as seja:
+            assert ClaniRepository(seja, CVEK_ID).aktivnih_starsev() == 2
 
     def test_lastnika_sistema_ni_mogoce_deaktivirati(
         self, odjemalec: PrijavljenOdjemalec, motor: Engine, lastnik: str
@@ -655,6 +719,68 @@ class TestPravila:
 
     def test_normalizacija_je_obrez_in_male_crke(self) -> None:
         assert prijava.normaliziraj_identifikator("  Masa@Primer.TEST ") == "masa@primer.test"
+
+
+class TestPrevodNapakeBaze:
+    """Zasedeno ime se od vsake druge kršitve integritete mora ločiti."""
+
+    @pytest.mark.parametrize(
+        "besedilo",
+        [
+            "UNIQUE constraint failed: credentials.identifier",
+            'duplicate key value violates unique constraint "credentials_identifier_key"',
+        ],
+        ids=["sqlite", "postgres"],
+    )
+    def test_zasedeno_ime_prepozna_oba_dialekta(self, besedilo: str) -> None:
+        assert je_zaseden_identifikator(IntegrityError("stavek", None, Exception(besedilo)))
+
+    @pytest.mark.parametrize(
+        "besedilo",
+        [
+            'insert or update on table "users" violates foreign key constraint'
+            ' "fk_users_family_id"',
+            "UNIQUE constraint failed: sessions.token_hash",
+        ],
+        ids=["tuji-kljuc", "druga-enolicnost"],
+    )
+    def test_druga_krsitev_se_ne_predstavi_kot_zasedeno_ime(self, besedilo: str) -> None:
+        """Sicer bi napaka poslala uporabnico iskat drugo ime, ki ni težava."""
+        assert not je_zaseden_identifikator(IntegrityError("stavek", None, Exception(besedilo)))
+
+    def test_ustvari_clana_druge_krsitve_ne_pogoltne(
+        self, motor: Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Nepričakovana kršitev integritete mora priti ven, ne v sporočilo.
+
+        Sprožilec je trčenje primarnega ključa `users.id`, ne tuji ključ:
+        SQLite tujih ključev privzeto ne uveljavlja (`docs/01-arhitektura.md`),
+        zato bi bil test nad njim zelen iz napačnega razloga. Vnaprej znan
+        `uuid4` je edini način, kako v tej bazi ustvariti kršitev, ki **ni**
+        zasedeni identifikator.
+        """
+        monkeypatch.setattr(
+            "app.db.uuid4", lambda: "11111111-1111-4111-8111-111111111111"
+        )
+        with Session(motor) as seja:
+            repo = ClaniRepository(seja, CVEK_ID)
+            repo.ustvari_clana(
+                role=VLOGA_OTROK,
+                display_name="Prva",
+                identifier="prva",
+                secret_hash="x",
+                ko=datetime.now(UTC),
+            )
+
+            # Drug identifikator, isti `id` osebe: to ni zasedeno ime.
+            with pytest.raises(IntegrityError):
+                repo.ustvari_clana(
+                    role=VLOGA_OTROK,
+                    display_name="Druga",
+                    identifier="druga",
+                    secret_hash="x",
+                    ko=datetime.now(UTC),
+                )
 
 
 class TestOkoliska:

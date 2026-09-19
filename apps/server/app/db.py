@@ -1702,6 +1702,29 @@ class IdentifikatorZaseden(Exception):
     """
 
 
+#: Po čem se kršitev enoličnosti identifikatorja loči od vsake druge kršitve
+#: integritete. Dva zapisa, ker se dialekta razlikujeta: SQLite (testi) pove
+#: „UNIQUE constraint failed: credentials.identifier", Postgres (produkcija)
+#: pa „duplicate key value violates unique constraint
+#: \"credentials_identifier_key\"".
+_ZNAKI_ZASEDENEGA = ("credentials.identifier", "credentials_identifier_key")
+
+
+def je_zaseden_identifikator(izjema: IntegrityError) -> bool:
+    """Ali je ta kršitev integritete prav zasedeni identifikator.
+
+    Brez te preverbe bi `except IntegrityError` **vsako** kršitev prevedel v
+    „to ime je že zasedeno" — tudi kršitev tujega ključa na družino, ki bi jo
+    Postgres zavrnil. Sporočilo, ki v takem primeru pošlje uporabnico iskat
+    drugo ime, je slabše od napake, ki se vidi.
+
+    Funkcija je javna in preizkušena nad obema besediloma: ujemanje po nizu je
+    edino, kar je prenosljivo med dialektoma, in prav zato mora biti pribito s
+    testom, ne le prebrano.
+    """
+    return any(znak in str(izjema.orig) for znak in _ZNAKI_ZASEDENEGA)
+
+
 @dataclass(frozen=True)
 class ClanDruzine:
     """Ena oseba v družini, kot jo pokaže `/admin/family`.
@@ -1837,6 +1860,8 @@ class ClaniRepository(_RepozitorijDruzine):
             self._session.commit()
         except IntegrityError as izjema:
             self._session.rollback()
+            if not je_zaseden_identifikator(izjema):
+                raise
             raise IdentifikatorZaseden(identifier) from izjema
         return user_id
 
