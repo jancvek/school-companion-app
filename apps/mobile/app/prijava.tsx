@@ -75,7 +75,11 @@ export default function PrijavaScreen() {
     return (
       <View
         testID="odjava-vsebina"
-        style={[styles.container, { paddingBottom: theme.spacing + insets.bottom }]}
+        style={[
+          styles.container,
+          styles.vsebina,
+          { paddingBottom: theme.spacing + insets.bottom },
+        ]}
       >
         <Text testID="prijavljen" style={styles.naslov}>
           Prijavljena si kot {seja.ime}.
@@ -180,6 +184,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.background,
   },
+  /**
+   * Odmik vsebine od robov. Uporabita ga **obe** veji zaslona: prijavna prek
+   * `contentContainerStyle`, odjavna pa neposredno. Brez tega se besedilo in
+   * gumb dotikata levega in desnega roba — edini zaslon v aplikaciji, kjer
+   * bi bilo tako.
+   *
+   * `paddingBottom` vsaka veja prišteje sama, ker mora vanj prišteti še
+   * spodnji odmik varnega območja (Android riše edge-to-edge).
+   */
   vsebina: {
     gap: theme.spacing * 0.5,
     padding: theme.spacing * 1.5,

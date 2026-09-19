@@ -164,31 +164,33 @@ class TestPrijava:
         assert slike_na_disku(slike / CVEK_ID) == []
 
     def test_glava_z_ne_ascii_znaki_ne_sesuje_streznika(self, odjemalec: TestClient) -> None:
-        # Starlette glave dekodira kot latin-1, zato je lahko ključ, ki pride
-        # z omrežja, ne-ASCII niz. `compare_digest` nad takim nizom vrže
-        # TypeError; brez primerjave bajtov bi bila to 500, ne 401.
+        # Starlette glave dekodira kot latin-1, zato je lahko žeton, ki pride
+        # z omrežja, ne-ASCII niz. Glava je vnos od zunaj in ne sme sesuti
+        # strežnika: pričakujemo 401, ne 500.
+        #
+        # Do V3-R04 je isti primer varoval `compare_digest` nad ključem, ki nad
+        # ne-ASCII nizom vrže `TypeError`. Ključa ni več, pot pa je ostala —
+        # samo drugo glavo ima, zato test **preide** na `Authorization`.
+        # Preverjanje s staro glavo brez tega ne bi dokazovalo več ničesar:
+        # `X-API-Key` se odslej samo prezre.
         #
         # Glava je podana kot bajti, ker odjemalec ne-ASCII niza sploh ne bi
-        # poslal — omejitev je na njegovi strani, ne na strežnikovi.
-        #
-        # Bajti so tudi v ključu glave, ne le v vrednosti: odjemalec sprejme
-        # preslikavo nizov ali preslikavo bajtov, ne pa mešanice. Mešanica je
-        # tekla, dokler je bil tip ohlapnejši, in je zdaj napaka `mypy`.
-        # Popravljeno pri V1-R04, ker je blokiralo `verify`; vsebina testa je
-        # nespremenjena.
+        # poslal — omejitev je na njegovi strani, ne na strežnikovi. Bajti so
+        # tudi v imenu glave, ne le v vrednosti: odjemalec sprejme preslikavo
+        # nizov ali preslikavo bajtov, ne pa mešanice.
         odgovor = odjemalec.post(
             "/materials",
             data=polja(),
             files=datoteka(),
-            headers={b"X-API-Key": b"\xc4-tuj-kljuc"},
+            headers={b"Authorization": b"Bearer \xc4-tuj-zeton"},
         )
 
         assert odgovor.status_code == 401
 
-    def test_kljuc_se_preveri_pred_branjem_telesa(self, odjemalec: TestClient) -> None:
+    def test_prijava_se_preveri_pred_branjem_telesa(self, odjemalec: TestClient) -> None:
         # Zahtevek je brez obveznih polj: če bi se telo bralo prej, bi bil
-        # odgovor 422. Ker je 401, je ključ res prva stvar na poti.
-        odgovor = odjemalec.post("/materials", headers={"X-API-Key": "tuj-kljuc"})
+        # odgovor 422. Ker je 401, je prijava res prva stvar na poti.
+        odgovor = odjemalec.post("/materials", headers={"Authorization": "Bearer tuj-zeton"})
 
         assert odgovor.status_code == 401
 

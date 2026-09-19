@@ -51,6 +51,16 @@ function material(overrides: Partial<Material> = {}): Material {
   };
 }
 
+/** Odmik `padding` iz sloga; sloge React Native podaja kot gnezdena polja. */
+function odmik(style: unknown): number {
+  const kosi = Array.isArray(style) ? style.flat(Infinity) : [style];
+  for (const kos of [...kosi].reverse()) {
+    const vrednost = (kos as { padding?: number } | null)?.padding;
+    if (typeof vrednost === 'number') return vrednost;
+  }
+  return 0;
+}
+
 describe('prijavni zaslon', () => {
   let db: MaterialsDatabase & { close(): void };
   let odgovor: jest.Mock;
@@ -476,5 +486,19 @@ describe('prijavni zaslon', () => {
     const vsebina = screen.getByTestId('odjava-vsebina');
 
     expect(odmikSpodaj(vsebina.props.style)).toBe(theme.spacing + TEST_INSETS.bottom);
+  });
+
+  it('obe veji imata odmik od stranskih robov', async () => {
+    // Odjavna veja ga je sprva imela samo spodaj, zato sta se besedilo in
+    // gumb dotikala levega in desnega roba — edini tak zaslon v aplikaciji.
+    await izrisi(ustvariShrambo());
+    expect(odmik(screen.getByTestId('prijava-vsebina').props.contentContainerStyle)).toBe(
+      theme.spacing * 1.5,
+    );
+
+    await izrisi(ustvariShrambo(SEJA), true);
+    expect(odmik(screen.getByTestId('odjava-vsebina').props.style)).toBe(
+      theme.spacing * 1.5,
+    );
   });
 });
