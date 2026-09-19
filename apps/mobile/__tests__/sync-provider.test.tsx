@@ -77,7 +77,7 @@ function material(id: string): Material {
     sync_attempts: 0,
     last_attempt_at: null,
     sync_error: null,
-  user_id: null,
+    user_id: null,
   };
 }
 

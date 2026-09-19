@@ -273,7 +273,7 @@ describe('prijavni zaslon', () => {
 
     expect(await jeOdjavaNedokoncana(db)).toBe(false);
 
-    // Nov zagon: Jakova seja obvelja in ni zavržena kot ostanek.
+    // Nov zagon: sveža seja obvelja in ni zavržena kot ostanek.
     await izrisi(shramba, true);
     expect(screen.getByTestId('prijavljen')).toBeTruthy();
   });

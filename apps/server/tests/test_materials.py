@@ -131,15 +131,22 @@ class TestIdempotentnost:
         assert len(slike_na_disku(slike / CVEK_ID)) == 2
 
 
-class TestKljuc:
-    """Brez veljavnega ključa ne sme nastati nič."""
+class TestPrijava:
+    """Brez veljavne prijave ne sme nastati nič.
+
+    Primeri s staro glavo `X-API-Key` niso ostanek: od V3-R04 dokazujejo,
+    da je prehod oster in da stara skrivnost ne odpre več ničesar
+    (`docs/odlocitve/ADR-027` C2).
+    """
 
     @pytest.mark.parametrize(
         ("opis", "glave"),
         [
             ("brez glave", {}),
-            ("napacen kljuc", {"X-API-Key": "tuj-kljuc"}),
-            ("prazen kljuc", {"X-API-Key": ""}),
+            ("star kljuc", {"X-API-Key": "star-kljuc"}),
+            ("prazen star kljuc", {"X-API-Key": ""}),
+            ("tuja shema", {"Authorization": "Basic karkoli"}),
+            ("zeton, ki ga ni", {"Authorization": "Bearer zeton-ki-ga-ni"}),
         ],
     )
     def test_vrne_401_brez_vrstice_in_brez_datoteke(
@@ -156,7 +163,7 @@ class TestKljuc:
         assert stevilo_vrstic(motor) == 0
         assert slike_na_disku(slike / CVEK_ID) == []
 
-    def test_kljuc_z_ne_ascii_znaki_ne_sesuje_streznika(self, odjemalec: TestClient) -> None:
+    def test_glava_z_ne_ascii_znaki_ne_sesuje_streznika(self, odjemalec: TestClient) -> None:
         # Starlette glave dekodira kot latin-1, zato je lahko ključ, ki pride
         # z omrežja, ne-ASCII niz. `compare_digest` nad takim nizom vrže
         # TypeError; brez primerjave bajtov bi bila to 500, ne 401.
