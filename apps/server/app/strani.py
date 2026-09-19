@@ -69,6 +69,23 @@ def ni_dovoljeno(predloge: Jinja2Templates, request: Request, sporocilo: str) ->
     )
 
 
+def zavrnjeno(predloge: Jinja2Templates, request: Request, sporocilo: str) -> Response:
+    """403 kot stran (V3-R06).
+
+    Ni 404: član je v tvoji družini in ga vidiš, zato skrivanje nima česa
+    skriti — skriva se samo obstoj **tujih** članov, in to počne `ni_najdeno`.
+    Ni 409: stanje je v redu, dejanje pa ni tvoje (deaktivacija sebe, lastnika
+    sistema ali zadnjega starša). Razlika med „še ne gre" in „ti ne smeš" je
+    edino, kar zavrnjenemu pove, ali naj poskusi drugače ali sploh ne.
+    """
+    return predloge.TemplateResponse(
+        request,
+        "najdena-ni.html",
+        {"naslov": "Tega ne smeš", "sporocilo": sporocilo},
+        status_code=403,
+    )
+
+
 def neveljavna_zahteva(predloge: Jinja2Templates, request: Request, sporocilo: str) -> Response:
     """400 kot stran, ne kot JSON.
 

@@ -16,7 +16,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import prijava, strani
 from app.db import naredi_motor, naredi_tovarno_sej
-from app.routers import admin, dnevi, kvizi, materials, resevanje, statistika, vstop
+from app.routers import admin, clani, dnevi, kvizi, materials, resevanje, statistika, vstop
 from app.schemas import Zivost
 from app.security import SejaMiddleware, ZetonMiddleware
 from app.settings import Settings
@@ -157,6 +157,10 @@ def create_app(
     # nobeno obstoječo potjo se ne prekriva in samo bere; varuje jo isto kot
     # ves `/admin` (`docs/odlocitve/ADR-026`).
     app.include_router(dnevi.router)
+    # Člani družine (V3-R06), pod `/admin/family`. Z nobeno obstoječo potjo se
+    # ne prekriva in je varovana z isto plastjo kot ves `/admin` (`ADR-035` A);
+    # pravila o tem, kdo sme koga, so v `app/clani.py`.
+    app.include_router(clani.router)
 
     # Napake pod `/admin` naj bodo stran, ne JSON. Prestreznik se za vse
     # ostale poti umakne privzetemu — glej `admin.prestrezi_napako`.

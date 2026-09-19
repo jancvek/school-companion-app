@@ -21,6 +21,7 @@ SLIKE: Oblike = ("slika", "sliki", "slike", "slik")
 VPRASANJA: Oblike = ("vprašanje", "vprašanji", "vprašanja", "vprašanj")
 SNOVI: Oblike = ("snov", "snovi", "snovi", "snovi")
 POSKUSI: Oblike = ("poskus", "poskusa", "poskusi", "poskusov")
+CLANI: Oblike = ("član", "člana", "člani", "članov")
 
 
 def stevilo_z_besedo(koliko: int, oblike: Oblike) -> str:

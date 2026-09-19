@@ -1208,6 +1208,10 @@ class TestPakiranje:
             "dnevi.html",
             # V3-R03.
             "prijava.html",
+            # V3-R06.
+            "clani.html",
+            "clani-geslo.html",
+            "clani-stanje.html",
         }
 
 

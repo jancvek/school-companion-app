@@ -168,6 +168,29 @@ class IzidPrijave:
     poverilnica: PoverilnicaZaPrijavo | None = None
 
 
+# --- Identifikator ---------------------------------------------------------
+
+
+def normaliziraj_identifikator(identifikator: str) -> str:
+    """Identifikator v obliki, v kakršni stoji v bazi: brez robov, male črke.
+
+    Normalizira se **ob nastanku računa in ob vsaki prijavi**, na obeh vratih
+    (`docs/odlocitve/ADR-038` E). Brez tega enoličnost stolpca
+    `credentials.identifier` ne pomeni tega, kar zahteva `V3-R06`:
+    `Ana@primer.si` in `ana@primer.si` bi bila dva računa, torej natanko
+    dvoumnost, ki naj bi jo enoličnost preprečila.
+
+    Stranski učinek je dobrodošel: omejevanje ugibanja (`ADR-035` E) šteje po
+    normaliziranem identifikatorju, zato se mu z menjavo velikih črk ni mogoče
+    izogniti.
+
+    `lower` in ne `casefold`: ta bi `ß` preslikal v `ss` in s tem dva različna
+    zapisa zlil v enega — pri identifikatorju, ki je ime računa, je to več, kot
+    je bilo mišljeno.
+    """
+    return identifikator.strip().lower()
+
+
 # --- Gesla -----------------------------------------------------------------
 
 
@@ -232,8 +255,15 @@ def zamik_pred_preverbo(neuspelih: int) -> float:
 
 
 def koliko_cakati(repo: PrijavaRepository, identifikator: str, ko: datetime) -> float:
-    """Zamik za ta identifikator ob času `ko`."""
-    neuspelih = repo.neuspelih_poskusov(identifikator, ko - OKNO_POSKUSOV)
+    """Zamik za ta identifikator ob času `ko`.
+
+    Identifikator se normalizira tudi tu in ne samo ob preverbi: števec bi
+    sicer za `Masa` in `masa` tekel ločeno in ugibanje bi se mu izognilo z
+    menjavo velikih črk (`docs/odlocitve/ADR-038` E).
+    """
+    neuspelih = repo.neuspelih_poskusov(
+        normaliziraj_identifikator(identifikator), ko - OKNO_POSKUSOV
+    )
     return zamik_pred_preverbo(neuspelih)
 
 
@@ -261,7 +291,14 @@ def preveri_prijavo(
 
     `vrata` povedo, od kod prijava prihaja. Vloga, ki tja ne sodi, dobi
     `NAPACNA_VRATA` z razlago namesto enotnega sporočila — glej `Vrata`.
+
+    **Identifikator se normalizira tu in ne v usmerjevalniku** (`ADR-038` E):
+    pravilo mora veljati za obe vrati in za vsak zapis v `login_attempts`, in
+    pravilo, ki bi ga moral vsak klicatelj ponoviti, je pravilo, ki ga bo kdo
+    kdaj pozabil.
     """
+    identifikator = normaliziraj_identifikator(identifikator)
+
     repo.pocisti_stare_poskuse(ko - HRAMBA_POSKUSOV)
     repo.pocisti_potekle_seje(ko)
 

@@ -1,0 +1,110 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}Družina{% endblock %}
+
+{% block vsebina %}
+  <h1>Družina</h1>
+  <p class="pod">Skupaj {{ skupaj_opis }}.</p>
+
+  {# Dejanja so povezave na vmesno stran in **ne** gumbi: sam klik ne spremeni
+     ničesar, spremeni šele `POST` s potrditvene strani (kriterij V3-R06).
+     Ponujena so samo tista, ki bi uspela — kateri so to, odloči `app/clani.py`
+     in ne ta predloga. #}
+  <div class="tabela-ovoj">
+    <table class="tabela">
+      <thead>
+        <tr>
+          <th>Ime</th>
+          <th>Vloga</th>
+          <th>Prijava</th>
+          <th>Stanje</th>
+          <th>Dejanja</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for clan in clani %}
+          <tr class="{{ '' if clan.aktiven else 'prazen' }}">
+            <td>
+              {{ clan.ime }}
+              {% if clan.jaz %}<span class="stanje">— to si ti</span>{% endif %}
+              {% if clan.lastnik_sistema %}<span class="stanje">— lastnik sistema</span>{% endif %}
+            </td>
+            <td>{{ clan.vloga }}</td>
+            <td>{{ clan.identifikator }}</td>
+            <td>
+              {{ clan.stanje }}
+              {% if clan.brez_gesla %}<span class="stanje">— geslo ni nastavljeno</span>{% endif %}
+            </td>
+            <td class="zaporedje">
+              {% if clan.sme_geslo %}
+                <span><a href="/admin/family/members/{{ clan.id }}/password">Ponastavi geslo</a></span>
+              {% endif %}
+              {% if clan.sme_deaktivacijo %}
+                <span><a href="/admin/family/members/{{ clan.id }}/deactivate">Deaktiviraj</a></span>
+              {% endif %}
+              {% if clan.sme_aktivacijo %}
+                <span><a href="/admin/family/members/{{ clan.id }}/activate">Aktiviraj znova</a></span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {# Dodajanje nima vmesne potrditve: ta bi začetno geslo spravila v skrito
+     polje druge strani (`docs/odlocitve/ADR-038` F). Ob napaki se vrneta ime
+     in identifikator, geslo pa nikoli. #}
+  <section class="izid">
+    <h2>Dodaj otroka</h2>
+    {% if napaka and obrazec == "otrok" %}
+      <p class="napaka">{{ napaka }}</p>
+    {% endif %}
+    <form method="post" action="/admin/family/children" class="prijava">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="otrok-ime">Prikazno ime</label>
+      <input class="ime" type="text" id="otrok-ime" name="ime"
+             value="{{ vnos.ime if obrazec == 'otrok' else '' }}" autocomplete="off">
+      <label for="otrok-uporabnisko-ime">Uporabniško ime za prijavo v aplikacijo</label>
+      <input class="ime" type="text" id="otrok-uporabnisko-ime" name="uporabnisko_ime"
+             value="{{ vnos.identifikator if obrazec == 'otrok' else '' }}" autocomplete="off">
+      <label for="otrok-geslo">Začetno geslo (vsaj 8 znakov)</label>
+      <input class="ime" type="password" id="otrok-geslo" name="geslo" autocomplete="new-password">
+      <label for="otrok-geslo-znova">Isto geslo še enkrat</label>
+      <input class="ime" type="password" id="otrok-geslo-znova" name="geslo_znova"
+             autocomplete="new-password">
+      <button class="gumb gumb-obdelava" type="submit">Dodaj otroka</button>
+    </form>
+    <p class="drobno">
+      Otrok e-naslova nima — v aplikacijo se prijavi z uporabniškim imenom.
+      Ime je enolično za celo namestitev, zato je lahko že zasedeno.
+    </p>
+  </section>
+
+  <section class="izid">
+    <h2>Dodaj starša</h2>
+    {% if napaka and obrazec == "stars" %}
+      <p class="napaka">{{ napaka }}</p>
+    {% endif %}
+    <form method="post" action="/admin/family/parents" class="prijava">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="stars-ime">Prikazno ime</label>
+      <input class="ime" type="text" id="stars-ime" name="ime"
+             value="{{ vnos.ime if obrazec == 'stars' else '' }}" autocomplete="off">
+      <label for="stars-enaslov">E-naslov za prijavo na tej strani</label>
+      <input class="ime" type="text" id="stars-enaslov" name="enaslov"
+             value="{{ vnos.identifikator if obrazec == 'stars' else '' }}" autocomplete="off">
+      <label for="stars-geslo">Začetno geslo (vsaj 12 znakov)</label>
+      <input class="ime" type="password" id="stars-geslo" name="geslo" autocomplete="new-password">
+      <label for="stars-geslo-znova">Isto geslo še enkrat</label>
+      <input class="ime" type="password" id="stars-geslo-znova" name="geslo_znova"
+             autocomplete="new-password">
+      <button class="gumb gumb-obdelava" type="submit">Dodaj starša</button>
+    </form>
+    <p class="drobno">
+      Novi starš vidi vso snov, kvize in statistiko te družine — in nič zunaj nje.
+    </p>
+  </section>
+
+  <a class="nazaj" href="/admin">← Nazaj na predmete</a>
+{% endblock %}

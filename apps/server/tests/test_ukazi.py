@@ -13,7 +13,7 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from app import ukazi
-from app.models import Credential
+from app.models import Credential, UserSession
 from app.prijava import geslo_se_ujema
 from tests.conftest import (
     GESLO_STARSA,
@@ -21,6 +21,7 @@ from tests.conftest import (
     STARS_IDENTIFIKATOR,
     PrijavljenOdjemalec,
     ustvari_otroka,
+    ustvari_sejo,
     ustvari_starsa,
 )
 from tests.test_prijava import prijavi_se
@@ -90,6 +91,45 @@ class TestNastaviGeslo:
             odgovor = prijavi_se(odjemalec, geslo=novo)
 
         assert odgovor.status_code == 303
+
+    def test_ukaz_preklice_vse_seje_racuna(self, motor: Engine, izpisi: list[str]) -> None:
+        """V3-R06: ukaz in stran ponastavita geslo z istim pomenom (`ADR-038` C).
+
+        Do V3-R06 je ukaz seje pustil in to tudi izpisal. Dve poti do istega
+        dejanja z različno posledico bi bili past: geslo bi bilo zamenjano,
+        prijavljena naprava pa bi ostala prijavljena.
+        """
+        user_id = ustvari_starsa(motor)
+        ustvari_sejo(motor, user_id)
+        ustvari_sejo(motor, user_id)
+        novo = "geslo-po-ukazu-12"
+
+        koda = ukazi.nastavi_geslo(
+            STARS_IDENTIFIKATOR,
+            vprasaj=Tipkovnica(novo, novo),
+            izpisi=izpisi.append,
+            motor=motor,
+        )
+
+        assert koda == 0
+        with Session(motor) as seja:
+            assert list(seja.scalars(select(UserSession.id))) == []
+        assert "preklicane" in izpisi[0]
+
+    def test_identifikator_se_normalizira(self, motor: Engine, izpisi: list[str]) -> None:
+        """`ADR-038` E: ukaz išče po isti obliki, po kakršni išče prijava."""
+        ustvari_starsa(motor, geslo=None)
+        novo = "geslo-z-velikimi-12"
+
+        koda = ukazi.nastavi_geslo(
+            STARS_IDENTIFIKATOR.upper(),
+            vprasaj=Tipkovnica(novo, novo),
+            izpisi=izpisi.append,
+            motor=motor,
+        )
+
+        assert koda == 0
+        assert geslo_se_ujema(zgostitev_v_bazi(motor, STARS_IDENTIFIKATOR), novo)
 
     def test_neznan_identifikator(self, motor: Engine, izpisi: list[str]) -> None:
         koda = ukazi.nastavi_geslo(

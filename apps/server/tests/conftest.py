@@ -224,11 +224,14 @@ def ustvari_starsa(
     geslo: str | None = GESLO_STARSA,
     vloga: str = VLOGA_STARS,
     aktiven: bool = True,
+    lastnik_sistema: bool = False,
 ) -> str:
     """Ustvari uporabnika s poverilnico in vrne njegov `id`.
 
     `geslo=None` pomeni račun brez nastavljenega gesla — stanje, v katerem
-    uporabnika pusti migracija `0008_uporabniki`.
+    uporabnika pusti migracija `0008_uporabniki`. `lastnik_sistema` postavi
+    zastavico, ki jo sicer postavi ista migracija; poti `V3-R06` je ne
+    podelijo nikomur (`docs/odlocitve/ADR-038` G).
     """
     user_id = str(uuid4())
     zdaj = datetime.now(UTC)
@@ -239,7 +242,7 @@ def ustvari_starsa(
                 family_id=family_id,
                 role=vloga,
                 display_name=prikazno_ime,
-                is_system_owner=False,
+                is_system_owner=lastnik_sistema,
                 is_active=aktiven,
                 created_at=zdaj,
             )
