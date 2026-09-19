@@ -344,3 +344,45 @@ it('sporočilo o potekli prijavi ugasne, ko prenos spet steče', async () => {
   await waitFor(() => expect(getByTestId('potekla').props.children).toBe('ne'));
   expect(uspesen).toHaveBeenCalled();
 });
+
+it('sporočilo o potekli prijavi ne preživi menjave uporabnika', async () => {
+  // Ugotovitev nosi, **čigava** prijava je potekla. Ob menjavi uporabnika mora
+  // izginiti **takoj**, ne šele ob naslednjem obhodu: v resnični rabi se to
+  // zgodi natanko tako — Maši potekče prijava, Jaka se prijavi in domača
+  // stran se izriše, preden nov obhod karkoli javi.
+  //
+  // Aplikacija je med menjavo v ozadju, da noben obhod ne stopi vmes. Brez
+  // tega bi test meril dirko med izrisom in obhodom, ne pravila.
+  (AppState as { currentState: string }).currentState = 'active';
+  await insertMaterial(db, material('a'));
+
+  const POTEKLA: Izid = { vrsta: 'pending', razlog: 'potekla', prijavaPotekla: true };
+  const prenesiEno = jest.fn(async () => POTEKLA);
+
+  function drevo(shramba: ReturnType<typeof ustvariShrambo>) {
+    return (
+      <PrijavaProvider db={db} nastavitve={NASTAVITVE} shramba={shramba}>
+        <SyncProvider
+          db={db}
+          nastavitve={NASTAVITVE}
+          prenesiEno={prenesiEno}
+          odjemalec={MIREN_ODJEMALEC}
+        >
+          <Sonda />
+        </SyncProvider>
+      </PrijavaProvider>
+    );
+  }
+
+  const { getByTestId, rerender } = await render(drevo(ustvariShrambo(SEJA)));
+  await waitFor(() => expect(getByTestId('potekla').props.children).toBe('da'));
+
+  // Menjava uporabnika: druga shramba, drug človek.
+  (AppState as { currentState: string }).currentState = 'background';
+  const drugi = { ...SEJA, zeton: 'zeton-jaka', userId: 'u-jaka', ime: 'Jaka' };
+  await act(async () => {
+    rerender(drevo(ustvariShrambo(drugi)));
+  });
+
+  await waitFor(() => expect(getByTestId('potekla').props.children).toBe('ne'));
+});
