@@ -192,3 +192,27 @@ Iz istega pregleda še troje, manjšega:
   kršitev res enoličnost identifikatorja** (`db.je_zaseden_identifikator`).
   Prej bi vsaka kršitev integritete — na Postgresu tudi tuji ključ na družino —
   poslala uporabnico iskat drugo ime, ki ni bilo težava.
+
+## Popravki po drugem pregledu (19. 9. 2026)
+
+**Vrstni red pravil v `zakaj_ne_sme_deaktivirati` je zamenjan**: najprej
+lastnik sistema, nato zadnji aktivni starš, šele nato „sebe ne".
+
+Vsa tri pravila vodijo v isti `403` in se razlikujejo samo po tem, kaj povedo,
+naj uporabnica naredi. Dokler je bilo „sebe ne" prvo, je starš, ki je v družini
+sam, dobil *„naj to naredi drugi starš v družini"* — nasvet, ki mu ni mogel
+slediti, ker drugega starša ni. **Enostarševska družina ni robni primer**: tako
+izgleda vsaka nova družina, po migraciji `0008` in po `V3-R05`. Merilo
+dokončanosti (`CLAUDE.md` §1b) zahteva, da sporočilo pove, kaj naj uporabnica
+naredi; *„najprej dodaj drugega starša, potem tega"* to pove.
+
+To je **napaka po fazi 9b in ne sprememba zahteve**: pripomba se preslika
+nazaj na zapisano merilo dokončanosti, ne na novo vedenje. Noben kriterij ne
+pove, katero od treh pravil naj ob dveh hkratnih zadetkih zmaga.
+
+Zamenjava razveljavi ugotovitev prvega kroga, da pravilo o zadnjem staršu čez
+HTTP ni dosegljivo: odkar je pred „sebe ne", ga edini starš v družini doseže,
+ko poskusi deaktivirati sebe. Test nad privatno `routers.clani._zavrnitev_deaktivacije`
+je zato **odpadel** in ga je nadomestil navaden test čez pot; priklop na pravo
+število je pribit tam. Utemeljitev, da pravilo ostane zaradi `V3-R05`, s tem
+ni več edina — pravilo zdaj tudi dela.

@@ -61,6 +61,8 @@ SPOROCILO_PREDOLG_ENASLOV = f"E-naslov je predolg; največ {NAJDALJSI_IDENTIFIKA
 #: (`ADR-038` E).
 SPOROCILO_IDENTIFIKATOR_ZASEDEN = "To ime je že zasedeno. Izberi drugo."
 
+#: Velja samo takrat, kadar v družini **je** drug aktiven starš — pravilo o
+#: zadnjem staršu ugrizne prej. Nasvet je zato vedno izvedljiv.
 SPOROCILO_NE_SEBE = (
     "Sebe ne moreš deaktivirati. Naj to naredi drugi starš v družini, "
     "sicer bi družina ostala brez nekoga, ki jo ureja."
@@ -176,39 +178,40 @@ def zakaj_ne_sme_deaktivirati(
 
     Pravila so tri in vsako ima svojo posledico, če ga ni:
 
-    - **sebe ne** (kriterij `V3-R06`) — sicer se starš izklopi iz lastnega
-      admina z enim klikom in ga nihče ne more vrniti, dokler v družini ni
-      drugega starša;
     - **lastnika sistema ne** (`ADR-038` G) — sicer drugi starš v isti družini
       izklopi račun, na katerem stoji `V3-R05`;
     - **zadnjega aktivnega starša ne** (kriterij `V3-R06`) — sicer družina
       ostane brez nekoga, ki jo ureja, in otrok brez nekoga, ki mu ponastavi
-      geslo.
+      geslo;
+    - **sebe ne** (kriterij `V3-R06`) — sicer se starš izklopi iz lastnega
+      admina z enim klikom.
 
     `aktivnih_starsev` je število aktivnih staršev družine **vključno s
     članom**, ki ga deaktiviramo; prav zato je meja `<= 1` in ne `< 1`.
 
-    **Tretje pravilo danes po nobeni poti ni dosegljivo, in to je namerno.**
-    Klicatelj je vedno aktiven starš te družine — sejo ima samo tak
-    (`prijava.seja_za_zeton` neaktivnemu sejo izbriše, `vloga_sodi` otroka ne
-    spusti) — zato tuj **aktiven** starš pomeni, da sta aktivna vsaj dva, ob
-    cilju „jaz" pa prej ugrizne prvo pravilo. Kriterij „zadnjega starša ni
-    mogoče deaktivirati" torej danes drži po zaslugi pravila „sebe ne".
+    **Vrstni red ni okras, ampak izbira sporočila.** Vsa tri pravila vodijo v
+    isti `403`; razlikujejo se po tem, kaj povedo, naj uporabnica naredi
+    (`CLAUDE.md` §1b). Dokler je bilo „sebe ne" prvo, je starš, ki je v
+    družini sam, dobil nasvet „naj to naredi drugi starš v družini" — nasvet,
+    ki mu v enostarševski družini ni mogel slediti, in enostarševska družina
+    je privzeto stanje vsake nove družine (migracija `0008`, pozneje `V3-R05`).
+    Odkar je pravilo o zadnjem staršu pred njim, tak starš dobi „najprej dodaj
+    drugega starša, potem tega", kar je izvedljiv naslednji korak. Najdeno v
+    drugem pregledu `V3-R06`.
 
-    Pravilo kljub temu ostane in ni mrtva koda: `V3-R05` pripelje klicatelja
-    **zunaj družine** (lastnik sistema deaktivira starša tuje družine), in
-    takrat je to edino pravilo, ki družino obvaruje pred tem, da ostane brez
-    nekoga, ki jo ureja. Brez njega bi ga bilo treba takrat napisati na novo —
-    in napisati na novo bi pomenilo tudi ugotoviti na novo, da je potreben.
-    Da je **priklopljeno** na pravo število, dokazuje test nad
-    `routers.clani._zavrnitev_deaktivacije`; pot čez HTTP tega ne more.
+    Stranski izid iste zamenjave: pravilo o zadnjem staršu je odslej dosegljivo
+    čez HTTP. Prej ni bilo — klicatelj je vedno aktiven starš te družine
+    (`prijava.seja_za_zeton` neaktivnemu sejo izbriše, `vloga_sodi` otroka ne
+    spusti), zato tuj **aktiven** starš pomeni, da sta aktivna vsaj dva, ob
+    cilju „jaz" pa je prej ugriznilo „sebe ne". Priklop na pravo število je
+    zato zdaj pribit z navadnim testom čez pot, ne z uvozom privatnega imena.
     """
-    if clan_id == izvajalec_id:
-        return SPOROCILO_NE_SEBE
     if clan_je_lastnik_sistema:
         return SPOROCILO_LASTNIK_SISTEMA
     if clan_vloga == VLOGA_STARS and aktivnih_starsev <= 1:
         return SPOROCILO_ZADNJI_STARS
+    if clan_id == izvajalec_id:
+        return SPOROCILO_NE_SEBE
     return None
 
 

@@ -28,11 +28,9 @@ from app import clani, prijava
 from app.db import (
     ClaniRepository,
     PrijavaRepository,
-    SejaUporabnika,
     je_zaseden_identifikator,
 )
 from app.models import VLOGA_OTROK, VLOGA_STARS, Credential, Material, User, UserSession
-from app.routers.clani import _zavrnitev_deaktivacije
 from tests.conftest import (
     CVEK_ID,
     GESLO_OTROKA,
@@ -140,6 +138,19 @@ class TestSeznam:
         ustvari_otroka(motor, identifikator="brez", prikazno_ime="Brez", geslo=None)
 
         assert "geslo ni nastavljeno" in odjemalec.get(POT).text
+
+    def test_nalepka_o_geslu_pove_isto_kot_zavrnitev(
+        self, odjemalec: PrijavljenOdjemalec
+    ) -> None:
+        """Nalepka v obrazcu in meja, po kateri se zavrača, sta ista številka.
+
+        Vtipkana v predlogo bi se lahko razšla, ne da bi kak test padel:
+        sporočilo o napaki se gradi iz `NAJKRAJSE_GESLO`, nalepka pa ne bi.
+        """
+        besedilo = odjemalec.get(POT).text
+
+        assert f"vsaj {prijava.NAJKRAJSE_GESLO[VLOGA_OTROK]} znakov" in besedilo
+        assert f"vsaj {prijava.NAJKRAJSE_GESLO[VLOGA_STARS]} znakov" in besedilo
 
     def test_povezava_je_na_pregledu(self, odjemalec: PrijavljenOdjemalec) -> None:
         """Brez vhoda s `/admin` je stran dosegljiva samo z vtipkanim naslovom."""
@@ -472,6 +483,11 @@ class TestDeaktivacija:
     def test_sebe_ni_mogoce_deaktivirati(
         self, odjemalec: PrijavljenOdjemalec, motor: Engine, stars: str
     ) -> None:
+        """Z **drugim** aktivnim staršem v družini je sporočilo „sebe ne".
+
+        Par s testom nad edinim staršem spodaj: ločnica med sporočiloma je
+        prav to, ali je nasvet „naj to naredi drugi starš" izvedljiv.
+        """
         ustvari_starsa(motor, identifikator="druga@primer.test", prikazno_ime="Druga")
 
         for odgovor in (
@@ -500,43 +516,32 @@ class TestDeaktivacija:
             oseba = seja.get(User, stars)
             assert oseba is not None and oseba.is_active is False
 
-    def test_zadnji_aktiven_stars_ostane_ceprav_je_klicatelj_zunaj_druzine(
-        self, motor: Engine, stars: str
+    def test_edini_stars_dobi_izvedljiv_nasvet_in_ostane_aktiven(
+        self, odjemalec: PrijavljenOdjemalec, motor: Engine, stars: str
     ) -> None:
-        """Pravilo o zadnjem staršu je **priklopljeno na pravo število**.
+        """Starš, ki je v družini sam, dobi pravilo o **zadnjem staršu**.
 
-        Čez HTTP tega ni mogoče dokazati: klicatelj je vedno aktiven starš te
-        družine, zato tuj aktiven starš pomeni, da sta aktivna vsaj dva, ob
-        cilju „jaz" pa prej ugrizne pravilo „sebe ne" (`app/clani.py`).
-        Pravilo zato kličemo tam, kjer bo klicatelj zunaj družine — v `V3-R05`
-        — in preverimo natanko vrstico, ki število prebere iz repozitorija.
+        Dvoje naenkrat, in oboje je bilo najdeno v pregledu:
 
-        Brez tega testa je mogoče `aktivnih_starsev` zamenjati s poljubno
-        konstanto in zbirka ostane zelena; prav to je pregled V3-R06 našel.
+        - Sporočilo mora povedati izvedljiv naslednji korak (`CLAUDE.md` §1b).
+          „Naj to naredi drugi starš v družini" v enostarševski družini ni
+          izvedljivo; „najprej dodaj drugega starša" je.
+        - To je hkrati edina pot, po kateri je pravilo o zadnjem staršu
+          dosegljivo čez HTTP, zato tu visi tudi dokaz, da je **priklopljeno na
+          pravo število**: ob `aktivnih_starsev=99` v `routers/clani.py` bi
+          odgovor nosil `SPOROCILO_NE_SEBE` in ta test bi padel.
         """
-        seja_tujca = SejaUporabnika(
-            session_id="x",
-            user_id="lastnik-sistema-zunaj-te-druzine",
-            family_id=CVEK_ID,
-            family_name="Cvek",
-            role=VLOGA_STARS,
-            display_name="Lastnik",
-            is_active=True,
-            is_system_owner=True,
-            csrf_token="x",
-            expires_at=datetime.now(UTC),
-            last_used_at=datetime.now(UTC),
-        )
+        for odgovor in (
+            odjemalec.get(pot_clana(stars, "deactivate")),
+            odjemalec.post(pot_clana(stars, "deactivate")),
+        ):
+            assert odgovor.status_code == 403
+            assert clani.SPOROCILO_ZADNJI_STARS in odgovor.text
+            assert clani.SPOROCILO_NE_SEBE not in odgovor.text
 
         with Session(motor) as seja:
-            repo = ClaniRepository(seja, CVEK_ID)
-            clan = repo.clan(stars)
-            assert clan is not None
-            assert repo.aktivnih_starsev() == 1
-
-            razlog = _zavrnitev_deaktivacije(repo, clan, seja_tujca)
-
-        assert razlog == clani.SPOROCILO_ZADNJI_STARS
+            oseba = seja.get(User, stars)
+            assert oseba is not None and oseba.is_active is True
 
     def test_aktivnih_starsev_steje_samo_aktivne_starse_te_druzine(
         self, motor: Engine, stars: str, otrok: str
@@ -656,6 +661,24 @@ class TestPravila:
                 aktivnih_starsev=5,
             )
             == clani.SPOROCILO_NE_SEBE
+        )
+
+    def test_edini_stars_dobi_zadnjega_starsa_in_ne_sebe(self) -> None:
+        """Vrstni red pravil: izvedljiv nasvet prevlada nad „sebe ne".
+
+        Oba pogoja sta izpolnjena hkrati (cilj sem jaz **in** sem zadnji
+        aktivni starš); pravilo, ki pove izvedljiv naslednji korak, mora
+        zmagati (`CLAUDE.md` §1b).
+        """
+        assert (
+            clani.zakaj_ne_sme_deaktivirati(
+                izvajalec_id="jaz",
+                clan_id="jaz",
+                clan_vloga=VLOGA_STARS,
+                clan_je_lastnik_sistema=False,
+                aktivnih_starsev=1,
+            )
+            == clani.SPOROCILO_ZADNJI_STARS
         )
 
     def test_zadnji_aktivni_stars_ne(self) -> None:
