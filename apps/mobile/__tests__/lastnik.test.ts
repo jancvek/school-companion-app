@@ -170,6 +170,21 @@ describe('posvojitev zapisov brez lastnika', () => {
     expect((await neprenesenePoskuse(db, MASA)).map((p) => p.id)).toEqual(['k1-a1']);
   });
 
+  it('tujega **poskusa** ne posvoji', async () => {
+    // Zrcalno zgornjemu, in ne odvečno: posvojitev sta dva `UPDATE`, in samo
+    // prvi je bil doslej varovan. Brez pogoja bi Jakova prijava pobrala Mašin
+    // neprenesen poskus in ga poslala pod svojim žetonom — statistika na
+    // strežniku bi govorila o napačnem otroku (`docs/plan/V3-R04.md`:
+    // „za oboje obstaja svoj test").
+    await shraniKviz(db, kvizStreznika('k-masa', 1));
+    await zapisiPoskus(db, poskus('k-masa', 1, { user_id: MASA }));
+
+    await posvojiBrezLastnika(db, JAKA);
+
+    expect((await neprenesenePoskuse(db, MASA)).map((p) => p.id)).toEqual(['k-masa-a1']);
+    expect(await neprenesenePoskuse(db, JAKA)).toEqual([]);
+  });
+
   it('tujega zapisa ne posvoji', async () => {
     await insertMaterial(db, material({ id: 'jakov', user_id: JAKA }));
 

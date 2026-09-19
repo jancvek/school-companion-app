@@ -252,11 +252,12 @@ brez njega ostalo brez družine (`ADR-029` C). Primarni ključi ostanejo globaln
   `family_id` v konstruktorju, brez privzetka; prazen niz je `ValueError`. Seja
   je zasebna, `Session.get` se nad podatki ne uporablja, vsaka poizvedba in
   vsak `UPDATE` ima pogoj družine. Nove vrstice dobijo družino od repozitorija.
-- `DruzineRepository` bere samo `families` (za obdelavo in izbiro družine).
-- **Izbira družine je začasna** (`ADR-029` A): `daj_druzino` vrne edino
-  družino v bazi, pri nič ali več vrže `500` s slovenskim sporočilom. Ena
-  poizvedba na zahtevo. Zamenjata jo seja (`V3-R03`) in žeton (`V3-R04`);
-  do takrat druga družina v bazi ustavi vse poti.
+- `DruzineRepository` bere samo `families` (za obdelavo).
+- **Družino pove seja, na obeh straneh** (V3-R04): `daj_druzino` vrne
+  `family_id` iz seje, ki jo je razrešila vmesna plast — brez poizvedbe.
+  Začasna izbira „edina družina v bazi" (`ADR-029` A) je odpadla skupaj z
+  API ključem (`ADR-036` F); druga družina v bazi zato ne ustavi več ničesar,
+  kar je bil pogoj za `V3-R05`.
 - `tests/test_tesnjenje.py` pošlje identifikatorje ene družine v imenu druge
   na vsako pot in v vsako javno metodo repozitorijev. Varovali zahtevata, da
   ima vsaka pot in metoda svoj primer; posnetek družine zavrne tabelo brez

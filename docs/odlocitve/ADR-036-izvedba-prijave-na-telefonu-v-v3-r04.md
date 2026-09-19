@@ -239,7 +239,9 @@ odločitev.
 
 **Zapisana cena:** sporočilo velja za zadnji obhod prenosa, zato ob potekli
 prijavi in nato izgubljeni povezavi izgine, čeprav je prijava še vedno
-potekla — domača stran spet kaže samo števec. To je najpogostejše stanje te
+potekla — domača stran spet kaže samo števec. Isto velja ob **prazni vrsti**:
+obhod, ki nima kaj prenašati, ne izve ničesar in sporočilo ugasne, dokler
+otrok ne poslika naslednje strani. To je najpogostejše stanje te
 aplikacije (otrok brez povezave), zato je vredno vedeti: sporočilo se vrne ob
 prvem obhodu, ki spet doseže strežnik. Obstojnejše sporočilo bi terjalo
 stanje, ki bi ga bilo treba nekje hraniti in čistiti — in prvi kandidat za to

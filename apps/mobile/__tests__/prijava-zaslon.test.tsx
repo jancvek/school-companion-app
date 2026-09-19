@@ -217,7 +217,7 @@ describe('prijavni zaslon', () => {
     });
   });
 
-  it('zagon z ostankom brisanje ponovi in ožnako počisti', async () => {
+  it('zagon z ostankom brisanje ponovi in oznako počisti', async () => {
     // `ADR-037` tega ne obljublja mimogrede: žeton, ki bi ostal na disku za
     // vedno, bi bil skrivnost, ki je nihče ne vzdržuje, in vsak naslednji
     // zagon bi ga znova zavračal.
@@ -234,21 +234,42 @@ describe('prijavni zaslon', () => {
     expect(await jeOdjavaNedokoncana(db)).toBe(false);
   });
 
+  it('če tudi drugo brisanje spodleti, oznaka ostane', async () => {
+    // Pogoj `if (await pozabiSejo(...))` na poti zagona: oznako sme počistiti
+    // samo brisanje, ki je **uspelo**. Sicer bi šel naslednji zagon mimo nje,
+    // žeton bi obveljal kot seja — in to je natanko napaka, zaradi katere je
+    // `ADR-037` nastal, samo en zagon pozneje.
+    // Odpove **samo brisanje**: žeton ostane berljiv. Popolna odpoved tega ne
+    // pokaže, ker takrat tudi branje vrne `null` in koda do te veje ne pride.
+    const shramba = ustvariShrambo(SEJA);
+    await izrisi(shramba, true);
+
+    shramba.pokvariBrisanje();
+    await odjavi();
+
+    // Nov zagon, brisanje še vedno ne dela.
+    await izrisi(shramba);
+
+    expect(await jeOdjavaNedokoncana(db)).toBe(true);
+    expect(screen.getByTestId('polje-ime')).toBeTruthy();
+    expect(shramba.vsebina()).toContain(SEJA.zeton);
+  });
+
   it('prijava prekliče nedokončano odjavo pred njo', async () => {
     // Oznaka brez žetona: odjava je žeton pobrisala, `koncaj` pa je padel
     // (okvarjena baza). Zagon je tedaj ne počisti — veja za ostanek se
     // ujame samo, kadar žeton **je**. Počisti jo prijava, in to je edino
     // mesto, kjer se to zgodi.
     //
-    // Sicer bi Jakov **veljaven** žeton ob naslednjem zagonu srečal Mašino
-    // oznako in bi bil zavržen — tiha odjava brez sporočila (`ADR-037`).
+    // Sicer bi **veljaven** žeton ob naslednjem zagonu srečal staro oznako
+    // in bi bil zavržen — tiha odjava brez sporočila (`ADR-037`).
     await zacniOdjavo(db, '2026-09-19T08:00:00.000Z');
     const shramba = ustvariShrambo();
 
     await izrisi(shramba);
     expect(await jeOdjavaNedokoncana(db)).toBe(true);
 
-    await vpisiInPotrdi('jaka', 'geslo-otroka');
+    await vpisiInPotrdi('masa', 'geslo-otroka');
 
     expect(await jeOdjavaNedokoncana(db)).toBe(false);
 

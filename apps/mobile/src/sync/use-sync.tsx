@@ -45,6 +45,21 @@ import { ustvariRazporejevalnik, type PrenesiEno, type Razporejevalnik } from '.
 
 const PRAZEN_POVZETEK: SyncPovzetek = { pending: 0, synced: 0, failed: 0 };
 
+/**
+ * Ali ugotovitev o potekli prijavi še velja.
+ *
+ * Ugotovitev nosi **čigava** prijava je potekla, ne le „ali je". Velja samo,
+ * dokler je prijavljen isti človek: ob odjavi in ob menjavi uporabnika mora
+ * sporočilo izginiti samo od sebe, sicer bi Jaka takoj po uspešni prijavi
+ * videl, da je njegova prijava potekla.
+ *
+ * Svoja funkcija in ne izraz v telesu ponudnika, da je pravilo mogoče trditi
+ * brez izrisa in brez menjave seje sredi testa.
+ */
+export function sporociloVelja(poteklaZa: string | null, lastnik: string | null): boolean {
+  return poteklaZa !== null && poteklaZa === lastnik;
+}
+
 export type SyncVrednost = {
   /** Ali je naslov strežnika sploh prišel v to gradnjo. */
   nastavljen: boolean;
@@ -229,7 +244,7 @@ export function SyncProvider({
 
   // Ob odjavi in ob menjavi uporabnika sporočilo izgine samo od sebe:
   // ugotovitev je vezana na sejo, v kateri je nastala.
-  const prijavaPotekla = poteklaZa !== null && poteklaZa === lastnik;
+  const prijavaPotekla = sporociloVelja(poteklaZa, lastnik);
 
   const vrednost = useMemo<SyncVrednost>(
     () => ({

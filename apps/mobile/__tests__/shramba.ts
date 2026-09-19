@@ -18,6 +18,15 @@ export type TestnaShramba = VarnaShramba & {
   pokvari(): void;
   /** Spet dela — za zaporedja, v katerih odpoved ni trajna. */
   popravi(): void;
+  /**
+   * Odpove **samo brisanje**; branje in pisanje delata.
+   *
+   * Ta oblika odpovedi je tista, zaradi katere `ADR-037` obstaja: žeton
+   * ostane berljiv, odjava pa ga ne spravi z diska. Popolna odpoved tega
+   * ne pokaže, ker takrat tudi branje vrne `null` in koda do te veje
+   * sploh ne pride.
+   */
+  pokvariBrisanje(): void;
 };
 
 /** Seja, s katero se v testih izkaže telefon. */
@@ -27,6 +36,7 @@ export function ustvariShrambo(zacetna: Seja | null = null): TestnaShramba {
   const zapisi = new Map<string, string>();
   if (zacetna !== null) zapisi.set(KLJUC_SEJE, JSON.stringify(zacetna));
   let pokvarjena = false;
+  let brisanjePokvarjeno = false;
 
   function preveri(): void {
     if (pokvarjena) throw new Error('Varna shramba ni dosegljiva.');
@@ -39,6 +49,10 @@ export function ustvariShrambo(zacetna: Seja | null = null): TestnaShramba {
     },
     popravi: () => {
       pokvarjena = false;
+      brisanjePokvarjeno = false;
+    },
+    pokvariBrisanje: () => {
+      brisanjePokvarjeno = true;
     },
     getItemAsync: async (kljuc) => {
       preveri();
@@ -50,6 +64,7 @@ export function ustvariShrambo(zacetna: Seja | null = null): TestnaShramba {
     },
     deleteItemAsync: async (kljuc) => {
       preveri();
+      if (brisanjePokvarjeno) throw new Error('Brisanje iz varne shrambe ni uspelo.');
       zapisi.delete(kljuc);
     },
   };
