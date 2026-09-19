@@ -64,7 +64,7 @@ describe('razvrščanje statusa', () => {
     expect(razvrstiStatus(410).vrsta).toBe('arhiviran');
   });
 
-  it('401 pusti zapis v vrsti in pove, naj se prijavi znova', () => {
+  it('401 pusti zapis v vrsti in ga označi kot poteklo prijavo', () => {
     // Kriterij V3-R04: s poteklim žetonom se prenos ustavi, snov pa ne
     // izgubi. `failed` bi zahteval ročno vrnitev v vrsto (`ADR-036` H).
     const izid = razvrstiStatus(401);
@@ -74,8 +74,21 @@ describe('razvrščanje statusa', () => {
     // izid `arhiviran`, ki razloga nima.
     if (izid.vrsta === 'pending') {
       expect(izid.razlog).toBe(SPOROCILO_POTEKLA_PRIJAVA);
-      expect(izid.razlog).toMatch(/prijav/i);
+      // `prijavaPotekla` ni okras ob `razlog`: `razlog` konča v
+      // `materials.sync_error`, ki ga ne izriše nihče, zastavica pa je edina
+      // pot, po kateri sporočilo pride na domačo stran. Brez te trditve bi
+      // smela biti `false` in zbirka bi ostala zelena — aplikacija pa v
+      // natanko tistem stanju, ki ga kriterij `V3-R04` prepoveduje.
+      expect(izid.prijavaPotekla).toBe(true);
     }
+  });
+
+  it.each([500, 408, 429])('%i ni označen kot potekla prijava', (status) => {
+    // Sicer bi otrok ob vsaki izgubljeni povezavi poskusil ponovno prijavo.
+    const izid = razvrstiStatus(status);
+
+    expect(izid.vrsta).toBe('pending');
+    if (izid.vrsta === 'pending') expect(izid.prijavaPotekla).toBeFalsy();
   });
 });
 

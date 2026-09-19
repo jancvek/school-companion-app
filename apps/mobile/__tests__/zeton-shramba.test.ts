@@ -3,6 +3,7 @@ import { join, relative } from 'node:path';
 
 import { CREATE_KVIZI_TABLES_SQL } from '@/db/kvizi';
 import { CREATE_MATERIALS_TABLE_SQL } from '@/db/materials';
+import { CREATE_NAPRAVA_TABLE_SQL } from '@/db/naprava';
 import { migriraj } from '@/db/migrations';
 
 import { createTestDatabase } from './test-database';
@@ -66,7 +67,11 @@ describe('žeton živi samo v varni shrambi', () => {
   });
 
   it('shema lokalne baze nima stolpca za žeton, geslo ali sejo', () => {
-    const shema = `${CREATE_MATERIALS_TABLE_SQL}\n${CREATE_KVIZI_TABLES_SQL}`;
+    const shema = [
+      CREATE_MATERIALS_TABLE_SQL,
+      CREATE_KVIZI_TABLES_SQL,
+      CREATE_NAPRAVA_TABLE_SQL,
+    ].join('\n');
 
     expect(shema).not.toMatch(/token|zeton|geslo|password|secret|seja/i);
   });

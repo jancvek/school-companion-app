@@ -186,6 +186,16 @@ vrsta (`listPending`), števci (`countByStatus`), Zgodovina
 (`listBySubject`), vrnitev v vrsto (`retryFailed`) in nepreneseni poskusi
 (`neprenesenePoskuse`).
 
+**Stik na `attempts` v `cakajociKvizi` in `postavkeKviza` lastnika
+namenoma ne filtrira.** Postavka ima en sam poskus (`UNIQUE (quiz_item_id)`
+tu in „prvi zmaga“ na strežniku, `ADR-019` E), zato bi filtriran stik
+drugemu otroku pokazal neodgovorjeno postavko, ki je ne bi mogel
+odgovoriti. V V3-R04 je kviz še last družine; `V3-R07` to reši tam.
+
+`pobrisiKvizeRazen` ne pobriše kviza, na katerem visi **tuj neprenesen
+poskus**: seznam s strežnika je seznam prijavljenega otroka, zato bi bil
+vsak kviz prejšnjega videti kot preklican (`ADR-036` C).
+
 #### Sled o nedokončani odjavi (migracija 4, V3-R04)
 
 Tabela `naprava` (`id = 1`, `odjava_ob`) — ena sama vrstica, ki jo jamči
@@ -201,16 +211,6 @@ ki jih je med tem naredil kdo drug (`ADR-037`).
 Oznaka je v tej bazi in ne v varni shrambi prav zato, ker obstaja za primer,
 ko odpove varna shramba. Prijava jo počisti — nova prijava prekliče vsako
 nedokončano odjavo pred njo.
-
-**Stik na `attempts` v `cakajociKvizi` in `postavkeKviza` lastnika
-namenoma ne filtrira.** Postavka ima en sam poskus (`UNIQUE (quiz_item_id)`
-tu in „prvi zmaga“ na strežniku, `ADR-019` E), zato bi filtriran stik
-drugemu otroku pokazal neodgovorjeno postavko, ki je ne bi mogel
-odgovoriti. V V3-R04 je kviz še last družine; `V3-R07` to reši tam.
-
-`pobrisiKvizeRazen` ne pobriše kviza, na katerem visi **tuj neprenesen
-poskus**: seznam s strežnika je seznam prijavljenega otroka, zato bi bil
-vsak kviz prejšnjega videti kot preklican (`ADR-036` C).
 
 #### Tabele kvizov (migracija 2, V2-R02)
 

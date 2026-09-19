@@ -90,6 +90,14 @@ sploh razrešijo.
     dejanje, ki ga aplikacija ne počne.
   - Cena odločitve `ADR-036` G (odjava je najprej lokalna) je s tem plačana
     na pravem mestu: odjava ostane takojšnja, sled pa se ne izgubi.
+- **Novo okno, ki ga ta odločitev odpre.** V prijavi je vrstni red
+  `shraniSejo` → posvojitev → `počisti oznako`. Če aplikacija umre ali
+  čiščenje pade med prvim in zadnjim, na disku leži **svež in veljaven**
+  žeton, oznaka pa je še postavljena — naslednji zagon ga zavrže. Otrok se
+  mora prijaviti znova; nič se ne izgubi in nič ne pripade napačnemu.
+  Vrstni red je kljub temu ta in ne obratni: obratni bi vrnil prav napako,
+  zaradi katere je ta ADR nastal. Smer odpovedi je izbrana zavestno —
+  **raje odveč odjava kot napačna pripisanost.**
 - **Na katere zahteve to vpliva:** `V3-R06` (ponastavitev gesla in
   deaktivacija prekličeta seje — ta oznaka je lokalni par tega), `V3-R07`
   (lastnik zapisa mora biti pravi, sicer statistika govori o napačnem otroku).

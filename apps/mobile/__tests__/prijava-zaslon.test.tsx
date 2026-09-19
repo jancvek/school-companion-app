@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-
 import PrijavaScreen from '../app/prijava';
 import { insertMaterial, listPending, type MaterialsDatabase } from '@/db/materials';
 import { migriraj } from '@/db/migrations';
+import { jeOdjavaNedokoncana, zacniOdjavo } from '@/db/naprava';
 import { PrijavaProvider } from '@/sync/use-prijava';
 import { SyncProvider } from '@/sync/use-sync';
 import type { Material } from '@/types';
@@ -214,6 +215,66 @@ describe('prijavni zaslon', () => {
     await waitFor(async () => {
       expect((await listPending(db, SEJA.userId)).map((m) => m.id)).toEqual(['po-odjavi']);
     });
+  });
+
+  it('zagon z ostankom brisanje ponovi in ožnako počisti', async () => {
+    // `ADR-037` tega ne obljublja mimogrede: žeton, ki bi ostal na disku za
+    // vedno, bi bil skrivnost, ki je nihče ne vzdržuje, in vsak naslednji
+    // zagon bi ga znova zavračal.
+    const shramba = ustvariShrambo(SEJA);
+    await izrisi(shramba, true);
+
+    shramba.pokvari();
+    await odjavi();
+    shramba.popravi();
+
+    await izrisi(shramba);
+
+    await waitFor(() => expect(shramba.vsebina()).toBeUndefined());
+    expect(await jeOdjavaNedokoncana(db)).toBe(false);
+  });
+
+  it('prijava prekliče nedokončano odjavo pred njo', async () => {
+    // Oznaka brez žetona: odjava je žeton pobrisala, `koncaj` pa je padel
+    // (okvarjena baza). Zagon je tedaj ne počisti — veja za ostanek se
+    // ujame samo, kadar žeton **je**. Počisti jo prijava, in to je edino
+    // mesto, kjer se to zgodi.
+    //
+    // Sicer bi Jakov **veljaven** žeton ob naslednjem zagonu srečal Mašino
+    // oznako in bi bil zavržen — tiha odjava brez sporočila (`ADR-037`).
+    await zacniOdjavo(db, '2026-09-19T08:00:00.000Z');
+    const shramba = ustvariShrambo();
+
+    await izrisi(shramba);
+    expect(await jeOdjavaNedokoncana(db)).toBe(true);
+
+    await vpisiInPotrdi('jaka', 'geslo-otroka');
+
+    expect(await jeOdjavaNedokoncana(db)).toBe(false);
+
+    // Nov zagon: Jakova seja obvelja in ni zavržena kot ostanek.
+    await izrisi(shramba, true);
+    expect(screen.getByTestId('prijavljen')).toBeTruthy();
+  });
+
+  it('oznaka nastane pred brisanjem iz varne shrambe', async () => {
+    // Vrstni red je jedro `ADR-037`: obratni bi pustil okno, v katerem je
+    // žeton že izbrisan, oznake pa še ni — in prav takrat uporabnica
+    // aplikacijo najpogosteje zapre.
+    const shramba = ustvariShrambo(SEJA);
+    let oznakaObBrisanju: boolean | null = null;
+    const opazovana = {
+      ...shramba,
+      deleteItemAsync: async (kljuc: string) => {
+        oznakaObBrisanju = await jeOdjavaNedokoncana(db);
+        return shramba.deleteItemAsync(kljuc);
+      },
+    };
+
+    await izrisi(opazovana, true);
+    await odjavi();
+
+    expect(oznakaObBrisanju).toBe(true);
   });
 
   it('obnovljena seja preživi padlo posvojitev', async () => {

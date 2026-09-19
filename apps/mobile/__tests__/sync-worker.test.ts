@@ -1,6 +1,6 @@
 import { insertMaterial, listPending, type MaterialsDatabase } from '@/db/materials';
 import { migriraj } from '@/db/migrations';
-import type { Izid } from '@/sync/upload';
+import { razvrstiStatus, type Izid } from '@/sync/upload';
 import {
   INTERVAL_MS,
   NAJVECJI_ODMIK_MS,
@@ -127,7 +127,32 @@ describe('oddelava čakalne vrste', () => {
     expect((await listPending(db, null)).map((v) => v.id)).toEqual(['a', 'b', 'c']);
   });
 
-  it('zavrnjen zapis ne ustavi vrste', async () => {
+  it('potekla prijava pride v povzetek, ne le v razlog', async () => {
+  // Vmesni člen verige od `401` do domače strani: `Povzetek` je edino, kar
+  // ponudnik vidi. Brez tega bi zastavica lahko obstala v `Izid` in
+  // sporočilo bi spet končalo samo v `materials.sync_error`, ki ga ne
+  // izriše nihče (`docs/odlocitve/ADR-036`, tretji pregled).
+  await insertMaterial(db, material({ id: 'a' }));
+
+  const povzetek = await prenesiCakajoce(
+    db,
+    async () => razvrstiStatus(401),
+    null,
+  );
+
+  expect(povzetek.prijavaPotekla).toBe(true);
+  expect(povzetek.cakajoci).toBe(1);
+});
+
+it('nedosegljiv strežnik potekle prijave ne javi', async () => {
+  await insertMaterial(db, material({ id: 'a' }));
+
+  const povzetek = await prenesiCakajoce(db, async () => CAKA, null);
+
+  expect(povzetek.prijavaPotekla).toBe(false);
+});
+
+it('zavrnjen zapis ne ustavi vrste', async () => {
     await insertMaterial(db, material({ id: 'a', taken_at: '2026-09-01T08:00:00.000Z' }));
     await insertMaterial(db, material({ id: 'b', taken_at: '2026-09-02T08:00:00.000Z' }));
 

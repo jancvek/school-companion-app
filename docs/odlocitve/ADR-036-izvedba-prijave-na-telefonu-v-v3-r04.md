@@ -237,6 +237,14 @@ bila to sprememba vedenja, ki je kriterij ne zahteva: aplikacija naj pove, ne
 ukrepa namesto otroka. Če se pokaže, da je vrstica premalo, je to nova
 odločitev.
 
+**Zapisana cena:** sporočilo velja za zadnji obhod prenosa, zato ob potekli
+prijavi in nato izgubljeni povezavi izgine, čeprav je prijava še vedno
+potekla — domača stran spet kaže samo števec. To je najpogostejše stanje te
+aplikacije (otrok brez povezave), zato je vredno vedeti: sporočilo se vrne ob
+prvem obhodu, ki spet doseže strežnik. Obstojnejše sporočilo bi terjalo
+stanje, ki bi ga bilo treba nekje hraniti in čistiti — in prvi kandidat za to
+je ravno odjava ob `401`, ki je zgoraj zavrnjena.
+
 ### Posvojitev ne sme podreti seje
 
 Popravek iz drugega pregleda je posvojitev postavil pred `setSeja`. Če
