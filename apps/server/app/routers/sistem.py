@@ -247,6 +247,25 @@ def seznam(
     return _stran_seznama(predloge, request, repo, seja)
 
 
+@router.get("/families")
+def seznam_znova() -> Response:
+    """`GET` na pot, ki obstaja samo kot `POST`, pelje nazaj na seznam.
+
+    Ne zaradi udobja: brez te poti bi Starlette ob neujemanju metode odgovoril
+    s **405**, in to še preden bi stekla odvisnost `zahtevaj_lastnika_sistema`.
+    Navaden starš bi tako iz razlike med `405` in `404` prebral, da pot
+    obstaja — kriterij `V3-R05` pa pravi, da zanj ta stran ne obstaja.
+
+    Z registrirano potjo se odvisnost izvede in starš dobi `404`, enak kot za
+    katerikoli izmišljen naslov. Lastnik pride na seznam.
+
+    **Velja za to predpono in ne za `/admin` nasploh:** enako se obnašajo vse
+    ostale poti samo s `POST` (`/admin/logout`, `/admin/family/parents`, …),
+    kjer pa obstoj poti ni skrivnost. Tu je, zato je tu popravljeno.
+    """
+    return _nazaj()
+
+
 @router.post("/families")
 def odpri_druzino(
     request: Request,

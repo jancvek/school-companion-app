@@ -582,6 +582,9 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
     # stran ne obstaja (`ADR-044` G). Da je za lastnika 200, dokazuje
     # `tests/test_sistem.py`; tu je pomembno, da za vse ostale ni.
     ("GET", "/admin/system"): lambda o, a: (o.get("/admin/system"), NI, ()),
+    ("GET", "/admin/system/families"): lambda o, a: (
+        o.get("/admin/system/families", follow_redirects=False), NI, ()
+    ),
     ("POST", "/admin/system/families"): lambda o, a: (
         o.post(
             "/admin/system/families",
@@ -924,6 +927,15 @@ def test_repozitorij_druzin_ne_bere_podatkov_druzine(motor: Engine) -> None:
             repo.idji_aktivnih()
             repo.edina()
             repo.nastavi_aktivnost(CVEK_ID, aktivna=False)
+            # Tudi pisalna pot: če bi kdo vanjo dodal branje snovi ali kvizov,
+            # bi brez tega klica varovalo ostalo zeleno.
+            repo.ustvari_z_prvim_starsem(
+                ime_druzine="Nova",
+                prikazno_ime="Nov starš",
+                identifier="nov@primer.test",
+                secret_hash="zgostitev",
+                ko=datetime.now(UTC),
+            )
     finally:
         event.remove(motor, "before_cursor_execute", zabelezi)
 

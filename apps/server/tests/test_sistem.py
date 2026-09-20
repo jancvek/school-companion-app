@@ -154,6 +154,33 @@ def test_dostop_starsa_ni_mogoc(
         assert "Te strani na strežniku ni." in odgovor.text, f"{metoda} {pot}"
 
 
+def test_starsu_je_pot_samo_s_postom_videti_kot_neobstojeca(
+    odjemalec: PrijavljenOdjemalec,
+) -> None:
+    """Pot, ki obstaja samo kot `POST`, se staršu ne sme izdati z **405**.
+
+    Starlette ob ujemanju poti in neujemanju metode odgovori `405`, še preden
+    steče odvisnost — in razlika med `405` in `404` je sama po sebi podatek,
+    da pot obstaja. Kriterij `V3-R05` pravi, da za starša ta stran ne obstaja,
+    zato mora biti odgovor **enak** kot za izmišljen naslov.
+    """
+    obstojeca = odjemalec.get(f"{POT}/families", follow_redirects=False)
+    izmisljena = odjemalec.get(f"{POT}/izmisljena-pot", follow_redirects=False)
+
+    assert obstojeca.status_code == izmisljena.status_code == 404
+    assert obstojeca.text == izmisljena.text
+
+
+def test_lastniku_get_na_families_pelje_na_seznam(
+    lastnikov_odjemalec: PrijavljenOdjemalec,
+) -> None:
+    """Za lastnika ista pot ni slepa ulica — pelje na seznam družin."""
+    odgovor = lastnikov_odjemalec.get(f"{POT}/families", follow_redirects=False)
+
+    assert odgovor.status_code == 303
+    assert odgovor.headers["location"] == POT
+
+
 def test_lastnik_pride_na_stran(lastnikov_odjemalec: PrijavljenOdjemalec) -> None:
     """Test zgoraj ni prazen: ista pot je za lastnika sistema 200."""
     odgovor = lastnikov_odjemalec.get(POT)

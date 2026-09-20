@@ -42,8 +42,14 @@ SPOROCILO_SVOJE_DRUZINE = (
 SPOROCILO_ZE_UGASNJENA = "Ta družina je že deaktivirana."
 SPOROCILO_ZE_PRIZGANA = "Ta družina je že aktivna."
 
-#: Račun smo našli, stavek pa ni spremenil ničesar — dvojček
-#: `clani.SPOROCILO_NI_SPREMENJENO` za družino.
+#: Družino smo našli, stavek pa ni spremenil ničesar.
+#:
+#: **Varovalo in ne pričakovano stanje:** poti lastnika družino poiščejo, preden
+#: jo prižgejo ali ugasnejo, in družine se ne brišejo, zato tega sporočila danes
+#: ni mogoče doseči. Stoji, ker `nastavi_aktivnost` vrne `bool` in ker je izid
+#: pisanja, ki ga klicatelj ne pogleda, slabši od sporočila, ki se ne pokaže.
+#: Dvojček `clani.SPOROCILO_NI_SPREMENJENO`, ki dosegljiv je — tam račun brez
+#: poverilnice obstaja.
 SPOROCILO_NI_SPREMENJENO = (
     "Dejanja nisem izvedel — ta družina se je medtem spremenila. "
     "Osveži stran in poglej, v kakšnem stanju je."
