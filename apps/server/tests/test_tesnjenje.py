@@ -21,7 +21,7 @@ to mogoče, da tesnjenje velja za stanje, kakršno nastane v produkciji.
 import inspect
 import io
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -30,11 +30,12 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import Engine, Select, select
+from sqlalchemy import Engine, Select, event, select
 from sqlalchemy.orm import Session
 
 from app.db import (
     ClaniRepository,
+    DruzineRepository,
     IdentifikatorZaseden,
     IzidObdelave,
     KviziRepository,
@@ -102,8 +103,13 @@ class Druzina:
     stars_id: str
     otrok_id: str
 
-    def sledi(self) -> tuple[str, ...]:
-        """Nizi, ki v odgovoru druge družine ne smejo nastopiti."""
+    def sledi_vsebine(self) -> tuple[str, ...]:
+        """Nizi **vsebine**: snov, kvizi, vprašanja, postavke, poskusi.
+
+        Ločeno od oseb, ker `V3-R05` pozna bralca, ki sme videti imena in `id`
+        staršev tuje družine (lastnik sistema), vsebine pa ne sme videti nihče
+        (`ADR-044` B). Za vse ostale poti velja `sledi()`, ki oboje združi.
+        """
         return (
             self.znak,
             self.akt,
@@ -116,9 +122,11 @@ class Druzina:
             *self.vprasanja,
             *self.postavke,
             *self.poskusi,
-            self.stars_id,
-            self.otrok_id,
         )
+
+    def sledi(self) -> tuple[str, ...]:
+        """Nizi, ki v odgovoru druge družine ne smejo nastopiti."""
+        return (*self.sledi_vsebine(), self.stars_id, self.otrok_id)
 
 
 def _zgradi(
@@ -569,6 +577,87 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
         NI,
         (a.otrok_id,),
     ),
+    # Stran lastnika sistema (V3-R05). Odjemalec je **navaden starš**, zato je
+    # vsaka od teh poti 404 — ne 403 in ne 200 z obrezano vsebino: za starša ta
+    # stran ne obstaja (`ADR-044` G). Da je za lastnika 200, dokazuje
+    # `tests/test_sistem.py`; tu je pomembno, da za vse ostale ni.
+    ("GET", "/admin/system"): lambda o, a: (o.get("/admin/system"), NI, ()),
+    ("POST", "/admin/system/families"): lambda o, a: (
+        o.post(
+            "/admin/system/families",
+            data={
+                "ime_druzine": "Vdor",
+                "ime": "Vlomilec",
+                "enaslov": "vlom@primer.test",
+                "geslo": "vlomljeno-geslo-12",
+                "geslo_znova": "vlomljeno-geslo-12",
+            },
+            follow_redirects=False,
+        ),
+        NI,
+        (),
+    ),
+    ("GET", "/admin/system/families/{family_id}"): lambda o, a: (
+        o.get(f"/admin/system/families/{a.family_id}"), NI, (a.family_id,),
+    ),
+    ("GET", "/admin/system/families/{family_id}/deactivate"): lambda o, a: (
+        o.get(f"/admin/system/families/{a.family_id}/deactivate"), NI, (a.family_id,),
+    ),
+    ("POST", "/admin/system/families/{family_id}/deactivate"): lambda o, a: (
+        o.post(
+            f"/admin/system/families/{a.family_id}/deactivate", follow_redirects=False
+        ),
+        NI,
+        (a.family_id,),
+    ),
+    ("GET", "/admin/system/families/{family_id}/activate"): lambda o, a: (
+        o.get(f"/admin/system/families/{a.family_id}/activate"), NI, (a.family_id,),
+    ),
+    ("POST", "/admin/system/families/{family_id}/activate"): lambda o, a: (
+        o.post(f"/admin/system/families/{a.family_id}/activate", follow_redirects=False),
+        NI,
+        (a.family_id,),
+    ),
+    ("GET", "/admin/system/families/{family_id}/parents/{user_id}/password"): lambda o, a: (
+        o.get(f"/admin/system/families/{a.family_id}/parents/{a.stars_id}/password"),
+        NI,
+        (a.family_id, a.stars_id),
+    ),
+    ("POST", "/admin/system/families/{family_id}/parents/{user_id}/password"): lambda o, a: (
+        o.post(
+            f"/admin/system/families/{a.family_id}/parents/{a.stars_id}/password",
+            data={"geslo": "vlomljeno-geslo-12", "geslo_znova": "vlomljeno-geslo-12"},
+            follow_redirects=False,
+        ),
+        NI,
+        (a.family_id, a.stars_id),
+    ),
+    ("GET", "/admin/system/families/{family_id}/parents/{user_id}/deactivate"): lambda o, a: (
+        o.get(f"/admin/system/families/{a.family_id}/parents/{a.stars_id}/deactivate"),
+        NI,
+        (a.family_id, a.stars_id),
+    ),
+    ("POST", "/admin/system/families/{family_id}/parents/{user_id}/deactivate"): lambda o, a: (
+        o.post(
+            f"/admin/system/families/{a.family_id}/parents/{a.stars_id}/deactivate",
+            follow_redirects=False,
+        ),
+        NI,
+        (a.family_id, a.stars_id),
+    ),
+    ("GET", "/admin/system/families/{family_id}/parents/{user_id}/activate"): lambda o, a: (
+        o.get(f"/admin/system/families/{a.family_id}/parents/{a.stars_id}/activate"),
+        NI,
+        (a.family_id, a.stars_id),
+    ),
+    ("POST", "/admin/system/families/{family_id}/parents/{user_id}/activate"): lambda o, a: (
+        o.post(
+            f"/admin/system/families/{a.family_id}/parents/{a.stars_id}/activate",
+            follow_redirects=False,
+        ),
+        NI,
+        (a.family_id, a.stars_id),
+    ),
     # Urnik (V3-R09). Vse tri poti imenujejo **tujega** otroka: urnik je last
     # otroka, zato je to tu ista vrsta sledi kot tuj `material_id` drugje.
     ("GET", "/admin/schedule"): lambda o, a: (
@@ -674,6 +763,182 @@ def test_druzina_b_na_istih_poteh_vidi_svoje(
     assert b.odprt_kviz in odjemalec.get("/quizzes/pending").text
     assert b.za_brisanje in odjemalec.get("/materials/pending-deletion").text
     assert b.otrok_id in odjemalec.get("/admin/family").text
+
+
+# --- Lastnik sistema (V3-R05) ---
+
+
+@pytest.fixture
+def lastnikov_odjemalec(
+    aplikacija: FastAPI, motor: Engine, druzini: tuple[Druzina, Druzina]
+) -> Iterator[PrijavljenOdjemalec]:
+    """Odjemalec lastnika sistema, ki je starš družine **B**.
+
+    Lastnik je vedno v neki družini (`ADR-025`), zato je A zanj tuja družina —
+    natanko razmerje, ki ga `V3-R05` uvaja in ki ga je treba preizkusiti.
+    """
+    _, b = druzini
+    lastnik = ustvari_starsa(
+        motor,
+        family_id=b.family_id,
+        identifikator="lastnik@primer.test",
+        prikazno_ime="Lastnik sistema",
+        lastnik_sistema=True,
+    )
+    with PrijavljenOdjemalec(aplikacija, base_url="https://testserver") as odjemalec:
+        prijavi(odjemalec, motor, lastnik)
+        yield odjemalec
+
+
+def test_lastnik_ne_vidi_vsebine_tuje_druzine(
+    lastnikov_odjemalec: PrijavljenOdjemalec, druzini: tuple[Druzina, Druzina]
+) -> None:
+    """Kriterij 4: lastnik vidi imena, števila in stanje — **vsebine pa ne**.
+
+    Imena in `id` staršev tuje družine sme videti, ker jim ponastavlja geslo in
+    jih deaktivira; snovi, prepisov, povzetkov, kvizov, vprašanj in poskusov ne
+    sme videti nikjer (`ADR-044` B). Zato `sledi_vsebine()` in ne `sledi()`.
+
+    Test pomete čez **vse** strani lastnika, ki kaj kažejo, in ne samo čez
+    seznam: nova stran, ki bi kdaj prikazala kaj več, pade tu.
+    """
+    a, _ = druzini
+    strani = (
+        "/admin/system",
+        f"/admin/system/families/{a.family_id}",
+        f"/admin/system/families/{a.family_id}/deactivate",
+        f"/admin/system/families/{a.family_id}/parents/{a.stars_id}/password",
+        f"/admin/system/families/{a.family_id}/parents/{a.stars_id}/deactivate",
+    )
+
+    for pot in strani:
+        odgovor = lastnikov_odjemalec.get(pot)
+        assert odgovor.status_code == 200, pot
+        for sled in a.sledi_vsebine():
+            assert sled not in odgovor.text, f"{pot} vsebuje sled vsebine tuje družine: {sled}"
+
+
+def test_lastnik_tujo_druzino_vseeno_vidi(
+    lastnikov_odjemalec: PrijavljenOdjemalec, druzini: tuple[Druzina, Druzina]
+) -> None:
+    """Test zgoraj ni prazen: ime tuje družine in njen starš sta na strani."""
+    a, _ = druzini
+
+    odgovor = lastnikov_odjemalec.get(f"/admin/system/families/{a.family_id}")
+
+    assert "Cvek" in odgovor.text
+    assert a.stars_id in odgovor.text
+
+
+def test_lastnikova_dejanja_ne_spremenijo_vsebine_tuje_druzine(
+    lastnikov_odjemalec: PrijavljenOdjemalec,
+    motor: Engine,
+    slike: Path,
+    druzini: tuple[Druzina, Druzina],
+) -> None:
+    """Deaktivacija družine se dotakne **samo** zastavice in sej.
+
+    Posnetek zajame vse vrstice in vse slike družine, zato bi vsako drugo
+    spremembo — pobrisano snov, premaknjeno sliko, spremenjen kviz, ugasnjen
+    račun člana — ujel. Izvzeti sta natanko dve stvari, ki se **smeta**
+    spremeniti: zastavica družine in seje njenih članov (`ADR-044` A).
+
+    Da seje res padejo, ni stvar tega testa — to trdi `tests/test_sistem.py`.
+    Tu je vprašanje obratno: ali se je deaktivacija dotaknila česa drugega.
+    """
+    a, _ = druzini
+    prej = _brez_stanja_in_sej(posnetek_druzine(motor, slike, a.family_id))
+
+    odgovor = lastnikov_odjemalec.post(
+        f"/admin/system/families/{a.family_id}/deactivate", follow_redirects=False
+    )
+
+    assert odgovor.status_code == 303
+    assert _brez_stanja_in_sej(posnetek_druzine(motor, slike, a.family_id)) == prej
+
+
+#: Tabeli, ki ju deaktivacija družine sme spremeniti: stanje in seje.
+SME_SE_SPREMENITI = frozenset({"families", "sessions"})
+
+
+def _brez_stanja_in_sej(
+    posnetek: tuple[list[tuple[str, ...]], dict[str, bytes]],
+) -> tuple[list[tuple[str, ...]], dict[str, bytes]]:
+    """Posnetek brez tistega, kar deaktivacija sme spremeniti."""
+    vrstice, datoteke = posnetek
+    return [vrstica for vrstica in vrstice if vrstica[0] not in SME_SE_SPREMENITI], datoteke
+
+
+#: Javne metode `DruzineRepository`, zapisane na roko.
+#:
+#: Varovalo `test_vsaka_javna_metoda_repozitorija_ima_primer` našteva pet
+#: repozitorijev **z družino** in tega ne gleda — po `ADR-025` je ta edini, ki
+#: sme brati čez vse. Prav zato potrebuje svoje: nova metoda tu je odločitev o
+#: meji iz `ADR-044` E in ne sme nastati tiho, med pisanjem strani.
+JAVNE_METODE_DRUZIN = {
+    "edina",
+    "idji",
+    "idji_aktivnih",
+    "nastavi_aktivnost",
+    "poisci",
+    "pregled",
+    "ustvari_z_prvim_starsem",
+}
+
+
+def test_repozitorij_druzin_ima_zapisan_obseg() -> None:
+    """Varovalo: nova javna metoda `DruzineRepository` podre zbirko.
+
+    Ta razred je edini, ki bere čez družine, zato je vsaka njegova nova metoda
+    vprašanje „sme to brati?" in ne podrobnost izvedbe.
+    """
+    javne = {
+        ime
+        for ime, clan in inspect.getmembers(DruzineRepository)
+        if not ime.startswith("_") and callable(clan)
+    }
+
+    assert javne == JAVNE_METODE_DRUZIN
+
+
+def test_repozitorij_druzin_ne_bere_podatkov_druzine(motor: Engine) -> None:
+    """Meja iz `ADR-044` E: samo `families` in `users`, nikoli podatki.
+
+    Trditev je o **stavkih, ki jih razred res izvede**, in ne o branju kode:
+    poslušalec SQLAlchemy prestreže vsako poizvedbo, ki gre na bazo.
+    """
+    prestrezene: list[str] = []
+
+    @event.listens_for(motor, "before_cursor_execute")
+    def zabelezi(  # type: ignore[no-untyped-def]
+        conn, cursor, stavek, parameters, context, executemany
+    ) -> None:
+        prestrezene.append(stavek.lower())
+
+    try:
+        with Session(motor) as seja:
+            repo = DruzineRepository(seja)
+            repo.pregled()
+            repo.poisci(CVEK_ID)
+            repo.idji()
+            repo.idji_aktivnih()
+            repo.edina()
+            repo.nastavi_aktivnost(CVEK_ID, aktivna=False)
+    finally:
+        event.remove(motor, "before_cursor_execute", zabelezi)
+
+    prepovedane = (
+        "materials",
+        "questions",
+        "quizzes",
+        "quiz_items",
+        "question_attempts",
+        "schedules",
+        "schedule_entries",
+    )
+    for stavek in prestrezene:
+        for tabela in prepovedane:
+            assert tabela not in stavek, f"{tabela} v stavku: {stavek}"
 
 
 # --- Repozitoriji ---

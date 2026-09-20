@@ -1231,3 +1231,60 @@ def test_razveljavitev_urnika_ohrani_ostalo(baza: str, slike: Path) -> None:
         assert _stej(motor) == prej, "razveljavitev urnika ne sme vzeti ničesar s sabo"
     finally:
         motor.dispose()
+
+
+# --- Stanje družine (V3-R05, `0011_stanje_druzine`) ---
+
+
+def test_obstojece_druzine_ostanejo_aktivne(baza: str, slike: Path) -> None:
+    """`0011_stanje_druzine` doda stolpec in nobene vrstice ne premakne.
+
+    Preverja prav to, kar migracija **trdi** o sebi: obstoječe družine so po
+    njej aktivne in vsebina baze je enaka. Zgolj obstoj stolpca pove že
+    varovalo `test_migrirana_shema_se_ujema_z_modeli`.
+    """
+    config = alembic_nastavitve(baza)
+    _polna_baza_pred_druzinami(baza, slike)
+    command.upgrade(config, "0010_urnik")
+
+    motor = create_engine(baza)
+    try:
+        prej = _stej(motor)
+        assert prej["materials"] >= 1, "test mora teči nad polno bazo"
+
+        command.upgrade(config, "0011_stanje_druzine")
+
+        assert _vrstice(motor, "SELECT DISTINCT is_active FROM families") == [(1,)]
+        assert _stej(motor) == prej, "stanje družine ne sme premakniti nobene vrstice"
+    finally:
+        motor.dispose()
+
+
+def test_razveljavitev_stanja_druzine_ohrani_podatke(baza: str, slike: Path) -> None:
+    """`downgrade` spusti stolpec in nič drugega.
+
+    Podatek o tem, katera družina je bila ugasnjena, se pri tem izgubi
+    dokončno — isti razred kot `0004_upokojena_vprasanja` —, vse ostalo pa
+    mora ostati nedotaknjeno. Test ugasne družino prav zato, da bi ga
+    razveljavitev, ki bi vrstico vzela s sabo, ne odnesla neopaženo.
+    """
+    config = alembic_nastavitve(baza)
+    _polna_baza_pred_druzinami(baza, slike)
+    command.upgrade(config, "head")
+
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            povezava.execute(
+                text("UPDATE families SET is_active = 0 WHERE id = :druzina"),
+                {"druzina": CVEK_ID},
+            )
+        prej = _stej(motor)
+
+        command.downgrade(config, "0010_urnik")
+
+        stolpci = {stolpec["name"] for stolpec in inspect(motor).get_columns("families")}
+        assert "is_active" not in stolpci
+        assert _stej(motor) == prej, "razveljavitev ne sme vzeti nobene vrstice s sabo"
+    finally:
+        motor.dispose()

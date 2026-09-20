@@ -20,7 +20,7 @@ Kode zavrnitve so iste kot na starševi strani, ker so ista pravila:
 
 | Kaj | Koda | Kdaj |
 |---|---|---|
-| te družine ali tega starša ni | `404` | neznana družina, neznan `user_id`, otrok pod potjo staršev |
+| te družine ali starša ni | `404` | neznana družina, neznan `user_id`, otrok pod `parents/` |
 | dejanje ni tvoje | `403` | svoja družina, lastnik sistema, zadnji aktivni starš |
 | stanje že je tako | `409` | deaktivacija deaktiviranega, aktivacija aktivnega |
 

@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 
 from app import prijava
 from app.models import VLOGA_OTROK, LoginAttempt, Material, UserSession
-from app.routers import admin, clani, dnevi, kvizi, statistika, urnik, vstop
+from app.routers import admin, clani, dnevi, kvizi, sistem, statistika, urnik, vstop
 from app.routers.admin import MAPA_PREDLOG
 from app.security import SPOROCILO_BREZ_CSRF, SPOROCILO_NEVELJAVEN_ZETON
 from tests.conftest import (
@@ -158,7 +158,7 @@ class TestDosegljivost:
         """
         iz_usmerjevalnikov = {
             (metoda, brez_pretvornika(pot.path))
-            for modul in (admin, clani, dnevi, kvizi, statistika, urnik, vstop)
+            for modul in (admin, clani, dnevi, kvizi, sistem, statistika, urnik, vstop)
             for pot in modul.router.routes
             for metoda in getattr(pot, "methods", set())
             if pot.path.startswith("/admin")
