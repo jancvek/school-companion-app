@@ -113,6 +113,34 @@ def sej_uporabnika(motor: Engine, user_id: str) -> int:
 # --- Kdo sploh pride do strani ---------------------------------------------
 
 
+@pytest.mark.parametrize(
+    ("pot", "skrita"),
+    [
+        ("/admin/system", True),
+        ("/admin/system/", True),
+        ("/admin/system/families", True),
+        ("/admin/system/families/abc/parents/def/password", True),
+        # Pot s podobnim imenom ni pod predpono. Golo `startswith` bi jo zajelo
+        # in bi bilo videti pravilno do dneva, ko taka pot nastane — ista past
+        # kot pri `security.je_izvzeta` (odločitev 6 v `docs/plan/V1-R04.md`).
+        ("/admin/systematic", False),
+        ("/admin/system-x", False),
+        ("/admin", False),
+        ("/admin/family", False),
+        ("/system", False),
+    ],
+)
+def test_je_skrita_pot(pot: str, skrita: bool) -> None:
+    """Ujemanje predpone: sama pot in to, kar ji sledi za poševnico.
+
+    Test enote in ne čez HTTP: `/admin/systematic` ne obstaja, zato se razlika
+    med pravilnim ujemanjem in golim `startswith` v odgovoru strežnika ne vidi
+    — pokazala bi se šele, ko bi taka pot nastala, in takrat bi bila skrita po
+    nesreči.
+    """
+    assert sistem.je_skrita_pot(pot) is skrita
+
+
 def _primeri_poti(aplikacija: FastAPI) -> list[tuple[str, str]]:
     """Vsaka pot pod `/admin/system`, z izmišljenimi, a veljavnimi vrednostmi.
 

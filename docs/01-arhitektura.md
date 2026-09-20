@@ -976,6 +976,10 @@ poizvedbe v `DruzineRepository` in `ClaniRepository`, odločitve v
   **Ostale poti pod `/admin` ostanejo pri `405`** — tam obstoj poti ni
   skrivnost. `POST /admin/system/families` ima poleg tega registriran `GET`,
   ki lastnika s `303` pelje na seznam; da pot ne bi bila slepa ulica.
+- **Meja obljube je zapisana** (`ADR-045`): skrivanje velja za odgovore
+  aplikacije, **ne** za usmerjanje okvirja in **ne** za shemo poti. Da stran
+  obstaja, je torej mogoče ugotoviti; kaj je na njej, ne. Podatke drži
+  `zahtevaj_lastnika_sistema`, ne koda odgovora.
 - **Lastnik vidi imena, števila članov, datum in stanje — vsebine ne.** Ne
   slik, ne prepisov, ne kvizov, ne statistike, ne urnikov (`ADR-044` B). To ni
   stvar izrisa: nobena pot te predpone teh tabel ne bere, `DruzinaZaPregled`
@@ -1034,6 +1038,15 @@ pa ne — isti vzorec kot `0004` in `0009`.
   ne podeli nobena pot; postavi jo migracija `0008_uporabniki`. Če bo lastnikov
   kdaj več, bo pravilo o „svoji družini" treba napisati čez vse družine, v
   katerih kakšen je.
+- **Obstoj strani je mogoče ugotoviti po dveh poteh** (`ADR-045`, zavestno):
+  `GET /admin/system/` s končno poševnico vrne `307` na naslov brez nje, ker to
+  preusmeritev naredi Starlette sam in prestreznik je ne vidi; izklop
+  (`redirect_slashes=False`) bi veljal za vso aplikacijo in podrl `GET /admin/`.
+  `/openapi.json` pa vsakemu veljavnemu žetonu vrne vse poti aplikacije.
+- **`/openapi.json`, `/docs` in `/redoc` so dosegljivi vsakemu veljavnemu
+  žetonu, tudi otrokovemu.** Brez žetona so `401` (`ZetonMiddleware`), z njim
+  vrnejo celotno shemo poti — tudi `/admin/family` (V3-R06) in `/admin/system`.
+  Tako je od `V1`; to **ni** lastnost `V3-R05`. Zaprtje je svoja zahteva.
 
 ## Sestavljalnik kvizov (V2-R01)
 
