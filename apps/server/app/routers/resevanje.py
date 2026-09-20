@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.casi import utc
 from app.db import KviziRepository, PoskusZaZapis
-from app.dependencies import daj_repozitorij_kvizov
+from app.dependencies import daj_otroka, daj_repozitorij_kvizov
 from app.schemas import (
     CakajociKvizi,
     KvizZaTelefonOblika,
@@ -40,11 +40,17 @@ SPOROCILO_NEZNANA_POSTAVKA = (
 @router.get("/quizzes/pending", response_model=CakajociKvizi)
 def cakajoci_kvizi(
     repozitorij: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov)],
+    otrok: Annotated[str, Depends(daj_otroka)],
 ) -> CakajociKvizi:
     """Kvizi, ki čakajo na reševanje, s celotno zamrznjeno vsebino.
 
-    Samo nepreklicani in nerešeni. Splošne sinhronizacije vprašanj ni: telefon
-    dobi kviz kot zaprt objekt (`ADR-016`, posledice).
+    Samo nepreklicani in nerešeni, in samo tisti, **naslovljeni na
+    prijavljenega otroka** (`V3-R07`). Splošne sinhronizacije vprašanj ni:
+    telefon dobi kviz kot zaprt objekt (`ADR-016`, posledice).
+
+    Do `V3-R07` je bil kviz last družine in je na skupnem telefonu vsak otrok
+    dobil vse. Pogodba se s tem **zoži in ne spremeni oblike**: star APK ne
+    pade, le seznam je pravilen.
     """
     return CakajociKvizi(
         quizzes=[
@@ -63,7 +69,7 @@ def cakajoci_kvizi(
                     for postavka in cakajoc.kviz.postavke
                 ],
             )
-            for cakajoc in repozitorij.seznam_za_telefon()
+            for cakajoc in repozitorij.seznam_za_telefon(otrok)
         ]
     )
 
@@ -72,6 +78,7 @@ def cakajoci_kvizi(
 def zapisi_poskuse(
     telo: PaketPoskusov,
     repozitorij: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov)],
+    otrok: Annotated[str, Depends(daj_otroka)],
 ) -> PoskusiZapisani:
     """Sprejme paket poskusov; idempotentno po `id`, prvi poskus postavke zmaga.
 
@@ -79,6 +86,14 @@ def zapisi_poskuse(
     `200` s številom res zapisanih. Telefon oboje šteje za uspeh, sicer bi po
     `ADR-004` obtičal v stanju, iz katerega ga nič ne vrne
     (`docs/odlocitve/ADR-019` E).
+
+    **Poskus za kviz drugega otroka je tretji tak primer** (`ADR-039` D):
+    sprejme se, ne zapiše in ne šteje. Nastane lahko samo iz zastarelih
+    lokalnih podatkov na skupnem telefonu; `422` bi ga po `ADR-020` zataknil
+    za vedno.
+
+    Odgovarjalca pove **seja**, ne paket: kdo odgovarja, je trditev, ki jo je
+    prijava že preverila.
     """
     zapisani = repozitorij.zapisi_poskuse(
         [
@@ -92,7 +107,8 @@ def zapisi_poskuse(
                 answered_at=poskus.answered_at.astimezone(UTC),
             )
             for poskus in telo.attempts
-        ]
+        ],
+        otrok,
     )
     if zapisani is None:
         raise HTTPException(status_code=422, detail=SPOROCILO_NEZNANA_POSTAVKA)

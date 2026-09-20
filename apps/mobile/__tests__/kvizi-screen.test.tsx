@@ -33,9 +33,9 @@ afterEach(() => {
 
 describe('seznam kvizov', () => {
   it('našteje čakajoče, najstarejšega prvega, rešenega ne', async () => {
-    await shraniKviz(db, kvizStreznika('mlajsi', 2, { name: 'MAT — 10. 9. 2026', created_at: '2026-09-10T08:00:00+00:00' }));
-    await shraniKviz(db, kvizStreznika('starejsi', 2, { name: 'SLJ — 8. 9. 2026', created_at: '2026-09-08T08:00:00+00:00' }));
-    await shraniKviz(db, kvizStreznika('resen', 1, { name: 'Rešen' }));
+    await shraniKviz(db, kvizStreznika('mlajsi', 2, { name: 'MAT — 10. 9. 2026', created_at: '2026-09-10T08:00:00+00:00' }), null);
+    await shraniKviz(db, kvizStreznika('starejsi', 2, { name: 'SLJ — 8. 9. 2026', created_at: '2026-09-08T08:00:00+00:00' }), null);
+    await shraniKviz(db, kvizStreznika('resen', 1, { name: 'Rešen' }), null);
     await zapisiPoskus(db, poskus('resen', 1));
 
     await render(<KviziScreen />);
@@ -49,7 +49,7 @@ describe('seznam kvizov', () => {
   });
 
   it('napol rešen kviz pove, koliko je odgovorjenega', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 3));
+    await shraniKviz(db, kvizStreznika('k1', 3), null);
     await zapisiPoskus(db, poskus('k1', 1));
 
     await render(<KviziScreen />);
@@ -58,7 +58,7 @@ describe('seznam kvizov', () => {
   });
 
   it('nov kviz pove število vprašanj', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 3));
+    await shraniKviz(db, kvizStreznika('k1', 3), null);
 
     await render(<KviziScreen />);
 
@@ -72,7 +72,7 @@ describe('seznam kvizov', () => {
   });
 
   it('pritisk odpre kviz', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 1));
+    await shraniKviz(db, kvizStreznika('k1', 1), null);
     await render(<KviziScreen />);
 
     await fireEvent.press(await screen.findByTestId('kviz'));
@@ -84,7 +84,7 @@ describe('seznam kvizov', () => {
   });
 
   it('zadnji kviz ne obtiči pod sistemsko navigacijsko vrstico', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 1));
+    await shraniKviz(db, kvizStreznika('k1', 1), null);
     await render(<KviziScreen />);
 
     const seznam = await screen.findByTestId('seznam-kvizov');
@@ -125,9 +125,9 @@ describe('gumb „Kvizi" na domači strani', () => {
   });
 
   it('kadar kaj čaka, nosi število', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 1));
-    await shraniKviz(db, kvizStreznika('k2', 2));
-    await shraniKviz(db, kvizStreznika('resen', 1));
+    await shraniKviz(db, kvizStreznika('k1', 1), null);
+    await shraniKviz(db, kvizStreznika('k2', 2), null);
+    await shraniKviz(db, kvizStreznika('resen', 1), null);
     await zapisiPoskus(db, poskus('resen', 1));
 
     await izrisi();
@@ -136,7 +136,7 @@ describe('gumb „Kvizi" na domači strani', () => {
   });
 
   it('kadar kaj čaka, ima poudarjen rob', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 1));
+    await shraniKviz(db, kvizStreznika('k1', 1), null);
     await izrisi();
     await screen.findByText('Kvizi · 1');
 

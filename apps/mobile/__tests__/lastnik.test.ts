@@ -162,7 +162,7 @@ describe('posvojitev zapisov brez lastnika', () => {
   });
 
   it('posvoji tudi neprenesene poskuse', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 1));
+    await shraniKviz(db, kvizStreznika('k1', 1), null);
     await zapisiPoskus(db, poskus('k1', 1, { user_id: null }));
 
     await posvojiBrezLastnika(db, MASA);
@@ -176,7 +176,7 @@ describe('posvojitev zapisov brez lastnika', () => {
     // neprenesen poskus in ga poslala pod svojim žetonom — statistika na
     // strežniku bi govorila o napačnem otroku (`docs/plan/V3-R04.md`:
     // „za oboje obstaja svoj test").
-    await shraniKviz(db, kvizStreznika('k-masa', 1));
+    await shraniKviz(db, kvizStreznika('k-masa', 1), null);
     await zapisiPoskus(db, poskus('k-masa', 1, { user_id: MASA }));
 
     await posvojiBrezLastnika(db, JAKA);
@@ -207,7 +207,7 @@ describe('lastnik poskusa (ADR-036 C)', () => {
 
   /** Neprenesen poskus dane osebe na svežem kvizu. */
   async function neprenesen(quizId: string, lastnik: string | null): Promise<Poskus> {
-    await shraniKviz(db, kvizStreznika(quizId, 1));
+    await shraniKviz(db, kvizStreznika(quizId, 1), null);
     const p = poskus(quizId, 1, { user_id: lastnik });
     await zapisiPoskus(db, p);
     return p;
@@ -235,7 +235,7 @@ describe('lastnik poskusa (ADR-036 C)', () => {
 
   it('kviz brez tujih neprenesenih poskusov se pobriše kot doslej', async () => {
     // Varovalka ne sme ustaviti običajnega pospravljanja (`ADR-019` B).
-    await shraniKviz(db, kvizStreznika('k-star', 1));
+    await shraniKviz(db, kvizStreznika('k-star', 1), null);
 
     expect(await pobrisiKvizeRazen(db, [], null, MASA)).toBe(1);
   });

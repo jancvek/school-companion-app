@@ -138,7 +138,7 @@ export async function uskladiKvize(
 
   const kvizi = await odjemalec.preberiKvize();
   for (const kviz of kvizi) {
-    await shraniKviz(db, kviz);
+    await shraniKviz(db, kviz, lastnik);
   }
   const pobrisani = await pobrisiKvizeRazen(
     db,

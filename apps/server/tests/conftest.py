@@ -43,6 +43,12 @@ GESLO_STARSA = "geslo-starsa-12"
 OTROK_IDENTIFIKATOR = "otrok"
 GESLO_OTROKA = "geslo-otroka"
 
+#: Stalen `id` otroka družine Cvek (V3-R07). Stalen in ne `uuid4()`, ker ga
+#: pomožne funkcije testov potrebujejo kot **privzetek** pri gradnji snovi,
+#: kvizov in poskusov — `child_id` je od `ADR-039` obvezen. Test, ki
+#: potrebuje drugega otroka, ga ustvari z izrecnim `user_id`.
+OTROK_ID = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+
 
 @cache
 def zgostitev(geslo: str) -> str:
@@ -218,6 +224,7 @@ class PrijavljenOdjemalec(TestClient):
 def ustvari_starsa(
     motor: Engine,
     *,
+    user_id: str | None = None,
     family_id: str = CVEK_ID,
     identifikator: str = STARS_IDENTIFIKATOR,
     prikazno_ime: str = "Dejan",
@@ -233,7 +240,7 @@ def ustvari_starsa(
     zastavico, ki jo sicer postavi ista migracija; poti `V3-R06` je ne
     podelijo nikomur (`docs/odlocitve/ADR-038` G).
     """
-    user_id = str(uuid4())
+    user_id = user_id if user_id is not None else str(uuid4())
     zdaj = datetime.now(UTC)
     with Session(motor) as seja:
         seja.add(
@@ -316,15 +323,23 @@ def prijavi(odjemalec: PrijavljenOdjemalec, motor: Engine, user_id: str) -> None
 def ustvari_otroka(
     motor: Engine,
     *,
+    user_id: str | None = OTROK_ID,
     family_id: str = CVEK_ID,
     identifikator: str = OTROK_IDENTIFIKATOR,
     prikazno_ime: str = "Maša",
     geslo: str | None = GESLO_OTROKA,
     aktiven: bool = True,
 ) -> str:
-    """Otrok v družini — uporabnik, ki se prijavlja na telefonu (V3-R04)."""
+    """Otrok v družini — uporabnik, ki se prijavlja na telefonu (V3-R04).
+
+    Privzeti `user_id` je stalen (`OTROK_ID`), da se ujema s privzetkom, s
+    katerim pomožne funkcije testov gradijo snov, kvize in poskuse (V3-R07).
+    Drugega otroka test ustvari z izrecnim `user_id` in svojim
+    `identifikator` — ta je enoličen čez celo namestitev.
+    """
     return ustvari_starsa(
         motor,
+        user_id=user_id,
         family_id=family_id,
         identifikator=identifikator,
         prikazno_ime=prikazno_ime,

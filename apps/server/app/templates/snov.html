@@ -5,7 +5,7 @@
 {% block vsebina %}
   <h1>{{ snov.koda }} — {{ snov.oznaka }}</h1>
   <p class="pod">
-    {{ snov.cas }}{% if snov.arhiviran %} — <strong>v arhivu</strong>{% endif %}
+    {{ snov.cas }}{% if snov.otrok %} · {{ snov.otrok }}{% endif %}{% if snov.arhiviran %} — <strong>v arhivu</strong>{% endif %}
   </p>
 
   <div class="snov">

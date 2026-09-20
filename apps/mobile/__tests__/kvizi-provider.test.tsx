@@ -77,7 +77,7 @@ function izrisi(streznik: OdjemalecKvizov) {
 }
 
 it('zavrnjene poskuse si zapomni med obhodi in jih ob novem zagonu poskusi znova', async () => {
-  await shraniKviz(db, kvizStreznika('k1', 2));
+  await shraniKviz(db, kvizStreznika('k1', 2), null);
   await zapisiPoskus(db, poskus('k1', 1));
   await zapisiPoskus(db, poskus('k1', 2));
   const streznik = zavracajoc();

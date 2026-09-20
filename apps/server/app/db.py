@@ -39,6 +39,7 @@ from app.models import (
     STATUS_NOV,
     STATUS_PRIPRAVLJEN,
     STATUS_V_OBDELAVI,
+    VLOGA_OTROK,
     VLOGA_STARS,
     Credential,
     Family,
@@ -210,6 +211,12 @@ class MaterialsRepository(_RepozitorijDruzine):
         if material.family_id != self._family_id:
             raise ValueError("Zapis mora nositi družino tega repozitorija, ne tuje ali prazne.")
 
+        # Prazen niz `NOT NULL` ne ujame. Otroka pove seja žetona
+        # (`docs/odlocitve/ADR-039`); prazen pomeni napako v poti, ne vhod
+        # uporabnice, zato izjema in ne HTTP odgovor.
+        if not material.child_id:
+            raise ValueError("Snov mora nositi otroka, ki jo je fotografiral (ADR-039).")
+
         if self.obstaja(material.id):
             return False
 
@@ -278,8 +285,8 @@ class MaterialsRepository(_RepozitorijDruzine):
         naslednji = idji[mesto + 1] if mesto + 1 < len(idji) else None
         return prejsnji, naslednji
 
-    def seznam_po_obdobju(self, od: datetime, do: datetime) -> list[Material]:
-        """Nearhivirane slike, posnete v polodprtem intervalu `[od, do)`.
+    def seznam_po_obdobju(self, od: datetime, do: datetime, child_id: str) -> list[Material]:
+        """Nearhivirane slike **enega otroka**, posnete v `[od, do)`.
 
         Čez vse predmete in **naraščajoče** po `taken_at` — obratno kot
         `seznam_po_predmetu`. Zaporedni posnetki so strani iste snovi
@@ -290,12 +297,18 @@ class MaterialsRepository(_RepozitorijDruzine):
         lokalni dan je to, repozitorij ne ve nič. Grupiranje po lokalnem dnevu
         je zato v Pythonu — izraz za lokalni dan v SQL ni prenosljiv med SQLite
         (testi) in Postgresom (produkcija), `docs/odlocitve/ADR-023`.
+
+        `child_id` je **argument poizvedbe in ne konstruktorja**, za razliko od
+        družine: družina je meja lastništva (`ADR-025`), otrok pa izbira
+        pogleda znotraj nje. Starš legitimno gleda oba svoja otroka, zato otrok
+        ne sme biti videti kot druga meja izolacije (`ADR-039` B).
         """
         return list(
             self._session.scalars(
                 select(Material)
                 .where(
                     self._moje(),
+                    Material.child_id == child_id,
                     Material.archived_at.is_(None),
                     Material.taken_at >= od,
                     Material.taken_at < do,
@@ -761,6 +774,7 @@ class KviziRepository(_RepozitorijDruzine):
 
     def snovi_za_izbor(
         self,
+        naslovljenec: str,
         subject: str | None = None,
         od: datetime | None = None,
         do: datetime | None = None,
@@ -778,6 +792,11 @@ class KviziRepository(_RepozitorijDruzine):
         Vrstni red je `taken_at DESC`, kot povsod v `/admin` — in ker kriterij
         pravi „po snovi (kot v izbirniku)", je to hkrati vrstni red postavk
         objavljenega kviza.
+
+        **Seznam ni omejen na snov naslovljenca.** Vprašanja so last družine,
+        zato sme starš iz snovi enega otroka sestaviti kviz za drugega — to je
+        kriterij `V3-R07` in zavestna izbira, ne posledica. `naslovljenec`
+        vpliva izključno na `ze_v_kvizu` (`ADR-039` G).
 
         **Tri poizvedbe, nikoli N+1.** Branje števila vprašanj na vsako sliko
         posebej bi pri seznamu celega predmeta pomenilo sto poizvedb na stran;
@@ -807,7 +826,7 @@ class KviziRepository(_RepozitorijDruzine):
 
         idji = [snov.id for snov in snovi]
         steviloma = self._stej_veljavna(idji)
-        v_kvizu = self._ze_v_kvizu(idji)
+        v_kvizu = self._ze_v_kvizu(idji, naslovljenec)
 
         return [
             SnovZaIzbor(
@@ -831,11 +850,16 @@ class KviziRepository(_RepozitorijDruzine):
         ).all()
         return {material_id: koliko for material_id, koliko in vrstice if material_id}
 
-    def _ze_v_kvizu(self, material_ids: Sequence[str]) -> set[str]:
-        """Katere od danih snovi so že bile v kvizu.
+    def _ze_v_kvizu(self, material_ids: Sequence[str], naslovljenec: str) -> set[str]:
+        """Katere od danih snovi so že bile v kvizu **tega naslovljenca**.
 
-        „Bila v kvizu" pomeni dvoje hkrati (`docs/odlocitve/ADR-017` B):
+        „Bila v kvizu" pomeni troje hkrati (`docs/odlocitve/ADR-017` B, zožen
+        z `ADR-039` G):
 
+        - kviz je bil namenjen **istemu otroku** — snov, iz katere je nastal
+          kviz za sestro, je za brata še vedno nova. Brez tega bi *Nova snov*
+          skrila natanko tisto snov, ki jo kriterij `V3-R07` izrecno dovoli
+          uporabiti;
         - kviz **ni preklican** — preklican kviz ni bil pravi, zato se njegova
           snov spet ponudi (`ADR-016` B);
         - vprašanje je **veljavno** — po ponovni obdelavi so stara vprašanja
@@ -853,6 +877,7 @@ class KviziRepository(_RepozitorijDruzine):
                 .where(
                     Question.family_id == self._family_id,
                     Quiz.family_id == self._family_id,
+                    Quiz.child_id == naslovljenec,
                     Question.material_id.in_(material_ids),
                     Question.retired_at.is_(None),
                     Quiz.canceled_at.is_(None),
@@ -955,9 +980,13 @@ class KviziRepository(_RepozitorijDruzine):
     # --- Objava in življenje kviza ---
 
     def objavi(
-        self, ime: str, subject: str | None, vprasanja: Sequence[Question]
+        self,
+        ime: str,
+        subject: str | None,
+        vprasanja: Sequence[Question],
+        naslovljenec: str,
     ) -> Quiz:
-        """Ustvari kviz in vse njegove postavke **v eni transakciji**.
+        """Ustvari kviz za `naslovljenec` in vse postavke **v eni transakciji**.
 
         En `commit` na koncu in ne eden na postavko: kriterij zahteva, da
         delnega kviza ni. Ob napaki med potjo se ne zapiše nič.
@@ -966,15 +995,33 @@ class KviziRepository(_RepozitorijDruzine):
         pove, katera vprašanja, ne kaj v njih piše. Od tega trenutka je postavka
         neodvisna od vprašanja: ponovna obdelava ali dokončno brisanje snovi je
         ne spremenita (`ADR-016` E).
+
+        **Naslovljenec mora biti otrok te družine** (`ADR-039` A). Preverba je
+        tu in ne samo v usmerjevalniku: tuji ključ na `users` pove, da oseba
+        obstaja, ne pa, da je naša — in izolacija mora biti lastnost kode
+        (`ADR-025`). Tuj ali neznan naslovljenec je `ValueError`; usmerjevalnik
+        ga prestreže prej in naredi `404`, ker obstoj tujega računa ni podatek
+        za starša (`ADR-038`).
         """
         # Druga ograja za `vprasanja_po_idjih`: kviz ne sme nikoli prestopiti
         # meje družine, tudi če bi vprašanja prišla od drugod.
         if any(vprasanje.family_id != self._family_id for vprasanje in vprasanja):
             raise ValueError("Kviz ne sme vsebovati vprašanja tuje družine (ADR-025).")
 
+        je_moj_otrok = self._session.scalars(
+            select(User.id).where(
+                User.id == naslovljenec,
+                User.family_id == self._family_id,
+                User.role == VLOGA_OTROK,
+            )
+        ).first()
+        if je_moj_otrok is None:
+            raise ValueError("Naslovljenec kviza mora biti otrok te družine (ADR-039 A).")
+
         kviz = Quiz(
             id=str(uuid4()),
             family_id=self._family_id,
+            child_id=naslovljenec,
             name=ime,
             subject=subject,
             created_at=datetime.now(UTC),
@@ -1100,8 +1147,8 @@ class KviziRepository(_RepozitorijDruzine):
 
     # --- Reševanje na telefonu (V2-R02) ---
 
-    def seznam_za_telefon(self) -> list[KvizZaTelefon]:
-        """Kvizi, ki čakajo na telefonu: nepreklicani in nerešeni, najstarejši prvi.
+    def seznam_za_telefon(self, child_id: str) -> list[KvizZaTelefon]:
+        """Kvizi otroka `child_id`: nepreklicani in nerešeni, najstarejši prvi.
 
         **Delovni seznam, ne odsek za kazalcem** — isti vzorec kot
         `seznam_za_brisanje` (`docs/odlocitve/ADR-011`, `ADR-016` F). Seznam se
@@ -1112,6 +1159,11 @@ class KviziRepository(_RepozitorijDruzine):
         `questions`: ponovna obdelava snovi objavljenega kviza ne spremeni
         (`ADR-016` E).
 
+        **Samo kvizi, naslovljeni na tega otroka** (kriterij `V3-R07`). Do
+        `V3-R07` je bil kviz last družine in je na skupnem telefonu vsak otrok
+        dobil vse; družina je meja lastništva, naslovljenec pa meja delovnega
+        seznama.
+
         Dve poizvedbi za postavke (`selectinload`) in ena za odgovorjene, ne
         ena na kviz.
         """
@@ -1120,6 +1172,7 @@ class KviziRepository(_RepozitorijDruzine):
                 select(Quiz)
                 .where(
                     Quiz.family_id == self._family_id,
+                    Quiz.child_id == child_id,
                     Quiz.canceled_at.is_(None),
                     Quiz.solved_at.is_(None),
                 )
@@ -1152,7 +1205,7 @@ class KviziRepository(_RepozitorijDruzine):
         ]
 
     def zapisi_poskuse(
-        self, poskusi: Sequence[PoskusZaZapis], _ponovitev: bool = False
+        self, poskusi: Sequence[PoskusZaZapis], child_id: str, _ponovitev: bool = False
     ) -> int | None:
         """Zapiše paket poskusov; vrne, koliko jih je bilo res zapisanih.
 
@@ -1167,7 +1220,13 @@ class KviziRepository(_RepozitorijDruzine):
         - obstoječ `id` → preskoči (idempotentnost, `ADR-012`);
         - postavka že ima poskus, tudi iz istega paketa → preskoči. **Prvi
           zmaga** (`docs/odlocitve/ADR-019` E);
-        - sicer vstavi.
+        - postavka pripada kvizu, naslovljenemu na **drugega** otroka →
+          preskoči. Drugi tih sprejem poleg „prvi zmaga" in iz istega razloga
+          (`ADR-039` D): nastane samo iz zastarelih lokalnih podatkov na
+          skupnem telefonu, `422` pa bi tak poskus po `ADR-020` zataknil za
+          vedno. Cena je, da se tak odgovor tiho izgubi — zapis pod
+          odgovarjalcem bi tuj kviz spravil v njegovo statistiko;
+        - sicer vstavi, z `child_id` odgovarjalca.
 
         Poskusi preklicanega kviza se sprejmejo kot vsi drugi: dogodek je
         dejstvo, zavrnjen poskus pa bi na telefonu obtičal za vedno
@@ -1195,17 +1254,31 @@ class KviziRepository(_RepozitorijDruzine):
             return 0
 
         postavke_idji = {poskus.quiz_item_id for poskus in poskusi}
-        kvizi_postavk = dict(
+        vrstice_postavk = (
             self._session.execute(
-                select(QuizItem.id, QuizItem.quiz_id)
+                select(QuizItem.id, QuizItem.quiz_id, Quiz.child_id)
                 .join(Quiz, Quiz.id == QuizItem.quiz_id)
                 .where(Quiz.family_id == self._family_id, QuizItem.id.in_(postavke_idji))
             )
             .tuples()
             .all()
         )
-        if len(kvizi_postavk) != len(postavke_idji):
+        # Postavka, ki je ni (ali je tuje družine), je `None` za cel paket.
+        # Postavka **tujega naslovljenca** pa obstaja in se samo preskoči,
+        # zato jo je treba ločiti od neobstoječe (`ADR-039` D).
+        if len(vrstice_postavk) != len(postavke_idji):
             return None
+
+        kvizi_postavk = {
+            item_id: quiz_id
+            for item_id, quiz_id, naslovljenec in vrstice_postavk
+            if naslovljenec == child_id
+        }
+        tuje_postavke = {
+            item_id
+            for item_id, _quiz_id, naslovljenec in vrstice_postavk
+            if naslovljenec != child_id
+        }
 
         znani_idji = set(
             self._session.scalars(
@@ -1229,10 +1302,13 @@ class KviziRepository(_RepozitorijDruzine):
         for poskus in poskusi:
             if poskus.id in znani_idji or poskus.quiz_item_id in zasedene:
                 continue
+            if poskus.quiz_item_id in tuje_postavke:
+                continue
             self._session.add(
                 QuestionAttempt(
                     id=poskus.id,
                     family_id=self._family_id,
+                    child_id=child_id,
                     quiz_item_id=poskus.quiz_item_id,
                     mode=poskus.mode,
                     rating=poskus.rating,
@@ -1255,7 +1331,7 @@ class KviziRepository(_RepozitorijDruzine):
             self._session.rollback()
             if _ponovitev:
                 raise
-            return self.zapisi_poskuse(poskusi, _ponovitev=True)
+            return self.zapisi_poskuse(poskusi, child_id, _ponovitev=True)
 
         return zapisani
 
@@ -1307,14 +1383,22 @@ class StatistikaRepository(_RepozitorijDruzine):
     nosijo tudi družino poskusa.
     """
 
-    def _pogoji(self, od: datetime | None, do: datetime | None) -> list[ColumnElement[bool]]:
-        """Družina, način in okno po `answered_at`, polodprto `[od, do)`, meje v UTC.
+    def _pogoji(
+        self, child_id: str, od: datetime | None, do: datetime | None
+    ) -> list[ColumnElement[bool]]:
+        """Družina, otrok, način in okno po `answered_at`, polodprto, meje v UTC.
 
         `answered_at` je v bazi v UTC — `routers/resevanje.py` ga pred zapisom
         pretvori —, zato primerjava drži tudi nad SQLite, ki pasu ne hrani.
+
+        **Otrok je argument in ne stanje repozitorija** (`ADR-039` B): družina
+        je meja lastništva, otrok pa izbira pogleda znotraj nje. V
+        konstruktorju bi bil videti kot druga meja izolacije, kar ni — starš
+        legitimno gleda oba svoja otroka, le ne obeh hkrati.
         """
         pogoji: list[ColumnElement[bool]] = [
             QuestionAttempt.family_id == self._family_id,
+            QuestionAttempt.child_id == child_id,
             QuestionAttempt.mode == NACIN_SAMOOCENA,
         ]
         if od is not None:
@@ -1325,6 +1409,7 @@ class StatistikaRepository(_RepozitorijDruzine):
 
     def poskusi(
         self,
+        child_id: str,
         od: datetime | None = None,
         do: datetime | None = None,
         subject: str | None = None,
@@ -1338,7 +1423,7 @@ class StatistikaRepository(_RepozitorijDruzine):
         kviz napačno sestavljen (`docs/odlocitve/ADR-021` E). Upokojeno
         vprašanje ni izločeno: poskus nanj je Mašin odgovor (`ADR-021` D).
         """
-        pogoji = self._pogoji(od, do)
+        pogoji = self._pogoji(child_id, od, do)
         if subject is not None:
             pogoji.append(Question.subject == subject)
 
@@ -1396,8 +1481,8 @@ class StatistikaRepository(_RepozitorijDruzine):
             ) in vrstice
         ]
 
-    def casi_poskusov(self) -> list[datetime]:
-        """`answered_at` vseh poskusov, za izbiro šolskih let. Ena poizvedba.
+    def casi_poskusov(self, child_id: str) -> list[datetime]:
+        """`answered_at` vseh poskusov tega otroka, za izbiro šolskih let.
 
         Časi in ne leta: šolsko leto se določi v domačem pasu, tega pa baza ne
         pozna (`app/casi.py`). En stolpec čez vse poskuse je pri tem obsegu
@@ -1405,7 +1490,7 @@ class StatistikaRepository(_RepozitorijDruzine):
         """
         return list(
             self._session.scalars(
-                select(QuestionAttempt.answered_at).where(*self._pogoji(None, None))
+                select(QuestionAttempt.answered_at).where(*self._pogoji(child_id, None, None))
             )
         )
 
@@ -1427,8 +1512,8 @@ class StatistikaRepository(_RepozitorijDruzine):
             )
         }
 
-    def ima_poskuse(self, subject: str) -> bool:
-        """Ali ima predmet kakšen poskus, v kateremkoli oknu.
+    def ima_poskuse(self, subject: str, child_id: str) -> bool:
+        """Ali ima predmet kakšen poskus tega otroka, v kateremkoli oknu.
 
         Za kodo, ki je ni na seznamu desetih: brez poskusov je stran 404, s
         poskusi pa mora obstajati — sicer bi se ocene predmeta s preimenovano
@@ -1439,7 +1524,7 @@ class StatistikaRepository(_RepozitorijDruzine):
                 select(QuestionAttempt.id)
                 .join(QuizItem, QuizItem.id == QuestionAttempt.quiz_item_id)
                 .join(Question, Question.id == QuizItem.question_id)
-                .where(*self._pogoji(None, None), Question.subject == subject)
+                .where(*self._pogoji(child_id, None, None), Question.subject == subject)
                 .limit(1)
             ).first()
             is not None
@@ -1787,6 +1872,33 @@ class ClaniRepository(_RepozitorijDruzine):
                 User.display_name,
                 User.id,
             )
+        ).all()
+        return [self._v_clana(vrstica) for vrstica in vrstice]
+
+    def otroci(self, *, samo_aktivni: bool = False) -> list[ClanDruzine]:
+        """Otroci te družine, po prikaznem imenu. Vir izbirnika in privzetka.
+
+        Razvrstitev je `display_name`, nato `id`: privzeti otrok na statistiki
+        in v pregledu po dnevih je **prvi po prikaznem imenu** (`ADR-039` B),
+        in privzetek, ki bi se ob dveh enakih imenih premikal, ne bi bil
+        privzetek. Zato drugi ključ.
+
+        `samo_aktivni` loči dva bralca:
+
+        - **sestavljalnik kvizov** (`samo_aktivni=True`): deaktiviran otrok se
+          ne more prijaviti, zato kviza zanj ni mogoče rešiti in ga ni smiselno
+          ponuditi (`ADR-039` A);
+        - **statistika in pregled po dnevih** (privzeto vse): podatki
+          deaktiviranega otroka ostanejo (`V3-R06`), in seznam, ki bi ga
+          izpustil, bi jih naredil nedosegljive — kar bi bilo brisanje po
+          drugi poti.
+        """
+        pogoji: list[ColumnElement[bool]] = [self._moje(), User.role == VLOGA_OTROK]
+        if samo_aktivni:
+            pogoji.append(User.is_active.is_(True))
+
+        vrstice = self._session.execute(
+            self._poizvedba().where(*pogoji).order_by(User.display_name, User.id)
         ).all()
         return [self._v_clana(vrstica) for vrstica in vrstice]
 

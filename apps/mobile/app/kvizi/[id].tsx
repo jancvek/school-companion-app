@@ -63,7 +63,7 @@ export default function ResevanjeKvizaScreen() {
     let aktiven = true;
     const db = asMaterialsDatabase(database);
 
-    Promise.all([najdiKviz(db, id), postavkeKviza(db, id)])
+    Promise.all([najdiKviz(db, id, lastnik), postavkeKviza(db, id, lastnik)])
       .then(([najden, postavke]) => {
         if (!aktiven) return;
         if (najden === null || postavke.length === 0) {

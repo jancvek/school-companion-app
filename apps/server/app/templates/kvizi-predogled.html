@@ -3,7 +3,7 @@
 {% block naslov %}Predogled kviza{% endblock %}
 
 {% block vsebina %}
-  <h1>Predogled kviza</h1>
+  <h1>Predogled kviza za {{ naslovljenec_ime }}</h1>
   <p class="pod">
     {# „snovi“ je tu konstanta in ne sklanjana oblika: za predlogom *iz* gre
        rodilnik, ta pa je pri tem samostalniku enak pri vsakem številu —
@@ -16,8 +16,8 @@
     {# Opozorilo in ne zapora: kviz sme biti dolg, operater mora le vedeti,
        da bo. Meja je kriterij V2-R01, ne okus. #}
     <p class="opozorilo">
-      Kviz ima več kot {{ meja }} vprašanj. Toliko jih Maša naenkrat verjetno
-      ne bo rešila — razmisli, ali ne bi kakšne snovi raje odkljukal.
+      Kviz ima več kot {{ meja }} vprašanj. Toliko jih je za eno reševanje
+      verjetno preveč — razmisli, ali ne bi kakšne snovi raje odkljukal.
     </p>
   {% endif %}
 
@@ -67,6 +67,7 @@
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="vstop" value="{{ vstop }}">
       {% if subject %}<input type="hidden" name="subject" value="{{ subject }}">{% endif %}
+      <input type="hidden" name="otrok" value="{{ naslovljenec }}">
       {% for id in vprasanja_idji %}
         <input type="hidden" name="vprasanje" value="{{ id }}">
       {% endfor %}
@@ -78,7 +79,7 @@
         </label>
       </p>
 
-      <button class="gumb gumb-obdelava" type="submit">Objavi</button>
+      <button class="gumb gumb-obdelava" type="submit">Objavi kviz za {{ naslovljenec_ime }}</button>
       <p class="drobno">
         Kviz in vse njegove postavke ({{ skupaj }}) nastanejo naenkrat. Postavke se
         zamrznejo: poznejša ponovna obdelava ali brisanje snovi jih ne
@@ -91,6 +92,7 @@
       <input type="hidden" name="vstop" value="{{ vstop }}">
       {% if subject %}<input type="hidden" name="subject" value="{{ subject }}">{% endif %}
       <input type="hidden" name="stevilo" value="{{ stevilo }}">
+      <input type="hidden" name="otrok" value="{{ naslovljenec }}">
       {% for id in izbrane %}
         <input type="hidden" name="snov" value="{{ id }}">
       {% endfor %}

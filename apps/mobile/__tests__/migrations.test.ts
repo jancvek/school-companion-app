@@ -7,6 +7,7 @@ import {
   SHEMA_VERZIJE_1,
   SHEMA_VERZIJE_2,
   SHEMA_VERZIJE_3,
+  SHEMA_VERZIJE_4,
 } from './test-database';
 
 /** Tabele, ki jih prinese migracija 2 (V2-R02). */
@@ -461,6 +462,91 @@ describe('migracija lokalne sheme', () => {
         [],
       );
       expect(indeksi.map((i) => i.name)).toContain('materials_subject_taken_at');
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe('nad bazo verzije 4 (stanje Mašinega telefona pred V3-R07)', () => {
+  it('doda `quizzes.user_id` in ne izgubi kvizov, postavk ne poskusov', async () => {
+    const db = createTestDatabase();
+    try {
+      await db.execAsync(SHEMA_VERZIJE_4);
+      await db.runAsync(
+        'INSERT INTO quizzes (id, name, created_at) VALUES (?, ?, ?)',
+        ['k1', 'MAT — 9. 9. 2026', '2026-09-09T08:00:00.000Z'],
+      );
+      await db.runAsync(
+        'INSERT INTO quiz_items (id, quiz_id, position, question_text, answer_text)' +
+          ' VALUES (?, ?, ?, ?, ?)',
+        ['p1', 'k1', 1, 'Kdaj?', 'Leta 1991.'],
+      );
+      await db.runAsync(
+        'INSERT INTO attempts (id, quiz_id, quiz_item_id, mode, rating, shown_at,' +
+          ' revealed_at, answered_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          'a1',
+          'k1',
+          'p1',
+          'samoocena',
+          'lahko',
+          '2026-09-10T15:00:00.000Z',
+          '2026-09-10T15:00:07.000Z',
+          '2026-09-10T15:00:09.000Z',
+          'u-masa',
+        ],
+      );
+      expect(await preberiVerzijo(db)).toBe(4);
+
+      await migriraj(db);
+
+      expect(await preberiVerzijo(db)).toBe(SHEMA_VERZIJA);
+      // Obstoječi kviz ostane in je brez lastnika — na napravi ni nikogar, ki
+      // bi vedel, čigav je. Posvoji ga prva razrešena seja (`ADR-039` E).
+      expect(
+        await db.getAllAsync<Record<string, unknown>>('SELECT id, user_id FROM quizzes', []),
+      ).toEqual([{ id: 'k1', user_id: null }]);
+      expect(
+        await db.getAllAsync<Record<string, unknown>>('SELECT id FROM quiz_items', []),
+      ).toEqual([{ id: 'p1' }]);
+      expect(
+        await db.getAllAsync<Record<string, unknown>>('SELECT id, user_id FROM attempts', []),
+      ).toEqual([{ id: 'a1', user_id: 'u-masa' }]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('drugi zagon ne doda stolpca še enkrat', async () => {
+    // `ADD COLUMN` na obstoječem stolpcu vrže; korak mora biti ponovljiv, ker
+    // se aplikacija lahko ubije med `ALTER` in zapisom `user_version`.
+    const db = createTestDatabase();
+    try {
+      await db.execAsync(SHEMA_VERZIJE_4);
+      await migriraj(db);
+
+      await expect(migriraj(db)).resolves.toBe(SHEMA_VERZIJA);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('sveža baza ima `quizzes.user_id` in njegov indeks', async () => {
+    // Sveža namestitev gre skozi isto zaporedje migracij kot nadgradnja
+    // (`ADR-004`); dve poti bi pomenili dve shemi, testirana pa bi bila ena.
+    const db = createTestDatabase();
+    try {
+      await migriraj(db);
+
+      const stolpci = await db.getAllAsync<{ name: string }>('PRAGMA table_info(quizzes)', []);
+      expect(stolpci.map((s) => s.name)).toContain('user_id');
+
+      const indeksi = await db.getAllAsync<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'quizzes'",
+        [],
+      );
+      expect(indeksi.map((i) => i.name)).toContain('quizzes_user_id');
     } finally {
       db.close();
     }

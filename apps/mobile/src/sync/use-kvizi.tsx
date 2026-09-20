@@ -93,12 +93,12 @@ export function KviziProvider({
 
   const osvezi = useCallback(async () => {
     try {
-      setCakajocih((await cakajociKvizi(db)).length);
+      setCakajocih((await cakajociKvizi(db, lastnik)).length);
     } catch {
       // Števec je postranska informacija; napaka pri štetju ne sme podreti
       // domače strani. Isto pravilo kot pri števcu prenosa.
     }
-  }, [db]);
+  }, [db, lastnik]);
 
   useEffect(() => {
     if (odjemalec === null) return;

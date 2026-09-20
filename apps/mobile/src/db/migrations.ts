@@ -16,7 +16,7 @@ import { CREATE_MATERIALS_TABLE_SQL, type MaterialsDatabase } from './materials'
 import { CREATE_NAPRAVA_TABLE_SQL } from './naprava';
 
 /** Verzija sheme, ki jo pričakuje ta različica aplikacije. */
-export const SHEMA_VERZIJA = 4;
+export const SHEMA_VERZIJA = 5;
 
 type Migracija = {
   /** Verzija, ki velja, ko se ta korak konča. */
@@ -96,6 +96,30 @@ const MIGRACIJE: Migracija[] = [
     doVerzije: 4,
     async izvedi(db) {
       await db.execAsync(CREATE_NAPRAVA_TABLE_SQL);
+    },
+  },
+  {
+    // Lastnik kviza (V3-R07, `docs/odlocitve/ADR-039` E). Do te verzije je
+    // bil kviz last druzine: `cakajociKvizi`, `najdiKviz` in `postavkeKviza`
+    // niso filtrirali nicesar, zato je na skupnem telefonu otrok B videl
+    // kvize otroka A — tiste, ki so ostali, ker na njih visi neprenesen tuj
+    // poskus (`ADR-036` C) — in v njih postavke, ki so bile zanj videti
+    // odgovorjene.
+    //
+    // `NULL`-abilen in ne `NOT NULL`: kviz, ki je na telefon prisel pred to
+    // migracijo, lastnika nima, migracija na napravi pa nima koga vprasati.
+    // Posvoji ga ista pot kot posnetke — vsaka razresena seja
+    // (`posvojiBrezLastnika`, `ADR-036`).
+    doVerzije: 5,
+    async izvedi(db) {
+      const obstojeci = await imenaStolpcev(db, 'quizzes');
+      if (!obstojeci.has('user_id')) {
+        await db.execAsync('ALTER TABLE quizzes ADD COLUMN user_id TEXT');
+      }
+      // Seznam kvizov se bere po lastniku.
+      await db.execAsync(
+        'CREATE INDEX IF NOT EXISTS quizzes_user_id ON quizzes (user_id)',
+      );
     },
   },
 ];

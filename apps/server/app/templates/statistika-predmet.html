@@ -38,10 +38,14 @@
 
 {% block vsebina %}
   <h1>{{ koda }} — {{ oznaka }}</h1>
-  <p class="pod">{{ okno }} · {{ skupaj.poskusov_opis }}</p>
+  <p class="pod">
+    {%- if otrok_ime %}{{ otrok_ime }} · {% endif -%}
+    {{ okno }} · {{ skupaj.poskusov_opis }}
+  </p>
 
+  {{ deli.izbira_otrok(otroci) }}
   {{ deli.izbira_let(leta, neprebrano) }}
-  {{ deli.samoocena() }}
+  {{ deli.samoocena(True, otrok_ime) }}
   {{ deli.opombe(opombe) }}
 
   {% if not skupaj.poskusov %}

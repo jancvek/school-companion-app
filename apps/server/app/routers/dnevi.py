@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.templating import Jinja2Templates
@@ -26,18 +27,29 @@ from starlette.responses import Response
 
 from app.besedilo import SLIKE, stevilo_z_besedo
 from app.casi import cas, danes, datum_dneva, dnevi_od_do, ura, v_domacem
-from app.db import MaterialsRepository
-from app.dependencies import daj_nastavitve, daj_repozitorij
+from app.db import ClaniRepository, MaterialsRepository
+from app.dependencies import (
+    daj_nastavitve,
+    daj_repozitorij,
+    daj_repozitorij_clanov,
+)
 from app.models import Material
+from app.otroci import PARAMETER as PARAMETER_OTROKA
+from app.otroci import IzbiraOtroka, izberi_otroka
 from app.settings import Settings
 from app.storage import je_znotraj, mapa_druzine, velikost_slike
-from app.strani import daj_predloge, neveljavna_zahteva
+from app.strani import daj_predloge, neveljavna_zahteva, ni_najdeno
 from app.subjects import PREDMETI, oznaka_predmeta
 
 #: Predpona te strani. Pod `/admin`, torej brez ključa (`ADR-006`).
 PREDPONA = "/admin/days"
 
 router = APIRouter(prefix=PREDPONA)
+
+#: Besedilo, kadar naslov imenuje otroka, ki ga v tej družini ni. Isto za
+#: tujega in za neobstoječega: obstoj tujega računa ni podatek za starša
+#: (`docs/odlocitve/ADR-039` B, vzorec iz `ADR-038`).
+SPOROCILO_NEZNAN_OTROK = "Tega otroka v tvoji družini ni."
 
 #: Vrednosti parametra `obdobje`.
 DAN = "dan"
@@ -231,24 +243,50 @@ def razvrsti_po_dnevih(
     return izpis
 
 
+def _parameter_otroka(izbira: IzbiraOtroka, *, prvi: bool) -> str:
+    """`?otrok=…` ali `&otrok=…`, ali prazno, kadar se izbirnik ne izriše.
+
+    Pri enem otroku parameter ne pove ničesar in bi se pojavil v vsaki
+    povezavi družine, ki ga ne potrebuje (`docs/odlocitve/ADR-039` B).
+    """
+    if not izbira.je_izbirnik or izbira.izbrani is None:
+        return ""
+    locilo = "?" if prvi else "&"
+    return f"{locilo}{PARAMETER_OTROKA}={quote(izbira.izbrani.user_id, safe='')}"
+
+
 @router.get("")
 def pregled_po_dnevih(
     request: Request,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
+    clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     dan: str | None = None,
     obdobje: str | None = None,
+    otrok: str | None = None,
 ) -> Response:
-    """Slike izbranega dne ali tedna, grupirane po dnevu in predmetu."""
+    """Slike izbranega dne ali tedna enega otroka, grupirane po dnevu in predmetu."""
     zdaj = danes()
     try:
         izbrano = preberi_obdobje(dan, obdobje, zdaj)
     except NeveljavenVhod as neveljaven:
         return neveljavna_zahteva(predloge, request, neveljaven.sporocilo)
 
+    # Tudi deaktivirani otroci: njihovi podatki ostanejo (`V3-R06`) in seznam,
+    # ki bi jih izpustil, bi jih naredil nedosegljive.
+    izbira = izberi_otroka(clani.otroci(), otrok)
+    if izbira is None:
+        return ni_najdeno(predloge, request, SPOROCILO_NEZNAN_OTROK)
+
     od, do = dnevi_od_do(izbrano.prvi, izbrano.zadnji)
-    snovi = repozitorij.seznam_po_obdobju(od, do)
+    # Družina brez otroka nima snovi — `child_id` je obvezen —, zato je prazen
+    # seznam resnica in ne poseben primer.
+    snovi = (
+        repozitorij.seznam_po_obdobju(od, do, izbira.izbrani.user_id)
+        if izbira.izbrani is not None
+        else []
+    )
     prejeto = repozitorij.nazadnje_prejeto()
 
     return predloge.TemplateResponse(
@@ -256,6 +294,17 @@ def pregled_po_dnevih(
         "dnevi.html",
         {
             "obdobje_opis": izbrano.opis,
+            # Izbirnika, ki nima česa izbirati, ni (`ADR-039` B).
+            "je_izbirnik_otrok": izbira.je_izbirnik,
+            # Gotova niza za povezave: predloga ne sestavlja naslovov. Brez
+            # njiju bi vsak gumb za obdobje tiho vrnil privzetega otroka —
+            # dve izbiri, od katerih vsaka pobriše drugo.
+            "otrok_prvi": _parameter_otroka(izbira, prvi=True),
+            "otrok_dodatni": _parameter_otroka(izbira, prvi=False),
+            "otroci": [
+                {"id": kdo.user_id, "ime": kdo.display_name} for kdo in izbira.vsi
+            ],
+            "izbrani_otrok": izbira.izbrani.user_id if izbira.izbrani is not None else None,
             "je_teden": izbrano.je_teden,
             "dni_v_tednu": DNI_V_TEDNU,
             "skupaj_opis": stevilo_z_besedo(len(snovi), SLIKE),

@@ -43,28 +43,39 @@
 
        Obrazec je `GET`: nič ne spremeni, zato mora biti izbirnik dosegljiv
        tudi z osvežitvijo in iz zgodovine brskalnika. #}
-    <form method="get" action="/admin/quizzes/new" class="vstopi">
-      <label>
-        Predmet:
-        <select name="subject">
-          {% for vrstica in predmeti %}
-            <option value="{{ vrstica.koda }}">{{ vrstica.koda }} — {{ vrstica.oznaka }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <button class="gumb gumb-obdelava" type="submit" name="vstop" value="nova">
-        Nova snov
-      </button>
-      <button class="gumb gumb-obdelava" type="submit" name="vstop" value="rocna">
-        Ročna izbira
-      </button>
-    </form>
-    <p class="drobno">
-      „Nova snov" obkljuka vso snov predmeta, ki še ni bila v kvizu.
-      „Ročna izbira" pokaže isto, a ne obkljuka nič.
-      <a href="/admin/quizzes/new?vstop=danes">Kaj smo se danes učili</a> gre
-      čez vse predmete in obkljuka današnjo snov.
-    </p>
+    {# Kviz je vedno namenjen enemu otroku (`docs/odlocitve/ADR-039` A), zato
+       družina brez aktivnega otroka vstopov ne dobi. Pove, kaj naj starš
+       naredi — ne le, česa ne gre. Poti isto pravilo zavrne s `409`. #}
+    {% if ima_otroka %}
+      <form method="get" action="/admin/quizzes/new" class="vstopi">
+        <label>
+          Predmet:
+          <select name="subject">
+            {% for vrstica in predmeti %}
+              <option value="{{ vrstica.koda }}">{{ vrstica.koda }} — {{ vrstica.oznaka }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button class="gumb gumb-obdelava" type="submit" name="vstop" value="nova">
+          Nova snov
+        </button>
+        <button class="gumb gumb-obdelava" type="submit" name="vstop" value="rocna">
+          Ročna izbira
+        </button>
+      </form>
+      <p class="drobno">
+        „Nova snov" obkljuka vso snov predmeta, ki še ni bila v kvizu.
+        „Ročna izbira" pokaže isto, a ne obkljuka nič.
+        <a href="/admin/quizzes/new?vstop=danes">Kaj smo se danes učili</a> gre
+        čez vse predmete in obkljuka današnjo snov.
+      </p>
+    {% else %}
+      <p class="opozorilo">
+        Kviz je vedno namenjen enemu otroku, tvoja družina pa nima nobenega
+        aktivnega otroka. Najprej dodaj otroka v razdelku
+        <a href="/admin/family">Družina</a>.
+      </p>
+    {% endif %}
 
     {% if kvizi %}
       <ul class="predmeti">
@@ -76,7 +87,9 @@
                 {# Predmet in datum sta kriterij in ne okras: ime je
                    prepisljivo, zato ju ob prepisanem imenu ne nosi nic. #}
                 <span class="stanje">
-                  {{ kviz.koda }} &middot; {{ kviz.nastal_datum }} &middot;
+                  {{ kviz.koda }} &middot;
+                  {%- if kviz.otrok %} {{ kviz.otrok }} &middot;{% endif %}
+                  {{ kviz.nastal_datum }} &middot;
                   {# Preklic ima prednost pred rešenostjo (`ADR-019` C). #}
                   {% if kviz.preklican %}preklican{% elif kviz.resen %}rešen {{ kviz.resen_datum }}{% else %}objavljen{% endif %}
                 </span>

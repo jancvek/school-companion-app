@@ -22,6 +22,11 @@ import type { MaterialsDatabase } from './materials';
  * preneseni, poskus pa ne sme iti z njim.
  *
  * `UNIQUE (quiz_item_id)` je `ADR-019` E tudi lokalno: postavka ima en poskus.
+ *
+ * **Ta niz je zamrznjena shema V2-R02 in se ne dopolnjuje** (`ADR-004`):
+ * `quizzes.user_id` doda migracija 5 (V3-R07) in `attempts.user_id`
+ * migracija 3 (V3-R04). Test migracije teče nad zamrznjenimi kopijami in ne
+ * nad shemo iz kode — sicer bi migracijo preverjal nad tem, kar sam ustvari.
  */
 export const CREATE_KVIZI_TABLES_SQL = `
 CREATE TABLE IF NOT EXISTS quizzes (
@@ -59,11 +64,26 @@ CREATE TABLE IF NOT EXISTS attempts (
  * prepisuje. Posodobi se samo `answered_on_server`, in to samo v smeri 0 → 1:
  * postavka, ki je na strežniku enkrat odgovorjena, to ostane.
  */
-export async function shraniKviz(db: MaterialsDatabase, kviz: KvizStreznika): Promise<void> {
+export async function shraniKviz(
+  db: MaterialsDatabase,
+  kviz: KvizStreznika,
+  lastnik: string | null,
+): Promise<void> {
   await db.runAsync(
-    'INSERT OR IGNORE INTO quizzes (id, name, created_at) VALUES (?, ?, ?)',
-    [kviz.id, kviz.name, kviz.created_at],
+    'INSERT OR IGNORE INTO quizzes (id, name, created_at, user_id) VALUES (?, ?, ?, ?)',
+    [kviz.id, kviz.name, kviz.created_at, lastnik],
   );
+  // Kviz, ki je na telefonu že bil brez lastnika (nadgradnja čez migracijo 5
+  // ali obhod brez prijave), se posvoji ob prvem obhodu, v katerem ga seznam
+  // res prinese temu otroku. `INSERT OR IGNORE` zgoraj obstoječe vrstice ne
+  // spremeni, vsebina pa ostane zamrznjena (`ADR-016` E) — posodobi se samo
+  // lastništvo, in samo iz `NULL`.
+  if (lastnik !== null) {
+    await db.runAsync('UPDATE quizzes SET user_id = ? WHERE id = ? AND user_id IS NULL', [
+      lastnik,
+      kviz.id,
+    ]);
+  }
 
   for (const postavka of kviz.items) {
     await db.runAsync(
@@ -162,7 +182,10 @@ export async function pobrisiKvizeRazen(
  * še last družine, ne otroka; ko ga `V3-R07` nasloví na otroka, se to vprašanje
  * reši tam, ne s pogojem tukaj.
  */
-export async function cakajociKvizi(db: MaterialsDatabase): Promise<KvizNaSeznamu[]> {
+export async function cakajociKvizi(
+  db: MaterialsDatabase,
+  lastnik: string | null,
+): Promise<KvizNaSeznamu[]> {
   return db.getAllAsync<KvizNaSeznamu>(
     `SELECT q.id, q.name, q.created_at,
             COUNT(i.id) AS vprasanj,
@@ -170,11 +193,12 @@ export async function cakajociKvizi(db: MaterialsDatabase): Promise<KvizNaSeznam
               AS odgovorjenih
        FROM quizzes q
        JOIN quiz_items i ON i.quiz_id = q.id
-       LEFT JOIN attempts a ON a.quiz_item_id = i.id
+       LEFT JOIN attempts a ON a.quiz_item_id = i.id AND a.user_id IS ?
+      WHERE q.user_id IS ?
       GROUP BY q.id, q.name, q.created_at
      HAVING odgovorjenih < vprasanj
       ORDER BY q.created_at ASC, q.id ASC`,
-    [],
+    [lastnik, lastnik],
   );
 }
 
@@ -184,28 +208,41 @@ type PostavkaVrstica = Omit<PostavkaKviza, 'odgovorjena'> & { odgovorjena: numbe
 export async function najdiKviz(
   db: MaterialsDatabase,
   id: string,
+  lastnik: string | null,
 ): Promise<{ id: string; name: string } | null> {
   const vrstice = await db.getAllAsync<{ id: string; name: string }>(
-    'SELECT id, name FROM quizzes WHERE id = ?',
-    [id],
+    'SELECT id, name FROM quizzes WHERE id = ? AND user_id IS ?',
+    [id, lastnik],
   );
   return vrstice[0] ?? null;
 }
 
-/** Postavke kviza po zaporedju, vsaka s podatkom, ali je že odgovorjena. */
+/**
+ * Postavke kviza po zaporedju, vsaka s podatkom, ali je že odgovorjena.
+ *
+ * **Stik na `quizzes` je druga ograja, ne okras** (V3-R07): zaslon sicer
+ * najprej pokliče `najdiKviz` in ob `null` pove „kviza ni", a poizvedba mora
+ * pomeniti „postavke **mojega** kviza" tudi sama zase.
+ *
+ * Stik na `attempts` je filtriran po lastniku: tuj poskus ne sme postavke
+ * narediti odgovorjene, sicer bi jo otrok videl kot rešeno in je ne bi mogel
+ * odgovoriti — kviz bi na seznamu visel za vedno (`docs/odlocitve/ADR-039` E).
+ */
 export async function postavkeKviza(
   db: MaterialsDatabase,
   quizId: string,
+  lastnik: string | null,
 ): Promise<PostavkaKviza[]> {
   const vrstice = await db.getAllAsync<PostavkaVrstica>(
     `SELECT i.id, i.quiz_id, i.position, i.question_text, i.answer_text,
             CASE WHEN i.answered_on_server = 1 OR a.id IS NOT NULL THEN 1 ELSE 0 END
               AS odgovorjena
        FROM quiz_items i
-       LEFT JOIN attempts a ON a.quiz_item_id = i.id
+       JOIN quizzes q ON q.id = i.quiz_id AND q.user_id IS ?
+       LEFT JOIN attempts a ON a.quiz_item_id = i.id AND a.user_id IS ?
       WHERE i.quiz_id = ?
       ORDER BY i.position ASC`,
-    [quizId],
+    [lastnik, lastnik, quizId],
   );
   return vrstice.map((vrstica) => ({ ...vrstica, odgovorjena: vrstica.odgovorjena === 1 }));
 }

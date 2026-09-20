@@ -120,3 +120,18 @@ CREATE INDEX IF NOT EXISTS materials_user_id ON materials (user_id);
 CREATE INDEX IF NOT EXISTS attempts_user_id ON attempts (user_id);
 PRAGMA user_version = 3;
 `;
+
+/**
+ * Baza, kakršna je na telefonu po migraciji 4 (V3-R04, drugi del) — spet
+ * **dobesedna kopija, ki se ne posodablja** (`docs/odlocitve/ADR-004`).
+ *
+ * To je stanje Mašinega telefona pred `V3-R07`: kvizi so tu, lastnika pa
+ * nimajo. Migracija 5 mora čezenj brez izgube kvizov, postavk in poskusov.
+ */
+export const SHEMA_VERZIJE_4 = `${SHEMA_VERZIJE_3}
+CREATE TABLE IF NOT EXISTS naprava (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  odjava_ob TEXT
+);
+PRAGMA user_version = 4;
+`;

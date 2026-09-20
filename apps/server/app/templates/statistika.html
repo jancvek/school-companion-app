@@ -5,14 +5,23 @@
 
 {% block vsebina %}
   <h1>Statistika čez kvize</h1>
-  <p class="pod">{{ okno }} · {{ skupaj.poskusov_opis }}</p>
+  <p class="pod">
+    {%- if otrok_ime %}{{ otrok_ime }} · {% endif -%}
+    {{ okno }} · {{ skupaj.poskusov_opis }}
+  </p>
 
+  {{ deli.izbira_otrok(otroci) }}
   {{ deli.izbira_let(leta, neprebrano) }}
   {# Predmeti so po urniku, ne po težavnosti. #}
-  {{ deli.samoocena(False) }}
+  {{ deli.samoocena(False, otrok_ime) }}
   {{ deli.opombe(opombe) }}
 
-  {% if not skupaj.poskusov %}
+  {% if brez_otroka %}
+    <p class="opozorilo">
+      Statistika je vezana na otroka, tvoja družina pa še nima nobenega.
+      Dodaj ga v razdelku <a href="/admin/family">Družina</a>.
+    </p>
+  {% elif not skupaj.poskusov %}
     <p class="opozorilo">V tem obdobju ni nobene ocene.</p>
   {% endif %}
 

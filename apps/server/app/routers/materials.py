@@ -12,7 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 
 from app.db import MaterialsRepository
-from app.dependencies import daj_nastavitve, daj_repozitorij
+from app.dependencies import daj_nastavitve, daj_otroka, daj_repozitorij
 from app.models import STATUS_NOV, Material
 from app.schemas import (
     BrisanjePotrjeno,
@@ -55,6 +55,7 @@ def prevzemi_material(
     file: Annotated[UploadFile, File()],
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
+    otrok: Annotated[str, Depends(daj_otroka)],
 ) -> MaterialPrevzet:
     """Prevzame sliko in metapodatke; idempotentno glede na `id`.
 
@@ -94,6 +95,10 @@ def prevzemi_material(
     material = Material(
         id=identifikator,
         family_id=repozitorij.family_id,
+        # Otrok pride iz seje in ne iz multiparta: telefon pove, kaj je
+        # poslikal, ne kdo je (`docs/odlocitve/ADR-039`). Pogodba s telefonom
+        # se zato navzven ne spremeni — novega polja ni.
+        child_id=otrok,
         subject=subject,
         taken_at=v_utc(taken_at),
         image_path=str(pot),
