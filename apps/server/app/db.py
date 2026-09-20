@@ -21,6 +21,7 @@ from sqlalchemy import (
     ColumnElement,
     CursorResult,
     Engine,
+    Select,
     create_engine,
     delete,
     func,
@@ -38,6 +39,7 @@ from app.models import (
     STATUS_NOV,
     STATUS_PRIPRAVLJEN,
     STATUS_V_OBDELAVI,
+    VLOGA_STARS,
     Credential,
     Family,
     LoginAttempt,
@@ -1535,13 +1537,26 @@ class PrijavaRepository:
             is_system_owner=vrstica[8],
         )
 
-    def zapisi_zgostitev(self, credential_id: str, secret_hash: str, ko: datetime) -> None:
-        """Vpiše novo zgostitev gesla. Gesla samega ne vidi."""
+    def ponastavi_geslo(
+        self, credential_id: str, user_id: str, secret_hash: str, ko: datetime
+    ) -> None:
+        """Vpiše novo zgostitev gesla in prekliče vse seje tega uporabnika.
+
+        Gesla samega ne vidi. **Oboje v eni transakciji** (`ADR-038` C in D):
+        ponastavitev, po kateri bi na kakšni napravi ostala veljavna seja, ne
+        bi bila ponastavitev. Ista pot velja za ukaz `nastavi-geslo` in za
+        stran `/admin/family` — dve poti do istega dejanja z različnim pomenom
+        bi bili past.
+
+        Do `V3-R06` se je metoda imenovala `zapisi_zgostitev` in sej ni
+        preklicala; `app/ukazi.py` je to tudi izrecno povedal.
+        """
         self._session.execute(
             update(Credential)
             .where(Credential.id == credential_id)
             .values(secret_hash=secret_hash, updated_at=ko)
         )
+        self._session.execute(delete(UserSession).where(UserSession.user_id == user_id))
         self._session.commit()
 
     # --- Omejevanje ugibanja ----------------------------------------------
@@ -1670,3 +1685,267 @@ class PrijavaRepository:
         """Izbriše vse seje, ki jim je rok potekel (`ADR-035` C)."""
         self._session.execute(delete(UserSession).where(UserSession.expires_at <= ko))
         self._session.commit()
+
+
+# --- Člani družine (V3-R06) ------------------------------------------------
+
+
+class IdentifikatorZaseden(Exception):
+    """Identifikator že obstaja — kjerkoli v namestitvi.
+
+    Izjema in ne vrnjena vrednost `False`, ker je to izid vstavljanja in ne
+    odgovor na vprašanje: repozitorij družine po zasedenosti **ne sme
+    poizvedovati**, ker bi za to moral brati čez mejo svoje družine
+    (`ADR-025`). Enoličnost razsodi baza (`credentials.identifier UNIQUE`) in
+    ta izjema je njena sodba, prevedena v nekaj, kar usmerjevalnik razume
+    (`docs/odlocitve/ADR-038` E).
+    """
+
+
+#: Po čem se kršitev enoličnosti identifikatorja loči od vsake druge kršitve
+#: integritete. Dva zapisa, ker se dialekta razlikujeta: SQLite (testi) pove
+#: „UNIQUE constraint failed: credentials.identifier", Postgres (produkcija)
+#: pa „duplicate key value violates unique constraint
+#: \"credentials_identifier_key\"".
+_ZNAKI_ZASEDENEGA = ("credentials.identifier", "credentials_identifier_key")
+
+
+def je_zaseden_identifikator(izjema: IntegrityError) -> bool:
+    """Ali je ta kršitev integritete prav zasedeni identifikator.
+
+    Brez te preverbe bi `except IntegrityError` **vsako** kršitev prevedel v
+    „to ime je že zasedeno" — tudi kršitev tujega ključa na družino, ki bi jo
+    Postgres zavrnil. Sporočilo, ki v takem primeru pošlje uporabnico iskat
+    drugo ime, je slabše od napake, ki se vidi.
+
+    Funkcija je javna in preizkušena nad obema besediloma: ujemanje po nizu je
+    edino, kar je prenosljivo med dialektoma, in prav zato mora biti pribito s
+    testom, ne le prebrano.
+    """
+    return any(znak in str(izjema.orig) for znak in _ZNAKI_ZASEDENEGA)
+
+
+@dataclass(frozen=True)
+class ClanDruzine:
+    """Ena oseba v družini, kot jo pokaže `/admin/family`.
+
+    Poverilnica je v tem tipu zvedena na dvoje — identifikator in ali je geslo
+    nastavljeno — ker stran o njej ne pokaže nič drugega in zgostitev nima kaj
+    iskati v pogledu.
+    """
+
+    user_id: str
+    role: str
+    display_name: str
+    #: `None` samo, kadar oseba poverilnice nima. V `V3-R06` taka oseba ne
+    #: nastane, shema pa jo dopušča in stran mora zdržati tudi tak zapis.
+    identifier: str | None
+    #: `secret_hash IS NOT NULL` — geslo je nastavljeno (`ADR-035` G).
+    geslo_nastavljeno: bool
+    is_active: bool
+    is_system_owner: bool
+    created_at: datetime
+
+
+class ClaniRepository(_RepozitorijDruzine):
+    """Osebe, poverilnice in seje **ene** družine (V3-R06).
+
+    Ločen od `PrijavaRepository` in ne njegova razširitev: ta pozna samo
+    identifikator in družino šele izve, zato je družina ne more omejevati. Tu
+    je obratno — družina pride iz seje in vsaka poizvedba jo nosi, kot pri
+    `MaterialsRepository` (`ADR-025`).
+
+    **Nobena metoda ne bere in ne piše čez mejo družine.** `credentials` in
+    `sessions` stolpca družine nimata; njuna družina je družina uporabnika, ki
+    mu vrstica pripada, zato gre pogoj skozi `users` (`_moj_uporabnik`).
+    """
+
+    def _moje(self) -> ColumnElement[bool]:
+        """Pogoj družine nad `users`; na enem mestu, da ga nobena poizvedba ne pozabi."""
+        return User.family_id == self._family_id
+
+    def _moj_uporabnik(self, user_id: str) -> Select[Any]:
+        """Podpoizvedba `user_id`, a samo kadar pripada tej družini.
+
+        Uporabljata jo `UPDATE` nad `credentials` in `DELETE` nad `sessions`.
+        Tuj ali neznan `user_id` da prazno množico in stavek ne spremeni
+        ničesar — brez posebnega primera in brez druge poizvedbe.
+        """
+        return select(User.id).where(User.id == user_id, self._moje())
+
+    def clani(self) -> list[ClanDruzine]:
+        """Vsi člani družine: starši pred otroki, znotraj vloge po imenu.
+
+        Starši prvi zato, ker je seznam njihovo orodje in ker je pravilo o
+        zadnjem staršu vidno šele, ko so našteti skupaj. Razvrstitev je izraz
+        in ne stolpec `role`: `child` je po abecedi pred `parent`, zato bi
+        razvrščanje po stolpcu dalo obraten vrstni red od namenjenega.
+        """
+        vrstice = self._session.execute(
+            self._poizvedba().order_by(
+                User.role != VLOGA_STARS,
+                User.display_name,
+                User.id,
+            )
+        ).all()
+        return [self._v_clana(vrstica) for vrstica in vrstice]
+
+    def clan(self, user_id: str) -> ClanDruzine | None:
+        """Član te družine z danim `id`, ali `None`.
+
+        Tuj in neobstoječ `user_id` se ne ločita — oboje je `None` in
+        usmerjevalnik iz obojega naredi isti `404`. Obstoj tujega uporabnika ni
+        podatek, ki bi ga starš smel dobiti (kriterij `V3-R06`).
+
+        Poizvedba in ne `Session.get`: ta išče samo po primarnem ključu in bi
+        vrnil osebo tuje družine.
+        """
+        vrstica = self._session.execute(self._poizvedba().where(User.id == user_id)).first()
+        return self._v_clana(vrstica) if vrstica is not None else None
+
+    def aktivnih_starsev(self) -> int:
+        """Koliko aktivnih staršev ima ta družina (pravilo zadnjega starša)."""
+        return int(
+            self._session.scalar(
+                select(func.count(User.id)).where(
+                    self._moje(), User.role == VLOGA_STARS, User.is_active.is_(True)
+                )
+            )
+            or 0
+        )
+
+    def ustvari_clana(
+        self,
+        *,
+        role: str,
+        display_name: str,
+        identifier: str,
+        secret_hash: str,
+        ko: datetime,
+    ) -> str:
+        """Ustvari osebo in njeno poverilnico v eni transakciji; vrne `user_id`.
+
+        Oseba dobi družino **repozitorija**, nikoli iz zahteve — isto pravilo
+        kot pri `MaterialsRepository.vstavi_ce_ga_ni`.
+
+        Zaseden identifikator je `IdentifikatorZaseden`. Preverba pred
+        vstavljanjem bi morala brati čez vse družine (`ADR-025` tega ne
+        dovoli) in bi bila poleg tega tekma: med preverbo in vstavljanjem lahko
+        isto ime vpiše kdo drug.
+        """
+        user_id = str(uuid4())
+        self._session.add(
+            User(
+                id=user_id,
+                family_id=self._family_id,
+                role=role,
+                display_name=display_name,
+                is_system_owner=False,
+                is_active=True,
+                created_at=ko,
+            )
+        )
+        self._session.add(
+            Credential(
+                id=str(uuid4()),
+                user_id=user_id,
+                kind=POVERILNICA_GESLO,
+                identifier=identifier,
+                secret_hash=secret_hash,
+                created_at=ko,
+                updated_at=ko,
+            )
+        )
+        try:
+            self._session.commit()
+        except IntegrityError as izjema:
+            self._session.rollback()
+            if not je_zaseden_identifikator(izjema):
+                raise
+            raise IdentifikatorZaseden(identifier) from izjema
+        return user_id
+
+    def ponastavi_geslo(self, user_id: str, secret_hash: str, ko: datetime) -> bool:
+        """Vpiše novo zgostitev in prekliče **vse** seje člana. Vrne, ali je uspelo.
+
+        `False` pomeni tujega ali neznanega člana; takrat se ne spremeni nič,
+        tudi seje ne, ker gre pogoj skozi isto podpoizvedbo.
+
+        Oboje je **ena transakcija** (`ADR-038` D): ponastavitev, po kateri bi
+        na kakšni napravi ostala veljavna seja, ne bi bila ponastavitev.
+        """
+        izid = self._session.execute(
+            update(Credential)
+            .where(
+                Credential.user_id.in_(self._moj_uporabnik(user_id)),
+                Credential.kind == POVERILNICA_GESLO,
+            )
+            .values(secret_hash=secret_hash, updated_at=ko)
+        )
+        if not cast(CursorResult[Any], izid).rowcount:
+            self._session.rollback()
+            return False
+        self._session.execute(
+            delete(UserSession).where(UserSession.user_id.in_(self._moj_uporabnik(user_id)))
+        )
+        self._session.commit()
+        return True
+
+    def nastavi_aktivnost(self, user_id: str, *, aktiven: bool) -> bool:
+        """Deaktivira ali aktivira člana. Vrne, ali je bila vrstica spremenjena.
+
+        **Deaktivacija v isti transakciji izbriše vse seje člana**; aktivacija
+        jih ne vrne, ker izbrisana vrstica ne obstaja več (`ADR-038` A). Lena
+        preverba `is_active` ob uporabi seje (`prijava.seja_za_zeton`) ostane
+        kot druga plast — ta izbris je prva.
+
+        Ničesar drugega se ne dotakne: snov, vprašanja in poskusi člana
+        ostanejo, ker se nič ne briše, vse se upokoji (`docs/00-namen.md`).
+        """
+        izid = self._session.execute(
+            update(User).where(User.id == user_id, self._moje()).values(is_active=aktiven)
+        )
+        if not cast(CursorResult[Any], izid).rowcount:
+            self._session.rollback()
+            return False
+        if not aktiven:
+            self._session.execute(
+                delete(UserSession).where(UserSession.user_id.in_(self._moj_uporabnik(user_id)))
+            )
+        self._session.commit()
+        return True
+
+    # --- Skupno branje -----------------------------------------------------
+
+    def _poizvedba(self) -> Select[Any]:
+        """Oseba z njeno poverilnico. `outerjoin`, ker shema osebo brez nje dopušča."""
+        return (
+            select(
+                User.id,
+                User.role,
+                User.display_name,
+                Credential.identifier,
+                Credential.secret_hash,
+                User.is_active,
+                User.is_system_owner,
+                User.created_at,
+            )
+            .outerjoin(
+                Credential,
+                (Credential.user_id == User.id) & (Credential.kind == POVERILNICA_GESLO),
+            )
+            .where(self._moje())
+        )
+
+    @staticmethod
+    def _v_clana(vrstica: Any) -> ClanDruzine:
+        return ClanDruzine(
+            user_id=vrstica[0],
+            role=vrstica[1],
+            display_name=vrstica[2],
+            identifier=vrstica[3],
+            geslo_nastavljeno=vrstica[4] is not None,
+            is_active=bool(vrstica[5]),
+            is_system_owner=bool(vrstica[6]),
+            created_at=casi.utc(vrstica[7]),
+        )

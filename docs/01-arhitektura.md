@@ -77,21 +77,23 @@ logika testljiva brez naprave.
 | `app/routers/resevanje.py` | poti telefona za kvize: `GET /quizzes/pending`, `POST /quiz-attempts` (V2-R02) |
 | `app/routers/statistika.py` | statistika čez kvize pod `/admin/statistics` (V2-R04) |
 | `app/routers/dnevi.py` | pregled slik po obdobju in predmetih pod `/admin/days` (V2-R07) |
-| `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository` in `StatistikaRepository` (V2-R04, samo bere) — vsak z obvezno družino (V3-R01) — ter `DruzineRepository` in `PrijavaRepository` (V3-R03), edina brez družine; edina pot do baze |
+| `app/routers/clani.py` | člani družine pod `/admin/family`: seznam, dodajanje, ponastavitev gesla, deaktivacija in aktivacija (V3-R06) |
+| `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository`, `StatistikaRepository` (V2-R04, samo bere) in `ClaniRepository` (V3-R06) — vsak z obvezno družino (V3-R01) — ter `DruzineRepository` in `PrijavaRepository` (V3-R03), edina brez družine; edina pot do baze |
 | `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03) |
 | `app/storage.py` | zapis, meja mape in brisanje slik na disku; mapa družine (V3-R01) |
 | `app/vision.py` | **edini modul, ki uvaža `openai`**: prompt, shema odgovora, klic |
 | `app/obdelava.py` | kaj se zgodi z enim zapisom: prevzem, klic, zapis izida. Sinhron |
 | `app/worker.py` | časovnik: obhodi v presledkih, zagon in ustavitev. Brez poslovne logike |
 | `app/statistika.py` | pravila štetja statistike: razporeditev, izpeljava pravilnosti, razvrstitev, meseci (V2-R04). Brez FastAPI in brez seje |
-| `app/prijava.py` | gesla (argon2id), žetoni sej, CSRF, omejevanje ugibanja, varen `next` — brez FastAPI (V3-R03); `Vrata` in `vloga_sodi`: katera vloga sme kam (V3-R04) |
-| `app/ukazi.py` | `python -m app.ukazi nastavi-geslo <identifikator>`; geslo z `getpass`, nikoli iz argumenta (V3-R03) |
+| `app/prijava.py` | gesla (argon2id), žetoni sej, CSRF, omejevanje ugibanja, varen `next` — brez FastAPI (V3-R03); `Vrata` in `vloga_sodi`: katera vloga sme kam (V3-R04); `normaliziraj_identifikator` (V3-R06) |
+| `app/ukazi.py` | `python -m app.ukazi nastavi-geslo <identifikator>`; geslo z `getpass`, nikoli iz argumenta (V3-R03); prekliče seje računa (V3-R06) |
+| `app/clani.py` | pravila o članih družine: veljaven vnos in kdo sme koga — brez FastAPI in brez baze (V3-R06) |
 | `app/routers/vstop.py` | prijava in odjava: `GET/POST /admin/login`, `POST /admin/logout` (V3-R03); `POST /auth/login` in `POST /auth/logout` za telefon (V3-R04) |
 | `app/settings.py` | nastavitve iz okolja |
 | `app/dependencies.py` | odvisnosti poti iz `app.state`; družina iz seje — ene same, za obe strani (`daj_druzino`, V3-R04; začasne `daj_druzino_telefona` ni več) |
 | `app/subjects.py` | predmeti, slovenske oznake stanj in oznake ocen (`OZNAKE_OCEN`, tu od V2-R04) |
 | `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03); šolsko leto in meseci (V2-R04); današnji dan, meje poljubnega obdobja in ura brez datuma (V2-R07) |
-| `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01) ter 400 (V2-R07); obdelovalec konteksta z glavo in CSRF žetonom (V3-R03) |
+| `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01), 400 (V2-R07) ter 403 (V3-R06); obdelovalec konteksta z glavo in CSRF žetonom (V3-R03) |
 | `app/besedilo.py` | slovenske oblike števil (dvojina) |
 | `Caddyfile` | Caddy pred `api`: domena, TLS-ALPN, ikona zavihka (V3-R02); `basic_auth` je padel z V3-R03 |
 | `varnostna-kopija/` | `kopija.ps1` in `obnova.ps1` (V3-R02) |
@@ -508,7 +510,7 @@ Model je iz `ADR-027`: **poverilnica ni uporabnik**, zato je Google pozneje
 
 | Tabela | Stolpci | Opomba |
 |---|---|---|
-| `users` | `id`, `family_id NOT NULL` (FK, indeks), `role` (`parent`\|`child`), `display_name`, `is_system_owner`, `is_active`, `created_at` | oseba brez gesla; `is_active` rabi šele `V3-R06`, a je v shemi že zdaj |
+| `users` | `id`, `family_id NOT NULL` (FK, indeks), `role` (`parent`\|`child`), `display_name`, `is_system_owner`, `is_active`, `created_at` | oseba brez gesla; `is_active` pišeta in bereta poti `V3-R06` (glej „Člani družine") |
 | `credentials` | `id`, `user_id NOT NULL` (FK, indeks), `kind` (`password`), `identifier` **UNIQUE**, `secret_hash`, `created_at`, `updated_at` | `identifier` je e-naslov starša ali uporabniško ime otroka, enoličen čez celo namestitev; `secret_hash IS NULL` pomeni „geslo ni nastavljeno" |
 | `sessions` | `id`, `user_id NOT NULL` (FK, indeks), `token_hash` **UNIQUE**, `csrf_token`, `created_at`, `expires_at`, `last_used_at`, `device_label` | žetona v bazi ni, samo SHA-256 |
 | `login_attempts` | `id`, `identifier` (indeks), `ip_address`, `created_at` (indeks) | **edina tabela brez družine**: poskus se zabeleži tudi za identifikator, ki ne obstaja |
@@ -673,6 +675,15 @@ nje in to preverja `TestBrezJavaScripta`, ki izvzame samo `snov.html`.
 | `/admin/statistics` | GET | statistika čez kvize po predmetih; okno `?leto=2026` ali `?leto=vse` (V2-R04) |
 | `/admin/statistics/subjects/{koda}` | GET | statistika predmeta: po mesecih, snovi, vprašanja od najtežjega (V2-R04) |
 | `/admin/days` | GET | slike dneva ali zadnjih sedmih dni, po dnevu in predmetu; `?dan=YYYY-MM-DD`, `?obdobje=dan\|teden` (V2-R07) |
+| `/admin/family` | GET | člani družine z vlogo in stanjem, obrazca za dodajanje (V3-R06) |
+| `/admin/family/children` | POST | doda otroka: prikazno ime, uporabniško ime, začetno geslo (V3-R06) |
+| `/admin/family/parents` | POST | doda starša: prikazno ime, e-naslov, začetno geslo (V3-R06) |
+| `/admin/family/members/{id}/password` | GET | vmesna stran s poljema za novo geslo (V3-R06) |
+| `/admin/family/members/{id}/password` | POST | zapiše zgostitev in prekliče vse seje člana (V3-R06) |
+| `/admin/family/members/{id}/deactivate` | GET | vmesna stran (V3-R06) |
+| `/admin/family/members/{id}/deactivate` | POST | deaktivira in prekliče vse seje člana (V3-R06) |
+| `/admin/family/members/{id}/activate` | GET | vmesna stran (V3-R06) |
+| `/admin/family/members/{id}/activate` | POST | vrne račun v uporabo; sej ne obnovi (V3-R06) |
 
 Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Vsaka od njih
 zahteva sejo** (V3-R03, glej „Prijava, seje in CSRF"); vsak `POST` nosi CSRF
@@ -756,7 +767,9 @@ Odločitve so v `ADR-027` (model) in `ADR-035` (izvedba).
   ne teče (`ADR-009`).
 - **Geslo nastavi lastnik z ukazom** v vsebniku:
   `docker compose exec api python -m app.ukazi nastavi-geslo <identifikator>`.
-  Geslo pride z `getpass`, nikoli iz argumenta ali okolja. Najkrajše geslo je
+  Geslo pride z `getpass`, nikoli iz argumenta ali okolja. **Od V3-R06 ukaz
+  prekliče vse seje tega računa**, enako kot stran `/admin/family` — dve poti
+  do istega dejanja z različnim pomenom bi bili past (`ADR-038` C). Najkrajše geslo je
   12 znakov za starša in **8 za otroka** — otrokovih 4 iz `ADR-035` G je
   razveljavil `ADR-036` E, ko je mobilna prijava postala dosegljiva z javnega
   interneta.
@@ -804,6 +817,50 @@ Izvedbene odločitve so v `ADR-036`.
   edino stanje vrste, ki ga uporabnica more odpraviti sama: domača stran
   pove „Prijava je potekla, prijavi se znova". Odjave ob `401` ni —
   aplikacija pove, ne ukrepa namesto otroka (`ADR-036`, tretji pregled).
+
+## Člani družine (V3-R06)
+
+Starš na `/admin/family` odpre račun otroku ali drugemu staršu, ponastavi geslo
+in člana deaktivira. Poti so v tabeli zgoraj, pravila v `app/clani.py`,
+poizvedbe v `ClaniRepository`, odločitve v `docs/odlocitve/ADR-038`. Nove
+tabele ni — `users`, `credentials` in `sessions` so postavljene v V3-R03.
+
+- **Tri kode zavrnitve in vsaka pomeni drugo pot naprej.** `404` za tujega in
+  za neobstoječega člana (isto besedilo — obstoj tujega računa ni podatek za
+  starša), `403` za dejanje, ki ni tvoje (sebe, lastnik sistema, zadnji aktivni
+  starš), `409` za stanje, ki že je tako. Seznam dejanja, ki bi bilo zavrnjeno,
+  sploh ne ponudi; odloči isto pravilo, ki ga tudi zavrne.
+- **Vrstni red treh pravil o deaktivaciji je izbira sporočila, ne okras**:
+  lastnik sistema, nato zadnji aktivni starš, šele nato „sebe ne". Vsa vodijo
+  v isti `403`; edini starš v družini mora dobiti „najprej dodaj drugega
+  starša", ne „naj to naredi drugi starš", ki mu ne more slediti
+  (`CLAUDE.md` §1b, `ADR-038` „Popravki po drugem pregledu").
+- **Ponastavitev gesla in deaktivacija v isti transakciji izbrišeta vse seje
+  člana.** Ponastavitev, po kateri bi kje ostala veljavna seja, ne bi bila
+  ponastavitev. Velja brez izjeme tudi zase: starš, ki ponastavi lastno geslo,
+  se s tem odjavi (`ADR-038` D). Lena preverba `is_active` v
+  `prijava.seja_za_zeton` ostane kot druga plast.
+- **Deaktivacija je obrnljiva, seje pa se ne vrnejo** (`ADR-038` A). Nič drugega
+  se ne dotakne: snov, vprašanja in poskusi člana ostanejo.
+- **Lastnika sistema ni mogoče deaktivirati**, geslo mu ponastavi samo on sam
+  (`ADR-038` G) — sicer bi drugi starš izklopil račun, na katerem stoji
+  `V3-R05`. Zastavice `is_system_owner` nobena od teh poti ne podeli.
+- **Enoličnost identifikatorja razsodi baza**, ne poizvedba: repozitorij je
+  vezan na družino in čez njo ne sme brati, `IntegrityError` pa je tako ali
+  tako edini izid brez tekme. Sporočilo ob zasedenem imenu ne pove ne pri kom
+  ne za kakšno vrsto računa gre (`ADR-038` E).
+- **Identifikator se normalizira** (obrezani robovi, male črke) **ob nastanku
+  računa, ob prijavi na obojih vratih in v ukazu `nastavi-geslo`**. Brez tega
+  bi bila `Ana@primer.si` in `ana@primer.si` dva računa; stranski učinek je,
+  da se omejevanju ugibanja (`ADR-035` E) ni mogoče izogniti z velikimi črkami.
+  Identifikatorji, ki so nastali pred to zahtevo, so že v tej obliki, zato
+  migracije ni.
+- **Dodajanje nima vmesne potrditve**, ponastavitev, deaktivacija in aktivacija
+  jo imajo. Vmesna stran pri dodajanju bi začetno geslo spravila v skrito polje
+  in v zgodovino brskalnika (`ADR-038` F). Geslo se ne vrne v izris nikoli —
+  tudi ob napaki se vrneta le ime in identifikator.
+- **Urejanja člana in seznama prijavljenih naprav ni** (`ADR-038` B in H).
+  `sessions.device_label` se piše naprej, a ga ne bere nobena stran.
 
 ## Sestavljalnik kvizov (V2-R01)
 

@@ -1,0 +1,47 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}{% if aktiviramo %}Aktivirati račun?{% else %}Deaktivirati račun?{% endif %}{% endblock %}
+
+{% block vsebina %}
+  {% if aktiviramo %}
+    <h1>Vrniti račun {{ clan.ime }} v uporabo?</h1>
+  {% else %}
+    <h1>Deaktivirati račun {{ clan.ime }}?</h1>
+  {% endif %}
+  <p class="pod">{{ clan.vloga }} &middot; {{ clan.identifikator }} &middot; nastal {{ clan.nastal }}</p>
+
+  {% if aktiviramo %}
+    <p class="opozorilo">
+      Račun bo spet mogoče uporabiti za prijavo z istim geslom kot prej.
+      <strong>Prijavljen ni nihče</strong> — seje so bile ob deaktivaciji
+      preklicane in se ne vrnejo.
+    </p>
+    <p class="drobno">
+      Če gesla ne pozna nihče več, ga po aktivaciji ponastavi na seznamu družine.
+    </p>
+  {% else %}
+    <p class="opozorilo">
+      Prijava s tem računom odslej ne bo mogoča, <strong>vse seje pa padejo
+      takoj</strong> — tudi na telefonu. Če je to otrok, bo kamera pri njem
+      delala naprej, posnetki pa bodo čakali na prenos do naslednje prijave.
+    </p>
+    <p class="drobno">
+      <strong>Nič se ne izbriše.</strong> Snov, vprašanja, kvizi in poskusi
+      tega člana ostanejo v družini. Račun je mogoče pozneje spet aktivirati.
+    </p>
+  {% endif %}
+
+  {% if aktiviramo %}
+    <form method="post" action="/admin/family/members/{{ clan.id }}/activate">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="gumb gumb-obdelava" type="submit">Da, aktiviraj</button>
+    </form>
+  {% else %}
+    <form method="post" action="/admin/family/members/{{ clan.id }}/deactivate">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="gumb" type="submit">Da, deaktiviraj</button>
+    </form>
+  {% endif %}
+
+  <a class="nazaj" href="/admin/family">← Ne, vrni se</a>
+{% endblock %}

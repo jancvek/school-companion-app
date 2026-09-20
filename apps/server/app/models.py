@@ -658,8 +658,12 @@ class UserSession(Base):
     #: sicer bi bila vsaka zahteva `UPDATE` (`ADR-035` B).
     last_used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    #: Groba oznaka naprave (`User-Agent`, skrajšan), da je seznam sej v
-    #: `V3-R06` berljiv. Ni identiteta in se ne preverja.
+    #: Groba oznaka naprave (`User-Agent`, skrajšan). Ni identiteta in se ne
+    #: preverja.
+    #:
+    #: **Seznama sej ne kaže nobena stran.** `V3-R06` ga ni naredila, ker ga
+    #: njeni kriteriji ne zahtevajo (`docs/odlocitve/ADR-038` H); stolpec se
+    #: piše ob vsaki prijavi in bo seznam nosil, ko in če bo.
     device_label: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 

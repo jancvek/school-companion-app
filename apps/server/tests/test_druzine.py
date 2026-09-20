@@ -18,6 +18,7 @@ from sqlalchemy import Engine, delete, event, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db import (
+    ClaniRepository,
     DruzineRepository,
     KviziRepository,
     MaterialsRepository,
@@ -48,7 +49,7 @@ UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 UUID_DVA = "a1b2c3d4-e5f6-4789-abcd-ef0123456789"
 
 
-REPOZITORIJI = (MaterialsRepository, KviziRepository, StatistikaRepository)
+REPOZITORIJI = (MaterialsRepository, KviziRepository, StatistikaRepository, ClaniRepository)
 
 
 def dodaj_druzino(

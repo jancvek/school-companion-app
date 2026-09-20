@@ -24,7 +24,12 @@ from sqlalchemy.orm import Session
 
 from app.db import PrijavaRepository, naredi_motor
 from app.models import VLOGA_OTROK
-from app.prijava import NAJKRAJSE_GESLO, geslo_je_dovolj_dolgo, zgosti_geslo
+from app.prijava import (
+    NAJKRAJSE_GESLO,
+    geslo_je_dovolj_dolgo,
+    normaliziraj_identifikator,
+    zgosti_geslo,
+)
 from app.settings import Settings
 
 #: Izhodna koda ob napaki, ki je uporabnikova (napačen vnos, neznan račun).
@@ -74,6 +79,10 @@ def nastavi_geslo(
             nastavitve = Settings()  # vsa polja imajo privzetek; okolje jih le prepiše
         motor = naredi_motor(nastavitve.database_url)
 
+    # Ista normalizacija kot ob prijavi (`docs/odlocitve/ADR-038` E), sicer
+    # `Masa` v ukazu ne bi našla računa `masa`, ki se s tem imenom prijavlja.
+    identifikator = normaliziraj_identifikator(identifikator)
+
     with Session(motor) as seja:
         repo = PrijavaRepository(seja)
         poverilnica = repo.poverilnica(identifikator)
@@ -92,13 +101,16 @@ def nastavi_geslo(
             izpisi(SPOROCILO_NEUJEMANJE)
             return NAPAKA
 
-        repo.zapisi_zgostitev(
-            poverilnica.credential_id, zgosti_geslo(geslo), datetime.now(UTC)
+        repo.ponastavi_geslo(
+            poverilnica.credential_id,
+            poverilnica.user_id,
+            zgosti_geslo(geslo),
+            datetime.now(UTC),
         )
 
     izpisi(
         f"Geslo za {poverilnica.display_name} je nastavljeno. "
-        "Obstoječe seje ostanejo veljavne (preklic sej pride z V3-R06)."
+        "Vse dosedanje seje tega računa so preklicane; prijaviti se je treba znova."
     )
     return 0
 

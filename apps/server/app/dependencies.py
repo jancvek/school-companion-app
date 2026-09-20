@@ -11,6 +11,7 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db import (
+    ClaniRepository,
     KviziRepository,
     MaterialsRepository,
     PrijavaRepository,
@@ -88,6 +89,20 @@ def daj_repozitorij_kvizov(
     tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
     with tovarna() as seja:
         yield KviziRepository(seja, family_id)
+
+
+def daj_repozitorij_clanov(
+    request: Request, family_id: Annotated[str, Depends(daj_druzino)]
+) -> Iterator[ClaniRepository]:
+    """Kot `daj_repozitorij`, a za osebe, poverilnice in seje družine (V3-R06).
+
+    Svoja seja in ne deljena s `PrijavaRepository`: ta je brez družine in ga
+    dobi vmesna plast, ta pa je vezan na družino iz seje. Da sta ločena, je
+    vidno v tipu in ne le v dogovoru (`docs/odlocitve/ADR-025`).
+    """
+    tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
+    with tovarna() as seja:
+        yield ClaniRepository(seja, family_id)
 
 
 def daj_repozitorij_statistike(

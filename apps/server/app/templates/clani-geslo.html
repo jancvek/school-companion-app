@@ -1,0 +1,43 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}Ponastaviti geslo?{% endblock %}
+
+{% block vsebina %}
+  <h1>Ponastaviti geslo za {{ clan.ime }}?</h1>
+  <p class="pod">{{ clan.vloga }} &middot; {{ clan.identifikator }}</p>
+
+  {% if napaka %}
+    <p class="napaka">{{ napaka }}</p>
+  {% endif %}
+
+  <p class="opozorilo">
+    Novo geslo začne veljati takoj, <strong>vse dosedanje seje tega računa pa
+    padejo</strong> — na vseh napravah. Kdor je prijavljen, se bo moral
+    prijaviti znova.
+  </p>
+
+  {% if clan.jaz %}
+    {# Brez pogojnega besedila drugod: to je edina razlika in je posledica,
+       ne okras (`docs/odlocitve/ADR-038` D). #}
+    <p class="opozorilo">
+      To je tvoj račun, zato boš odjavljen tudi ti. Po ponastavitvi se prijavi
+      z novim geslom.
+    </p>
+  {% endif %}
+
+  <p class="drobno">
+    Geslo si zapomni ti in ga povej lastniku računa — nikjer se ne pokaže več.
+  </p>
+
+  <form method="post" action="/admin/family/members/{{ clan.id }}/password" class="prijava">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="geslo">Novo geslo (vsaj {{ najmanj }} znakov)</label>
+    <input class="ime" type="password" id="geslo" name="geslo" autocomplete="new-password">
+    <label for="geslo-znova">Isto geslo še enkrat</label>
+    <input class="ime" type="password" id="geslo-znova" name="geslo_znova"
+           autocomplete="new-password">
+    <button class="gumb" type="submit">Da, ponastavi geslo</button>
+  </form>
+
+  <a class="nazaj" href="/admin/family">← Ne, vrni se</a>
+{% endblock %}

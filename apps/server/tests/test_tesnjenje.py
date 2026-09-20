@@ -34,6 +34,8 @@ from sqlalchemy import Engine, Select, select
 from sqlalchemy.orm import Session
 
 from app.db import (
+    ClaniRepository,
+    IdentifikatorZaseden,
     IzidObdelave,
     KviziRepository,
     MaterialsRepository,
@@ -45,6 +47,7 @@ from app.models import (
     STATUS_NOV,
     STATUS_PRIPRAVLJEN,
     STATUS_V_OBDELAVI,
+    VLOGA_OTROK,
     Base,
     Material,
     Question,
@@ -90,6 +93,10 @@ class Druzina:
     postavke: tuple[str, ...]
     postavka_odprtega: str
     poskusi: tuple[str, ...]
+    #: Osebi družine (V3-R06). Tudi njun `id` je sled: seznam članov druge
+    #: družine se ne sme pokazati nikjer.
+    stars_id: str
+    otrok_id: str
 
     def sledi(self) -> tuple[str, ...]:
         """Nizi, ki v odgovoru druge družine ne smejo nastopiti."""
@@ -105,6 +112,8 @@ class Druzina:
             *self.vprasanja,
             *self.postavke,
             *self.poskusi,
+            self.stars_id,
+            self.otrok_id,
         )
 
 
@@ -165,11 +174,12 @@ def _zgradi(
     # telefon z žetonom otroka v glavi. Do V3-R04 je bila druga polovica
     # začasna odvisnost, ki jo je bilo mogoče podtakniti mimo prijave —
     # tesnjenje telefona je zato šele odslej tesnjenje prave poti.
-    prijavi(odjemalec, motor, ustvari_starsa(motor, family_id=family_id, identifikator=znak))
-    telefon = ustvari_sejo(
-        motor,
-        ustvari_otroka(motor, family_id=family_id, identifikator=f"otrok-{znak}"),
+    stars_id = ustvari_starsa(motor, family_id=family_id, identifikator=znak.lower())
+    prijavi(odjemalec, motor, stars_id)
+    otrok_id = ustvari_otroka(
+        motor, family_id=family_id, identifikator=f"otrok-{znak}".lower()
     )
+    telefon = ustvari_sejo(motor, otrok_id)
     odjemalec.headers.update(telefon.glave)
     resen = objavi(
         odjemalec,
@@ -211,6 +221,8 @@ def _zgradi(
         postavke=(*postavke_resenega, *postavke_odprtega),
         postavka_odprtega=postavke_odprtega[0],
         poskusi=poskusi,
+        stars_id=stars_id,
+        otrok_id=otrok_id,
         **idji,
     )
 
@@ -457,6 +469,68 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
         OK,
         (),
     ),
+    # Člani družine (V3-R06). Tuj `user_id` je 404 in ne 403: `403` bi povedal,
+    # da tak uporabnik obstaja. Zato so tu **vse** poti člana, obe metodi, in
+    # v obeh vlogah — starš in otrok tuje družine.
+    ("GET", "/admin/family"): lambda o, a: (o.get("/admin/family"), OK, ()),
+    ("POST", "/admin/family/children"): lambda o, a: (
+        o.post(
+            "/admin/family/children",
+            data={
+                "ime": "Vrinjen otrok",
+                # Uporabniško ime tuje družine: če bi ga ta pot sprejela, bi
+                # nastal drugi račun z istim imenom — ali pa bi sporočilo o
+                # zasedenosti izdalo, čigav je.
+                "uporabnisko_ime": f"otrok-{a.znak}".lower(),
+                "geslo": "geslo-otroka-8",
+                "geslo_znova": "geslo-otroka-8",
+            },
+        ),
+        frozenset({400}),
+        (a.znak,),
+    ),
+    ("POST", "/admin/family/parents"): lambda o, a: (
+        o.post(
+            "/admin/family/parents",
+            data={
+                "ime": "Vrinjen starš",
+                "enaslov": f"{a.znak}@primer.test".lower(),
+                "geslo": "geslo-starsa-12",
+                "geslo_znova": "geslo-starsa-12",
+            },
+            follow_redirects=False,
+        ),
+        PREUSMERITEV,
+        (a.znak,),
+    ),
+    ("GET", "/admin/family/members/{user_id}/password"): lambda o, a: (
+        o.get(f"/admin/family/members/{a.stars_id}/password"), NI, (a.stars_id,),
+    ),
+    ("POST", "/admin/family/members/{user_id}/password"): lambda o, a: (
+        o.post(
+            f"/admin/family/members/{a.otrok_id}/password",
+            data={"geslo": "vlomljeno-geslo", "geslo_znova": "vlomljeno-geslo"},
+            follow_redirects=False,
+        ),
+        NI,
+        (a.otrok_id,),
+    ),
+    ("GET", "/admin/family/members/{user_id}/deactivate"): lambda o, a: (
+        o.get(f"/admin/family/members/{a.stars_id}/deactivate"), NI, (a.stars_id,),
+    ),
+    ("POST", "/admin/family/members/{user_id}/deactivate"): lambda o, a: (
+        o.post(f"/admin/family/members/{a.otrok_id}/deactivate", follow_redirects=False),
+        NI,
+        (a.otrok_id,),
+    ),
+    ("GET", "/admin/family/members/{user_id}/activate"): lambda o, a: (
+        o.get(f"/admin/family/members/{a.stars_id}/activate"), NI, (a.stars_id,),
+    ),
+    ("POST", "/admin/family/members/{user_id}/activate"): lambda o, a: (
+        o.post(f"/admin/family/members/{a.otrok_id}/activate", follow_redirects=False),
+        NI,
+        (a.otrok_id,),
+    ),
     ("GET", "/admin/statistics"): lambda o, a: (o.get("/admin/statistics?leto=vse"), OK, ()),
     ("GET", "/admin/statistics/subjects/{koda}"): lambda o, a: (
         o.get(f"/admin/statistics/subjects/{a.subject}?leto=vse"),
@@ -535,6 +609,7 @@ def test_druzina_b_na_istih_poteh_vidi_svoje(
     assert b.znak in odjemalec.get(f"/admin/statistics/subjects/{b.subject}?leto=vse").text
     assert b.odprt_kviz in odjemalec.get("/quizzes/pending").text
     assert b.za_brisanje in odjemalec.get("/materials/pending-deletion").text
+    assert b.otrok_id in odjemalec.get("/admin/family").text
 
 
 # --- Repozitoriji ---
@@ -550,6 +625,10 @@ def _k(seja: Session, druzina: Druzina) -> KviziRepository:
 
 def _s(seja: Session, druzina: Druzina) -> StatistikaRepository:
     return StatistikaRepository(seja, druzina.family_id)
+
+
+def _c(seja: Session, druzina: Druzina) -> ClaniRepository:
+    return ClaniRepository(seja, druzina.family_id)
 
 
 def _nalozi[T](seja: Session, model: type[T], identifikator: str) -> T:
@@ -702,6 +781,31 @@ PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
         {p.quiz_id for p in _s(s, b).poskusi()} == {b.resen_kviz}
     ),
     ("StatistikaRepository", "snovi"): lambda s, a, b: _s(s, b).snovi([a.akt]) == {},
+    # ClaniRepository (V3-R06)
+    ("ClaniRepository", "aktivnih_starsev"): lambda s, a, b: _c(s, b).aktivnih_starsev() == 1,
+    ("ClaniRepository", "clan"): lambda s, a, b: _c(s, b).clan(a.stars_id) is None,
+    ("ClaniRepository", "clani"): lambda s, a, b: (
+        {clan.user_id for clan in _c(s, b).clani()} == {b.stars_id, b.otrok_id}
+    ),
+    ("ClaniRepository", "nastavi_aktivnost"): lambda s, a, b: (
+        _c(s, b).nastavi_aktivnost(a.otrok_id, aktiven=False) is False
+    ),
+    ("ClaniRepository", "ponastavi_geslo"): lambda s, a, b: (
+        _c(s, b).ponastavi_geslo(a.otrok_id, "vlomljena-zgostitev", datetime.now(UTC)) is False
+    ),
+    # Enoličnost identifikatorja je **globalna** (`ADR-038` E), zato ta klic ne
+    # more uspeti — a mora pasti na bazi in ne na poizvedbi čez tujo družino,
+    # in ne sme pustiti vrstice ne tu ne tam.
+    ("ClaniRepository", "ustvari_clana"): lambda s, a, b: _vrze(
+        IdentifikatorZaseden,
+        lambda: _c(s, b).ustvari_clana(
+            role=VLOGA_OTROK,
+            display_name="Vrinjen otrok",
+            identifier=f"otrok-{a.znak}".lower(),
+            secret_hash="vlomljena-zgostitev",
+            ko=datetime.now(UTC),
+        ),
+    ),
 }
 
 
@@ -709,7 +813,7 @@ def test_vsaka_javna_metoda_repozitorija_ima_primer() -> None:
     """Varovalo: nova javna metoda brez primera tu podre zbirko."""
     javne = {
         (razred.__name__, ime)
-        for razred in (MaterialsRepository, KviziRepository, StatistikaRepository)
+        for razred in (MaterialsRepository, KviziRepository, StatistikaRepository, ClaniRepository)
         for ime, clan in inspect.getmembers(razred)
         if not ime.startswith("_") and callable(clan)
     }
