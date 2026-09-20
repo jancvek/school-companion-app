@@ -104,6 +104,7 @@ class Urnik:
             if vnos.dan == dan and not vnos.se_ne_slika
         )
 
+
 def _kljuc_vnosa(vnos: Vnos) -> tuple[int, int, str]:
     """Razvrstitev vnosov: po dnevu, znotraj dneva po vrstnem redu `PREDMETI`."""
     return (vnos.dan, _MESTO.get(vnos.predmet, _ZADNJI), vnos.predmet)

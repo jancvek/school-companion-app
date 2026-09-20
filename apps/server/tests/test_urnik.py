@@ -31,9 +31,11 @@ from app.db import ScheduleRepository
 from app.main import POTI_S_SVOJIM_CSRF
 from app.models import Material, Question, Schedule
 from app.routers.urnik import (
+    IZHOD_OB_NEUSPEHU,
     NAJVECJA_SLIKA,
     POT_PREDLOGA,
     PREDPONA,
+    SPOROCILO_PRAZNA_SLIKA,
     _pot_slike,
     ime_polja,
 )
@@ -44,6 +46,14 @@ from app.vision import NapakaObdelave, PredlogUrnika, razcleni_urnik
 from tests.conftest import CVEK_ID, PrijavljenOdjemalec, prijavi
 
 PON, TOR, SRE, CET, PET = DNEVI
+
+#: Del izhoda, ki ga mora nositi vsako sporocilo o neuspelem branju.
+#:
+#: Zapisan na roko in **ne** vzet iz `IZHOD_OB_NEUSPEHU`: test, ki bi
+#: pricakovanje bral iz iste konstante kot izvedba, bi ostal zelen tudi,
+#: ko bi konstanta postala prazen niz - `"" in besedilo` je vedno res.
+#: Isto pravilo kot pri obliki datuma v `tests/test_dnevi.py`.
+IZHOD = "urnik vnesi in potrdi kar v spodnji mreži"
 
 #: Enopikselni PNG. Vsebina ni pomembna — klicalec je v testih namestnik —,
 #: pomembno je, da gre skozi `multipart` kot prava datoteka.
@@ -663,6 +673,10 @@ class TestPredlogSSlike:
 
         assert odgovor.status_code == 200
         assert "Model se ni odzval" in odgovor.text
+        # Kriterij ne zahteva samo razlage, ampak tudi **kaj naj starš naredi**
+        # (merilo dokončanosti). Brez te trditve je bilo mogoče izhod izbrisati
+        # in zbirka je ostala zelena.
+        assert IZHOD in odgovor.text
         zapisan = ScheduleRepository(Session(motor), CVEK_ID).urnik(otrok)
         assert zapisan is not None
         assert zapisan.predmeti_dneva(PON) == ("MAT",), "prejšnji urnik mora ostati cel"
@@ -684,6 +698,61 @@ class TestPredlogSSlike:
         odgovor = self.naloz(odjemalec, otrok)
 
         assert "ni bilo mogoče brati" in odgovor.text
+        assert IZHOD in odgovor.text
+
+    def test_napaka_razclenjevanja_ne_ostane_gola(
+        self,
+        aplikacija: FastAPI,
+        motor: Engine,
+        stars: str,
+        otrok: str,
+        sklad: ExitStack,
+    ) -> None:
+        """Tudi sporočilo iz `razcleni_urnik` dobi izhod.
+
+        To je najbolj gol primer: „Model ni vrnil veljavnega JSON" je stavek o
+        strojih, ne o tem, kaj naj starš naredi, in prav tak ne sme biti edina
+        vsebina strani (`CLAUDE.md`, merilo dokončanosti). Izhod se zato pripne
+        **vsakemu** sporočilu o neuspehu, tudi tistim, ki pridejo iz
+        `app/vision.py`, in ne le tistim, ki jih sestavi ta usmerjevalnik.
+        """
+
+        def klicalec(_: Path) -> PredlogUrnika:
+            return razcleni_urnik("{to ni json")
+
+        odjemalec = sklad.enter_context(
+            odjemalec_s_klicalcem(aplikacija, motor, stars, klicalec)
+        )
+        besedilo = self.naloz(odjemalec, otrok).text
+
+        assert "JSON" in besedilo, "razlaga mora ostati"
+        assert IZHOD in besedilo, "in z njo izhod"
+
+    def test_sporocilo_ki_izhod_ze_ima_ga_ne_podvoji(
+        self,
+        aplikacija: FastAPI,
+        motor: Engine,
+        stars: str,
+        otrok: str,
+        sklad: ExitStack,
+    ) -> None:
+        """`z_izhodom=False` velja za sporočila, ki povedo pot naprej sama.
+
+        „Izberi datoteko in poskusi znova" je že navodilo; pripet izhod bi
+        staršu ponudil še ostrejšo sliko datoteke, ki je sploh ni izbral.
+        """
+        odjemalec = sklad.enter_context(
+            odjemalec_s_klicalcem(aplikacija, motor, stars, lambda _: None)
+        )
+
+        besedilo = odjemalec.post(
+            POT_PREDLOGA,
+            data={"csrf": odjemalec.csrf, "otrok": otrok},
+            files={"slika": ("", io.BytesIO(b""), "image/png")},
+        ).text
+
+        assert SPOROCILO_PRAZNA_SLIKA in besedilo
+        assert IZHOD not in besedilo
 
     def test_neuspel_klic_ne_pusti_slike_na_disku(
         self,
@@ -996,3 +1065,14 @@ def test_urnik_enega_otroka_ni_urnik_drugega(motor: Engine, otrok: str, brat: st
     assert manjkajoci_predmeti(
         ScheduleRepository(Session(motor), CVEK_ID).urnik(brat), PON, ["GEO"]
     ) == ()
+
+
+def test_izhod_se_ujema_z_zapisanim_pricakovanjem() -> None:
+    """Vez med zapisanim pričakovanjem in izvedbo.
+
+    Testi zgoraj trdijo `IZHOD`, ki je napisan na roko. Ta test je edino
+    mesto, ki pove, da se ta niz še vedno pojavlja v `IZHOD_OB_NEUSPEHU` —
+    brez njega bi sprememba besedila v izvedbi tiho pustila trditve, ki
+    preverjajo nekaj, česar ni več nikjer.
+    """
+    assert IZHOD and IZHOD in IZHOD_OB_NEUSPEHU
