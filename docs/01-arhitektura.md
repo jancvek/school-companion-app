@@ -325,7 +325,7 @@ Tabela `questions` (V1-R03):
 | `id` | `VARCHAR(36) PRIMARY KEY` | UUID, generiran **na strežniku** |
 | `family_id` | `VARCHAR(36) NOT NULL` | tuji ključ na `families.id`, brez `ondelete`, indeksiran (V3-R01) |
 | `material_id` | `VARCHAR(36)` | tuji ključ na `materials.id`, `ON DELETE SET NULL`, indeksiran; `NULL`, ko je material dokončno izbrisan (V1-R07) |
-| `subject` | `VARCHAR(16)` | predmet materiala, prepisan ob nastanku (V1-R07) |
+| `subject` | `VARCHAR(16)` | predmet materiala, prepisan ob nastanku (V1-R07); popravi ga premik snovi (V3-R10) |
 | `material_taken_at` | `TIMESTAMPTZ` | čas posnetka materiala, prepisan ob nastanku (V1-R07) |
 | `position` | `INTEGER NOT NULL` | zaporedje znotraj **serije**, od 1 |
 | `question` | `TEXT NOT NULL` | besedilo vprašanja |
@@ -378,6 +378,11 @@ seji pred stavkom.
 
 Denormalizirana `subject` in `material_taken_at` sta tam zato, da vprašanje
 brez materiala še vedno pove, iz katere snovi in katerega dne je.
+
+**`questions.subject` je kopija ob nastanku, ki pa ni zamrznjena:** premik
+snovi v drug predmet jo popravi pri vseh vprašanjih te snovi, veljavnih in
+upokojenih (V3-R10, `ADR-040` B1). Statistika predmeta se s tem za nazaj
+spremeni — to je namen premika. `material_taken_at` se ne spreminja nikoli.
 
 `id` je `VARCHAR` in ne `UUID`, čas pa `DateTime(timezone=True)`, ker mora ista
 shema stati nad Postgresom (produkcija) in nad SQLite (testi).
@@ -717,6 +722,7 @@ nje in to preverja `TestBrezJavaScripta`, ki izvzame samo `snov.html`.
 | `/admin/materials/{id}/delete` | GET | potrditvena stran za dokončno brisanje |
 | `/admin/materials/{id}/delete` | POST | dokončno izbriše in preusmeri (303) |
 | `/admin/materials/{id}/reprocess` | POST | vrne v vrsto, vprašanja upokoji, preusmeri (303) |
+| `/admin/materials/{id}/subject` | POST | premakne snov in **vsa** njena vprašanja v drug predmet, preusmeri (303) (V3-R10) |
 | `/admin/quizzes/new` | GET | izbirnik slik za enega od treh vstopov (V2-R01) |
 | `/admin/quizzes/new` | POST | isti izbirnik ob vrnitvi iz predogleda, z ohranjenim izborom (V2-R01) |
 | `/admin/quizzes/preview` | POST | predogled izbranih vprašanj; **ničesar ne shrani** (V2-R01) |
@@ -1099,6 +1105,36 @@ njen odgovor sta ostala nespremenjena.
   v brskalniku.
 - **Fokus v prikazu ni ujet**: tabulator ga lahko odnese na stran za njim.
 - **Vsaka puščica je nova stran** in nov vnos v zgodovini brskalnika.
+
+## Premik slike v drug predmet (V3-R10)
+
+Obrazec na strani s podrobnostmi snovi (`<select>` z desetimi predmeti v
+vrstnem redu urnika, trenutni izbran) in `POST /admin/materials/{id}/subject`.
+Snov s kodo zunaj desetih trenutne možnosti nima, zato dobi **vodilno možnost
+brez vrednosti** — sicer bi brskalnik izbral prvo (`NAR`) in klik bi snov tiho
+vložil pod Naravoslovje. Prazna vrednost pade v isto vejo kot neznana koda.
+`MaterialsRepository.premakni_v_predmet` v **eni transakciji** popravi
+`materials.subject` in `questions.subject` vseh vprašanj te snovi, veljavnih
+in upokojenih. Oba stavka nosita pogoj družine.
+
+Pogoja „ni arhivirana" in „ni v obdelavi" sta **v stavku `UPDATE`**, ne v
+branju pred njim (`ADR-040` C1): worker vprašanjem predmet prepiše iz snovi,
+ki jo prebere tik pred zapisom, in branje-nato-pisanje bi pustilo okno, v
+katerem nova vprašanja dobijo star predmet. Neizbran ali neznan predmet je
+400 s slovensko stranjo, tuja ali neobstoječa snov 404.
+
+Objavljeni kvizi se ne spremenijo — ne `quizzes.subject`, ne ime, ne postavke
+(`ADR-016` E). Nove skripte obrazec ne prinese; edina skripta te strani ostane
+povečan prikaz (`ADR-024`).
+
+### Znane omejitve
+
+- **Telefon predmeta ne izve.** Zgodovina na napravi kaže predmet, ki ga je
+  izbral otrok ob slikanju; strežnik lokalne baze telefona ne piše
+  (`ADR-040` A1). Ponovni prenos iste slike popravka ne povozi, ker je
+  `POST /materials` idempotenten glede na `id`.
+- **Prvotni predmet se nikjer ne hrani** in dnevnika premikov ni.
+- **Premik je po ena snov.** Večkratne izbire na seznamu predmeta ni.
 
 ## Slovenske oblike števil
 

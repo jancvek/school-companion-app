@@ -405,6 +405,17 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
     ("POST", "/admin/materials/{material_id}/reprocess"): lambda o, a: (
         o.post(f"/admin/materials/{a.akt}/reprocess", follow_redirects=False), NI, (a.akt,),
     ),
+    # Veljavna koda predmeta, ne neznana: 404 mora priti iz meje družine in
+    # ne iz zavrnitve vrednosti (V3-R10, `ADR-040`).
+    ("POST", "/admin/materials/{material_id}/subject"): lambda o, a: (
+        o.post(
+            f"/admin/materials/{a.akt}/subject",
+            data={"subject": "SLJ"},
+            follow_redirects=False,
+        ),
+        NI,
+        (a.akt,),
+    ),
     ("GET", "/admin/quizzes/new"): lambda o, a: (
         o.get("/admin/quizzes/new?vstop=danes"), OK, (),
     ),
@@ -701,6 +712,9 @@ PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
     ),
     ("MaterialsRepository", "prevzemi_za_obdelavo"): lambda s, a, b: (
         _m(s, b).prevzemi_za_obdelavo(a.nova) is False
+    ),
+    ("MaterialsRepository", "premakni_v_predmet"): lambda s, a, b: (
+        _m(s, b).premakni_v_predmet(a.akt, "SLJ") is False
     ),
     ("MaterialsRepository", "seznam_arhiviranih"): lambda s, a, b: (
         {x.id for x in _m(s, b).seznam_arhiviranih()} == {b.arh, b.za_brisanje}

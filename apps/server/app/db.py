@@ -553,6 +553,81 @@ class MaterialsRepository(_RepozitorijDruzine):
             .values(status=STATUS_NOV)
         )
 
+    # --- Premik v drug predmet (V3-R10) ---
+
+    def premakni_v_predmet(self, material_id: str, koda: str) -> bool:
+        """Snov in **vsa** njena vprašanja postavi pod dani predmet.
+
+        Vrne, ali se je premik zgodil. `False` pomeni, da snovi ni, da je
+        tuja, da je arhivirana ali da je pravkar v obdelavi — klicatelj te
+        primere loči s `poisci`, enako kot pri `vrni_v_vrsto`.
+
+        **Pogoj je v stavku `UPDATE`, ne v branju pred njim**
+        (`docs/odlocitve/ADR-040` C1). Worker vprašanja ustvari v
+        `zapisi_izid` in jim predmet prepiše iz snovi, ki jo prebere tik pred
+        zapisom. Branje-nato-pisanje bi tu pustilo okno: predmet bi se
+        spremenil med workerjevim branjem in njegovim commitom, nova
+        vprašanja bi dobila star predmet, `UPDATE` vprašanj pa jih ne bi
+        videl, ker še niso commitana. S pogojem `status <> 'processing'` v
+        stavku Postgres počaka na zaklep vrstice, ki ga drži worker, in pogoj
+        preveri nad commitano vrstico; ko snov ni več v obdelavi, so njena
+        vprašanja commitana in jih drugi stavek ujame. Isti vzorec kot
+        `prevzemi_za_obdelavo`.
+
+        **Arhivirana snov se ne premakne** (`ADR-011`: arhiv je umik, ne
+        urejanje). Pogoj je tu in ne le v predlogi: gumb, ki ga stran ne
+        izriše, ni varovalka.
+
+        **Vprašanja gredo zraven, veljavna in upokojena** (`ADR-040` B1).
+        Brez upokojenih bi poskusi prejšnjih serij ostali pod napačnim
+        predmetom in ista snov bi bila v statistiki razcepljena na dva
+        predmeta — zato tu pogoja `retired_at IS NULL` **namenoma ni**.
+
+        Oba stavka sta ena transakcija: vmesnega stanja, v katerem je snov že
+        pod novim predmetom, njena vprašanja pa še pod starim, ni. Oba nosita
+        pogoj družine.
+
+        Objavljenih kvizov se ne dotakne (`ADR-016` E, `ADR-040` D1): ime
+        „MAT — 9. 9. 2026" je že natisnjeno.
+
+        `synchronize_session="fetch"` iz istega razloga kot v
+        `_upokoji_vprasanja`: klicatelj je snov pred tem prebral s `poisci` in
+        jo ima v tej seji naloženo. Brez tega bi mu na njej ostal star
+        predmet.
+        """
+        premaknjenih = cast(
+            "CursorResult[Any]",
+            self._session.execute(
+                update(Material)
+                .where(
+                    self._moje(),
+                    Material.id == material_id,
+                    Material.archived_at.is_(None),
+                    Material.status != STATUS_V_OBDELAVI,
+                )
+                .values(subject=koda)
+                .execution_options(synchronize_session="fetch")
+            ),
+        ).rowcount
+
+        if premaknjenih != 1:
+            # Nič ni bilo spremenjeno; transakcijo vseeno zapremo, da seja ne
+            # ostane v odprti transakciji do konca zahteve.
+            self._session.rollback()
+            return False
+
+        self._session.execute(
+            update(Question)
+            .where(
+                Question.family_id == self._family_id,
+                Question.material_id == material_id,
+            )
+            .values(subject=koda)
+            .execution_options(synchronize_session="fetch")
+        )
+        self._session.commit()
+        return True
+
     # --- Arhiv (V1-R07) ---
 
     def arhiviraj(self, material_id: str) -> Material | None:
