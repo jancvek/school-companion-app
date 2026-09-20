@@ -79,7 +79,8 @@ logika testljiva brez naprave.
 | `app/routers/dnevi.py` | pregled slik po obdobju in predmetih pod `/admin/days` (V2-R07); vrstica z manjki (V3-R09) |
 | `app/routers/urnik.py` | urnik otroka pod `/admin/schedule`: mreža, predlog s slike, potrditev (V3-R09) |
 | `app/routers/clani.py` | člani družine pod `/admin/family`: seznam, dodajanje, ponastavitev gesla, deaktivacija in aktivacija (V3-R06) |
-| `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository`, `StatistikaRepository` (V2-R04, samo bere), `ClaniRepository` (V3-R06) in `ScheduleRepository` (V3-R09) — vsak z obvezno družino (V3-R01) — ter `DruzineRepository` in `PrijavaRepository` (V3-R03), edina brez družine; edina pot do baze |
+| `app/routers/sistem.py` | stran lastnika sistema pod `/admin/system`: družine, odpiranje nove, stanje družine in dejanja nad starši (V3-R05) |
+| `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository`, `StatistikaRepository` (V2-R04, samo bere), `ClaniRepository` (V3-R06) in `ScheduleRepository` (V3-R09) — vsak z obvezno družino (V3-R01) — ter `DruzineRepository` (od V3-R05 tudi pregled čez družine) in `PrijavaRepository` (V3-R03), edina brez družine; edina pot do baze |
 | `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03); `child_id` na snovi, kvizu in poskusu (V3-R07); `schedules` in `schedule_entries` (V3-R09) |
 | `app/storage.py` | zapis, meja mape in brisanje slik na disku; mapa družine (V3-R01); podmapa `urniki/` (V3-R09) |
 | `app/vision.py` | **edini modul, ki uvaža `openai`**: prompta, shemi odgovorov, klic. Dva klicalca — snov (V1-R03) in urnik (V3-R09) — nad skupnim `_izvedi_klic` |
@@ -89,6 +90,7 @@ logika testljiva brez naprave.
 | `app/prijava.py` | gesla (argon2id), žetoni sej, CSRF, omejevanje ugibanja, varen `next` — brez FastAPI (V3-R03); `Vrata` in `vloga_sodi`: katera vloga sme kam (V3-R04); `normaliziraj_identifikator` (V3-R06) |
 | `app/ukazi.py` | `python -m app.ukazi nastavi-geslo <identifikator>`; geslo z `getpass`, nikoli iz argumenta (V3-R03); prekliče seje računa (V3-R06) |
 | `app/clani.py` | pravila o članih družine: veljaven vnos in kdo sme koga — brez FastAPI in brez baze (V3-R06) |
+| `app/sistem.py` | pravila lastnika sistema: ime družine, česa niti on ne sme, besedilo o zunanjem vision API-ju — brez FastAPI in brez baze (V3-R05) |
 | `app/routers/vstop.py` | prijava in odjava: `GET/POST /admin/login`, `POST /admin/logout` (V3-R03); `POST /auth/login` in `POST /auth/logout` za telefon (V3-R04) |
 | `app/settings.py` | nastavitve iz okolja |
 | `app/dependencies.py` | odvisnosti poti iz `app.state`; družina iz seje — ene same, za obe strani (`daj_druzino`, V3-R04; začasne `daj_druzino_telefona` ni več) |
@@ -264,7 +266,9 @@ je prenesen — `oznaciPrenesene` teče pred `pobrisiKvizeRazen`.
 #### Družina kot lastnik podatkov (V3-R01)
 
 Tabela `families`: `id` (`VARCHAR(36)`, UUID s strežnika, hkrati ime mape
-slik), `name` (`VARCHAR(200) NOT NULL`), `created_at`. Nič drugega.
+slik), `name` (`VARCHAR(200) NOT NULL`, **ni enoličen**), `created_at` in — od
+V3-R05 — `is_active` (`BOOLEAN NOT NULL`, privzeto `true`). Nič drugega; ni
+naslova in ni nastavitev.
 
 `family_id NOT NULL` imajo `materials`, `questions`, `quizzes` in
 `question_attempts`. **Izpeljave:** `quiz_items` stolpca nima — družina
@@ -278,7 +282,9 @@ brez njega ostalo brez družine (`ADR-029` C). Primarni ključi ostanejo globaln
   `family_id` v konstruktorju, brez privzetka; prazen niz je `ValueError`. Seja
   je zasebna, `Session.get` se nad podatki ne uporablja, vsaka poizvedba in
   vsak `UPDATE` ima pogoj družine. Nove vrstice dobijo družino od repozitorija.
-- `DruzineRepository` bere samo `families` (za obdelavo).
+- `DruzineRepository` bere `families` in **šteje** člane v `users` (obdelava,
+  od V3-R05 pregled lastnika sistema). Podatkov nobene družine ne bere in
+  imen članov ne vrača; meja je zapisana v `ADR-044` E in jo varuje test.
 - **Družino pove seja, na obeh straneh** (V3-R04): `daj_druzino` vrne
   `family_id` iz seje, ki jo je razrešila vmesna plast — brez poizvedbe.
   Začasna izbira „edina družina v bazi" (`ADR-029` A) je odpadla skupaj z
@@ -569,7 +575,7 @@ Model je iz `ADR-027`: **poverilnica ni uporabnik**, zato je Google pozneje
 
 | Tabela | Stolpci | Opomba |
 |---|---|---|
-| `users` | `id`, `family_id NOT NULL` (FK, indeks), `role` (`parent`\|`child`), `display_name`, `is_system_owner`, `is_active`, `created_at` | oseba brez gesla; `is_active` pišeta in bereta poti `V3-R06` (glej „Člani družine") |
+| `users` | `id`, `family_id NOT NULL` (FK, indeks), `role` (`parent`\|`child`), `display_name`, `is_system_owner`, `is_active`, `created_at` | oseba brez gesla; `is_active` pišeta in bereta poti `V3-R06` (glej „Člani družine"), `is_system_owner` odpira `/admin/system` (`V3-R05`) |
 | `credentials` | `id`, `user_id NOT NULL` (FK, indeks), `kind` (`password`), `identifier` **UNIQUE**, `secret_hash`, `created_at`, `updated_at` | `identifier` je e-naslov starša ali uporabniško ime otroka, enoličen čez celo namestitev; `secret_hash IS NULL` pomeni „geslo ni nastavljeno" |
 | `sessions` | `id`, `user_id NOT NULL` (FK, indeks), `token_hash` **UNIQUE**, `csrf_token`, `created_at`, `expires_at`, `last_used_at`, `device_label` | žetona v bazi ni, samo SHA-256 |
 | `login_attempts` | `id`, `identifier` (indeks), `ip_address`, `created_at` (indeks) | **edina tabela brez družine**: poskus se zabeleži tudi za identifikator, ki ne obstaja |
@@ -750,10 +756,20 @@ nje in to preverja `TestBrezJavaScripta`, ki izvzame samo `snov.html`.
 | `/admin/family/members/{id}/deactivate` | POST | deaktivira in prekliče vse seje člana (V3-R06) |
 | `/admin/family/members/{id}/activate` | GET | vmesna stran (V3-R06) |
 | `/admin/family/members/{id}/activate` | POST | vrne račun v uporabo; sej ne obnovi (V3-R06) |
+| `/admin/system` | GET | vse družine s števili članov in stanjem, obrazec za novo družino, besedilo o vision API-ju (V3-R05) |
+| `/admin/system/families` | GET | 303 na seznam; obstaja zato, da pot ni videti kot 405 (V3-R05) |
+| `/admin/system/families` | POST | ustvari družino in v njej prvega starša v eni transakciji (V3-R05) |
+| `/admin/system/families/{id}` | GET | ena družina: starši poimensko, otroci samo kot število (V3-R05) |
+| `/admin/system/families/{id}/deactivate` | GET, POST | vmesna stran in ugasnitev družine; seje vseh članov padejo (V3-R05) |
+| `/admin/system/families/{id}/activate` | GET, POST | vmesna stran in vrnitev družine v uporabo (V3-R05) |
+| `/admin/system/families/{id}/parents/{user_id}/password` | GET, POST | ponastavitev gesla staršu (V3-R05) |
+| `/admin/system/families/{id}/parents/{user_id}/deactivate` | GET, POST | vmesna stran in deaktivacija starša (V3-R05) |
+| `/admin/system/families/{id}/parents/{user_id}/activate` | GET, POST | vmesna stran in aktivacija starša (V3-R05) |
 
 Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Vsaka od njih
 zahteva sejo** (V3-R03, glej „Prijava, seje in CSRF"); vsak `POST` nosi CSRF
-žeton. Strani kažejo podatke družine iz seje, glava pa pove, čigava družina je
+žeton. Poti pod `/admin/system` zahtevajo še lastnika sistema in so za vse
+ostale `404` (V3-R05, glej „Lastnik sistema odpira družine"). Strani kažejo podatke družine iz seje, glava pa pove, čigava družina je
 to in kdo je prijavljen.
 
 Napake pod `/admin` (404, 405 in 500 izbire družine) izriše prestreznik `StarletteHTTPException`,
@@ -844,6 +860,10 @@ Odločitve so v `ADR-027` (model) in `ADR-035` (izvedba).
   12 znakov za starša in **8 za otroka** — otrokovih 4 iz `ADR-035` G je
   razveljavil `ADR-036` E, ko je mobilna prijava postala dosegljiva z javnega
   interneta.
+- **Seja pade ob treh rečeh, ne le ob poteku:** potekel rok, deaktiviran račun
+  (`V3-R06`) in ugasnjena družina (`V3-R05`). Prvi dve sta v `seja_za_zeton` od
+  svojih zahtev, tretja od `V3-R05`; vse tri so preverjene **ob vsaki uporabi
+  seje** in ne le ob prijavi, ker seje ustvarja tudi telefon.
 - **Telefon se s tem do V3-R04 ni srečal.** Odtlej uporablja isto tabelo
   `sessions`, le da žeton nosi v glavi `Authorization: Bearer`; glej razdelek
   spodaj.
@@ -932,6 +952,81 @@ tabele ni — `users`, `credentials` in `sessions` so postavljene v V3-R03.
   tudi ob napaki se vrneta le ime in identifikator.
 - **Urejanja člana in seznama prijavljenih naprav ni** (`ADR-038` B in H).
   `sessions.device_label` se piše naprej, a ga ne bere nobena stran.
+
+## Lastnik sistema odpira družine (V3-R05)
+
+Lastnik sistema na `/admin/system` odpre novo družino z njenim prvim staršem,
+staršem ponastavi geslo ter starša ali celo družino deaktivira in vrne v
+uporabo. Poti so v tabeli zgoraj, pravila v `app/sistem.py` in `app/clani.py`,
+poizvedbe v `DruzineRepository` in `ClaniRepository`, odločitve v
+`docs/odlocitve/ADR-044`.
+
+- **Za vsakogar drugega ta predpona ne obstaja.** `zahtevaj_lastnika_sistema`
+  visi kot odvisnost na `APIRouter`, zato velja za vsako njegovo pot, tudi za
+  tisto, ki bo dodana pozneje; dvigne `404`, ki ga izriše isti prestreznik kot
+  vsako neobstoječo pot. `403` bi povedal, da stran obstaja. Prav zato ima
+  `POST /admin/system/families` tudi `GET`: brez njega bi Starlette odgovoril s
+  `405`, še preden bi odvisnost stekla, in razlika med `405` in `404` bi bila
+  sama podatek. **Ostale poti samo s `POST` pod `/admin` se še vedno obnašajo
+  tako** — tam obstoj poti ni skrivnost.
+- **Lastnik vidi imena, števila članov, datum in stanje — vsebine ne.** Ne
+  slik, ne prepisov, ne kvizov, ne statistike, ne urnikov (`ADR-044` B). To ni
+  stvar izrisa: nobena pot te predpone teh tabel ne bere, `DruzinaZaPregled`
+  jih ne nosi, in `tests/test_tesnjenje.py` to trdi na treh ravneh — s sledmi
+  vsebine čez vse lastnikove strani, s protitestom, da trditev ni prazna, in s
+  prestrezanjem izvedenih SQL stavkov.
+- **Starši poimensko, otroci samo kot število.** Otroka ureja njegov starš
+  (`V3-R06`) in lastnik nad njim nima nobenega dejanja, zato njegovega imena
+  ta stran ne pozna. `user_id` otroka pod potjo `parents/` je `404`.
+- **Dejanja nad člani tečejo skozi `ClaniRepository(seja, ciljna_druzina)`** —
+  torej skozi repozitorij z družino v konstruktorju (`ADR-025`), le da jo tu
+  izbere naslov in ne prijava. Pravila `app/clani.py` veljajo nespremenjena;
+  pravilo o zadnjem aktivnem staršu je `ADR-038` obdržal prav za tega
+  klicatelja. **Aktivacija starša** obstaja, ker bi bila družina z enim samim
+  deaktiviranim staršem sicer zaklenjena za vedno (`ADR-044` F).
+- **Lastnik ne more ugasniti svoje družine in ne sebe.** Na njej stoji račun z
+  `is_system_owner`; dejanje, ki ga vmesnik ponuja, mora biti preživeto
+  (isto sklepanje kot `ADR-038` G).
+- **Besedilo o zunanjem vision API-ju** je konstanta `sistem.BESEDILO_ZASEBNOST`,
+  izrisana ob obrazcu za novo družino — na mestu in v trenutku, ko ga lastnik
+  potrebuje. Obrazca soglasja ni: to bi bil pravni okvir, ki ga `ADR-025`
+  izrecno ne želi.
+
+### Deaktivirana družina
+
+`families.is_active` je zastavica po vzoru `users.is_active`, **ne** prelivanje
+na člane (`ADR-044` A):
+
+- Preverja se na **dveh** mestih: `prijava.preveri_prijavo` (prijava zavrnjena
+  z istim besedilom kot vsaka druga neuspela — da je družina ugasnjena, ni
+  podatek za tistega, ki ugiba) in `prijava.seja_za_zeton` (obstoječa seja
+  neha veljati in se izbriše). Velja na **obojih vratih**: starš v brskalniku
+  in otrok na telefonu.
+- **Ugasnitev v isti transakciji izbriše seje vseh članov**; prižig jih ne
+  vrne. Članov se ne dotakne, zato prižig vrne družino v stanje pred
+  ugasnitvijo — kdor je bil deaktiviran prej, ostane deaktiviran.
+- **Podatki ostanejo nedotaknjeni:** snov, vprašanja, kvizi, poskusi, urniki in
+  slike na disku. Deaktivacija se dotakne samo zastavice in sej.
+- **Obhod obdelave ugasnjeno družino preskoči** (`DruzineRepository.idji_aktivnih`):
+  slike ostanejo `new` in se obdelajo po ponovni aktivaciji — isti vzorec kot
+  mirujoči worker brez ključa (`ADR-009` B2). `worker.obnovi_obticale` gre
+  naprej čez **vse** družine: ne kliče ničesar zunanjega, vrstica, ki bi tam
+  ostala `processing`, pa bi bila tiha izguba.
+
+Migracija `0011_stanje_druzine` doda stolpec s `server_default` `true`;
+obstoječe družine ostanejo aktivne in prepisa podatkov ni. `downgrade` stolpec
+spusti in **dokončno izgubi podatek, katera družina je bila ugasnjena**, vrstic
+pa ne — isti vzorec kot `0004` in `0009`.
+
+### Znane omejitve
+
+- **Števila članov vključujejo deaktivirane.** „1 starš" na seznamu je lahko
+  starš, ki je v tabeli označen kot deaktiviran. Šteje se članstvo, ne
+  dejavnost.
+- **Drugega lastnika sistema ni mogoče ustvariti.** Zastavice `is_system_owner`
+  ne podeli nobena pot; postavi jo migracija `0008_uporabniki`. Če bo lastnikov
+  kdaj več, bo pravilo o „svoji družini" treba napisati čez vse družine, v
+  katerih kakšen je.
 
 ## Sestavljalnik kvizov (V2-R01)
 
