@@ -280,12 +280,34 @@ class TestSkupine:
     def test_pri_enem_otroku_imena_ni(
         self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
-        """Kriterij `V3-R07`: vmesnik družine z enim otrokom se ne spremeni."""
+        """Kriterij `V3-R07`: vmesnik družine z enim otrokom se ne spremeni.
+
+        Tudi **stran za tisk**: ta gre z zaslona na mizo in je edina, ki je
+        `TestImenaPriEnemOtroku` v `test_kvizi.py` ne doseže, ker zahteva rešen
+        kviz (`ADR-039` F3).
+        """
         quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
 
-        besedilo = stran(odjemalec, quiz_id)
+        assert "Maša" not in stran(odjemalec, quiz_id)
+        tisk = odjemalec.get(f"/admin/quizzes/{quiz_id}/print")
+        assert tisk.status_code == 200, tisk.text
+        assert "Maša" not in tisk.text
 
-        assert "Maša" not in besedilo
+    def test_pri_dveh_otrocih_tisk_pove_cigav_je(
+        self,
+        odjemalec: TestClient,
+        motor: Engine,
+        slike: Path,
+        telefon: SejaTesta,
+        brat: str,
+    ) -> None:
+        """Natisnjena lista dveh otrok se ločita samo po imenu."""
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
+
+        besedilo = odjemalec.get(f"/admin/quizzes/{quiz_id}/print").text
+
+        assert "Maša ·" in besedilo
+        assert "za Maša" not in besedilo
 
     def test_pri_dveh_otrocih_pove_cigav_je_kviz(
         self,

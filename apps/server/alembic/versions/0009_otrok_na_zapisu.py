@@ -65,8 +65,12 @@ def _otrok(koliko: int) -> str:
     """
     ostanek_100 = koliko % 100
     ostanek_10 = koliko % 10
+    # Za „ima" gre **tožilnik**, ki je pri živem samostalniku enak rodilniku:
+    # „ima enega otroka", „ima dva otroka", „ima tri otroke", „ima pet otrok".
+    # Veja za 1 se v praksi ne izriše — kliče se samo pri `len != 1` —, a
+    # funkcija naj bo popolna, ne le zadostna.
     if ostanek_100 == 1 or (ostanek_10 == 1 and ostanek_100 != 11):
-        return f"{koliko} otroka"  # „1 otroka" — rodilnik za „ima"
+        return f"{koliko} otroka"
     if ostanek_100 == 2 or (ostanek_10 == 2 and ostanek_100 != 12):
         return f"{koliko} otroka"
     if ostanek_100 in (3, 4) or (ostanek_10 in (3, 4) and ostanek_100 not in (13, 14)):

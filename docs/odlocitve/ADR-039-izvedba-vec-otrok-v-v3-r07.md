@@ -310,3 +310,51 @@ naprej šteje čez vso družino. Ostaja tako: poved govori o **strežniku**
 („Strežnik je nazadnje prejel sliko …") in odgovarja na vprašanje, ali telefon
 sploh prenaša — to ni lastnost otroka. Po otroku bi bila uporabna drugače, a
 bi zahtevala svojo odločitev; zdaj je vsaj zapisana.
+
+## Popravki po drugem pregledu (20. 9. 2026)
+
+F3 je bil pravilen, uveljavljen pa je bil na sedmih straneh in v
+**sestavljalniku ne**: gumba „Sestavi kviz za …" in „Objavi kviz za …" ter
+naslov predogleda so ime izrisali vedno in vedno za predlogom. Pregledovalec
+je isto mesto — ime otroka v vmesniku — vrnil drugič.
+
+### F3 preglaša tisto poved `ADR-039` G, ki ime zahteva v gumbih
+
+G pravi: *„Ime naslovljenca stoji na predogledu in na gumbu za objavo, da
+privzetek ni tiha izbira."* Ta utemeljitev je **odpadla** s popravkom kritične
+točke 3 iz prvega pregleda: objava privzetka nima več — brez polja `otrok` je
+`409`. Nevarnosti, pred katero je G varoval, ni, zato ime v gumbih ni več
+potrebno in F3 velja brez izjeme tudi tam.
+
+G se po `CLAUDE.md` §3 ne prepisuje; ta odstavek pove, katero njegovo poved
+preglaša. Vse ostalo v G (naslovljenec nad seznamom, štetje „bila v kvizu" po
+njem) ostaja.
+
+### Vrata so na tipu, ne na vsakem klicnem mestu
+
+Vzrok napake ni bil spregled treh vrstic, ampak to, da je sestavljalnik ime
+bral **mimo pravila**: `naslovljenec.izbrani.display_name` neposredno, medtem
+ko so druge strani šle skozi `_imena` oziroma `_ime_otroka`, ki pravilo
+uveljavita.
+
+Odslej je edina pot do imena v izrisu `Naslovljenec.ime_za_prikaz`, ki pri
+enem otroku vrne `None`. **Pravilo, ki ga mora vsako klicno mesto uveljaviti
+samo, je pravilo, ki bo enkrat pozabljeno.**
+
+Zraven gre varovalo, ki ga prvič ni bilo: `TestImenaPriEnemOtroku` pomete čez
+**vseh deset** strani `/admin` naenkrat in trdi dvoje — da pri enem otroku
+imena ni nikjer in da pri dveh nikjer ne stoji za predlogom. Nova stran z
+imenom pade tam, ne šele v pregledu.
+
+### Gumbi so spet glagoli
+
+„Sestavi" in „Objavi", ime pa je na predogledu vrednost polja v vrstici pod
+naslovom (`Nejc · Skupaj 6 vprašanj iz 2 snovi.`), kot povsod drugod. V
+izbirniku posebne oznake ni: naslovljenca pove izbirnik sam, ki ima izbranega
+otroka označenega.
+
+Ob tem se je pokazala še ena luknja, ki je ni našel nihče: **stran za tisk**
+je ime dobila v kontekst, a ga ni izrisala. Natisnjena lista dveh otrok bi se
+zato ne ločila v ničemer — in prav ta list gre z zaslona na mizo. Zdaj ime
+nosi, po istem pravilu. Sweep `TestImenaPriEnemOtroku` te strani ne doseže,
+ker zahteva rešen kviz, zato trditev stoji v `test_rezultat.py`.

@@ -257,6 +257,19 @@ class Naslovljenec:
         """Pri enem otroku se polje ne izriše — izbirati ni česa."""
         return len(self.vsi) > 1
 
+    @property
+    def ime_za_prikaz(self) -> str | None:
+        """Prikazno ime, ali `None` pri družini z enim otrokom.
+
+        **Edina pot do imena v izrisu.** `izbrani.display_name` se v
+        usmerjevalniku ne bere neposredno: prvi zapis te zahteve je to počel in
+        pravilo „ime samo pri več kot enem otroku" (`ADR-039` F3) je zato v
+        sestavljalniku odpadlo, medtem ko je na sedmih drugih straneh veljalo.
+        Pravilo, ki ga mora vsako klicno mesto uveljaviti samo, je pravilo, ki
+        bo enkrat pozabljeno — zato stoji tu.
+        """
+        return self.izbrani.display_name if self.je_izbirnik else None
+
 
 def _naslovljenec(
     predloge: Jinja2Templates,
@@ -279,8 +292,10 @@ def _naslovljenec(
 
     Privzetek je **prvi po prikaznem imenu**, isti kot na statistiki
     (`ADR-039` B), in velja samo pri **branju** — ob prvem prihodu v izbirnik
-    mora biti seznam že preračunan za nekoga. Ime naslovljenca stoji na
-    predogledu in na obeh gumbih, da privzetek ni tiha izbira.
+    mora biti seznam že preračunan za nekoga. Ob objavi privzetka ni, zato
+    imena tudi ni treba zapisati v gumbe: `ADR-039` G je ime tam zahteval prav
+    zato, da privzetek ne bi bil tiha izbira, in te nevarnosti po `obvezen`
+    ni več (`ADR-039` F3).
 
     **`obvezen=True` privzetka nima**, in to je kriterij `V3-R07`
     („sestavljalnik ga **zahteva** ob objavi"): objava brez polja je `409` in
@@ -396,7 +411,7 @@ def _izrisi_izbirnik(
             "izbirnih": sum(1 for vrstica in vrstice if vrstica["izbirna"]),
             "sporocilo": sporocilo,
             "naslovljenec": naslovljenec.izbrani.user_id,
-            "naslovljenec_ime": naslovljenec.izbrani.display_name,
+            "naslovljenec_ime": naslovljenec.ime_za_prikaz,
             "je_izbirnik_otrok": naslovljenec.je_izbirnik,
             "otroci": [
                 {"id": kdo.user_id, "ime": kdo.display_name} for kdo in naslovljenec.vsi
@@ -594,7 +609,7 @@ def predogled(
             # ostali izbor: predogled ničesar ne shrani (`ADR-016` C). Ime
             # stoji v naslovu in na gumbu, da privzeti otrok ni tiha izbira.
             "naslovljenec": naslovljenec.izbrani.user_id,
-            "naslovljenec_ime": naslovljenec.izbrani.display_name,
+            "naslovljenec_ime": naslovljenec.ime_za_prikaz,
             "skupine": [_skupina_pogled(skupina) for skupina in skupine],
             "vprasanja_idji": [
                 vprasanje.id for skupina in skupine for vprasanje in skupina.vprasanja

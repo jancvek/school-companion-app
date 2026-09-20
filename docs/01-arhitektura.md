@@ -544,7 +544,10 @@ indeksiran) imajo `materials`, `quizzes` in `question_attempts`.
   od družine: družina je meja izolacije, otrok izbira pogleda znotraj nje.
 - **Ime otroka se v vmesniku izriše samo pri več kot enem otroku**, in vedno
   kot vrednost polja (`Maša · MAT · …`), nikoli za predlogom — slovenščina bi
-  zahtevala sklanjanje (`ADR-039` F3).
+  zahtevala sklanjanje (`ADR-039` F3). Pravilo uveljavljajo **vrata**, ne
+  klicna mesta: `_imena`, `_ime_otroka` in `Naslovljenec.ime_za_prikaz` pri
+  enem otroku vrnejo `None` oziroma prazno preslikavo. `TestImenaPriEnemOtroku`
+  pomete čez vse strani `/admin` in nova stran z imenom pade tam.
 
 Migracija `0009_otrok_na_zapisu` doda stolpce kot `NULL`-abilne, jih zapolni z
 **edinim otrokom vsake družine** (šteje tudi deaktiviranega) in nato naredi

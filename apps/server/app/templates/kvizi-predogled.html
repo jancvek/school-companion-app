@@ -3,8 +3,12 @@
 {% block naslov %}Predogled kviza{% endblock %}
 
 {% block vsebina %}
-  <h1>Predogled kviza za {{ naslovljenec_ime }}</h1>
+  <h1>Predogled kviza</h1>
   <p class="pod">
+    {# Ime je vrednost polja in ne del povedi — za predlogom bi slovenščina
+       zahtevala sklanjanje poljubnega imena (`docs/odlocitve/ADR-039` F3).
+       Pri enem otroku ga ni: `ime_za_prikaz` je takrat `None`. #}
+    {%- if naslovljenec_ime %}{{ naslovljenec_ime }} · {% endif -%}
     {# „snovi“ je tu konstanta in ne sklanjana oblika: za predlogom *iz* gre
        rodilnik, ta pa je pri tem samostalniku enak pri vsakem številu —
        „iz 1 snovi“, „iz 2 snovi“, „iz 5 snovi“. #}
@@ -79,7 +83,7 @@
         </label>
       </p>
 
-      <button class="gumb gumb-obdelava" type="submit">Objavi kviz za {{ naslovljenec_ime }}</button>
+      <button class="gumb gumb-obdelava" type="submit">Objavi</button>
       <p class="drobno">
         Kviz in vse njegove postavke ({{ skupaj }}) nastanejo naenkrat. Postavke se
         zamrznejo: poznejša ponovna obdelava ali brisanje snovi jih ne

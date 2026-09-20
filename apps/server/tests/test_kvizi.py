@@ -1782,3 +1782,88 @@ class TestBilaVKvizuPoNaslovljencu:
             assert kviz is not None
             assert kviz.child_id == brat
             assert len(kviz.postavke) == 3
+
+
+class TestImenaPriEnemOtroku:
+    """Kriterij `V3-R07`: pri enem otroku se imena ne izriše **nikjer**.
+
+    Varovalo in ne še ena trditev o eni strani. Pravilo `ADR-039` F3 sem
+    najprej uveljavil na sedmih straneh in ga v sestavljalniku spregledal —
+    pravilo, ki ga mora vsako klicno mesto uveljaviti samo, je pravilo, ki bo
+    enkrat pozabljeno. Ta test pomete čez vse strani naenkrat, zato nova stran
+    z imenom pade tu, ne šele v pregledu.
+    """
+
+    def _strani(self, odjemalec: TestClient, quiz_id: str) -> dict[str, str]:
+        """Vse strani `/admin`, ki bi ime lahko izrisale."""
+        strani = {
+            pot: odjemalec.get(pot).text
+            for pot in (
+                "/admin",
+                "/admin/archive",
+                "/admin/days",
+                "/admin/statistics",
+                "/admin/statistics/subjects/MAT",
+                "/admin/subjects/MAT",
+                f"/admin/materials/{UUID_ENA}",
+                f"/admin/quizzes/{quiz_id}",
+                "/admin/quizzes/new?vstop=nova&subject=MAT",
+            )
+        }
+        strani["/admin/quizzes/preview"] = odjemalec.post(
+            "/admin/quizzes/preview",
+            data={"vstop": "nova", "subject": "MAT", "stevilo": "3", "snov": [UUID_ENA]},
+        ).text
+        return strani
+
+    def test_imena_ni_na_nobeni_strani(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        snov(motor, slike)
+        quiz_id = objavi(odjemalec, motor, [UUID_ENA])
+
+        with_ime = {
+            pot: besedilo
+            for pot, besedilo in self._strani(odjemalec, quiz_id).items()
+            if "Maša" in besedilo
+        }
+
+        assert not with_ime, f"ime otroka se izriše na: {sorted(with_ime)}"
+
+    def test_pri_dveh_otrocih_ime_nikjer_ne_stoji_za_predlogom(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, brat: str
+    ) -> None:
+        """Slovenščina bi za „za Maša" zahtevala tožilnik (`CLAUDE.md` §1b).
+
+        Sklanjanja poljubnega imena ta projekt ne rešuje, zato ime povsod stoji
+        kot **vrednost polja** — za ločilom, nikoli za predlogom.
+        """
+        snov(motor, slike)
+        quiz_id = objavi(odjemalec, motor, [UUID_ENA])
+
+        napacne = {
+            pot: besedilo
+            for pot, besedilo in self._strani(odjemalec, quiz_id).items()
+            if "za Maša" in besedilo or "za Nejc" in besedilo
+        }
+
+        assert not napacne, f"ime stoji za predlogom na: {sorted(napacne)}"
+
+    def test_pri_dveh_otrocih_predogled_pove_naslovljenca(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, brat: str
+    ) -> None:
+        """Varovali zgoraj sta zanikanji; brez te trditve bi ju zadovoljil prazen izris."""
+        snov(motor, slike)
+
+        besedilo = odjemalec.post(
+            "/admin/quizzes/preview",
+            data={
+                "vstop": "nova",
+                "subject": "MAT",
+                "stevilo": "3",
+                "snov": [UUID_ENA],
+                "otrok": brat,
+            },
+        ).text
+
+        assert "Nejc ·" in besedilo
