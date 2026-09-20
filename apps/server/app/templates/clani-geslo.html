@@ -1,3 +1,8 @@
+{# Vmesna stran za ponastavitev gesla. Nastala v V3-R06 za `/admin/family`,
+   od V3-R05 jo uporablja tudi lastnikova stran (`/admin/system`) — naslov
+   dejanja in pot nazaj prideta iz konteksta (`pot_dejanja`, `pot_nazaj`).
+   Dve kopiji iste potrditvene strani bi se razšli natanko v opozorilu, ki je
+   edini razlog, da stran obstaja (`docs/odlocitve/ADR-044`). #}
 {% extends "osnova.html" %}
 
 {% block naslov %}Ponastaviti geslo?{% endblock %}
@@ -29,7 +34,7 @@
     Geslo si zapomni ti in ga povej lastniku računa — nikjer se ne pokaže več.
   </p>
 
-  <form method="post" action="/admin/family/members/{{ clan.id }}/password" class="prijava">
+  <form method="post" action="{{ pot_dejanja }}" class="prijava">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label for="geslo">Novo geslo (vsaj {{ najmanj }} znakov)</label>
     <input class="ime" type="password" id="geslo" name="geslo" autocomplete="new-password">
@@ -39,5 +44,5 @@
     <button class="gumb" type="submit">Da, ponastavi geslo</button>
   </form>
 
-  <a class="nazaj" href="/admin/family">← Ne, vrni se</a>
+  <a class="nazaj" href="{{ pot_nazaj }}">← Ne, vrni se</a>
 {% endblock %}

@@ -1,0 +1,96 @@
+{# Ena družina, kot jo vidi lastnik sistema (V3-R05).
+
+   Starši poimensko, otroci **samo kot število** (`docs/odlocitve/ADR-044` B):
+   otroka ureja njegov starš (`V3-R06`) in lastnik nad njim nima nobenega
+   dejanja, zato njegovega imena ta stran ne pozna.
+
+   Vsebine družine tu ni in je ni mogoče dodati po nesreči — nobena pot tega
+   usmerjevalnika je ne bere. #}
+{% extends "osnova.html" %}
+
+{% block naslov %}{{ druzina.ime }}{% endblock %}
+
+{% block vsebina %}
+  <h1>{{ druzina.ime }}</h1>
+  <p class="pod">
+    {{ druzina.clanov_opis }} ({{ druzina.starsev_opis }}, {{ druzina.otrok_opis }})
+    &middot; nastala {{ druzina.nastala }} &middot; {{ druzina.stanje }}
+    {%- if druzina.moja %} &middot; tvoja družina{% endif %}
+  </p>
+
+  {% if not druzina.aktivna %}
+    <p class="opozorilo">
+      Ta družina je deaktivirana: nihče od njenih članov se ne more prijaviti,
+      ne na tej strani ne v aplikaciji, in njene slike ne gredo v obdelavo.
+      <strong>Nič ni izbrisano</strong> — vse se vrne, ko jo aktiviraš.
+    </p>
+  {% endif %}
+
+  <h2>Starši</h2>
+  <div class="tabela-ovoj">
+    <table class="tabela">
+      <thead>
+        <tr>
+          <th>Ime</th>
+          <th>Prijava</th>
+          <th>Stanje</th>
+          <th>Dejanja</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for stars in starsi %}
+          <tr class="{{ '' if stars.aktiven else 'prazen' }}">
+            <td>
+              {{ stars.ime }}
+              {% if stars.jaz %}<span class="stanje">— to si ti</span>{% endif %}
+              {% if stars.lastnik_sistema %}<span class="stanje">— lastnik sistema</span>{% endif %}
+            </td>
+            <td>{{ stars.identifikator }}</td>
+            <td>
+              {{ stars.stanje }}
+              {% if stars.brez_gesla %}<span class="stanje">— geslo ni nastavljeno</span>{% endif %}
+            </td>
+            <td class="zaporedje">
+              {% if stars.sme_geslo %}
+                <span><a href="{{ predpona }}/families/{{ druzina.id }}/parents/{{ stars.id }}/password">Ponastavi geslo</a></span>
+              {% endif %}
+              {% if stars.sme_deaktivacijo %}
+                <span><a href="{{ predpona }}/families/{{ druzina.id }}/parents/{{ stars.id }}/deactivate">Deaktiviraj</a></span>
+              {% endif %}
+              {% if stars.sme_aktivacijo %}
+                <span><a href="{{ predpona }}/families/{{ druzina.id }}/parents/{{ stars.id }}/activate">Aktiviraj znova</a></span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <p class="drobno">
+    Otroke te družine ureja njen starš na svoji strani — njihovih imen tu ni in
+    dejanj nad njimi tudi ne.
+  </p>
+
+  <section class="izid">
+    <h2>Družina</h2>
+    {% if druzina.sme_deaktivacijo %}
+      <p>
+        <a href="{{ predpona }}/families/{{ druzina.id }}/deactivate">Deaktiviraj družino</a>
+        — nihče se ne bo mogel prijaviti, podatki pa ostanejo.
+      </p>
+    {% elif druzina.sme_aktivacijo %}
+      <p>
+        <a href="{{ predpona }}/families/{{ druzina.id }}/activate">Aktiviraj družino znova</a>
+        — člani se bodo spet lahko prijavili, z istimi gesli kot prej.
+      </p>
+    {% else %}
+      <p class="drobno">
+        To je tvoja družina in je ni mogoče deaktivirati: na njej stoji račun
+        lastnika sistema, s katerim urejaš vse ostale.
+      </p>
+    {% endif %}
+  </section>
+
+  <a class="nazaj" href="{{ predpona }}">← Nazaj na družine</a>
+{% endblock %}

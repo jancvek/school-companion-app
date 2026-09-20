@@ -22,6 +22,11 @@ VPRASANJA: Oblike = ("vprašanje", "vprašanji", "vprašanja", "vprašanj")
 SNOVI: Oblike = ("snov", "snovi", "snovi", "snovi")
 POSKUSI: Oblike = ("poskus", "poskusa", "poskusi", "poskusov")
 CLANI: Oblike = ("član", "člana", "člani", "članov")
+DRUZINE: Oblike = ("družina", "družini", "družine", "družin")
+STARSI: Oblike = ("starš", "starša", "starši", "staršev")
+#: Pri tem samostalniku sta prva in četrta oblika enaki — *1 otrok, 5 otrok* —
+#: in to je pravilno, enako kot pri `SNOVI`.
+OTROCI: Oblike = ("otrok", "otroka", "otroci", "otrok")
 
 
 def stevilo_z_besedo(koliko: int, oblike: Oblike) -> str:

@@ -316,6 +316,10 @@ def _stran_gesla(
         "clani-geslo.html",
         {
             "clan": _pogled(clan, seja=seja, aktivnih_starsev=repo.aktivnih_starsev()),
+            # Predlogo od V3-R05 deli z lastnikovo stranjo, zato naslov dejanja
+            # ni vpisan vanjo (`docs/odlocitve/ADR-044`).
+            "pot_dejanja": f"{PREDPONA}/members/{clan.user_id}/password",
+            "pot_nazaj": PREDPONA,
             "napaka": napaka,
             "najmanj": prijava.NAJKRAJSE_GESLO.get(
                 clan.role, prijava.NAJKRAJSE_GESLO[VLOGA_STARS]
@@ -447,6 +451,11 @@ def _stran_stanja(
         "clani-stanje.html",
         {
             "clan": _pogled(clan, seja=seja, aktivnih_starsev=repo.aktivnih_starsev()),
+            "pot_dejanja": (
+                f"{PREDPONA}/members/{clan.user_id}/"
+                f"{'activate' if aktiviramo else 'deactivate'}"
+            ),
+            "pot_nazaj": PREDPONA,
             "aktiviramo": aktiviramo,
         },
     )

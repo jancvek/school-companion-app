@@ -135,6 +135,20 @@
     </p>
   </section>
 
+  {# Samo za lastnika sistema (V3-R05). Pogojni izris ni varovalo — to je
+     `zahtevaj_lastnika_sistema` na usmerjevalniku —, ampak vljudnost: povezava
+     na stran, ki je zate 404, je povabilo v prazno. Zastavica pride iz seje,
+     torej iz istega vira kot zavrnitev (`docs/odlocitve/ADR-044` G). #}
+  {% if prijava and prijava.is_system_owner %}
+    <section class="izid">
+      <h2>Sistem</h2>
+      <p>
+        <a href="/admin/system">Družine</a> — odpri novo družino in njenega
+        prvega starša, ponastavi mu geslo, deaktiviraj starša ali celo družino.
+      </p>
+    </section>
+  {% endif %}
+
   {# Pod kvizi iz istega razloga kot kvizi pod predmeti — in besedilo brez kod
      predmetov (V2-R04). #}
   <section class="izid">
