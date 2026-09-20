@@ -74,8 +74,9 @@
          Arhivirane snovi in snovi v obdelavi obrazec nima: tam ne bi naredil
          ničesar (`ADR-040` C1, `ADR-011`). Isti pogoj nosi tudi pot. #}
       {% if snov.premik_mozen %}
-        {# Odprta značka obrazca je v eni vrstici in skrito polje takoj za njo:
-           varovalo `TestCsrfPodAdminom` bere vrstico pod `method="post"`. #}
+        {# Odprta značka obrazca je v eni sami vrstici in skrito polje s CSRF
+           žetonom takoj za njo: varovalo `TestCsrfPodAdminom` bere vrstico,
+           ki sledi začetku obrazca, in prelomljena značka bi ga ušla. #}
         <form class="vstopi" method="post" action="/admin/materials/{{ snov.id }}/subject">
           <input type="hidden" name="csrf" value="{{ csrf }}">
           <label>
