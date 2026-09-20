@@ -18,37 +18,45 @@ obdelavi izrecno predvideva.
 
 **Obdelava teče sinhrono** (`ADR-041` B): starš stoji pred zaslonom in izid je
 obrazec, ki ga mora tako ali tako popraviti. Cena je čakanje do
-`openai_timeout_seconds`; endpoint je zato `def` in ne `async def`, da ga
-Starlette požene v pomožni niti in strežnik medtem streže naprej.
+`openai_timeout_seconds`; klic gre zato skozi `asyncio.to_thread`, kot obdelava
+snovi, da strežnik medtem streže naprej.
 
 **Nepotrjen predlog ne obstaja kot vrstica.** Predlog živi v izrisani mreži in
 v bazo pride šele potrditev, zato kriterija „nepotrjen predlog ne sproži
 manjka" ni treba uveljavljati — uveljavlja ga odsotnost vrstice.
 """
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Annotated, Any
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, Request
 from fastapi.templating import Jinja2Templates
+from starlette.datastructures import UploadFile
 from starlette.responses import RedirectResponse, Response
 
+from app import prijava
 from app.casi import IMENA_DNI
-from app.db import ClaniRepository, ScheduleRepository
+from app.db import ClaniRepository, ScheduleRepository, SejaUporabnika
 from app.dependencies import (
     daj_klicalca_urnika,
     daj_nastavitve,
+    daj_prijavo,
     daj_repozitorij_clanov,
     daj_repozitorij_urnikov,
 )
 from app.otroci import PARAMETER as PARAMETER_OTROKA
 from app.otroci import IzbiraOtroka, izberi_otroka
+
+# Besedilo o poteklem obrazcu je **isto** kot v plasti: ista stvar se ne
+# sme brati kot dve (`docs/odlocitve/ADR-043`).
+from app.security import SPOROCILO_BREZ_CSRF
 from app.settings import Settings
 from app.storage import BereBajte, mapa_urnikov, pobrisi_sliko, shrani_sliko_urnika
-from app.strani import daj_predloge, neveljavna_zahteva, ni_najdeno
+from app.strani import daj_predloge, neveljavna_zahteva, ni_izvedeno, ni_najdeno
 from app.subjects import PREDMETI
 from app.urnik import DNEVI, Urnik, Vnos
 from app.vision import KlicalecUrnika, NapakaObdelave, PredlogUrnika
@@ -61,6 +69,13 @@ dnevnik = logging.getLogger(__name__)
 PREDPONA = "/admin/schedule"
 
 router = APIRouter(prefix=PREDPONA)
+
+#: Pot, na kateri se naloži slika urnika.
+#:
+#: Konstanta in ne niz v `main.py`: ta pot je v `POTI_S_SVOJIM_CSRF`, in dve
+#: ročno prepisani poti, ki se razideta, bi pomenili bodisi 403 pri vsakem
+#: nalaganju bodisi pot brez preverbe žetona (`docs/odlocitve/ADR-043`).
+POT_PREDLOGA = f"{PREDPONA}/proposal"
 
 #: Isto besedilo kot drugod za tujega in za neobstoječega otroka: obstoj tujega
 #: računa ni podatek za starša (`ADR-038`, `ADR-039` B).
@@ -120,6 +135,20 @@ CELICA_NI = ""
 CELICA_SLIKA = "da"
 CELICA_BREZ_SLIKE = "brez"
 CELICE = (CELICA_NI, CELICA_SLIKA, CELICA_BREZ_SLIKE)
+
+
+def _zeton_velja(obrazec: Any, seja: SejaUporabnika) -> bool:
+    """Ali oddani obrazec nosi CSRF žeton te seje.
+
+    **To preverbo dela ta pot sama** (`docs/odlocitve/ADR-043`): `SejaMiddleware`
+    telesa te poti ne bere, ker nosi datoteko v `multipart/form-data`, ki ga
+    plast ne prizna, in je večja od meje, ki jo plast sme zadržati v
+    pomnilniku. Seja je bila zahtevana že v plasti; tu manjka samo žeton.
+
+    Primerjava gre skozi `prijava.zetona_se_ujemata` in ne skozi `==`: čas
+    primerjave je tam konstanten, manjkajoč žeton pa ne velja nikoli.
+    """
+    return prijava.zetona_se_ujemata(_polje(obrazec, prijava.POLJE_CSRF), seja.csrf_token)
 
 
 class NeveljavenObrazec(Exception):
@@ -298,6 +327,7 @@ def _kontekst(
     vrstice: list[Vrstica],
     *,
     ima_urnik: bool,
+    ima_klicalca: bool,
     slika_id: str | None = None,
     sporocilo: str | None = None,
     napaka: str | None = None,
@@ -322,7 +352,9 @@ def _kontekst(
         "otroci": [{"id": kdo.user_id, "ime": kdo.display_name} for kdo in izbira.vsi],
         "izbrani_otrok": izbira.izbrani.user_id if izbira.izbrani is not None else None,
         "najvecja_slika_mb": NAJVECJA_SLIKA // (1024 * 1024),
-        "ima_klicalca": True,
+        # Brez kljuca za OpenAI obrazca za nalaganje ni; mreza pa ostane
+        # urejljiva (`ADR-041` E).
+        "ima_klicalca": ima_klicalca,
     }
 
 
@@ -354,8 +386,12 @@ def stran_urnika(
     veljaven = (
         urniki.urnik(izbira.izbrani.user_id) if izbira.izbrani is not None else None
     )
-    kontekst = _kontekst(izbira, mreza(veljaven), ima_urnik=veljaven is not None)
-    kontekst["ima_klicalca"] = klicalec is not None
+    kontekst = _kontekst(
+        izbira,
+        mreza(veljaven),
+        ima_urnik=veljaven is not None,
+        ima_klicalca=klicalec is not None,
+    )
     if izbira.izbrani is None:
         kontekst["napaka"] = SPOROCILO_BREZ_OTROKA
     elif klicalec is None:
@@ -365,15 +401,14 @@ def stran_urnika(
 
 
 @router.post("/proposal")
-def predlagaj_urnik(
+async def predlagaj_urnik(
     request: Request,
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     urniki: Annotated[ScheduleRepository, Depends(daj_repozitorij_urnikov)],
     clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     klicalec: Annotated[KlicalecUrnika | None, Depends(daj_klicalca_urnika)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
-    slika: Annotated[UploadFile, File()],
-    otrok: Annotated[str | None, Form()] = None,
+    seja: Annotated[SejaUporabnika, Depends(daj_prijavo)],
 ) -> Response:
     """Prebere sliko urnika in izriše **predlagano** mrežo. V bazo ne piše nič.
 
@@ -381,7 +416,27 @@ def predlagaj_urnik(
     (`ADR-042`), ker klicalec bere s poti. Ob neuspelem klicu se pobriše —
     datoteka, na katero ne bo kazala nobena vrstica in je nihče ne bo potrdil,
     je sirota, ki jo tu še znamo pospraviti.
+
+    **CSRF preveri ta pot sama** (`ADR-043`), preden se karkoli zapiše na disk
+    ali pošlje modelu. Obrazec se zato bere tu in ne skozi deklarirane
+    parametre: klic modela bi sicer šel pred preverbo žetona.
+
+    `async def` kljub sinhronemu klicu modela: telo je treba prebrati. Klicalec
+    sam teče v pomožni niti (`asyncio.to_thread`), da zahteva, ki traja do
+    `openai_timeout_seconds`, ne ustavi strežnika.
     """
+    obrazec = await request.form()
+    if not _zeton_velja(obrazec, seja):
+        return ni_izvedeno(predloge, request, SPOROCILO_BREZ_CSRF)
+
+    # `UploadFile` iz `starlette.datastructures` in **ne** iz `fastapi`:
+    # `request.form()` vrne Starlettejevega, FastAPI pa svojega iz njega
+    # izpelje. `isinstance` proti izpeljanki bi bil zato vedno `False` in vsako
+    # nalaganje bi se končalo s „slike ni bilo".
+    nalozeno = obrazec.get("slika")
+    slika = nalozeno if isinstance(nalozeno, UploadFile) else None
+    otrok = _polje(obrazec, PARAMETER_OTROKA)
+
     izbira = _izberi(clani, otrok)
     if izbira is None:
         return ni_najdeno(predloge, request, SPOROCILO_NEZNAN_OTROK)
@@ -392,14 +447,21 @@ def predlagaj_urnik(
 
     def s_sporocilom(napaka: str) -> Response:
         """Mreža, kakršna je bila, z razlago. Urnik ostane nedotaknjen."""
-        kontekst = _kontekst(izbira, mreza(veljaven), ima_urnik=veljaven is not None)
-        kontekst["napaka"] = napaka
-        kontekst["ima_klicalca"] = klicalec is not None
-        return predloge.TemplateResponse(request, "urnik.html", kontekst)
+        return predloge.TemplateResponse(
+            request,
+            "urnik.html",
+            _kontekst(
+                izbira,
+                mreza(veljaven),
+                ima_urnik=veljaven is not None,
+                ima_klicalca=klicalec is not None,
+                napaka=napaka,
+            ),
+        )
 
     if klicalec is None:
         return s_sporocilom(SPOROCILO_BREZ_KLJUCA)
-    if not slika.filename:
+    if slika is None or not slika.filename:
         return s_sporocilom(SPOROCILO_PRAZNA_SLIKA)
     if slika.content_type not in VRSTE_SLIK:
         return s_sporocilom(SPOROCILO_NI_SLIKA)
@@ -416,7 +478,10 @@ def predlagaj_urnik(
         return s_sporocilom(prevelika.sporocilo)
 
     try:
-        predlog = klicalec(pot)
+        # V pomožno nit, kot obdelava snovi (`app/obdelava.py`): odjemalec
+        # OpenAI je sinhron in klic traja sekunde do minut. Brez tega bi ena
+        # oddaja urnika ustavila celoten strežnik za ves ta čas.
+        predlog = await asyncio.to_thread(klicalec, pot)
     except NapakaObdelave as napaka:
         # Sled gre v dnevnik in ne v bazo (`ADR-042`); staršu povemo, kaj naj
         # naredi, in ne surovega besedila napake.
@@ -432,6 +497,7 @@ def predlagaj_urnik(
         izbira,
         mreza_iz_predloga(predlog),
         ima_urnik=veljaven is not None,
+        ima_klicalca=True,
         slika_id=slika_id,
         sporocilo=(
             "Urnik je prebran. Preveri mrežo, popravi, kar je narobe, in potrdi."

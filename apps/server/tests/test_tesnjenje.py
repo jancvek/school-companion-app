@@ -19,6 +19,7 @@ to mogoče, da tesnjenje velja za stanje, kakršno nastane v produkciji.
 """
 
 import inspect
+import io
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -40,6 +41,7 @@ from app.db import (
     KviziRepository,
     MaterialsRepository,
     PoskusZaZapis,
+    ScheduleRepository,
     StatistikaRepository,
 )
 from app.models import (
@@ -53,8 +55,10 @@ from app.models import (
     Question,
     QuestionAttempt,
     Quiz,
+    Schedule,
     User,
 )
+from app.urnik import Vnos
 from tests.conftest import (
     CVEK_ID,
     OTROK_ID,
@@ -291,6 +295,7 @@ def posnetek_druzine(
     ne glede na to, kaj se v njej zgodi.
     """
     kvizi = Quiz.__table__
+    urniki = Schedule.__table__
     uporabniki = User.__table__
     vrstice: list[tuple[str, ...]] = []
     with Session(motor) as seja:
@@ -305,6 +310,15 @@ def posnetek_druzine(
                     select(tabela)
                     .join(kvizi, kvizi.c.id == tabela.c.quiz_id)
                     .where(kvizi.c.family_id == family_id)
+                )
+            elif tabela.name == "schedule_entries":
+                # Urnik (V3-R09): vnos brez urnika ne obstaja, zato je njegova
+                # družina družina urnika — ista izpeljava kot pri `quiz_items`
+                # (`ADR-029` C). `schedules` stolpec ima in pade v prvo vejo.
+                poizvedba = (
+                    select(tabela)
+                    .join(urniki, urniki.c.id == tabela.c.schedule_id)
+                    .where(urniki.c.family_id == family_id)
                 )
             elif tabela.name in ("credentials", "sessions"):
                 # Identiteta (V3-R03): družina je od uporabnika, ki mu vrstica
@@ -556,6 +570,32 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
         NI,
         (a.otrok_id,),
     ),
+    # Urnik (V3-R09). Vse tri poti imenujejo **tujega** otroka: urnik je last
+    # otroka, zato je to tu ista vrsta sledi kot tuj `material_id` drugje.
+    ("GET", "/admin/schedule"): lambda o, a: (
+        o.get(f"/admin/schedule?otrok={a.otrok_id}"), NI, (a.otrok_id,),
+    ),
+    ("POST", "/admin/schedule"): lambda o, a: (
+        o.post(
+            "/admin/schedule",
+            data={"otrok": a.otrok_id, "c0_MAT": "da"},
+            follow_redirects=False,
+        ),
+        NI,
+        (a.otrok_id,),
+    ),
+    # Edina pot pod `/admin`, ki pošilja `multipart` in CSRF preveri sama
+    # (`ADR-043`). Žeton gre zato v `data` in ne prek `PrijavljenOdjemalec`,
+    # ki ga doda samo običajnim obrazcem.
+    ("POST", "/admin/schedule/proposal"): lambda o, a: (
+        o.post(
+            "/admin/schedule/proposal",
+            data={"csrf": o.csrf, "otrok": a.otrok_id},
+            files={"slika": ("urnik.png", io.BytesIO(b"PNG"), "image/png")},
+        ),
+        NI,
+        (a.otrok_id,),
+    ),
     ("GET", "/admin/statistics"): lambda o, a: (o.get("/admin/statistics?leto=vse"), OK, ()),
     ("GET", "/admin/statistics/subjects/{koda}"): lambda o, a: (
         o.get(f"/admin/statistics/subjects/{a.subject}?leto=vse"),
@@ -696,6 +736,21 @@ def _poskus(postavka: str) -> PoskusZaZapis:
 Preverba = Callable[[Session, Druzina, Druzina], bool]
 
 PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
+    # ScheduleRepository (V3-R09). Urnik je last otroka, zato je tu sled
+    # **tuj otrok**: potrditev zanj ne sme zapisati ničesar, branje pa ne sme
+    # vrniti ničesar — tudi kadar urnik v resnici obstaja, le v drugi družini.
+    ("ScheduleRepository", "potrdi"): lambda s, a, b: (
+        ScheduleRepository(s, b.family_id).potrdi(
+            a.otrok_id, [Vnos(dan=0, predmet="MAT")], None
+        )
+        is None
+    ),
+    ("ScheduleRepository", "urnik"): lambda s, a, b: (
+        ScheduleRepository(s, b.family_id).urnik(a.otrok_id) is None
+    ),
+    ("ScheduleRepository", "veljaven"): lambda s, a, b: (
+        ScheduleRepository(s, b.family_id).veljaven(a.otrok_id) is None
+    ),
     # MaterialsRepository
     ("MaterialsRepository", "arhiviraj"): lambda s, a, b: _m(s, b).arhiviraj(a.akt) is None,
     ("MaterialsRepository", "nazadnje_prejeto"): lambda s, a, b: (
@@ -863,7 +918,13 @@ def test_vsaka_javna_metoda_repozitorija_ima_primer() -> None:
     """Varovalo: nova javna metoda brez primera tu podre zbirko."""
     javne = {
         (razred.__name__, ime)
-        for razred in (MaterialsRepository, KviziRepository, StatistikaRepository, ClaniRepository)
+        for razred in (
+            MaterialsRepository,
+            KviziRepository,
+            StatistikaRepository,
+            ClaniRepository,
+            ScheduleRepository,
+        )
         for ime, clan in inspect.getmembers(razred)
         if not ime.startswith("_") and callable(clan)
     }

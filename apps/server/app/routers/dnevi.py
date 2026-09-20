@@ -27,11 +27,12 @@ from starlette.responses import Response
 
 from app.besedilo import SLIKE, stevilo_z_besedo
 from app.casi import cas, danes, datum_dneva, dnevi_od_do, ura, v_domacem
-from app.db import ClaniRepository, MaterialsRepository
+from app.db import ClaniRepository, MaterialsRepository, ScheduleRepository
 from app.dependencies import (
     daj_nastavitve,
     daj_repozitorij,
     daj_repozitorij_clanov,
+    daj_repozitorij_urnikov,
 )
 from app.models import Material
 from app.otroci import PARAMETER as PARAMETER_OTROKA
@@ -40,6 +41,7 @@ from app.settings import Settings
 from app.storage import je_znotraj, mapa_druzine, velikost_slike
 from app.strani import daj_predloge, neveljavna_zahteva, ni_najdeno
 from app.subjects import PREDMETI, oznaka_predmeta
+from app.urnik import Urnik, manjkajoci_predmeti
 
 #: Predpona te strani. Pod `/admin`, torej brez ključa (`ADR-006`).
 PREDPONA = "/admin/days"
@@ -181,7 +183,10 @@ def _pogled_slike(material: Material, mapa_slik: Path) -> dict[str, Any]:
 
 
 def razvrsti_po_dnevih(
-    dnevi: list[date], snovi: list[Material], mapa_slik: Path
+    dnevi: list[date],
+    snovi: list[Material],
+    mapa_slik: Path,
+    urnik: Urnik | None = None,
 ) -> list[dict[str, Any]]:
     """Slike, razvrščene po dnevu in znotraj dneva po predmetu.
 
@@ -200,6 +205,13 @@ def razvrsti_po_dnevih(
       (`docs/odlocitve/ADR-003`).
 
     Predmet brez slik tistega dne se ne izpiše; dan brez slik se izpiše prazen.
+
+    **Manjki** (V3-R09) so četrti izid in ne četrti vrstni red: za vsak dan
+    povedo, katerih predmetov z urnika tisti dan ni na nobeni nearhivirani
+    sliki. Računajo se tu in ne v poizvedbi, ker potrebujejo prav to
+    razvrstitev po **lokalnem** dnevu, ki nastane šele v Pythonu. `urnik` je
+    `None` za otroka brez potrjenega urnika — takrat je stran natanko takna
+    kot pred to zahtevo.
     """
     po_dnevih: dict[date, dict[str, list[Material]]] = {dan: {} for dan in dnevi}
     for snov in snovi:
@@ -237,6 +249,10 @@ def razvrsti_po_dnevih(
                 "iso": dan.isoformat(),
                 "koliko_opis": stevilo_z_besedo(koliko, SLIKE),
                 "predmeti": predmeti,
+                # Prazna čopica pomeni „nič ne manjka" **in** „dan je prazen"
+                # **in** „urnika ni"; predloga med njimi ne loči, ker vsi trije
+                # pomenijo isto: vrstice z manjki ni (`ADR-028` E2).
+                "manjki": manjkajoci_predmeti(urnik, dan.weekday(), skupine.keys()),
             }
         )
 
@@ -262,6 +278,7 @@ def pregled_po_dnevih(
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
     clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
+    urniki: Annotated[ScheduleRepository, Depends(daj_repozitorij_urnikov)],
     dan: str | None = None,
     obdobje: str | None = None,
     otrok: str | None = None,
@@ -288,6 +305,11 @@ def pregled_po_dnevih(
         else []
     )
     prejeto = repozitorij.nazadnje_prejeto()
+    # Veljaven urnik **izbranega** otroka, nikoli bratov: manjki so
+    # pričakovanje o tem otroku (kriterij `V3-R09`).
+    urnik = (
+        urniki.urnik(izbira.izbrani.user_id) if izbira.izbrani is not None else None
+    )
 
     return predloge.TemplateResponse(
         request,
@@ -316,7 +338,10 @@ def pregled_po_dnevih(
             "izbrani_dan": izbrano.zadnji.isoformat(),
             "vceraj": (zdaj - timedelta(days=1)).isoformat(),
             "dnevi": razvrsti_po_dnevih(
-                izbrano.dnevi, snovi, mapa_druzine(nastavitve.images_dir, repozitorij.family_id)
+                izbrano.dnevi,
+                snovi,
+                mapa_druzine(nastavitve.images_dir, repozitorij.family_id),
+                urnik,
             ),
         },
     )

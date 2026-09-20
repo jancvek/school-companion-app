@@ -1225,6 +1225,8 @@ class TestPakiranje:
             "clani.html",
             "clani-geslo.html",
             "clani-stanje.html",
+            # V3-R09.
+            "urnik.html",
         }
 
 

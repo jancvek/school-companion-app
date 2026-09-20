@@ -70,18 +70,19 @@ logika testljiva brez naprave.
 | Datoteka | Odgovornost |
 |---|---|
 | `app/main.py` | tovarna aplikacije, življenjski cikel (zagon in ustavitev obdelave) |
-| `app/security.py` | vmesni plasti ob vhodu: `ZetonMiddleware` (telefon, `Authorization: Bearer`, V3-R04) in `SejaMiddleware` (seja in CSRF pod `/admin`, V3-R03) |
+| `app/security.py` | vmesni plasti ob vhodu: `ZetonMiddleware` (telefon, `Authorization: Bearer`, V3-R04) in `SejaMiddleware` (seja in CSRF pod `/admin`, V3-R03; `poti_s_svojim_csrf` od V3-R09) |
 | `app/routers/materials.py` | `POST /materials` — prevzem slike s telefona |
 | `app/routers/admin.py` | operaterska stran: predmeti, snov, arhiv, brisanje |
 | `app/routers/kvizi.py` | sestavljalnik kvizov pod `/admin/quizzes` (V2-R01); rezultat rešenega kviza in stran za tisk (V2-R03) |
 | `app/routers/resevanje.py` | poti telefona za kvize: `GET /quizzes/pending`, `POST /quiz-attempts` (V2-R02) |
 | `app/routers/statistika.py` | statistika čez kvize pod `/admin/statistics` (V2-R04) |
-| `app/routers/dnevi.py` | pregled slik po obdobju in predmetih pod `/admin/days` (V2-R07) |
+| `app/routers/dnevi.py` | pregled slik po obdobju in predmetih pod `/admin/days` (V2-R07); vrstica z manjki (V3-R09) |
+| `app/routers/urnik.py` | urnik otroka pod `/admin/schedule`: mreža, predlog s slike, potrditev (V3-R09) |
 | `app/routers/clani.py` | člani družine pod `/admin/family`: seznam, dodajanje, ponastavitev gesla, deaktivacija in aktivacija (V3-R06) |
-| `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository`, `StatistikaRepository` (V2-R04, samo bere) in `ClaniRepository` (V3-R06) — vsak z obvezno družino (V3-R01) — ter `DruzineRepository` in `PrijavaRepository` (V3-R03), edina brez družine; edina pot do baze |
-| `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03); `child_id` na snovi, kvizu in poskusu (V3-R07) |
-| `app/storage.py` | zapis, meja mape in brisanje slik na disku; mapa družine (V3-R01) |
-| `app/vision.py` | **edini modul, ki uvaža `openai`**: prompt, shema odgovora, klic |
+| `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository`, `StatistikaRepository` (V2-R04, samo bere), `ClaniRepository` (V3-R06) in `ScheduleRepository` (V3-R09) — vsak z obvezno družino (V3-R01) — ter `DruzineRepository` in `PrijavaRepository` (V3-R03), edina brez družine; edina pot do baze |
+| `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03); `child_id` na snovi, kvizu in poskusu (V3-R07); `schedules` in `schedule_entries` (V3-R09) |
+| `app/storage.py` | zapis, meja mape in brisanje slik na disku; mapa družine (V3-R01); podmapa `urniki/` (V3-R09) |
+| `app/vision.py` | **edini modul, ki uvaža `openai`**: prompta, shemi odgovorov, klic. Dva klicalca — snov (V1-R03) in urnik (V3-R09) — nad skupnim `_izvedi_klic` |
 | `app/obdelava.py` | kaj se zgodi z enim zapisom: prevzem, klic, zapis izida. Sinhron |
 | `app/worker.py` | časovnik: obhodi v presledkih, zagon in ustavitev. Brez poslovne logike |
 | `app/statistika.py` | pravila štetja statistike: razporeditev, izpeljava pravilnosti, razvrstitev, meseci (V2-R04). Brez FastAPI in brez seje |
@@ -91,6 +92,7 @@ logika testljiva brez naprave.
 | `app/routers/vstop.py` | prijava in odjava: `GET/POST /admin/login`, `POST /admin/logout` (V3-R03); `POST /auth/login` in `POST /auth/logout` za telefon (V3-R04) |
 | `app/settings.py` | nastavitve iz okolja |
 | `app/dependencies.py` | odvisnosti poti iz `app.state`; družina iz seje — ene same, za obe strani (`daj_druzino`, V3-R04; začasne `daj_druzino_telefona` ni več) |
+| `app/urnik.py` | pravila urnika in manjkov: kateri predmeti so kateri dan, česa tisti dan ni na sliki (V3-R09). Brez FastAPI in brez baze |
 | `app/otroci.py` | izbira otroka v pogledih, ki so ločeni po otroku: privzetek, 404 za tujega, kdaj se izbirnik izriše (V3-R07). Brez FastAPI in brez seje |
 | `app/subjects.py` | predmeti, slovenske oznake stanj in oznake ocen (`OZNAKE_OCEN`, tu od V2-R04) |
 | `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03); šolsko leto in meseci (V2-R04); današnji dan, meje poljubnega obdobja in ura brez datuma (V2-R07) |
@@ -668,7 +670,10 @@ vprašanj. Razliko pokaže oznaka „obdelano — slika ni berljiva".
 ni, ne plačamo. Meja je mapa družine, ista kot pri streženju slike na admin
 strani.
 
-Klic gre skozi `app/vision.py` in nikjer drugje (ADR-008). Slika potuje kot
+Klic gre skozi `app/vision.py` in nikjer drugje (ADR-008). **Od V3-R09 ga
+sprožita dve mesti**: ta zanka za snov in pot `/admin/schedule/proposal` za
+urnik, ki teče sinhrono ob zahtevi (`ADR-041` B). Modul ostaja edini uvoznik
+`openai`; „klic modela teče v ozadju“ pa ne drži več za oboje. Slika potuje kot
 base64 v `data:` URL, ker so slike dosegljive samo pod `/admin`, za geslom, in
 OpenAI do njih nima dostopa. Odgovor je strukturiran po shemi (`json_schema`,
 `strict: true`), a gre vseeno skozi preverbo s Pydantic: `strict` je obljuba
@@ -733,6 +738,9 @@ nje in to preverja `TestBrezJavaScripta`, ki izvzame samo `snov.html`.
 | `/admin/statistics` | GET | statistika čez kvize po predmetih; okno `?leto=2026` ali `?leto=vse` (V2-R04); otrok `?otrok=<id>` (V3-R07) |
 | `/admin/statistics/subjects/{koda}` | GET | statistika predmeta: po mesecih, snovi, vprašanja od najtežjega (V2-R04); `?otrok=` (V3-R07) |
 | `/admin/days` | GET | slike **enega otroka** po dnevu in predmetu; `?dan=YYYY-MM-DD`, `?obdobje=dan\|teden` (V2-R07), `?otrok=<id>` (V3-R07) |
+| `/admin/schedule` | GET | mreža urnika izbranega otroka; `?otrok=<id>` (V3-R09) |
+| `/admin/schedule/proposal` | POST | naloži sliko urnika, pokliče model, izriše **predlagano** mrežo; nič ne zapiše v bazo (V3-R09) |
+| `/admin/schedule` | POST | potrdi mrežo; prejšnji urnik upokoji (V3-R09) |
 | `/admin/family` | GET | člani družine z vlogo in stanjem, obrazca za dodajanje (V3-R06) |
 | `/admin/family/children` | POST | doda otroka: prikazno ime, uporabniško ime, začetno geslo (V3-R06) |
 | `/admin/family/parents` | POST | doda starša: prikazno ime, e-naslov, začetno geslo (V3-R06) |
@@ -797,6 +805,11 @@ Odločitve so v `ADR-027` (model) in `ADR-035` (izvedba).
   zapiše se z `urlencode` (sicer se cilj z dvema parametroma odreže pri `&`) in
   ga dobi **samo varna metoda** — `POST` brez seje pelje na `/admin`, ker bi
   vrnitev nanj z `GET` dala 404.
+- **Ena pot žeton preveri sama** (`ADR-043`): `POST /admin/schedule/proposal`
+  nosi datoteko v `multipart/form-data`, ki ga `_csrf_iz_telesa` ne prizna, in
+  telo, večje od `NAJVECJE_TELO_OBRAZCA`. Plast zato zanjo telesa ne bere;
+  **sejo zahteva enako kot povsod**. Nabor `poti_s_svojim_csrf` je enočlanski
+  in to varuje test — druga taka pot naj vanj ne zaide tiho.
 - **Žeton seje** je `secrets.token_urlsafe(32)`; v bazi je samo njegova
   SHA-256. Piškotek `seja` je `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`,
   z veljavnostjo 30 dni. **Rok je drseči** in se osveži največ enkrat na uro.
@@ -1105,6 +1118,79 @@ njen odgovor sta ostala nespremenjena.
   v brskalniku.
 - **Fokus v prikazu ni ujet**: tabulator ga lahko odnese na stran za njim.
 - **Vsaka puščica je nova stran** in nov vnos v zgodovini brskalnika.
+
+## Urnik in manjkajoče slike (V3-R09)
+
+**Urnik je množica predmetov na posamezen dan**, brez ur in brez zaporedja, in
+je **last otroka** (`ADR-028`). Pozna ponedeljek do petka (`ADR-041` F);
+izmeničnih tednov ne.
+
+Tabela `schedules` (`id`, `family_id`, `child_id`, `confirmed_at`,
+`replaced_at`, `image_path`) in `schedule_entries` (`id`, `schedule_id`,
+`weekday` 0–4, `subject`, `skip_photo`, enolično po `schedule_id + weekday +
+subject`). Vnos družine nima — izpelje se iz urnika, kot pri `quiz_items`
+(`ADR-029` C). Migracija `0010_urnik` je gol `CREATE TABLE`; `downgrade` obe
+tabeli spusti in **dokončno izgubi vse urnike**, kot `0005_kvizi`.
+
+**Veljaven urnik je en sam na otroka** in ga določa os `replaced_at IS NULL`,
+po vzorcu `archived_at` (`ADR-011`) in `retired_at` (`ADR-015`). Enoličnost
+uveljavlja **ena pot pisanja v eni transakciji** (`ScheduleRepository.potrdi`:
+upokoji prejšnje, vstavi novega) in ne delni indeks — tega bi bilo treba
+zapisati dvakrat, za SQLite in za Postgres. Zamenjava nosi **en trenutek**:
+`replaced_at` starega je enak `confirmed_at` novega, zato razvrstitev med
+njima ne loči in veljavnost stoji izključno na osi.
+
+**Slika urnika ni snov.** Živi v `<images_dir>/<family_id>/urniki/<uuid>.jpg`
+in nikoli v `materials`; iz nje ne nastane nobeno vprašanje. Sicer bi se
+pojavila v izbirniku kvizov, v statistiki in na strani predmeta.
+
+**Pot skozi vmesnik** je dvokoračna in teče v adminu (`ADR-041` A):
+
+1. `POST /admin/schedule/proposal` naloži sliko, jo zapiše na disk in
+   **sinhrono** pokliče model (`asyncio.to_thread`, ker je odjemalec OpenAI
+   sinhron). Izid je izpolnjena mreža; v bazo se ne zapiše nič.
+2. `POST /admin/schedule` potrdi mrežo. Skrito polje nosi `slika_id` in nikoli
+   poti — pot sestavi strežnik.
+
+Slika se zapiše **ob nalaganju in ne ob potrditvi** (`ADR-042`): med korakoma
+je nova zahteva in strežnik med njima ne hrani ničesar, nositi bi jo moral
+brskalnik kot base64. Cena je datoteka brez vrstice, kadar starš nalaganje
+opusti. **Revizijske sledi urnik nima**, za razliko od `materials`: potrjen
+urnik ni odgovor modela, ker ga starš vmes popravi.
+
+**Mreža je urejljiva tudi brez slike** (`ADR-041` E) in je **cela**: kar v njej
+ni označeno, na urniku ne obstaja — potrditev je zamenjava, ne krpanje. Vsaka
+celica je izbirnik s tremi stanji (ni na urniku / se slika / se ne slika); dve
+potrditveni polji bi dopustili četrto, nesmiselno kombinacijo. Skripte stran
+nima (`ADR-024`).
+
+**Model preslika kode sam**: prompt nosi seznam desetih kod, odgovor pa za
+vsako celico `day`, `text` in `subject`. Kar ni ena od desetih kod, je
+**nepreslikana celica** in se izpiše nad mrežo z dobesedno prebranim
+besedilom — nikoli ne izpade molče in nikoli ne pride v potrjen urnik.
+
+**Manjki** na `/admin/days`: za vsak **delno poslikan** dan se naštejejo
+predmeti z urnika tistega dne brez ene same nearhivirane slike tega otroka, v
+vrstnem redu `PREDMETI`. Računajo se ob izrisu (`app/urnik.py`,
+`manjkajoci_predmeti`) in se nikjer ne predračunavajo, zato so pravilni tudi
+takoj po premiku snovi v drug predmet (V3-R10). Tri stvari vrnejo prazno:
+otrok brez urnika, dan brez ene same slike (`ADR-028` E2) in dan, ko je vse
+poslikano. Stanje obdelave in berljivost na manjko ne vplivata; predmet z
+`skip_photo` ga ne javlja nikoli; poslikan predmet zunaj urnika se ne javlja
+in manjka tudi ne zapre.
+
+### Znane omejitve
+
+- **Pregled za nazaj sodi po trenutno veljavnem urniku** (`ADR-028` D2). Po
+  polletni menjavi bo november ocenjen po februarskem urniku.
+- **Arhiviran dan izgleda kot dan s samimi manjki**, ker se arhivirane slike ne
+  štejejo.
+- **Dan pouka brez slik in praznik sta videti enako** — oba brez manjkov.
+- **Današnji dan se obravnava kot vsak drug**: delno poslikan dan opoldne
+  manjke izpiše, čeprav pouk še traja.
+- **Upokojeni urniki in njihove slike rastejo brez meje** in brez vmesnika, ki
+  bi jih pokazal. Pri dveh na leto je to sprejeto.
+- **Zakaj je model kaj prebral narobe, se za nazaj ne da ugotoviti** — sledi ni.
 
 ## Premik slike v drug predmet (V3-R10)
 

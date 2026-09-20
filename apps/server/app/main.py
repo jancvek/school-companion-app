@@ -59,6 +59,14 @@ IZVZETE_PREDPONE = frozenset({"/admin"})
 #: prijaviti. **Odjave tu ni**: ta sejo zahteva kot vsak drug `POST`.
 POTI_BREZ_SEJE = frozenset({prijava.POT_PRIJAVE})
 
+#: Poti, ki CSRF žeton preverijo **same** (`docs/odlocitve/ADR-043`).
+#:
+#: Sejo zahtevajo kot vsaka druga pot pod `/admin`; izpade samo branje telesa v
+#: plasti, ker telo nosi datoteko. Nabor je **enočlanski** in to varuje test:
+#: druga taka pot naj ne zaide sem tiho, ampak naj pretehta možnost A iz
+#: `ADR-043` — da se `multipart` nauči plast sama.
+POTI_S_SVOJIM_CSRF = frozenset({urnik.POT_PREDLOGA})
+
 
 @asynccontextmanager
 async def _zivljenjski_cikel(app: FastAPI) -> AsyncIterator[None]:
@@ -146,7 +154,11 @@ def create_app(
     # (`ZetonMiddleware` izvzame predpono `/admin`, `SejaMiddleware` se ujame
     # samo nanjo), zato se ne prekrivata in nobena zahteva ne prebere seje
     # dvakrat.
-    app.add_middleware(SejaMiddleware, izvzete_poti=POTI_BREZ_SEJE)
+    app.add_middleware(
+        SejaMiddleware,
+        izvzete_poti=POTI_BREZ_SEJE,
+        poti_s_svojim_csrf=POTI_S_SVOJIM_CSRF,
+    )
     app.add_middleware(
         ZetonMiddleware,
         izvzete_poti=IZVZETE_POTI,

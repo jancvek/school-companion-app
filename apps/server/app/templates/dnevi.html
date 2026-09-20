@@ -68,6 +68,15 @@
       <h2>{{ dan.datum }}</h2>
       {% if dan.predmeti %}
         <p class="drobno">{{ dan.koliko_opis }}</p>
+        {# Manjki (V3-R09): predmeti z urnika tega dne brez ene same
+           nearhivirane slike. Izpišejo se samo pri **delno** poslikanem dnevu
+           — pri praznem bi bil vsak praznik in vsak dan počitnic vrstica s
+           petimi manjki in stran bi se nehala brati (`ADR-028` E2). Predmet,
+           ki je poslikan, a ga na urniku ni, se ne javlja: urnik je
+           pričakovanje, ne pravilo. #}
+        {% if dan.manjki %}
+          <p class="manjki">Manjka: {{ dan.manjki | join(", ") }}.</p>
+        {% endif %}
         {% for predmet in dan.predmeti %}
           {# Predmet brez slik tega dne se ne izpiše: pri tednu bi bilo to
              sedemdeset večinoma praznih vrstic. Kaj tisti dan manjka, ve

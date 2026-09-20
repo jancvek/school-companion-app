@@ -189,6 +189,11 @@ class SejaMiddleware:
        Zato ta plast telo bere — drugače CSRF brez odvisnosti v vsakem
        endpointu ne gre (`docs/odlocitve/ADR-035` D).
 
+    Izjema so `poti_s_svojim_csrf`: pot z naloženo datoteko pošilja
+    `multipart/form-data`, ki ga `_csrf_iz_telesa` ne prizna, in telo, ki je
+    večje od `NAJVECJE_TELO_OBRAZCA`. Tam žeton preveri pot sama
+    (`docs/odlocitve/ADR-043`); seja je obvezna enako kot povsod.
+
     Danes je edina nevarna metoda pod `/admin` `POST`. Pravilo je kljub temu
     napisano kot „vse razen varnih": `V3-R06` bo dodajal akcije, in plast, ki
     bi naštevala metode, bi novo spustila brez žetona.
@@ -199,10 +204,18 @@ class SejaMiddleware:
         app: ASGIApp,
         predpona: str = "/admin",
         izvzete_poti: frozenset[str] = frozenset(),
+        poti_s_svojim_csrf: frozenset[str] = frozenset(),
     ) -> None:
         self.app = app
         self.predpona = predpona
         self.izvzete_poti = izvzete_poti
+        #: Poti, ki CSRF žeton preverijo **same** (`docs/odlocitve/ADR-043`).
+        #:
+        #: Ločeno polje in ne `izvzete_poti`: to drugo izvzame pot iz **cele**
+        #: plasti, vključno s sejo, in je namenjeno prijavni strani. Tu seja
+        #: ostane obvezna — izpade samo branje telesa, ker telo nosi datoteko
+        #: in ga plast ne zna ne razbrati (`multipart`) ne zadržati (10 MB).
+        self.poti_s_svojim_csrf = poti_s_svojim_csrf
 
     def _je_pod_predpono(self, pot: str) -> bool:
         return pot == self.predpona or pot.startswith(f"{self.predpona}/")
@@ -232,6 +245,12 @@ class SejaMiddleware:
         scope.setdefault("state", {})["prijava"] = seja
 
         if scope["method"] in VARNE_METODE:
+            await self.app(scope, receive, send)
+            return
+
+        # Pot, ki nosi datoteko, žeton preveri sama (`ADR-043`). Seja je bila
+        # zahtevana zgoraj in velja tudi zanjo; izpade samo branje telesa.
+        if scope["path"] in self.poti_s_svojim_csrf:
             await self.app(scope, receive, send)
             return
 
