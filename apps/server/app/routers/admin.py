@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -37,7 +37,7 @@ from app.models import STATUS_V_OBDELAVI, Material
 from app.routers.kvizi import seznam_kvizov
 from app.settings import Settings
 from app.storage import je_znotraj, mapa_druzine, pobrisi_sliko, velikost_slike
-from app.strani import daj_predloge, ni_dovoljeno, ni_najdeno
+from app.strani import daj_predloge, neveljavna_zahteva, ni_dovoljeno, ni_najdeno
 from app.subjects import PREDMETI, oznaka_predmeta, oznaka_statusa, poisci_predmet
 
 #: Predpona vseh poti operaterske strani.
@@ -174,6 +174,15 @@ def _pogled_podrobno(
             # tudi ne — worker ga ne pobira več, gumb bi torej samo pobrisal
             # dosedanji izid in ne bi naredil novega.
             "ponovna_obdelava_mozna": (
+                material.status != STATUS_V_OBDELAVI and material.archived_at is None
+            ),
+            # Ista dva pogoja kot pri ponovni obdelavi, a svoja zastavica:
+            # razloga sta različna in se lahko kdaj razideta. Snov v obdelavi
+            # se ne premika (`ADR-040` C1), arhivirana pa se ne ureja
+            # (`ADR-011`). Obrazec, ki ga stran izriše zaman, bi lagal —
+            # in gumb, ki ga ne izriše, ni varovalka, zato ista dva pogoja
+            # nosi tudi `premakni_v_predmet`.
+            "premik_mozen": (
                 material.status != STATUS_V_OBDELAVI and material.archived_at is None
             ),
             "stevilo_vprasanj": len(material.veljavna_vprasanja),
@@ -408,7 +417,13 @@ def snov(
     )
 
     return predloge.TemplateResponse(
-        request, "snov.html", {"snov": pogled, "povecava": povecava}
+        request,
+        "snov.html",
+        # `PREDMETI` in ne kode iz baze: premik je mogoč samo v enega od
+        # desetih predmetov urnika (`ADR-040`). Snov s kodo, ki je na seznamu
+        # ni, je zato v izbiri videti kot nobena — in prav zato je premik
+        # edino, kar jo spravi nazaj med deset.
+        {"snov": pogled, "povecava": povecava, "predmeti": PREDMETI},
     )
 
 
@@ -610,6 +625,56 @@ def ponovno_obdelaj(
 
     # 303 iz istega razloga kot pri brisanju: osvežitev strani ne sme dejanja
     # ponoviti — tu bi to pomenilo še en plačan klic modela.
+    return RedirectResponse(
+        f"{PREDPONA}/materials/{quote(material_id, safe='')}", status_code=303
+    )
+
+
+@router.post("/materials/{material_id}/subject")
+def premakni_v_predmet(
+    request: Request,
+    material_id: str,
+    repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    subject: Annotated[str, Form()] = "",
+) -> Response:
+    """Premakne sliko pod drug predmet, skupaj z vsemi njenimi vprašanji.
+
+    Otrok ob slikanju včasih izbere napačen predmet; dotlej je bilo to
+    mogoče popraviti samo na telefonu pred prenosom, kar v praksi pomeni
+    nikoli (`docs/odlocitve/ADR-040`).
+
+    `POST` in ne povezava, ker spremeni stanje. Vmesne potrditvene strani
+    vseeno ni: za razliko od brisanja je premik povraten — snov se lahko
+    premakne nazaj.
+
+    Privzetek `""` in ne obvezno polje: brez njega bi manjkajoče polje
+    obrodilo 422 s FastAPIjevim JSON-om, tu pa mora tudi napačna vrednost
+    dobiti slovensko stran (merilo dokončanosti v `CLAUDE.md`).
+
+    Izid premika namenoma ne vpliva na odgovor. `False` pomeni, da je snov
+    arhivirana ali pravkar v obdelavi; takrat je stran, na katero peljemo,
+    prav tista, ki to pove.
+    """
+    material = repozitorij.poisci(material_id)
+    if material is None:
+        return ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
+
+    # Preverba družine je prva: tuja snov ne sme z ničimer izdati, ali
+    # obstaja — tudi ne z razliko med 400 in 404 (`ADR-025`).
+    if poisci_predmet(subject) is None:
+        return neveljavna_zahteva(
+            predloge,
+            request,
+            "Tega predmeta ni na seznamu. Sliko lahko premakneš samo v enega "
+            "od desetih predmetov urnika.",
+        )
+
+    repozitorij.premakni_v_predmet(material_id, subject)
+
+    # 303 iz istega razloga kot povsod pod `/admin`: osvežitev strani dejanja
+    # ne sme ponoviti. Nazaj na snov in ne na predmet — po premiku je prav
+    # stran snovi tista, ki pokaže, da je predmet zdaj drug.
     return RedirectResponse(
         f"{PREDPONA}/materials/{quote(material_id, safe='')}", status_code=303
     )

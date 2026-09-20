@@ -10,6 +10,7 @@ bi ob spremembi prenosa padel iz razloga, ki s to zahtevo nima zveze.
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,8 +25,19 @@ from app.models import (
     STATUS_V_OBDELAVI,
     Material,
     Question,
+    Quiz,
 )
-from tests.conftest import CVEK_ID, OTROK_ID, SejaTesta
+from app.subjects import PREDMETI
+from tests.conftest import CVEK_ID, OTROK_ID, TUJA_DRUZINA_ID, SejaTesta
+
+# V3-R10 preverja, da premik potegne za sabo statistiko, izbirnik in sosede.
+# Pomagala za to stanje že obstajajo v testih tistih zahtev; podvojena tu bi
+# se razšla od njih — isti razlog kot v `test_tesnjenje.py` in
+# `test_statistika.py`, ki jih uvažata enako.
+from tests.test_kvizi import izbirnik, je_izbirna, je_obkljukana, objavi, upokoji
+from tests.test_kvizi import snov as snov_z_vprasanji
+from tests.test_resevanje import poskus, poslji
+from tests.test_rezultat import postavke
 
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 UUID_DVA = "a1b2c3d4-e5f6-4789-abcd-ef0123456789"
@@ -1931,6 +1943,442 @@ class TestPonovnaObdelava:
         assert "Pošlji v obdelavo" in besedilo
         assert f'action="/admin/materials/{UUID_ENA}/reprocess"' in besedilo
         assert 'method="post"' in besedilo
+
+
+
+class TestPremikVDrugPredmet:
+    """`POST /admin/materials/{id}/subject` (V3-R10, `docs/odlocitve/ADR-040`).
+
+    Otrok ob slikanju včasih izbere napačen predmet. Premik popravi
+    `materials.subject` in `questions.subject` **vseh** vprašanj te snovi,
+    telefona in objavljenih kvizov pa se ne dotakne.
+
+    Snovi so iz `test_kvizi.snov`, ne iz `zapisi`/`obdelaj` tega modula:
+    vprašanja potrebujejo denormaliziran `subject`, ki ga tam zapiše
+    `zapisi_izid` — brez njega bi testi premika merili prazno polje.
+    """
+
+    POT = f"/admin/materials/{UUID_ENA}/subject"
+
+    @staticmethod
+    def predmet(motor: Engine, material_id: str = UUID_ENA) -> str:
+        with Session(motor) as seja:
+            material = seja.get(Material, material_id)
+            assert material is not None
+            return material.subject
+
+    @staticmethod
+    def predmeti_vprasanj(motor: Engine, material_id: str = UUID_ENA) -> set[str | None]:
+        """Predmeti **vseh** vprašanj snovi — veljavnih in upokojenih."""
+        with Session(motor) as seja:
+            return set(
+                seja.scalars(
+                    select(Question.subject).where(Question.material_id == material_id)
+                )
+            )
+
+    @staticmethod
+    def premakni(odjemalec: TestClient, koda: str = "SLJ", **kwargs: Any) -> Any:
+        return odjemalec.post(
+            TestPremikVDrugPredmet.POT, data={"subject": koda}, **kwargs
+        )
+
+    # --- Srečna pot ---
+
+    def test_premakne_snov_in_preusmeri_na_njeno_stran(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        snov_z_vprasanji(motor, slike)
+
+        odgovor = self.premakni(odjemalec, follow_redirects=False)
+
+        assert odgovor.status_code == 303
+        assert odgovor.headers["location"] == f"/admin/materials/{UUID_ENA}"
+        assert self.predmet(motor) == "SLJ"
+
+    def test_slika_je_na_seznamu_novega_predmeta_in_ne_vec_na_starem(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        snov_z_vprasanji(motor, slike)
+
+        self.premakni(odjemalec)
+
+        assert UUID_ENA in odjemalec.get("/admin/subjects/SLJ").text
+        assert UUID_ENA not in odjemalec.get("/admin/subjects/MAT").text
+
+    def test_vprasanja_gredo_zraven_tudi_upokojena(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """`ADR-040` B1: sicer bi bila ista snov v statistiki razcepljena.
+
+        Pade, če `UPDATE questions` dobi pogoj `retired_at IS NULL`: pet
+        upokojenih vprašanj bi ostalo pod `MAT`.
+        """
+        snov_z_vprasanji(motor, slike)
+        upokoji(motor)
+        # Druga serija na **isti** snovi, kot jo pusti ponovna obdelava.
+        with Session(motor) as seja:
+            for zaporedje in (1, 2):
+                seja.add(
+                    Question(
+                        family_id=CVEK_ID,
+                        id=f"{UUID_ENA}-nova{zaporedje}",
+                        material_id=UUID_ENA,
+                        position=zaporedje,
+                        question=f"Novo vprašanje {zaporedje}?",
+                        answer="Nov odgovor.",
+                        subject="MAT",
+                    )
+                )
+            seja.commit()
+        assert self.predmeti_vprasanj(motor) == {"MAT"}
+        assert stevilo_vprasanj(motor) == 7
+        assert stevilo_veljavnih(motor) == 2
+
+        self.premakni(odjemalec)
+
+        assert self.predmeti_vprasanj(motor) == {"SLJ"}
+        # Premik ni upokojitev in ni brisanje: serije ostanejo take, kot so.
+        assert stevilo_vprasanj(motor) == 7
+        assert stevilo_veljavnih(motor) == 2
+
+    def test_vprasanja_druge_snovi_ostanejo_pri_starem_predmetu(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Pogoj `material_id` ni okras: brez njega bi šel s sabo cel predmet."""
+        snov_z_vprasanji(motor, slike)
+        snov_z_vprasanji(motor, slike, UUID_DVA)
+
+        self.premakni(odjemalec)
+
+        assert self.predmet(motor, UUID_DVA) == "MAT"
+        assert self.predmeti_vprasanj(motor, UUID_DVA) == {"MAT"}
+
+    def test_vprasanje_tuje_druzine_na_isti_snovi_se_ne_premakne(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, tuj_otrok: str
+    ) -> None:
+        """Pogoj družine nosi **vsak** od obeh stavkov (`ADR-025`).
+
+        Vrstica je podtaknjena: vprašanje tuje družine, ki kaže na snov te.
+        Na produkciji tako stanje ne nastane — prav zato ga tu naredimo sami,
+        sicer bi bil pogoj družine na `UPDATE questions` nepreverljiv in bi
+        ga smel kdo odstraniti kot odvečnega. Prvi stavek ga ne pokrije: ta
+        ščiti **snov**, ne vprašanj, ki nanjo kažejo.
+        """
+        snov_z_vprasanji(motor, slike)
+        with Session(motor) as seja:
+            seja.add(
+                Question(
+                    family_id=TUJA_DRUZINA_ID,
+                    id="tuje-vprasanje",
+                    material_id=UUID_ENA,
+                    position=1,
+                    question="Tuje vprašanje?",
+                    answer="Tuj odgovor.",
+                    subject="MAT",
+                )
+            )
+            seja.commit()
+
+        self.premakni(odjemalec)
+
+        with Session(motor) as seja:
+            tuje = seja.get(Question, "tuje-vprasanje")
+            assert tuje is not None
+            assert tuje.subject == "MAT"
+
+    def test_snov_z_neznano_kodo_se_da_vrniti_med_deset(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Koda iz starejše gradnje telefona ni ovira — premik je izhod iz nje."""
+        snov_z_vprasanji(motor, slike, subject="FIZ")
+
+        self.premakni(odjemalec, "MAT")
+
+        assert self.predmet(motor) == "MAT"
+        assert self.predmeti_vprasanj(motor) == {"MAT"}
+
+    @pytest.mark.parametrize("status", [STATUS_NOV, STATUS_NAPAKA])
+    def test_neobdelana_in_padla_snov_se_premakneta(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, status: str
+    ) -> None:
+        """Premik ni vezan na izid obdelave; vprašanja bodo nastala pod novim predmetom."""
+        snov_z_vprasanji(motor, slike, status=status, readable=None, vprasanj=0)
+
+        self.premakni(odjemalec)
+
+        assert self.predmet(motor) == "SLJ"
+
+    def test_premik_v_isti_predmet_je_brez_ucinka_in_brez_napake(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        snov_z_vprasanji(motor, slike)
+
+        odgovor = self.premakni(odjemalec, "MAT", follow_redirects=False)
+
+        assert odgovor.status_code == 303
+        assert self.predmet(motor) == "MAT"
+        assert self.predmeti_vprasanj(motor) == {"MAT"}
+
+    # --- Kaj gre s premikom in kaj ne ---
+
+    def test_statistika_steje_poskuse_pod_novim_predmetom(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
+    ) -> None:
+        """Kriterij V3-R10 nad `V2-R04`: statistika predmeta se za nazaj spremeni.
+
+        To je namen premika, ne stranski učinek (`ADR-040` B1).
+        """
+        snov_z_vprasanji(motor, slike)
+        quiz_id = objavi(odjemalec, motor, [UUID_ENA], koliko=1)
+        odgovor = poslji(odjemalec, [poskus(postavke(motor, quiz_id)[0])], telefon)
+        assert odgovor.status_code == 200, odgovor.text
+        vprasanje = f"Vprašanje 1 iz {UUID_ENA[:4]}?"
+        assert vprasanje in odjemalec.get("/admin/statistics/subjects/MAT?leto=vse").text
+
+        self.premakni(odjemalec)
+
+        assert vprasanje in odjemalec.get("/admin/statistics/subjects/SLJ?leto=vse").text
+        assert (
+            vprasanje not in odjemalec.get("/admin/statistics/subjects/MAT?leto=vse").text
+        )
+
+    def test_objavljen_kviz_se_ne_spremeni(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str
+    ) -> None:
+        """`ADR-016` E in `ADR-040` D1: ime „MAT — …" je že natisnjeno."""
+        snov_z_vprasanji(motor, slike)
+        quiz_id = objavi(odjemalec, motor, [UUID_ENA], koliko=3)
+        with Session(motor) as seja:
+            kviz = seja.get(Quiz, quiz_id)
+            assert kviz is not None
+            prej = (kviz.subject, kviz.name)
+        assert prej[0] == "MAT"
+        postavke_prej = postavke(motor, quiz_id)
+
+        self.premakni(odjemalec)
+
+        with Session(motor) as seja:
+            kviz = seja.get(Quiz, quiz_id)
+            assert kviz is not None
+            assert (kviz.subject, kviz.name) == prej
+        assert postavke(motor, quiz_id) == postavke_prej
+
+    def test_sosedi_v_povecanem_prikazu_pridejo_iz_novega_predmeta(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Kriterij V3-R10 nad `V2-R08`: nabor sosedov je nabor predmeta."""
+        snov_z_vprasanji(motor, slike, taken_at=datetime(2026, 9, 4, 7, 30, tzinfo=UTC))
+        snov_z_vprasanji(
+            motor,
+            slike,
+            UUID_DVA,
+            subject="SLJ",
+            taken_at=datetime(2026, 9, 3, 7, 30, tzinfo=UTC),
+        )
+        stran = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+        assert UUID_DVA not in del_povecave(stran)
+
+        self.premakni(odjemalec)
+
+        stran = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+        assert UUID_DVA in del_povecave(stran)
+
+    def test_pregled_po_dnevih_kaze_sliko_pod_novim_predmetom(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str
+    ) -> None:
+        """Kriterij V3-R10 nad `V2-R07`: dan grupira po `materials.subject`."""
+        snov_z_vprasanji(motor, slike, taken_at=datetime(2026, 9, 4, 7, 30, tzinfo=UTC))
+
+        self.premakni(odjemalec)
+
+        besedilo = odjemalec.get("/admin/days?dan=2026-09-04").text
+        assert "SLJ — Slovenščina" in besedilo
+        assert "MAT — Matematika" not in besedilo
+
+    def test_izbirnik_kvizov_ponudi_sliko_pod_novim_predmetom(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str
+    ) -> None:
+        """Kriterij V3-R10 nad `V2-R01`: izbirnik bere `materials.subject`."""
+        snov_z_vprasanji(motor, slike)
+        assert not je_izbirna(izbirnik(odjemalec, "rocna", "SLJ"), UUID_ENA)
+
+        self.premakni(odjemalec)
+
+        assert je_izbirna(izbirnik(odjemalec, "rocna", "SLJ"), UUID_ENA)
+
+    def test_snov_iz_kviza_v_novem_predmetu_ni_nova(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str
+    ) -> None:
+        """„Nova snov" šteje prek vprašanj, ne prek predmeta (`ADR-017` B).
+
+        Snov, ki je bila v kvizu pod `MAT`, v `SLJ` ni nova — kar je pravilno:
+        vprašanja so ista in otrok jih je že dobil.
+        """
+        snov_z_vprasanji(motor, slike)
+        objavi(odjemalec, motor, [UUID_ENA], koliko=3)
+
+        self.premakni(odjemalec)
+
+        besedilo = izbirnik(odjemalec, "nova", "SLJ")
+        assert je_izbirna(besedilo, UUID_ENA)
+        assert not je_obkljukana(besedilo, UUID_ENA)
+
+    def test_ponovni_prenos_iste_slike_popravka_ne_povozi(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
+    ) -> None:
+        """Znana omejitev `ADR-040` A1 ima ostro stran: telefon ne sme povoziti.
+
+        Telefon prvotnega predmeta pri sebi ne popravi in prenos ponavlja,
+        dokler ne dobi odgovora. Ponovni prenos iste slike zato pride s
+        **starim** predmetom — in prenos mora ostati idempotenten glede na
+        `id`, sicer bi popravek izginil ob naslednji sinhronizaciji.
+        """
+        snov_z_vprasanji(motor, slike)
+        self.premakni(odjemalec)
+
+        odgovor = odjemalec.post(
+            "/materials",
+            data={"id": UUID_ENA, "subject": "MAT", "taken_at": "2026-09-04T07:30:00Z"},
+            files={"file": ("posnetek.jpg", b"slika", "image/jpeg")},
+            headers=telefon.glave,
+        )
+
+        assert odgovor.status_code == 200
+        assert odgovor.json()["created"] is False
+        assert self.predmet(motor) == "SLJ"
+
+    # --- Zavrnitve ---
+
+    def test_neznana_koda_vrne_400_in_nic_ne_spremeni(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        snov_z_vprasanji(motor, slike)
+
+        odgovor = self.premakni(odjemalec, "XYZ")
+
+        assert odgovor.status_code == 400
+        assert "Tega predmeta ni na seznamu" in odgovor.text
+        assert self.predmet(motor) == "MAT"
+        assert self.predmeti_vprasanj(motor) == {"MAT"}
+
+    def test_prazna_koda_vrne_400_in_ne_422(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Manjkajoče polje mora dobiti slovensko stran, ne FastAPIjevega JSON-a."""
+        snov_z_vprasanji(motor, slike)
+
+        odgovor = odjemalec.post(self.POT)
+
+        assert odgovor.status_code == 400
+        assert "Tega predmeta ni na seznamu" in odgovor.text
+        assert self.predmet(motor) == "MAT"
+
+    def test_arhivirane_snovi_ne_premakne(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """`ADR-011`: arhiv je umik, ne urejanje.
+
+        Pade, če iz `UPDATE` odstranim pogoj `archived_at IS NULL`.
+        """
+        snov_z_vprasanji(motor, slike, arhivirana=True)
+
+        odgovor = self.premakni(odjemalec, follow_redirects=False)
+
+        assert odgovor.status_code == 303
+        assert self.predmet(motor) == "MAT"
+        assert self.predmeti_vprasanj(motor) == {"MAT"}
+
+    def test_snovi_v_obdelavi_ne_premakne(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """`ADR-040` C1: tam pravkar teče worker in piše vprašanja.
+
+        Pade, če iz `UPDATE` odstranim pogoj `status <> 'processing'`.
+        """
+        snov_z_vprasanji(motor, slike, status=STATUS_V_OBDELAVI, readable=None)
+
+        odgovor = self.premakni(odjemalec, follow_redirects=False)
+
+        assert odgovor.status_code == 303
+        assert self.predmet(motor) == "MAT"
+        assert self.predmeti_vprasanj(motor) == {"MAT"}
+
+    def test_neznan_zapis_vrne_stran_in_ne_sled_izjeme(self, odjemalec: TestClient) -> None:
+        odgovor = odjemalec.post(
+            f"/admin/materials/{UUID_DVA}/subject", data={"subject": "SLJ"}
+        )
+
+        assert odgovor.status_code == 404
+        assert "Zapisa s tem identifikatorjem na strežniku ni." in odgovor.text
+
+    def test_brez_csrf_zetona_je_zavrnjen(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Ista plast kot pri vsakem drugem `POST` pod `/admin` (`ADR-035`)."""
+        snov_z_vprasanji(motor, slike)
+
+        odgovor = odjemalec.post(self.POT, data={"subject": "SLJ", "csrf": ""})
+
+        assert odgovor.status_code == 403
+        assert self.predmet(motor) == "MAT"
+
+    def test_pot_ni_navadna_povezava(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """`GET` na to pot ne sme ničesar spremeniti."""
+        snov_z_vprasanji(motor, slike)
+
+        odgovor = odjemalec.get(f"{self.POT}?subject=SLJ")
+
+        assert odgovor.status_code == 405
+        assert self.predmet(motor) == "MAT"
+
+    # --- Obrazec ---
+
+    def test_obrazec_ponudi_deset_predmetov_v_vrstnem_redu_urnika(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        snov_z_vprasanji(motor, slike)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert re.findall(r'<option value="([A-Z]+)"', besedilo) == [
+            predmet.koda for predmet in PREDMETI
+        ]
+        assert f'action="/admin/materials/{UUID_ENA}/subject"' in besedilo
+
+    def test_obrazec_ima_vnaprej_izbran_trenutni_predmet(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        snov_z_vprasanji(motor, slike)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert '<option value="MAT" selected>' in besedilo
+        assert besedilo.count(" selected>") == 1
+
+    def test_obrazca_ni_na_arhivirani_snovi_in_na_snovi_v_obdelavi(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Gumb, ki ne bi naredil ničesar, laže — pogoj pa je tudi v poti."""
+        snov_z_vprasanji(motor, slike, arhivirana=True)
+        snov_z_vprasanji(motor, slike, UUID_DVA, status=STATUS_V_OBDELAVI, readable=None)
+
+        for material_id in (UUID_ENA, UUID_DVA):
+            besedilo = odjemalec.get(f"/admin/materials/{material_id}").text
+            assert 'name="subject"' not in besedilo, material_id
+            assert "Premakni" not in besedilo, material_id
+
+    def test_obrazec_ne_prinese_nove_skripte(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """`ADR-024`: edina skripta te strani ostane povečan prikaz (V2-R08)."""
+        snov_z_vprasanji(motor, slike)
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert besedilo.count("<script") == 1
 
 
 class TestBrisanjeZVprasanji:

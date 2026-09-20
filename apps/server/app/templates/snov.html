@@ -63,6 +63,39 @@
         {% endif %}
       </dl>
 
+      {# Premik v drug predmet (V3-R10). Navaden obrazec s `<select>` in brez
+         skripte: `ADR-024` dovoljuje samo tisto skripto, ki jo zahteva
+         izrecno uvede, in edina na tej strani je povečan prikaz (V2-R08).
+
+         `POST`, ker spremeni stanje — snov in vsa njena vprašanja, veljavna
+         in upokojena (`ADR-040` B1). Potrditvene strani ni, ker je premik
+         povraten.
+
+         Arhivirane snovi in snovi v obdelavi obrazec nima: tam ne bi naredil
+         ničesar (`ADR-040` C1, `ADR-011`). Isti pogoj nosi tudi pot. #}
+      {% if snov.premik_mozen %}
+        {# Odprta značka obrazca je v eni vrstici in skrito polje takoj za njo:
+           varovalo `TestCsrfPodAdminom` bere vrstico pod `method="post"`. #}
+        <form class="vstopi" method="post" action="/admin/materials/{{ snov.id }}/subject">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <label>
+            Predmet:
+            <select name="subject">
+              {% for predmet in predmeti %}
+                <option value="{{ predmet.koda }}"{% if predmet.koda == snov.koda %} selected{% endif %}>{{ predmet.koda }} — {{ predmet.oznaka }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button class="gumb gumb-obdelava" type="submit">Premakni</button>
+        </form>
+        <p class="drobno">
+          Slika se preseli na seznam izbranega predmeta, z njo pa vsa njena
+          vprašanja — tudi upokojena. Statistika teh vprašanj odslej šteje pod
+          novi predmet. Že objavljeni kvizi se ne spremenijo. Zgodovina na
+          telefonu ostane taka, kot jo je posnel otrok.
+        </p>
+      {% endif %}
+
       {# Gumb je `POST` in ne povezava: ponovna obdelava zavrže prejšnji
          rezultat in stane nov klic (`docs/odlocitve/ADR-009`). Med obdelavo
          ga ni — takrat ne bi naredil ničesar. #}
