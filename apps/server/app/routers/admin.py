@@ -176,17 +176,17 @@ def _pogled_podrobno(
             "ponovna_obdelava_mozna": (
                 material.status != STATUS_V_OBDELAVI and material.archived_at is None
             ),
+            # Ali je trenutna koda med desetimi. Snov s kodo iz starejše
+            # gradnje telefona v izbiri ne more biti označena kot trenutna,
+            # in brez tega bi brskalnik sam pokazal prvo možnost (`NAR`) —
+            # neprevidna potrditev obrazca bi jo vložila pod Naravoslovje.
+            "koda_znana": poisci_predmet(material.subject) is not None,
             # Ista dva pogoja kot pri ponovni obdelavi, a svoja zastavica:
             # razloga sta različna in se lahko kdaj razideta. Snov v obdelavi
             # se ne premika (`ADR-040` C1), arhivirana pa se ne ureja
             # (`ADR-011`). Obrazec, ki ga stran izriše zaman, bi lagal —
             # in gumb, ki ga ne izriše, ni varovalka, zato ista dva pogoja
             # nosi tudi `premakni_v_predmet`.
-            # Ali je trenutna koda med desetimi. Snov s kodo iz starejše
-            # gradnje telefona v izbiri ne more biti označena kot trenutna,
-            # in brez tega bi brskalnik sam pokazal prvo možnost (`NAR`) —
-            # neprevidna potrditev obrazca bi jo vložila pod Naravoslovje.
-            "koda_znana": poisci_predmet(material.subject) is not None,
             "premik_mozen": (
                 material.status != STATUS_V_OBDELAVI and material.archived_at is None
             ),
@@ -672,8 +672,8 @@ def premakni_v_predmet(
         return neveljavna_zahteva(
             predloge,
             request,
-            "Tega predmeta ni na seznamu. Sliko lahko premakneš samo v enega "
-            "od desetih predmetov urnika.",
+            "Predmet ni izbran ali pa ga ni na seznamu desetih predmetov "
+            "urnika. Izberi enega od njih in poskusi znova.",
         )
 
     repozitorij.premakni_v_predmet(material_id, subject)

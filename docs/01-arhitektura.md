@@ -1110,6 +1110,9 @@ njen odgovor sta ostala nespremenjena.
 
 Obrazec na strani s podrobnostmi snovi (`<select>` z desetimi predmeti v
 vrstnem redu urnika, trenutni izbran) in `POST /admin/materials/{id}/subject`.
+Snov s kodo zunaj desetih trenutne možnosti nima, zato dobi **vodilno možnost
+brez vrednosti** — sicer bi brskalnik izbral prvo (`NAR`) in klik bi snov tiho
+vložil pod Naravoslovje. Prazna vrednost pade v isto vejo kot neznana koda.
 `MaterialsRepository.premakni_v_predmet` v **eni transakciji** popravi
 `materials.subject` in `questions.subject` vseh vprašanj te snovi, veljavnih
 in upokojenih. Oba stavka nosita pogoj družine.
@@ -1117,8 +1120,8 @@ in upokojenih. Oba stavka nosita pogoj družine.
 Pogoja „ni arhivirana" in „ni v obdelavi" sta **v stavku `UPDATE`**, ne v
 branju pred njim (`ADR-040` C1): worker vprašanjem predmet prepiše iz snovi,
 ki jo prebere tik pred zapisom, in branje-nato-pisanje bi pustilo okno, v
-katerem nova vprašanja dobijo star predmet. Neznana koda predmeta je 400 s
-slovensko stranjo, tuja ali neobstoječa snov 404.
+katerem nova vprašanja dobijo star predmet. Neizbran ali neznan predmet je
+400 s slovensko stranjo, tuja ali neobstoječa snov 404.
 
 Objavljeni kvizi se ne spremenijo — ne `quizzes.subject`, ne ime, ne postavke
 (`ADR-016` E). Nove skripte obrazec ne prinese; edina skripta te strani ostane

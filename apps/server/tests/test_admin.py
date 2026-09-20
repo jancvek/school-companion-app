@@ -2285,7 +2285,7 @@ class TestPremikVDrugPredmet:
         odgovor = self.premakni(odjemalec, "XYZ")
 
         assert odgovor.status_code == 400
-        assert "Tega predmeta ni na seznamu" in odgovor.text
+        assert "ni na seznamu desetih predmetov" in odgovor.text
         assert self.predmet(motor) == "MAT"
         assert self.predmeti_vprasanj(motor) == {"MAT"}
 
@@ -2298,7 +2298,7 @@ class TestPremikVDrugPredmet:
         odgovor = odjemalec.post(self.POT)
 
         assert odgovor.status_code == 400
-        assert "Tega predmeta ni na seznamu" in odgovor.text
+        assert "ni na seznamu desetih predmetov" in odgovor.text
         assert self.predmet(motor) == "MAT"
 
     def test_arhivirane_snovi_ne_premakne(
