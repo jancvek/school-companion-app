@@ -62,7 +62,7 @@ describe('uskladiKvize', () => {
     const izid = await uskladiKvize(db, odjemalec([kvizStreznika('k1', 3)]), null);
 
     expect(izid).toEqual({ poslani: 0, naStrezniku: 1, pobrisani: 0 });
-    expect((await cakajociKvizi(db)).map((k) => k.id)).toEqual(['k1']);
+    expect((await cakajociKvizi(db, null)).map((k) => k.id)).toEqual(['k1']);
   });
 
   it('ponovno usklajevanje ne podvoji', async () => {
@@ -71,13 +71,13 @@ describe('uskladiKvize', () => {
     await uskladiKvize(db, streznik, null, null);
     await uskladiKvize(db, streznik, null, null);
 
-    expect(await postavkeKviza(db, 'k1')).toHaveLength(3);
+    expect(await postavkeKviza(db, 'k1', null)).toHaveLength(3);
   });
 
   it('poskuse pošlje pred branjem seznama', async () => {
     // Strežnik kviz reši v isti transakciji kot zadnji poskus; seznam,
     // prebran po prenosu, je že brez njega.
-    await shraniKviz(db, kvizStreznika('k1', 1));
+    await shraniKviz(db, kvizStreznika('k1', 1), null);
     await zapisiPoskus(db, poskus('k1', 1));
     const streznik = odjemalec([]);
 
@@ -95,7 +95,7 @@ describe('uskladiKvize', () => {
   });
 
   it('prenesenih poskusov drugič ne pošlje', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 2));
+    await shraniKviz(db, kvizStreznika('k1', 2), null);
     await zapisiPoskus(db, poskus('k1', 1));
     const streznik = odjemalec([kvizStreznika('k1', 2)]);
 
@@ -107,25 +107,25 @@ describe('uskladiKvize', () => {
   });
 
   it('kviz, ki ga strežnik ne vrača več, pobriše', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 1));
+    await shraniKviz(db, kvizStreznika('k1', 1), null);
 
     const izid = await uskladiKvize(db, odjemalec([]), null);
 
     expect(izid.pobrisani).toBe(1);
-    expect(await cakajociKvizi(db)).toEqual([]);
+    expect(await cakajociKvizi(db, null)).toEqual([]);
   });
 
   it('odprtega kviza ne pobriše', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 2));
+    await shraniKviz(db, kvizStreznika('k1', 2), null);
 
     await uskladiKvize(db, odjemalec([]), null, 'k1');
 
-    expect(await postavkeKviza(db, 'k1')).toHaveLength(2);
+    expect(await postavkeKviza(db, 'k1', null)).toHaveLength(2);
   });
 
   it('neprenesen poskus preživi preklic kviza in gre gor ob naslednjem obhodu', async () => {
     // Kviz na pol, prenos poskusa spodleti, strežnik kviza medtem ne vrača več.
-    await shraniKviz(db, kvizStreznika('k1', 3));
+    await shraniKviz(db, kvizStreznika('k1', 3), null);
     await zapisiPoskus(db, poskus('k1', 1));
     const nedosegljiv = odjemalec([]);
     nedosegljiv.posljiPoskuse.mockRejectedValueOnce(new Error('omrežje'));
@@ -136,7 +136,7 @@ describe('uskladiKvize', () => {
     await uskladiKvize(db, streznik, null, null);
 
     expect(streznik.poslani).toEqual([[expect.objectContaining({ id: 'k1-a1' })]]);
-    expect(await postavkeKviza(db, 'k1')).toEqual([]);
+    expect(await postavkeKviza(db, 'k1', null)).toEqual([]);
     // Ko je gor, na telefonu ne ostane (`ADR-019` B).
     const [{ koliko }] = await db.getAllAsync<{ koliko: number }>(
       'SELECT COUNT(*) AS koliko FROM attempts',
@@ -146,7 +146,7 @@ describe('uskladiKvize', () => {
   });
 
   it('neuspeh prenosa pusti poskuse in seznama ne bere', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 2));
+    await shraniKviz(db, kvizStreznika('k1', 2), null);
     await zapisiPoskus(db, poskus('k1', 1));
     const streznik = odjemalec([]);
     streznik.posljiPoskuse.mockRejectedValueOnce(new Error('Strežnik je vrnil 500.'));
@@ -155,11 +155,11 @@ describe('uskladiKvize', () => {
 
     expect(streznik.preberiKvize).not.toHaveBeenCalled();
     expect((await neprenesenePoskuse(db, null)).map((p) => p.id)).toEqual(['k1-a1']);
-    expect(await postavkeKviza(db, 'k1')).toHaveLength(2);
+    expect(await postavkeKviza(db, 'k1', null)).toHaveLength(2);
   });
 
   it('po uspešnem prenosu in neuspešnem seznamu kviz ne čaka znova', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 1));
+    await shraniKviz(db, kvizStreznika('k1', 1), null);
     await zapisiPoskus(db, poskus('k1', 1));
     const streznik = odjemalec([]);
     streznik.preberiKvize.mockRejectedValueOnce(new Error('omrežje'));
@@ -168,14 +168,14 @@ describe('uskladiKvize', () => {
 
     // Poskus je prenesen, a še na telefonu — postavka je odgovorjena.
     expect(await neprenesenePoskuse(db, null)).toEqual([]);
-    expect(await cakajociKvizi(db)).toEqual([]);
+    expect(await cakajociKvizi(db, null)).toEqual([]);
   });
 
   describe('trajno zavrnjen paket (ADR-020)', () => {
     it('ne ustavi prenosa novih kvizov', async () => {
       // Brez ADR-020 bi en neveljaven poskus za vedno odrezal telefon od
       // novih kvizov: vsak obhod bi se končal pred branjem seznama.
-      await shraniKviz(db, kvizStreznika('k1', 2));
+      await shraniKviz(db, kvizStreznika('k1', 2), null);
       await zapisiPoskus(db, poskus('k1', 1));
       const streznik = odjemalec([kvizStreznika('k1', 2), kvizStreznika('nov', 1)]);
       streznik.posljiPoskuse.mockRejectedValue(new PaketZavrnjen(422));
@@ -183,12 +183,12 @@ describe('uskladiKvize', () => {
       const izid = await uskladiKvize(db, streznik, null, null);
 
       expect(streznik.preberiKvize).toHaveBeenCalledTimes(1);
-      expect((await cakajociKvizi(db)).map((k) => k.id)).toContain('nov');
+      expect((await cakajociKvizi(db, null)).map((k) => k.id)).toContain('nov');
       expect(izid.poslani).toBe(0);
     });
 
     it('zavrnjenih poskusov ne označi za prenesene in jih ne pobriše', async () => {
-      await shraniKviz(db, kvizStreznika('k1', 2));
+      await shraniKviz(db, kvizStreznika('k1', 2), null);
       await zapisiPoskus(db, poskus('k1', 1));
       const streznik = odjemalec([]);
       streznik.posljiPoskuse.mockRejectedValue(new PaketZavrnjen(422));
@@ -197,7 +197,7 @@ describe('uskladiKvize', () => {
       await uskladiKvize(db, streznik, null, null);
 
       // Kviza ni več na seznamu, poskus pa ostane in se pošilja znova.
-      expect(await postavkeKviza(db, 'k1')).toEqual([]);
+      expect(await postavkeKviza(db, 'k1', null)).toEqual([]);
       expect((await neprenesenePoskuse(db, null)).map((p) => p.id)).toEqual(['k1-a1']);
       expect(streznik.posljiPoskuse).toHaveBeenCalledTimes(2);
     });
@@ -206,9 +206,9 @@ describe('uskladiKvize', () => {
       // Scenarij iz tretjega pregleda: slab poskus je najstarejši, zato je
       // vedno v prvem paketu. Brez razbitja paketa ne bi šla gor nobena ocena
       // za njim in noben kviz ne bi bil več rešen (`ADR-020`, popravek).
-      await shraniKviz(db, kvizStreznika('slab', 1));
+      await shraniKviz(db, kvizStreznika('slab', 1), null);
       await zapisiPoskus(db, poskus('slab', 1, { answered_at: '2026-09-10T14:00:00.000Z' }));
-      await shraniKviz(db, kvizStreznika('k2', 3));
+      await shraniKviz(db, kvizStreznika('k2', 3), null);
       for (let i = 1; i <= 3; i += 1) await zapisiPoskus(db, poskus('k2', i));
       const streznik = odjemalec([]);
       streznik.posljiPoskuse.mockImplementation(async (paket: readonly Poskus[]) => {
@@ -230,7 +230,7 @@ describe('uskladiKvize', () => {
       // neprenesen (500 od 501). Lastnik je to vedenje preglasil (`ADR-020`,
       // popravek prve različice); test sledi novi odločitvi.
       const postavk = NAJVEC_V_PAKETU + 1;
-      await shraniKviz(db, kvizStreznika('k1', postavk));
+      await shraniKviz(db, kvizStreznika('k1', postavk), null);
       for (let i = 1; i <= postavk; i += 1) await zapisiPoskus(db, poskus('k1', i));
       const streznik = odjemalec([kvizStreznika('k1', postavk)]);
       streznik.posljiPoskuse.mockRejectedValueOnce(new PaketZavrnjen(422));
@@ -248,7 +248,7 @@ describe('uskladiKvize', () => {
       async (status) => {
         // Četrti pregled: ob napačnem ključu bi razbitje pomenilo do 501
         // zaman poslan zahtevek vsakih 5 minut (`ADR-020`, razbija se samo ob 422).
-        await shraniKviz(db, kvizStreznika('k1', 3));
+        await shraniKviz(db, kvizStreznika('k1', 3), null);
         for (let i = 1; i <= 3; i += 1) await zapisiPoskus(db, poskus('k1', i));
         const streznik = odjemalec([kvizStreznika('k1', 3)]);
         streznik.posljiPoskuse.mockRejectedValue(new PaketZavrnjen(status));
@@ -263,7 +263,7 @@ describe('uskladiKvize', () => {
     );
 
     it('zavrnitev, ki ni 422, ustavi razbijanje', async () => {
-      await shraniKviz(db, kvizStreznika('k1', 3));
+      await shraniKviz(db, kvizStreznika('k1', 3), null);
       for (let i = 1; i <= 3; i += 1) await zapisiPoskus(db, poskus('k1', i));
       const streznik = odjemalec([]);
       streznik.posljiPoskuse
@@ -281,7 +281,7 @@ describe('uskladiKvize', () => {
     it('sprejeti pred zavrnitvijo, ki ni 422, ostane označen in štet', async () => {
       // Peti pregled: `return 0` namesto `break` bi ostal zelen, `poslani`
       // pa bi lagal.
-      await shraniKviz(db, kvizStreznika('k1', 3));
+      await shraniKviz(db, kvizStreznika('k1', 3), null);
       for (let i = 1; i <= 3; i += 1) await zapisiPoskus(db, poskus('k1', i));
       const streznik = odjemalec([]);
       streznik.posljiPoskuse
@@ -300,10 +300,10 @@ describe('uskladiKvize', () => {
       it('posamič zavrnjenega do naslednjega zagona ne pošilja več', async () => {
         // Peti pregled: brez pomnjenja bi vsak obhod z N obtičalimi poslal
         // 1 + N zahtevkov, za vedno — tudi brez nove ocene.
-        await shraniKviz(db, kvizStreznika('slab', 2));
+        await shraniKviz(db, kvizStreznika('slab', 2), null);
         await zapisiPoskus(db, poskus('slab', 1, { answered_at: '2026-09-10T14:00:00.000Z' }));
         await zapisiPoskus(db, poskus('slab', 2, { answered_at: '2026-09-10T14:00:01.000Z' }));
-        await shraniKviz(db, kvizStreznika('k2', 1));
+        await shraniKviz(db, kvizStreznika('k2', 1), null);
         await zapisiPoskus(db, poskus('k2', 1));
         const streznik = odjemalec([]);
         streznik.posljiPoskuse.mockImplementation(async (paket: readonly Poskus[]) => {
@@ -330,7 +330,7 @@ describe('uskladiKvize', () => {
       });
 
       it('nov poskus gre gor, tudi ko so drugi zapomnjeni kot zavrnjeni', async () => {
-        await shraniKviz(db, kvizStreznika('slab', 1));
+        await shraniKviz(db, kvizStreznika('slab', 1), null);
         await zapisiPoskus(db, poskus('slab', 1));
         const streznik = odjemalec([]);
         streznik.posljiPoskuse.mockImplementation(async (paket: readonly Poskus[]) => {
@@ -340,7 +340,7 @@ describe('uskladiKvize', () => {
         const zagon = new Set<string>();
         await uskladiKvize(db, streznik, null, null, zagon);
 
-        await shraniKviz(db, kvizStreznika('k2', 1));
+        await shraniKviz(db, kvizStreznika('k2', 1), null);
         await zapisiPoskus(db, poskus('k2', 1));
         const izid = await uskladiKvize(db, streznik, null, null, zagon);
 
@@ -352,7 +352,7 @@ describe('uskladiKvize', () => {
         // Šesti pregled: brez tega testa bi `zavrnjeni.add` pred `break`
         // ostal zelen, poskus pa bi do naslednjega zagona obtičal zaradi
         // napake, ki ni njegova (npr. zamenjan ključ sredi obhoda).
-        await shraniKviz(db, kvizStreznika('k1', 2));
+        await shraniKviz(db, kvizStreznika('k1', 2), null);
         await zapisiPoskus(db, poskus('k1', 1));
         await zapisiPoskus(db, poskus('k1', 2));
         const streznik = odjemalec([]);
@@ -368,7 +368,7 @@ describe('uskladiKvize', () => {
       });
 
       it('enojni paket, zavrnjen s 422, se zapomni', async () => {
-        await shraniKviz(db, kvizStreznika('k1', 1));
+        await shraniKviz(db, kvizStreznika('k1', 1), null);
         await zapisiPoskus(db, poskus('k1', 1));
         const streznik = odjemalec([]);
         streznik.posljiPoskuse.mockRejectedValue(new PaketZavrnjen(422));
@@ -384,7 +384,7 @@ describe('uskladiKvize', () => {
       it('zavrnitev, ki ni 422, se ne zapomni', async () => {
         // Krivda ni v poskusu (npr. napačen ključ); ko je vzrok odpravljen,
         // mora poskus iti gor v istem zagonu.
-        await shraniKviz(db, kvizStreznika('k1', 2));
+        await shraniKviz(db, kvizStreznika('k1', 2), null);
         await zapisiPoskus(db, poskus('k1', 1));
         await zapisiPoskus(db, poskus('k1', 2));
         const streznik = odjemalec([]);
@@ -400,7 +400,7 @@ describe('uskladiKvize', () => {
     });
 
     it('paketa z enim samim poskusom ne ponavlja', async () => {
-      await shraniKviz(db, kvizStreznika('k1', 1));
+      await shraniKviz(db, kvizStreznika('k1', 1), null);
       await zapisiPoskus(db, poskus('k1', 1));
       const streznik = odjemalec([]);
       streznik.posljiPoskuse.mockRejectedValue(new PaketZavrnjen(422));
@@ -411,7 +411,7 @@ describe('uskladiKvize', () => {
     });
 
     it('nedosegljiv strežnik med posamičnim pošiljanjem konča obhod, sprejeti ostanejo', async () => {
-      await shraniKviz(db, kvizStreznika('k1', 3));
+      await shraniKviz(db, kvizStreznika('k1', 3), null);
       for (let i = 1; i <= 3; i += 1) await zapisiPoskus(db, poskus('k1', i));
       const streznik = odjemalec([]);
       streznik.posljiPoskuse
@@ -423,7 +423,7 @@ describe('uskladiKvize', () => {
 
       expect((await neprenesenePoskuse(db, null)).map((p) => p.id)).toEqual(['k1-a2', 'k1-a3']);
       expect(streznik.preberiKvize).not.toHaveBeenCalled();
-      expect(await postavkeKviza(db, 'k1')).toHaveLength(3);
+      expect(await postavkeKviza(db, 'k1', null)).toHaveLength(3);
     });
 
     it.each([
@@ -450,7 +450,7 @@ describe('uskladiKvize', () => {
     });
 
     it('s pravim odjemalcem: ob 422 se seznam prebere, ob 429 ne', async () => {
-      await shraniKviz(db, kvizStreznika('k1', 1));
+      await shraniKviz(db, kvizStreznika('k1', 1), null);
       await zapisiPoskus(db, poskus('k1', 1));
 
       for (const [status, seznamPrebran] of [
@@ -476,7 +476,7 @@ describe('uskladiKvize', () => {
 
   it('veliko poskusov razdeli v pakete', async () => {
     const postavk = NAJVEC_V_PAKETU + 1;
-    await shraniKviz(db, kvizStreznika('k1', postavk));
+    await shraniKviz(db, kvizStreznika('k1', postavk), null);
     for (let i = 1; i <= postavk; i += 1) await zapisiPoskus(db, poskus('k1', i));
     const streznik = odjemalec([]);
 

@@ -95,6 +95,19 @@ class Material(Base):
         index=True,
     )
 
+    #: Otrok, ki je snov fotografiral (`docs/odlocitve/ADR-039`).
+    #:
+    #: Obvezen in brez `ondelete`: račun se ne briše, `V3-R06` ga deaktivira.
+    #: Pove ga **seja žetona** in nikoli telo zahteve — starš se v mobilno
+    #: aplikacijo ne more prijaviti (`ADR-036` D), zato je vsak žeton na
+    #: `POST /materials` otrokov in „snov brez otroka" ne nastane.
+    child_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", name="fk_materials_child_id"),
+        nullable=False,
+        index=True,
+    )
+
     #: Koda predmeta, npr. `MAT`.
     subject: Mapped[str] = mapped_column(String(16), nullable=False)
 
@@ -347,6 +360,21 @@ class Quiz(Base):
         index=True,
     )
 
+    #: Otrok, ki mu je kviz namenjen — **naslovljenec** (`ADR-039` A).
+    #:
+    #: Obvezen: „kviz za nikogar" ne sme biti veljavno stanje, ki bi ga morala
+    #: znati obravnavati vsaka poizvedba za njim. Družina brez aktivnega
+    #: otroka zato kviza ne more objaviti; sestavljalnik to pove vnaprej.
+    #:
+    #: Naslovljenec je natanko eden (kriterij `V3-R07`) in je vedno otrok
+    #: **svoje** družine; tuj `id` je `404` in ne `403` (`ADR-038`).
+    child_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", name="fk_quizzes_child_id"),
+        nullable=False,
+        index=True,
+    )
+
     #: Ime za prikaz. Sestavi se samodejno (`MAT — 9. 9. 2026`), operater pa ga
     #: v obrazcu lahko prepiše.
     name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -498,6 +526,20 @@ class QuestionAttempt(Base):
     #: ne briše (`ADR-016` F).
     quiz_item_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("quiz_items.id"), nullable=False
+    )
+
+    #: Otrok, ki je odgovoril (`ADR-039`).
+    #:
+    #: Pove ga seja žetona, ne telo paketa. Ni nujno naslovljenec kviza:
+    #: poskus za kviz **drugega** otroka strežnik sprejme kot uspeh, a ga ne
+    #: zapiše (`ADR-039` D), zato v tabeli tak par ne nastane — pravilo je v
+    #: repozitoriju, ne v tuji omejitvi, ker gre za tih sprejem in ne za
+    #: napako.
+    child_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", name="fk_question_attempts_child_id"),
+        nullable=False,
+        index=True,
     )
 
     #: Način odgovarjanja; zaenkrat vedno `samoocena` (`ADR-014`).

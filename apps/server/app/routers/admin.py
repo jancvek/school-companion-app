@@ -26,8 +26,13 @@ from starlette.responses import Response
 
 from app.besedilo import SLIKE, stevilo_z_besedo
 from app.casi import cas, cas_ali_prazno, v_domacem
-from app.db import KviziRepository, MaterialsRepository
-from app.dependencies import daj_nastavitve, daj_repozitorij, daj_repozitorij_kvizov
+from app.db import ClaniRepository, KviziRepository, MaterialsRepository
+from app.dependencies import (
+    daj_nastavitve,
+    daj_repozitorij,
+    daj_repozitorij_clanov,
+    daj_repozitorij_kvizov,
+)
 from app.models import STATUS_V_OBDELAVI, Material
 from app.routers.kvizi import seznam_kvizov
 from app.settings import Settings
@@ -59,7 +64,25 @@ def _velikost_opis(bajti: int | None) -> str:
     return f"{bajti / (1024 * 1024):.1f} MB"
 
 
-def _pogled(material: Material, mapa_slik: Path) -> dict[str, Any]:
+def imena_otrok(clani: ClaniRepository) -> dict[str, str]:
+    """Preslikava `id` → prikazno ime, za oznako „čigava snov" (V3-R07).
+
+    **Prazna pri družini z enim otrokom**: oznaka, ki ne loči ničesar, bi bila
+    na vsaki vrstici samo šum, in kriterij `V3-R07` pravi, da se vmesnik
+    družine z enim otrokom ne spremeni (`ADR-039` F).
+
+    Vključuje tudi **deaktivirane** otroke: njihova snov ostane (`V3-R06`) in
+    mora imeti ime — brez tega bi vrstice po deaktivaciji tiho izgubile oznako.
+    """
+    otroci = clani.otroci()
+    if len(otroci) < 2:
+        return {}
+    return {otrok.user_id: otrok.display_name for otrok in otroci}
+
+
+def _pogled(
+    material: Material, mapa_slik: Path, imena: dict[str, str] | None = None
+) -> dict[str, Any]:
     """Zapis, pripravljen za predlogo.
 
     Predloga ne računa in ne oblikuje — dobi gotove nize. Tako je oblikovanje
@@ -77,6 +100,11 @@ def _pogled(material: Material, mapa_slik: Path) -> dict[str, Any]:
     velikost = velikost_slike(pot) if je_znotraj(mapa_slik, pot) else None
     return {
         "id": material.id,
+        # Čigava snov je (V3-R07). `None` pri družini z enim otrokom: ime, ki
+        # ne loči ničesar, je na vsaki vrstici samo šum (`ADR-039` F).
+        # Izbirnika tu ni — te strani so zgodovina družine, ne pogled po
+        # otroku; ta je na `/admin/days` in v statistiki.
+        "otrok": (imena or {}).get(material.child_id),
         "koda": material.subject,
         "oznaka": oznaka_predmeta(material.subject),
         "cas": cas(material.taken_at),
@@ -99,7 +127,9 @@ def _stevilo(koliko: int | None) -> str:
     return "—" if koliko is None else f"{koliko}"
 
 
-def _pogled_podrobno(material: Material, mapa_slik: Path) -> dict[str, Any]:
+def _pogled_podrobno(
+    material: Material, mapa_slik: Path, imena: dict[str, str] | None = None
+) -> dict[str, Any]:
     """Kot `_pogled`, plus izid obdelave in revizijska sled (V1-R03).
 
     Vse, kar je posebej za to stran, je zbrano tu: predloga potem samo
@@ -107,7 +137,7 @@ def _pogled_podrobno(material: Material, mapa_slik: Path) -> dict[str, Any]:
     predloga sicer sklepala o pomenu statusov — in bi se sklepanje podvojilo
     ob vsakem novem stanju.
     """
-    pogled = _pogled(material, mapa_slik)
+    pogled = _pogled(material, mapa_slik, imena)
     pogled.update(
         {
             "status": material.status,
@@ -240,10 +270,12 @@ def pregled(
     request: Request,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
     kvizi: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov)],
+    clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
 ) -> Response:
     """Vsi predmeti s številom slik in seznam kvizov (V2-R01)."""
     steviloma = repozitorij.stej_po_predmetih()
+    otroci = clani.otroci()
 
     vrstice = [
         {"koda": predmet.koda, "oznaka": predmet.oznaka, "koliko": steviloma.get(predmet.koda, 0)}
@@ -269,7 +301,12 @@ def pregled(
             # Kviz je svoja os in ne del pregleda predmetov, zato svoj ključ in
             # svoj razdelek. Oblika ene vrstice je last `routers/kvizi.py` —
             # ta stran jo samo pokaže.
-            "kvizi": seznam_kvizov(kvizi),
+            "kvizi": seznam_kvizov(kvizi, otroci),
+            # Kviz mora imeti naslovljenca (`docs/odlocitve/ADR-039` A), zato
+            # družina brez aktivnega otroka vstopov v sestavljalnik sploh ne
+            # dobi. Isto pravilo jih tudi zavrne s `409` — gumb, ki ga stran
+            # ne izriše, ni varovalka (vzorec `ADR-038`).
+            "ima_otroka": any(otrok.is_active for otrok in otroci),
         },
     )
 
@@ -278,6 +315,7 @@ def pregled(
 def arhiv(
     request: Request,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
 ) -> Response:
@@ -288,13 +326,18 @@ def arhiv(
     ne „kdaj je bila snov posneta".
     """
     snovi = repozitorij.seznam_arhiviranih()
+    imena = imena_otrok(clani)
     return predloge.TemplateResponse(
         request,
         "arhiv.html",
         {
             "koliko_opis": stevilo_z_besedo(len(snovi), SLIKE),
             "snovi": [
-                _pogled(snov, mapa_druzine(nastavitve.images_dir, repozitorij.family_id))
+                _pogled(
+                    snov,
+                    mapa_druzine(nastavitve.images_dir, repozitorij.family_id),
+                    imena,
+                )
                 for snov in snovi
             ],
         },
@@ -306,6 +349,7 @@ def predmet(
     request: Request,
     koda: str,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
 ) -> Response:
@@ -323,6 +367,12 @@ def predmet(
             predloge, request, f"Predmeta s kodo „{koda}“ ni ne na seznamu ne v bazi."
         )
 
+    # Imena **pred** zanko in ne v njej: znotraj izpeljanega seznama bi bila
+    # to ena poizvedba na sliko, seznam predmeta pa bo čez šolsko leto dolg
+    # nekaj sto vrstic (`docs/odlocitve/ADR-017` A). Arhiv ima isto potezo.
+    imena = imena_otrok(clani)
+    mapa_slik = mapa_druzine(nastavitve.images_dir, repozitorij.family_id)
+
     return predloge.TemplateResponse(
         request,
         "predmet.html",
@@ -330,10 +380,7 @@ def predmet(
             "koda": koda,
             "oznaka": oznaka_predmeta(koda),
             "koliko_opis": stevilo_z_besedo(len(snovi), SLIKE),
-            "snovi": [
-                _pogled(snov, mapa_druzine(nastavitve.images_dir, repozitorij.family_id))
-                for snov in snovi
-            ],
+            "snovi": [_pogled(snov, mapa_slik, imena) for snov in snovi],
         },
     )
 
@@ -343,6 +390,7 @@ def snov(
     request: Request,
     material_id: str,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
 ) -> Response:
@@ -352,7 +400,7 @@ def snov(
         return ni_najdeno(predloge, request, "Zapisa s tem identifikatorjem na strežniku ni.")
 
     mapa_slik = mapa_druzine(nastavitve.images_dir, repozitorij.family_id)
-    pogled = _pogled_podrobno(material, mapa_slik)
+    pogled = _pogled_podrobno(material, mapa_slik, imena_otrok(clani))
     # Snov brez datoteke povečanega prikaza nima, zato tudi poizvedbe po
     # sosedih ne plača.
     povecava = (

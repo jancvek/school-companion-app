@@ -12,6 +12,7 @@ strani (CSRF). Novih posledic ni: preklic kviza ničesar ne uniči, objava pa
 ustvari zapis, ki ga je mogoče preklicati.
 """
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -24,8 +25,12 @@ from starlette.responses import Response
 
 from app.besedilo import SNOVI, VPRASANJA, stevilo_z_besedo
 from app.casi import cas, cas_ali_prazno, dan_od_do, datum, trajanje
-from app.db import KviziRepository, SnovSVprasanji, SnovZaIzbor
-from app.dependencies import daj_nastavitve, daj_repozitorij_kvizov
+from app.db import ClanDruzine, ClaniRepository, KviziRepository, SnovSVprasanji, SnovZaIzbor
+from app.dependencies import (
+    daj_nastavitve,
+    daj_repozitorij_clanov,
+    daj_repozitorij_kvizov,
+)
 from app.models import (
     OCENE,
     STATUS_NAPAKA,
@@ -57,6 +62,50 @@ VSTOP_DANES = "danes"
 VSTOP_ROCNA = "rocna"
 
 VSTOPI = frozenset({VSTOP_NOVA, VSTOP_DANES, VSTOP_ROCNA})
+
+#: Kviz mora imeti naslovljenca (`docs/odlocitve/ADR-039` A), zato družina
+#: brez aktivnega otroka kviza ne more objaviti. Sporočilo pove, kaj naj starš
+#: naredi, in ne le, česa ne gre.
+SPOROCILO_BREZ_OTROKA = (
+    "Kviz je vedno namenjen enemu otroku, tvoja družina pa nima nobenega "
+    "aktivnega otroka. Najprej dodaj otroka v razdelku Družina."
+)
+
+#: Isto besedilo za tujega in za neobstoječega otroka (`ADR-038`).
+SPOROCILO_NEZNAN_OTROK = "Tega otroka v tvoji družini ni."
+
+#: Objava brez naslovljenca. Kviz je vedno nekomu namenjen, zato je tih
+#: privzetek tu napačen: kviz bi nastal za otroka, ki ga ni nihče izbral.
+SPOROCILO_BREZ_NASLOVLJENCA = (
+    "Kviza ni bilo mogoče objaviti, ker ni bilo izbrano, kateremu otroku je "
+    "namenjen. Vrni se na izbor snovi, izberi otroka in klikni „Sestavi“."
+)
+
+
+def _imena(otroci: list[ClanDruzine]) -> dict[str, str]:
+    """Preslikava `id` → prikazno ime, za oznako pri vrstici snovi.
+
+    Prazna pri družini z enim otrokom: oznaka, ki ne loči ničesar, je na
+    vsaki vrstici samo šum (`ADR-039` F). Vključuje tudi **deaktivirane**
+    otroke — njihova snov ostane in mora imeti ime.
+    """
+    if len(otroci) < 2:
+        return {}
+    return {otrok.user_id: otrok.display_name for otrok in otroci}
+
+
+def _ime_otroka(otroci: list[ClanDruzine], user_id: str) -> str | None:
+    """Prikazno ime naslovljenca, ali `None` pri družini z enim otrokom.
+
+    Isto pravilo kot `_imena` in kot izbirnik (`ADR-039` F3): vmesnik družine
+    z enim otrokom se ne spremeni. Prvi zapis te funkcije je ime vračal vedno,
+    z utemeljitvijo, da ga stavek o samooceni potrebuje — stavek je odtlej
+    preoblikovan tako, da ga ne (`ADR-014` je zadoščeno, ker je v družini z
+    enim otrokom jasno, čigava trditev je).
+    """
+    if len(otroci) < 2:
+        return None
+    return next((o.display_name for o in otroci if o.user_id == user_id), None)
 
 #: Naslov izbirnika za vsak vstop. Operater mora na strani videti, od kod je
 #: prišel — vsi trije vstopi so sicer videti enako.
@@ -155,7 +204,12 @@ def _razlog(snov: SnovZaIzbor) -> str | None:
     return "obdelano, a brez veljavnih vprašanj"
 
 
-def _vrstica(snov: SnovZaIzbor, obkljukana: bool, mapa_slik: Path) -> dict[str, Any]:
+def _vrstica(
+    snov: SnovZaIzbor,
+    obkljukana: bool,
+    mapa_slik: Path,
+    ime_otroka: str | None = None,
+) -> dict[str, Any]:
     """Ena vrstica izbirnika, pripravljena za predlogo.
 
     Predloga ne sklepa in ne oblikuje — dobi gotove vrednosti, tako kot
@@ -172,6 +226,9 @@ def _vrstica(snov: SnovZaIzbor, obkljukana: bool, mapa_slik: Path) -> dict[str, 
         "razlog": _razlog(snov),
         "obkljukana": obkljukana,
         "ima_sliko": ima_sliko,
+        # `None` pri družini z enim otrokom: ime, ki ne loči ničesar, je na
+        # vsaki vrstici samo šum (`docs/odlocitve/ADR-039` F).
+        "otrok": ime_otroka,
     }
 
 
@@ -183,6 +240,87 @@ def _predlagano_ime(subject: str | None, zdaj: datetime) -> str:
     njegovo dolgo ime, ker je to zapis, ki ga operater bere v seznamu.
     """
     return f"{subject or VSI_PREDMETI} — {datum(zdaj)}"
+
+
+@dataclass(frozen=True)
+class Naslovljenec:
+    """Otrok, ki mu bo kviz namenjen, in kaj naj ponudi izbirnik (`ADR-039` A)."""
+
+    izbrani: ClanDruzine
+
+    #: Vsi **aktivni** otroci družine, po prikaznem imenu. Deaktiviran otrok
+    #: se ne more prijaviti, zato kviza zanj ni mogoče rešiti in se ne ponudi.
+    vsi: tuple[ClanDruzine, ...]
+
+    @property
+    def je_izbirnik(self) -> bool:
+        """Pri enem otroku se polje ne izriše — izbirati ni česa."""
+        return len(self.vsi) > 1
+
+    @property
+    def ime_za_prikaz(self) -> str | None:
+        """Prikazno ime, ali `None` pri družini z enim otrokom.
+
+        **Edina pot do imena v izrisu.** `izbrani.display_name` se v
+        usmerjevalniku ne bere neposredno: prvi zapis te zahteve je to počel in
+        pravilo „ime samo pri več kot enem otroku" (`ADR-039` F3) je zato v
+        sestavljalniku odpadlo, medtem ko je na sedmih drugih straneh veljalo.
+        Pravilo, ki ga mora vsako klicno mesto uveljaviti samo, je pravilo, ki
+        bo enkrat pozabljeno — zato stoji tu.
+        """
+        return self.izbrani.display_name if self.je_izbirnik else None
+
+
+def _naslovljenec(
+    predloge: Jinja2Templates,
+    request: Request,
+    otroci: list[ClanDruzine],
+    zahtevani: str | None,
+    *,
+    obvezen: bool = False,
+) -> Naslovljenec | Response:
+    """Naslovljenec iz obrazca, ali privzetek; ob težavi vrne stran z napako.
+
+    Dve zavrnitvi in vsaka pomeni drugo pot naprej (vzorec `ADR-038`):
+
+    - **409**, kadar družina nima nobenega aktivnega otroka. Stanje družine
+      tega dejanja ne dopušča; pove, kaj naj starš naredi. Isto pravilo na
+      `/admin` vstopov sploh ne ponudi — gumb, ki ga stran ne izriše, ni
+      varovalka.
+    - **404**, kadar naslovljenec ni otrok te družine. Isto besedilo za
+      tujega in za neobstoječega: obstoj tujega računa ni podatek za starša.
+
+    Privzetek je **prvi po prikaznem imenu**, isti kot na statistiki
+    (`ADR-039` B), in velja samo pri **branju** — ob prvem prihodu v izbirnik
+    mora biti seznam že preračunan za nekoga. Ob objavi privzetka ni, zato
+    imena tudi ni treba zapisati v gumbe: `ADR-039` G je ime tam zahteval prav
+    zato, da privzetek ne bi bil tiha izbira, in te nevarnosti po `obvezen`
+    ni več (`ADR-039` F3).
+
+    **`obvezen=True` privzetka nima**, in to je kriterij `V3-R07`
+    („sestavljalnik ga **zahteva** ob objavi"): objava brez polja je `409` in
+    ne tih kviz za prvega otroka po abecedi. Utemeljitev „obrazec ga vedno
+    pošlje" ne vzdrži — osvežena ali zaznamovana stran predogleda izpred te
+    spremembe, ponovno pošiljanje iz zgodovine brskalnika in vsak prihodnji
+    izris, ki bi skrito polje izgubil, dajo natanko tak zahtevek. Skrito polje
+    ni varovalka, po istem pravilu kot gumb, ki ga stran ne izriše.
+
+    Prazen niz šteje enako kot manjkajoče polje — tu in v `app/otroci.py`,
+    da isti parameter nima dveh pomenov.
+    """
+    aktivni = [otrok for otrok in otroci if otrok.is_active]
+    if not aktivni:
+        return ni_dovoljeno(predloge, request, SPOROCILO_BREZ_OTROKA)
+
+    if not zahtevani:
+        if obvezen:
+            return ni_dovoljeno(predloge, request, SPOROCILO_BREZ_NASLOVLJENCA)
+        return Naslovljenec(izbrani=aktivni[0], vsi=tuple(aktivni))
+
+    izbrani = next((otrok for otrok in aktivni if otrok.user_id == zahtevani), None)
+    if izbrani is None:
+        return ni_najdeno(predloge, request, SPOROCILO_NEZNAN_OTROK)
+    return Naslovljenec(izbrani=izbrani, vsi=tuple(aktivni))
 
 
 def _obseg(
@@ -222,6 +360,8 @@ def _izrisi_izbirnik(
     vstop: str,
     subject: str | None,
     stevilo: int,
+    naslovljenec: Naslovljenec,
+    imena_otrok: dict[str, str],
     izbrane: set[str] | None = None,
     sporocilo: str | None = None,
 ) -> Response:
@@ -234,7 +374,12 @@ def _izrisi_izbirnik(
     """
     zdaj = datetime.now(UTC)
     predmet, od, do = _obseg(vstop, subject, zdaj)
-    snovi = repozitorij.snovi_za_izbor(subject=predmet, od=od, do=do)
+    # Seznam ni omejen na snov naslovljenca — vprašanja so last družine in
+    # starš sme iz snovi enega otroka sestaviti kviz za drugega (kriterij
+    # `V3-R07`). Naslovljenec odloča samo, kaj šteje kot „že v kvizu".
+    snovi = repozitorij.snovi_za_izbor(
+        naslovljenec.izbrani.user_id, subject=predmet, od=od, do=do
+    )
 
     vrstice = [
         _vrstica(
@@ -245,6 +390,7 @@ def _izrisi_izbirnik(
                 else snov.material.id in izbrane
             ),
             mapa_slik=mapa_slik,
+            ime_otroka=imena_otrok.get(snov.material.child_id),
         )
         for snov in snovi
     ]
@@ -264,6 +410,12 @@ def _izrisi_izbirnik(
             "snovi": vrstice,
             "izbirnih": sum(1 for vrstica in vrstice if vrstica["izbirna"]),
             "sporocilo": sporocilo,
+            "naslovljenec": naslovljenec.izbrani.user_id,
+            "naslovljenec_ime": naslovljenec.ime_za_prikaz,
+            "je_izbirnik_otrok": naslovljenec.je_izbirnik,
+            "otroci": [
+                {"id": kdo.user_id, "ime": kdo.display_name} for kdo in naslovljenec.vsi
+            ],
         },
     )
 
@@ -294,10 +446,12 @@ def izbirnik(
     request: Request,
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     repozitorij: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov)],
+    clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
     vstop: str = VSTOP_NOVA,
     subject: str | None = None,
     stevilo: str = str(PRIVZETO_STEVILO),
+    otrok: str | None = None,
 ) -> Response:
     """Izbirnik slik ob prihodu z enega od treh vstopov.
 
@@ -308,6 +462,11 @@ def izbirnik(
     if napaka is not None:
         return napaka
 
+    otroci = clani.otroci()
+    naslovljenec = _naslovljenec(predloge, request, otroci, otrok)
+    if isinstance(naslovljenec, Response):
+        return naslovljenec
+
     return _izrisi_izbirnik(
         request,
         predloge,
@@ -316,6 +475,8 @@ def izbirnik(
         vstop=vstop,
         subject=subject,
         stevilo=_prebrano_stevilo(stevilo),
+        naslovljenec=naslovljenec,
+        imena_otrok=_imena(otroci),
     )
 
 
@@ -324,20 +485,32 @@ def izbirnik_z_izborom(
     request: Request,
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     repozitorij: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov)],
+    clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
     vstop: Annotated[str, Form()] = VSTOP_NOVA,
     subject: Annotated[str | None, Form()] = None,
     stevilo: Annotated[str, Form()] = str(PRIVZETO_STEVILO),
     snov: Annotated[list[str] | None, Form()] = None,
+    otrok: Annotated[str | None, Form()] = None,
 ) -> Response:
     """Izbirnik ob vrnitvi iz predogleda („Nazaj na izbor").
 
     Ista stran kot `GET /new`, le da obkljuka to, kar je operater izbral.
     `POST` zato, ker izbor potuje kot seznam identifikatorjev in ne kot naslov.
+
+    Naslovljenec pride v skritem polju in se tu **ne menja**: menjava gre skozi
+    `GET /new`, ker mora kljukice preračunati po pravilu vstopa za novega
+    otroka (`ADR-039` G), tega pa vrnitev iz predogleda ne sme — tam velja
+    izbor, ki ga je operater naredil.
     """
     napaka = _preveri_vstop(predloge, request, vstop, subject)
     if napaka is not None:
         return napaka
+
+    otroci = clani.otroci()
+    naslovljenec = _naslovljenec(predloge, request, otroci, otrok)
+    if isinstance(naslovljenec, Response):
+        return naslovljenec
 
     return _izrisi_izbirnik(
         request,
@@ -347,6 +520,8 @@ def izbirnik_z_izborom(
         vstop=vstop,
         subject=subject,
         stevilo=_prebrano_stevilo(stevilo),
+        naslovljenec=naslovljenec,
+        imena_otrok=_imena(otroci),
         izbrane=set(snov or []),
     )
 
@@ -356,11 +531,13 @@ def predogled(
     request: Request,
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     repozitorij: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov)],
+    clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
     vstop: Annotated[str, Form()] = VSTOP_NOVA,
     subject: Annotated[str | None, Form()] = None,
     stevilo: Annotated[str, Form()] = str(PRIVZETO_STEVILO),
     snov: Annotated[list[str] | None, Form()] = None,
+    otrok: Annotated[str | None, Form()] = None,
 ) -> Response:
     """Predogled izbranih vprašanj. **Ničesar ne shrani** (`ADR-016` C).
 
@@ -371,6 +548,11 @@ def predogled(
     napaka = _preveri_vstop(predloge, request, vstop, subject)
     if napaka is not None:
         return napaka
+
+    otroci = clani.otroci()
+    naslovljenec = _naslovljenec(predloge, request, otroci, otrok)
+    if isinstance(naslovljenec, Response):
+        return naslovljenec
 
     koliko = _prebrano_stevilo(stevilo)
     izbrane = list(snov or [])
@@ -392,6 +574,8 @@ def predogled(
             vstop=vstop,
             subject=subject,
             stevilo=koliko,
+            naslovljenec=naslovljenec,
+            imena_otrok=_imena(otroci),
             izbrane=set(izbrane),
             sporocilo=(
                 "Izberi vsaj eno snov, ki ima vprašanja. Praznega kviza ni "
@@ -405,7 +589,11 @@ def predogled(
     # vprašanje, na katero predogled odgovarja, je „koliko snovi tega predmeta
     # oziroma dneva danes ne more v kviz", in ne „koliko sem jih odkljukal".
     izpusceno = sum(
-        1 for vrstica in repozitorij.snovi_za_izbor(predmet, od, do) if not vrstica.izbirna
+        1
+        for vrstica in repozitorij.snovi_za_izbor(
+            naslovljenec.izbrani.user_id, predmet, od, do
+        )
+        if not vrstica.izbirna
     )
 
     skupaj = sum(len(skupina.vprasanja) for skupina in skupine)
@@ -417,6 +605,12 @@ def predogled(
             "subject": subject,
             "stevilo": koliko,
             "izbrane": izbrane,
+            # Naslovljenec potuje skozi predogled v skritem polju, kot ves
+            # ostali izbor: predogled ničesar ne shrani (`ADR-016` C). Ime je
+            # vrednost polja v vrstici pod naslovom in ga pri enem otroku ni —
+            # v gumbih ga ni več, ker objava privzetka nima (`ADR-039` F3).
+            "naslovljenec": naslovljenec.izbrani.user_id,
+            "naslovljenec_ime": naslovljenec.ime_za_prikaz,
             "skupine": [_skupina_pogled(skupina) for skupina in skupine],
             "vprasanja_idji": [
                 vprasanje.id for skupina in skupine for vprasanje in skupina.vprasanja
@@ -458,10 +652,12 @@ def objavi(
     request: Request,
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     repozitorij: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov)],
+    clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     ime: Annotated[str, Form()] = "",
     vstop: Annotated[str, Form()] = VSTOP_NOVA,
     subject: Annotated[str | None, Form()] = None,
     vprasanje: Annotated[list[str] | None, Form()] = None,
+    otrok: Annotated[str | None, Form()] = None,
 ) -> Response:
     """Ustvari kviz iz predogledanih vprašanj, v eni transakciji.
 
@@ -477,6 +673,13 @@ def objavi(
     napaka = _preveri_vstop(predloge, request, vstop, subject)
     if napaka is not None:
         return napaka
+
+    # Naslovljenec je preverjen **pred** vsem ostalim in tu **nima
+    # privzetka**: kriterij pravi, da ga sestavljalnik ob objavi zahteva.
+    # Manjkajoč je 409, tuj 404, družina brez otroka 409 (`ADR-039` A).
+    naslovljenec = _naslovljenec(predloge, request, clani.otroci(), otrok, obvezen=True)
+    if isinstance(naslovljenec, Response):
+        return naslovljenec
 
     ime = ime.strip()
     if len(ime) > NAJVEC_IME:
@@ -519,6 +722,7 @@ def objavi(
         ime=ime or _predlagano_ime(predmet, datetime.now(UTC)),
         subject=predmet,
         vprasanja=vprasanja,
+        naslovljenec=naslovljenec.izbrani.user_id,
     )
 
     # 303 iz istega razloga kot pri brisanju in ponovni obdelavi: osvežitev
@@ -526,11 +730,18 @@ def objavi(
     return RedirectResponse(f"{PREDPONA}/{quote(kviz.id, safe='')}", status_code=303)
 
 
-def _pogled_kviza(kviz: Quiz, postavk: int) -> dict[str, Any]:
-    """Kviz brez postavk — za seznam na `/admin`."""
+def _pogled_kviza(kviz: Quiz, postavk: int, imena: dict[str, str]) -> dict[str, Any]:
+    """Kviz brez postavk — za seznam na `/admin` in za glavo strani kviza.
+
+    `imena` je prazen pri družini z enim otrokom: naslovljenec, ki je lahko
+    samo eden, na vsaki vrstici ne pove ničesar (`docs/odlocitve/ADR-039` F).
+    Ime je tudi tam, kjer otroka ni v preslikavi (podatek iz ročno spremenjene
+    baze), `None` — in stran ga takrat izpusti, ne pa pokaže surov `id`.
+    """
     return {
         "id": kviz.id,
         "ime": kviz.name,
+        "otrok": imena.get(kviz.child_id),
         "koda": kviz.subject or VSI_PREDMETI,
         "nastal": cas(kviz.created_at),
         # Sam datum za seznam: tam je ura odveč, predmet in datum pa sta
@@ -548,13 +759,16 @@ def _pogled_kviza(kviz: Quiz, postavk: int) -> dict[str, Any]:
     }
 
 
-def seznam_kvizov(repozitorij: KviziRepository) -> list[dict[str, Any]]:
+def seznam_kvizov(
+    repozitorij: KviziRepository, otroci: list[ClanDruzine]
+) -> list[dict[str, Any]]:
     """Kvizi za razdelek na `/admin`, najnovejši prvi.
 
     Živi tu in ne v `admin.py`, ker je oblika kviza stvar tega modula; `admin`
     jo samo pokliče in preda predlogi.
     """
-    return [_pogled_kviza(kviz, postavk) for kviz, postavk in repozitorij.seznam()]
+    imena = _imena(otroci)
+    return [_pogled_kviza(kviz, postavk, imena) for kviz, postavk in repozitorij.seznam()]
 
 
 def _skupine(
@@ -684,6 +898,7 @@ def kviz(
     quiz_id: str,
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     repozitorij: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov)],
+    clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
 ) -> Response:
     """En kviz z vsemi postavkami; rešen kviz kot rezultat (V2-R03).
@@ -702,12 +917,19 @@ def kviz(
     if najden is None:
         return ni_najdeno(predloge, request, "Kviza s tem identifikatorjem ni.")
 
+    # Izbirnika tu ni: kviz ima natanko enega naslovljenca (`ADR-039` F).
+    # Ime pa je — povedati mora, čigav rezultat bereš.
+    otroci = clani.otroci()
+    imena = _imena(otroci)
+    ime_otroka = _ime_otroka(otroci, najden.child_id)
+
     if najden.solved_at is not None:
         return predloge.TemplateResponse(
             request,
             "kviz.html",
             {
-                "kviz": _pogled_kviza(najden, len(najden.postavke)),
+                "otrok_ime": ime_otroka,
+                "kviz": _pogled_kviza(najden, len(najden.postavke), imena),
                 "rezultat": _rezultat(
                     najden,
                     repozitorij.poskusi_kviza(quiz_id),
@@ -736,7 +958,8 @@ def kviz(
         request,
         "kviz.html",
         {
-            "kviz": _pogled_kviza(najden, len(postavke)),
+            "otrok_ime": ime_otroka,
+            "kviz": _pogled_kviza(najden, len(postavke), imena),
             "postavke": postavke,
         },
     )
@@ -761,6 +984,7 @@ def tisk(
     quiz_id: str,
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     repozitorij: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov)],
+    clani_druzine: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     izbor: str | None = None,
     ocena: Annotated[list[str] | None, Query()] = None,
 ) -> Response:
@@ -786,7 +1010,7 @@ def tisk(
             predloge,
             request,
             "Kviz še ni rešen, zato vprašanj ni mogoče izbrati po oceni. Tisk bo "
-            "mogoč, ko Maša na telefonu oceni vsa vprašanja.",
+            "mogoč, ko otrok na telefonu oceni vsa vprašanja.",
         )
 
     zahtevane = set(ocena or [])
@@ -808,7 +1032,9 @@ def tisk(
         request,
         "kviz-tisk.html",
         {
-            "kviz": _pogled_kviza(najden, len(najden.postavke)),
+            # Natisnjen list gre iz zaslona na mizo, zato mora povedati,
+            # čigav je — pri dveh otrocih je to edina razlika med listoma.
+            "kviz": _pogled_kviza(najden, len(najden.postavke), _imena(clani_druzine.otroci())),
             "ocene": [
                 {
                     "koda": koda,

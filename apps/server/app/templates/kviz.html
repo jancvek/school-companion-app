@@ -5,6 +5,10 @@
 {% block vsebina %}
   <h1>{{ kviz.ime }}</h1>
   <p class="pod">
+    {# Naslovljenec je od V3-R07 del identitete kviza in ne okras: „kviz" brez
+       njega v družini z več otroki ne pomeni nič. Izbirnika tu ni — kviz ima
+       natanko enega (`docs/odlocitve/ADR-039` F). #}
+    {%- if otrok_ime %}{{ otrok_ime }} · {% endif -%}
     {{ kviz.koda }} · {{ kviz.vprasanj_opis }} · objavljen {{ kviz.nastal }}
   </p>
 
@@ -19,7 +23,7 @@
   {% elif kviz.resen %}
     <p class="pod">
       <strong>Kviz je rešen {{ kviz.resen_ob }}.</strong>
-      Maša je ocenila vsa vprašanja.
+      Vsa vprašanja so ocenjena.
     </p>
   {% endif %}
 
@@ -28,7 +32,9 @@
        prednost pri stanju zgoraj, poskusi pa so dejstvo in se pokažejo
        (`docs/plan/V2-R03.md`, odločitev 1). #}
     <p class="drobno">
-      Ocene so Mašina samoocena po razkritju odgovora, ne preverjeno znanje.
+      {# Ime stoji v glavi te strani in ne v tej povedi: za predlogom bi
+         slovenščina zahtevala sklanjanje poljubnega imena (`ADR-039` F3). #}
+      Ocene so samoocena po razkritju odgovora, ne preverjeno znanje.
       Najtežja vprašanja so zgoraj.
     </p>
     <p>

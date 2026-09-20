@@ -21,7 +21,9 @@
               <span class="brez-slike">slike na disku ni</span>
             {% endif %}
             <span class="opis">
-              <span class="cas">{{ snov.koda }} — {{ snov.cas }}</span>
+              <span class="cas">
+                {{ snov.koda }} — {{ snov.cas }}{% if snov.otrok %} · {{ snov.otrok }}{% endif %}
+              </span>
               <span class="stanje">arhivirano {{ snov.arhivirano_ob }}</span>
               {# Kljukica pove, ali je telefon sliko pri sebi res pobrisal.
                  Dokler je ni, dokončno brisanje ni mogoče. #}

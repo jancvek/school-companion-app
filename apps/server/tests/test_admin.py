@@ -25,7 +25,7 @@ from app.models import (
     Material,
     Question,
 )
-from tests.conftest import CVEK_ID, SejaTesta
+from tests.conftest import CVEK_ID, OTROK_ID, SejaTesta
 
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 UUID_DVA = "a1b2c3d4-e5f6-4789-abcd-ef0123456789"
@@ -51,6 +51,7 @@ def zapisi(
     with Session(motor) as seja:
         seja.add(
             Material(
+                child_id=OTROK_ID,
                 family_id=CVEK_ID,
                 id=material_id,
                 subject=subject,

@@ -81,7 +81,7 @@ async function izrisi(streznik?: OdjemalecKvizov) {
 
 describe('reševanje kviza', () => {
   it('pokaže vprašanje brez odgovora in brez gumbov za oceno', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 3));
+    await shraniKviz(db, kvizStreznika('k1', 3), null);
 
     await izrisi();
 
@@ -94,7 +94,7 @@ describe('reševanje kviza', () => {
   });
 
   it('„Pokaži odgovor" razkrije odgovor in štiri ocene', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 3));
+    await shraniKviz(db, kvizStreznika('k1', 3), null);
     await izrisi();
 
     await fireEvent.press(await screen.findByText('Pokaži odgovor'));
@@ -107,7 +107,7 @@ describe('reševanje kviza', () => {
   });
 
   it('ocena zapiše poskus in je hkrati „naprej"', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 3));
+    await shraniKviz(db, kvizStreznika('k1', 3), null);
     await izrisi();
 
     await fireEvent.press(await screen.findByText('Pokaži odgovor'));
@@ -134,7 +134,7 @@ describe('reševanje kviza', () => {
     // za prijavljenega otroka spregledala ali pa bi ga posvojila napačna
     // prijava — in ocena enega otroka bi pristala v statistiki drugega
     // (`docs/odlocitve/ADR-036` B in C).
-    await shraniKviz(db, kvizStreznika('k1', 2));
+    await shraniKviz(db, kvizStreznika('k1', 2), null);
     await render(
       <PrijavaProvider db={db} nastavitve={null} shramba={ustvariShrambo(SEJA)}>
         <KviziProvider db={db} nastavitve={null}>
@@ -156,7 +156,7 @@ describe('reševanje kviza', () => {
 
   it('zapiše tri žige: pokazano, razkrito, ocenjeno', async () => {
     jest.useFakeTimers({ now: new Date('2026-09-10T15:00:00.000Z'), doNotFake: ['nextTick', 'setImmediate'] });
-    await shraniKviz(db, kvizStreznika('k1', 2));
+    await shraniKviz(db, kvizStreznika('k1', 2), null);
     await izrisi();
     await screen.findByText('Vprašanje 1?');
 
@@ -173,7 +173,7 @@ describe('reševanje kviza', () => {
   });
 
   it('zapuščen kviz se nadaljuje pri prvi neocenjeni postavki', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 5));
+    await shraniKviz(db, kvizStreznika('k1', 5), null);
     await zapisiPoskus(db, poskus('k1', 1));
     await zapisiPoskus(db, poskus('k1', 2));
 
@@ -186,7 +186,7 @@ describe('reševanje kviza', () => {
   it('postavko, odgovorjeno na strežniku, preskoči', async () => {
     const kviz = kvizStreznika('k1', 3);
     kviz.items[0].answered = true;
-    await shraniKviz(db, kviz);
+    await shraniKviz(db, kviz, null);
 
     await izrisi();
 
@@ -194,7 +194,7 @@ describe('reševanje kviza', () => {
   });
 
   it('po zadnji oceni pove „Kviz je končan", brez številk ocen, in pošlje poskuse', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 2));
+    await shraniKviz(db, kvizStreznika('k1', 2), null);
     const streznik = odjemalec([kvizStreznika('k1', 2)]);
     await izrisi(streznik);
     // Prvi obhod ob vpetju: ni kaj poslati.
@@ -214,7 +214,7 @@ describe('reševanje kviza', () => {
   });
 
   it('„Nazaj na kvize" po koncu vrne na seznam', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 1));
+    await shraniKviz(db, kvizStreznika('k1', 1), null);
     await izrisi();
 
     await fireEvent.press(await screen.findByText('Pokaži odgovor'));
@@ -226,7 +226,7 @@ describe('reševanje kviza', () => {
 
   it('odprt kviz ne izgine, tudi če ga strežnik ne vrača več', async () => {
     // `ADR-019` C: preklic na strežniku ne sme Maši vzeti zaslona pod prsti.
-    await shraniKviz(db, kvizStreznika('k1', 2));
+    await shraniKviz(db, kvizStreznika('k1', 2), null);
     const streznik = odjemalec([]);
 
     const { unmount } = await izrisi(streznik);
@@ -235,13 +235,13 @@ describe('reševanje kviza', () => {
       await Promise.resolve();
     });
 
-    expect(await postavkeKviza(db, 'k1')).toHaveLength(2);
+    expect(await postavkeKviza(db, 'k1', null)).toHaveLength(2);
     // `await`, sicer se test konča pred odmontiranjem in ponavljalnik ostane živ.
     await unmount();
   });
 
   it('gumbi ob spodnjem robu upoštevajo varno območje', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 1));
+    await shraniKviz(db, kvizStreznika('k1', 1), null);
     await izrisi();
 
     const vrstica = await screen.findByTestId('spodnja-vrstica');
@@ -257,7 +257,7 @@ describe('reševanje kviza', () => {
   });
 
   it('neuspešno shranjena ocena pusti vprašanje in pove, kaj naj naredi', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 2));
+    await shraniKviz(db, kvizStreznika('k1', 2), null);
     sqlite.stanje.db = {
       ...db,
       runAsync: async () => {

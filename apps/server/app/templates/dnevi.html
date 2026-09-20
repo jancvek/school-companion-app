@@ -20,12 +20,37 @@
      ničesar ne spremeni, zato mora biti dosegljiva z osvežitvijo in iz
      zgodovine brskalnika. Skrito polje `obdobje=dan` poskrbi, da iz vmesnika
      nikoli ne nastane kombinacija „teden in poljuben dan", ki je 400. #}
+  {# Izbira otroka je svoj obrazec `GET` in ne povezave: obdobje in otrok
+     sta dve neodvisni izbiri, in vsaka mora drugo preživeti
+     (`docs/odlocitve/ADR-039` B). Pri enem otroku se ne izriše. #}
+  {% if je_izbirnik_otrok %}
+    <form method="get" action="/admin/days" class="vstopi izbira-otroka">
+      <input type="hidden" name="obdobje" value="{{ 'teden' if je_teden else 'dan' }}">
+      {% if not je_teden %}<input type="hidden" name="dan" value="{{ izbrani_dan }}">{% endif %}
+      <label>
+        Otrok:
+        <select name="otrok">
+          {% for otrok in otroci %}
+            <option value="{{ otrok.id }}"
+                    {% if otrok.id == izbrani_otrok %}selected{% endif %}>{{ otrok.ime }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="gumb gumb-obdelava" type="submit">Pokaži</button>
+    </form>
+  {% endif %}
+
   <div class="vstopi">
-    <a class="gumb gumb-obdelava" href="/admin/days">Danes</a>
-    <a class="gumb gumb-obdelava" href="/admin/days?dan={{ vceraj }}">Včeraj</a>
-    <a class="gumb gumb-obdelava" href="/admin/days?obdobje=teden">Ta teden</a>
+    <a class="gumb gumb-obdelava" href="/admin/days{{ otrok_prvi }}">Danes</a>
+    <a class="gumb gumb-obdelava"
+       href="/admin/days?dan={{ vceraj }}{{ otrok_dodatni }}">Včeraj</a>
+    <a class="gumb gumb-obdelava"
+       href="/admin/days?obdobje=teden{{ otrok_dodatni }}">Ta teden</a>
     <form method="get" action="/admin/days" class="vstopi">
       <input type="hidden" name="obdobje" value="dan">
+      {% if je_izbirnik_otrok %}
+        <input type="hidden" name="otrok" value="{{ izbrani_otrok }}">
+      {% endif %}
       <label>
         Dan:
         <input type="date" name="dan" value="{{ izbrani_dan }}" class="ime">

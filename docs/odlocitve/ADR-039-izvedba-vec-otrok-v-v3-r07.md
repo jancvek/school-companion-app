@@ -1,0 +1,384 @@
+# ADR-039: Izvedba „več otrok v družini" v V3-R07; naslovljenec kviza, lastnik snovi in poskusa
+
+- **Datum:** 2026-09-20
+- **Nastalo pri:** V3-R07 (fazi 1 in 2)
+- **Status:** Sprejeto
+- **Stoji na:** `ADR-025` (družina je lastnik, izolacija je lastnost kode),
+  `ADR-021` (kaj statistika šteje in kako razvršča), `ADR-019` (en poskus na
+  postavko, prvi zmaga), `ADR-036` (lastnik lokalnega zapisa na telefonu,
+  starš se v aplikacijo ne prijavi), `ADR-038` (vzorec zavrnitev in vmesnih
+  potrditev pri članih družine), `ADR-004` (migracije lokalne sheme)
+- **Zoži:** `ADR-017` B — „snov je bila v kvizu" odslej šteje **po
+  naslovljencu**, ne čez celo družino; glej G.
+- **Dopolnjuje:** `ADR-019` E — „prvi zmaga" dobi drugi primer tihega
+  sprejema: poskus za kviz, naslovljen na drugega otroka; glej D.
+- **Izpolnjuje:** odloženo nalogo iz `ADR-036` C in iz
+  `docs/01-arhitektura.md` („V V3-R04 je kviz še last družine; `V3-R07` to
+  reši tam.")
+
+## Kontekst
+
+Do te zahteve je bil **kviz last družine**. V družini z enim otrokom je to
+brez posledic in prav zato se ni videlo, da manjka: „kviz" je pomenil „kviz za
+Mašo", ker druge možnosti ni bilo. Z `V3-R06` starš odpre račun drugemu
+otroku, in od tistega trenutka naprej „kviz", „statistika" in „snov" brez
+otroka ne pomenijo ničesar.
+
+`V3-R01` je dal vsakemu podatku družino, `V3-R04` pa je na **telefonu** dal
+vsakemu lokalnemu zapisu lastnika (`materials.user_id`, `attempts.user_id`).
+Na strežniku lastnika ni nikjer. Ta zahteva je druga polovica istega dela in
+edina v `V3`, ki spremeni obstoječe vedenje.
+
+Kriteriji zahteve so v `docs/verzije/v3.md`. Ne povedo pa sedmih stvari, ki
+spremenijo, kaj pride v kodo: kaj stori družina brez otroka, ali izbirnik
+pozna „vse otroke", kaj naredi migracija s kvizi in snovjo, kaj se zgodi s
+poskusom za tuj kviz, ali je v obsegu tudi telefon, katere admin strani dobijo
+razsežnost otroka, in po čem se šteje „snov je bila v kvizu". Vse to je faza 1
+naslovila; dogovor je spodaj.
+
+## Odločitve
+
+### A — naslovljenec je obvezen; družina brez otroka kviza ne sestavi
+
+`quizzes.child_id` je `NOT NULL`. Kviz brez naslovljenca ne sme obstajati:
+prav ta stolpec je razlog te zahteve in `NULL`-abilen bi pomenil, da „kviz za
+nikogar" ostane veljavno stanje, ki ga mora znati obravnavati vsaka poizvedba
+za njim.
+
+Posledica je, da družina **brez aktivnega otroka** kviza ne more objaviti.
+Zato:
+
+1. razdelek „Kvizi" na `/admin` takrat vstopov v sestavljalnik **ne ponudi**
+   in na njihovem mestu pove, naj starš najprej doda otroka na
+   `/admin/family`;
+2. pot, poklicana neposredno, vrne **409** z istim besedilom.
+
+Oboje odloči **isto pravilo** — vzorec `ADR-038`: dejanja, ki bi bilo
+zavrnjeno, seznam sploh ne ponudi, in gumb, ki ga stran ne izriše, ni
+varovalka.
+
+Koda je `409` in ne `403`: to ni dejanje, ki ne bi bilo tvoje (`403` po
+`ADR-038`), ampak stanje družine, ki tega dejanja ta hip ne dopušča.
+
+Sestavljalnik ponudi samo **aktivne** otroke. Kviz, ki je že naslovljen na
+otroka, ki je pozneje deaktiviran, ostane nedotaknjen — nič se ne briše
+(`ADR-011`, `V3-R06`); le rešiti ga ni mogoče, ker se ta otrok ne more
+prijaviti.
+
+### B — izbirnik otroka nima možnosti „vsi otroci"
+
+1. **Privzeto skupno, z možnostjo zožitve na enega otroka.** Za: starš vidi
+   celotno družino na enem mestu. Proti: privzeti pogled sešteje dva otroka v
+   številko, ki ne odgovori na nobeno vprašanje — delež *Nisem vedela* čez
+   Mašo in njenega brata ni podatek o nobenem od njiju.
+2. **En otrok naenkrat, privzeto prvi po prikaznem imenu.**
+
+**Izbrano: B2.** `ADR-021` A pravi, da je statistika *„lastnikov delovni
+pripomoček za pogovor z Mašo"* — pogovor teče z enim otrokom. `V3-R09` bo
+manjke z urnika računal po otroku in po **njegovem** urniku, kjer skupni
+pogled sploh ni definiran; en vzorec za obe strani je vreden več kot ena
+dodatna možnost.
+
+Izbira potuje kot `?otrok=<id>`. Neznan ali **tuj** `id` je **404** z istim
+besedilom kot neobstoječ — obstoj tujega računa ni podatek, ki bi ga starš
+smel dobiti (`V3-R06`, `ADR-038`).
+
+To se namenoma razhaja z obema obstoječima praviloma za neveljaven parameter:
+statistika nerazberljiv `?leto=` tiho pade na tekoče leto, `/admin/days` pa
+neveljaven `?dan=` zavrne s `400` (`ADR-023`). Razlog za tretje pravilo je, da
+`otrok` ni ne okno nad istimi podatki ne datum, ampak **identiteta podatkov**,
+in za identiteto v tem projektu že obstaja pravilo — `404`.
+
+Pri družini z **enim** otrokom se izbirnik ne izriše (kriterij zahteve:
+izbirnika, ki nima česa izbirati, ni). Podatek v bazi je zapisan enako; razlika
+je samo v vmesniku.
+
+### C — migracija pripiše edinega otroka družine in se sicer ustavi
+
+`child_id` je `NOT NULL` na `materials`, `quizzes` in `question_attempts`.
+Kriterij zahteve imenuje samo poskuse („obstoječe pripiše Maši"); naslovljenec
+kviza in lastnik snovi sta ista stvar in ista migracija.
+
+Pravilo je **„edini otrok družine"**, ne „Maša" in ne „prvi po `created_at`":
+ime otroka v migraciji bi bilo ime produkcijske vrstice v kodi.
+
+Družina z **nič ali več kot enim** otrokom migracijo **ustavi z razlago v
+slovenščini** in ne naredi ničesar. Dve zavrnjeni možnosti in zakaj:
+
+- *ugani (npr. najstarejši otrok)* — tiho bi pripisala tuje odgovore napačni
+  osebi, in to je natanko podatek, ki ga potem nihče ne zna popraviti;
+- *pusti `NULL`* — stolpec potem ne more biti `NOT NULL` in A odpade.
+
+Na produkciji je danes ena družina (Cvek) z enim otrokom (Maša), zato je
+pravilo enoumno in migracija teče.
+
+`downgrade` stolpce spusti. **Dokončno izgubi pripis otroka** — nobene vrstice
+ne izgubi, po istem vzorcu kot `0004` (izgubi upokojitev) in za razliko od
+`0005` (izgubi cele kvize). Vrnitev čezenj je smiselna samo nad bazo z eno
+samo družino z enim otrokom.
+
+### D — poskus za tuj kviz se sprejme in ne zapiše
+
+Po tej zahtevi `GET /quizzes/pending` vrača samo kvize prijavljenega otroka.
+Poskus za kviz, naslovljen na **drugega** otroka, zato nastane samo iz
+zastarelih lokalnih podatkov na skupnem telefonu. Tri poti:
+
+1. **`422`.** Po `ADR-020` telefon paket razbije in pošlje poskuse posamič;
+   zavrnjeni obtiči do naslednjega zagona aplikacije in nato spet, za vedno.
+2. **`200`, ne zapiše se, ne šteje v `recorded`.**
+3. **Zapiši ga z otrokom, ki je res odgovoril.** Po `ADR-012` je poskus
+   dejstvo. Proti: v statistiki otroka B se pojavi kviz, ki ni njegov, in
+   `ADR-021` razvrstitev bi mešala dve osebi.
+
+**Izbrano: D2.** To je natanko obnašanje, ki ga `ADR-019` E že predpisuje za
+drugi poskus iste postavke, in iz istega razloga: stanje nastane ob ponovni
+namestitvi ali menjavi uporabnika, telefon pa ne sme obtičati (`ADR-004`).
+
+Cena, ki jo je treba vedeti: tak poskus se **tiho izgubi**. Nastane lahko le
+tako, da je otrok B odgovoril na vprašanje kviza otroka A na skupnem telefonu
+— torej odgovor, ki v statistiki nobenega od njiju nima pomena.
+
+### E — telefon je v obsegu; lokalna shema gre na 5
+
+`pobrisiKvizeRazen` lastnika že pozna (`ADR-036` C), `cakajociKvizi`,
+`najdiKviz` in `postavkeKviza` pa ne filtrirajo **nič**. Na skupnem telefonu
+zato otrok B vidi kvize otroka A — tiste, ki so ostali, ker na njih visi
+neprenesen tuj poskus — in v njih postavke, ki so zanj videti odgovorjene.
+
+`docs/01-arhitektura.md` to nalogo izrecno odlaga na to zahtevo. Zato:
+
+- lokalna migracija **5** doda `quizzes.user_id` (indeksiran, `NULL`-abilen,
+  isti vzorec kot migracija 3);
+- `cakajociKvizi`, `najdiKviz` in `postavkeKviza` filtrirajo po lastniku, po
+  istem pravilu `user_id IS ?` kot vse ostalo (velja tudi za neprijavljeno
+  aplikacijo);
+- zamrznjena kopija `SHEMA_VERZIJE_4` pride v `__tests__/test-database.ts`
+  (`ADR-004`: test migracije ne sme teči nad shemo iz kode);
+- zahteva se preizkusi **na napravi z APK iz te veje** (`ADR-010`, merilo
+  dokončanosti).
+
+`quizzes.user_id` je `NULL`-abilen in ne `NOT NULL`: kviz, ki je na telefon
+prišel pred to migracijo, lastnika nima, posvoji pa ga ista pot kot posnetke
+(`ADR-036`, „posvoji vsaka razrešena seja"). `NOT NULL` bi zahteval ugibanje v
+migraciji na napravi, kjer ni nikogar, ki bi ga vprašal.
+
+### F — razsežnost otroka dobijo tri strani, oznako pa štiri
+
+**Izbirnik otroka** (`?otrok=`, po B): `/admin/days`, `/admin/statistics` in
+`/admin/statistics/subjects/{koda}`.
+
+**Samo oznako z imenom otroka, brez izbirnika:** stran snovi
+(`/admin/materials/{id}`), stran predmeta (`/admin/subjects/{koda}`), arhiv
+(`/admin/archive`) in stran kviza (`/admin/quizzes/{id}`, kjer je naslovljenec
+en sam in izbirati ni česa).
+
+**Ne spremeni se:** pregled `/admin` s števci po predmetih. Števec pove, koliko
+snovi ima družina pri predmetu, in to ostane res.
+
+Oznaka se izriše **samo, kadar ima družina več kot enega otroka** — isto
+pravilo kot za izbirnik. Družina z enim otrokom ne dobi imena na vsako vrstico,
+ker tam ne pove ničesar.
+
+„Zgodovina" iz kriterija zahteve je po `docs/00-namen.md` **zaslon na
+telefonu**, in ta po `V3-R04` že filtrira po lastniku (`listBySubject`). Nove
+zahteve tam ni; zgornji seznam je branje kriterija, ki pokrije admin poglede
+na preteklo snov, ne da bi izumil filtre, ki jih ne zahteva nihče.
+
+### G — „snov je bila v kvizu" se šteje po naslovljencu
+
+`ADR-017` B pravi, da vstop *Nova snov* obkljuka snov, katere nobeno veljavno
+vprašanje ni v nepreklicanem kvizu. Doslej je bilo to čez celo družino, ker
+druge možnosti ni bilo.
+
+Odslej se šteje **po naslovljencu**: snov, iz katere je bil sestavljen kviz za
+otroka A, je za otroka B še vedno „nova".
+
+Brez tega bi *Nova snov* za drugega otroka skrila natanko tisto snov, ki jo
+kriterij zahteve izrecno dovoli uporabiti (*„starš lahko iz snovi enega otroka
+sestavi kviz za drugega"*) — in starš bi moral vedeti, da mora uporabiti
+*Ročno izbiro*, da bi prišel do nje.
+
+Posledica, ki jo je treba izvesti: **naslovljenec mora biti znan pred
+seznamom**, ne šele ob objavi. Zato je polje na **vrhu izbirnika** in skozi
+predogled potuje v skritih poljih, kot vse ostalo stanje izbora (`ADR-016` C:
+predogled ničesar ne shrani). Pri enem otroku je polje izpolnjeno samo in se
+ne izriše.
+
+`ADR-017` B s tem ne preneha veljati — preklican kviz še vedno ne šteje in
+nova serija vprašanj je še vedno „ni bila v kvizu". Zoži se samo obseg
+štetja.
+
+Vprašanja ostanejo **last družine** in ne otroka; to zahteva kriterij sam in
+je zavestna izbira, ne posledica. `questions.child_id` ne obstaja.
+
+## Posledice
+
+- **Kaj to olajša:** `V3-R09` dobi vzorec izbire otroka, na katerega se lahko
+  sklicuje, in snov, ki že nosi otroka — brez tega urnik kot last otroka ne bi
+  imel na kaj vezati manjkov. `V3-R05` dobi še eno pot, ki jo mora pokriti
+  regresijski test tesnjenja, in ta pot zdaj obstaja.
+- **Kaj to oteži:**
+  - Nastane **drugi** razred napake, ki ga baza z enim otrokom ne pokaže —
+    tako kot `ADR-025` uvaja enega za družino. Vsak test nad družino z enim
+    otrokom je od zdaj nepopoln enako, kot je test nad eno družino.
+  - Star APK neha pravilno delovati: pogodba `GET /quizzes/pending` se zoži.
+    Star APK sicer ne pade — dobi samo kvize prijavljenega otroka, kar je
+    pravilno — a njegov seznam še vedno kaže tuje lokalne kvize, dokler ni
+    nameščen nov. Na produkciji je to nevidno, dokler ima družina enega otroka.
+  - Statistika ima odslej dve osi (predmet in otrok), kar pomeni, da je vsako
+    število na teh straneh odvisno od izbire, ki je prej ni bilo.
+- **Na katere zahteve to vpliva:** `V2-R01` (naslovljenec v izbirniku, G),
+  `V2-R02` (zožena pogodba, D), `V2-R03` (oznaka naslovljenca), `V2-R04` in
+  `V2-R07` (izbirnik otroka, B in F), `V3-R01` (tesnjenje dobi nove primere),
+  `V3-R09` (izbira otroka sledi B).
+
+## Dopolnitve med izvedbo (20. 9. 2026)
+
+Dvoje, česar F ob svojem nastanku ni naštel in se je pokazalo šele ob izrisu.
+Obe **dopolnjujeta** F, ne razveljavljata ga.
+
+### F1 — izbirnik kvizov nosi ime otroka pri vsaki vrstici snovi
+
+F je naštel štiri strani z oznako in izbirnika ni omenil. Brez nje pa starš
+dveh otrok v *Ročni izbiri* vidi pomešan seznam brez podatka, čigava je katera
+slika — in prav ta seznam je edini, kjer je mešanje **namerno** (G: snov je
+last družine, da sme starš iz snovi enega otroka sestaviti kviz za drugega).
+Oznaka je torej cena, ki jo G nalaga sam.
+
+Velja isto pravilo kot povsod: izriše se samo pri več kot enem otroku.
+
+### F2 — kdo je na katerem seznamu otrok
+
+Dva bralca, dve pravili, in razlika ni okras:
+
+- **sestavljalnik kvizov** ponudi samo **aktivne** otroke (A): deaktiviran
+  otrok se ne more prijaviti, zato kviza zanj ni mogoče rešiti;
+- **statistika in pregled po dnevih** naštejeta **vse**, tudi deaktivirane.
+  Podatki deaktiviranega otroka ostanejo (`V3-R06`, „nič se ne briše"), in
+  seznam, ki bi ga izpustil, bi jih naredil nedosegljive — kar bi bilo
+  brisanje po drugi poti, le da tiho.
+
+Isto velja za preslikavo imen pri oznakah: vsebuje tudi deaktivirane otroke,
+sicer bi vrstice po deaktivaciji izgubile oznako.
+
+## Popravki po prvem pregledu (20. 9. 2026)
+
+Pregledovalec je vrnil tri kritične točke. Dve sta bili napaki v izvedbi
+(lint in typecheck padeta; objava brez naslovljenca pade na privzetek) in sta
+popravljeni brez spremembe odločitve. Tretja je odkrila, da F ne pove, kaj se
+zgodi z **zapisanimi imeni**, ki so bila v predlogah že prej.
+
+### F3 — ime otroka je vrednost polja, ne del povedi; zapisanih imen ni
+
+F je rekel „oznaka samo pri več kot enem otroku", a je izvedba ime pisala
+vedno na treh mestih: v podnaslov statistike, v stavek o samooceni in v
+podnaslov strani kviza. Družina z enim otrokom je zato dobila spremenjen
+vmesnik, kar kriterij `V3-R07` izrecno prepoveduje.
+
+Hkrati se je pokazalo, da so te predloge **že prej** nosile ime `Maša`
+zapisano na trdo („Mašina samoocena", „Maša je ocenila vsa vprašanja"). To je
+od `ADR-025` napačno za vsako družino razen Cveka in bi se ob prvi tuji
+družini (`V3-R05`) pokazalo kot tuje ime na njihovi strani.
+
+Odslej velja troje:
+
+1. **Ime se izriše samo pri več kot enem otroku**, brez izjeme — isto pravilo
+   kot za izbirnik. Družina z enim otrokom ima vmesnik, kakršen je bil.
+2. **Ime je vrednost polja in ne del povedi**: stoji za ločilom
+   (`Maša · MAT · 3 vprašanja`), nikoli za predlogom. Slovenščina bi za „za
+   Maša" zahtevala tožilnik, sklanjanje poljubnega imena pa je naloga, ki je
+   ta projekt ne rešuje — in „za Maša" je napačna slovenščina, ki jo merilo
+   dokončanosti (`CLAUDE.md` §1b) prepoveduje.
+3. **Zapisanih imen ni nikjer.** Stavek o samooceni in stavek o rešenem kvizu
+   sta preoblikovana tako, da imena ne potrebujeta: *„Ocene so samoocena po
+   razkritju odgovora, ne preverjeno znanje."* in *„Vsa vprašanja so
+   ocenjena."* `ADR-014` zahteva, da je jasno, **čigava** trditev je — pri
+   enem otroku je to družinsko jasno, pri več pa ime stoji v glavi iste
+   strani.
+
+**Zapisana cena:** družina z enim otrokom dve povedi vidi drugače kot prej —
+brez „Mašina" in brez „Maša je ocenila". To je edino odstopanje od „vmesnik se
+ne spremeni" in je zavestno: zapisano ime je bilo napaka, ki jo je ta zahteva
+naredila vidno, in nositi jo naprej bi pomenilo, da prva tuja družina na svoji
+strani bere ime lastnikove hčere. Kriterij v `docs/verzije/v3.md` je popravljen
+s to izjemo.
+
+### F4 — „nazadnje prejeto" na `/admin/days` ostane družinski podatek
+
+Stran je odslej pogled enega otroka, `max(materials.received_at)` pa se še
+naprej šteje čez vso družino. Ostaja tako: poved govori o **strežniku**
+(„Strežnik je nazadnje prejel sliko …") in odgovarja na vprašanje, ali telefon
+sploh prenaša — to ni lastnost otroka. Po otroku bi bila uporabna drugače, a
+bi zahtevala svojo odločitev; zdaj je vsaj zapisana.
+
+## Popravki po drugem pregledu (20. 9. 2026)
+
+F3 je bil pravilen, uveljavljen pa je bil na sedmih straneh in v
+**sestavljalniku ne**: gumba „Sestavi kviz za …" in „Objavi kviz za …" ter
+naslov predogleda so ime izrisali vedno in vedno za predlogom. Pregledovalec
+je isto mesto — ime otroka v vmesniku — vrnil drugič.
+
+### F3 preglaša tisto poved `ADR-039` G, ki ime zahteva v gumbih
+
+G pravi: *„Ime naslovljenca stoji na predogledu in na gumbu za objavo, da
+privzetek ni tiha izbira."* Ta utemeljitev je **odpadla** s popravkom kritične
+točke 3 iz prvega pregleda: objava privzetka nima več — brez polja `otrok` je
+`409`. Nevarnosti, pred katero je G varoval, ni, zato ime v gumbih ni več
+potrebno in F3 velja brez izjeme tudi tam.
+
+G se po `CLAUDE.md` §3 ne prepisuje; ta odstavek pove, katero njegovo poved
+preglaša. Vse ostalo v G (naslovljenec nad seznamom, štetje „bila v kvizu" po
+njem) ostaja.
+
+### Vrata so na tipu, ne na vsakem klicnem mestu
+
+Vzrok napake ni bil spregled treh vrstic, ampak to, da je sestavljalnik ime
+bral **mimo pravila**: `naslovljenec.izbrani.display_name` neposredno, medtem
+ko so druge strani šle skozi `_imena` oziroma `_ime_otroka`, ki pravilo
+uveljavita.
+
+Odslej je edina pot do imena v izrisu `Naslovljenec.ime_za_prikaz`, ki pri
+enem otroku vrne `None`. **Pravilo, ki ga mora vsako klicno mesto uveljaviti
+samo, je pravilo, ki bo enkrat pozabljeno.**
+
+Zraven gre varovalo, ki ga prvič ni bilo: `TestImenaPriEnemOtroku` pomete čez
+**vseh deset** strani `/admin` naenkrat in trdi dvoje — da pri enem otroku
+imena ni nikjer in da pri dveh nikjer ne stoji za predlogom. Nova stran z
+imenom pade tam, ne šele v pregledu.
+
+### Gumbi so spet glagoli
+
+„Sestavi" in „Objavi", ime pa je na predogledu vrednost polja v vrstici pod
+naslovom (`Nejc · Skupaj 6 vprašanj iz 2 snovi.`), kot povsod drugod. V
+izbirniku posebne oznake ni: naslovljenca pove izbirnik sam, ki ima izbranega
+otroka označenega.
+
+Ob tem se je pokazala še ena luknja, ki je ni našel nihče: **stran za tisk**
+je ime dobila v kontekst, a ga ni izrisala. Natisnjena lista dveh otrok bi se
+zato ne ločila v ničemer — in prav ta list gre z zaslona na mizo. Zdaj ime
+nosi, po istem pravilu. Sweep `TestImenaPriEnemOtroku` te strani ne doseže,
+ker zahteva rešen kviz, zato trditev stoji v `test_rezultat.py`.
+
+## Popravki po tretjem pregledu (20. 9. 2026)
+
+Pregled je dal `PRIPRAVLJENO ZA ČLOVEŠKI PREGLED` z enim opozorilom, ki pa
+zadeva merilo dokončanosti (`CLAUDE.md` §1b: *„Test, ki ostane zelen ob
+pokvarjeni implementaciji, ne šteje"*), zato je zaprto in ne odloženo.
+
+**Oznake z imenom so bile varovane samo v zanikanju.** `TestImenaPriEnemOtroku`
+je trdil, da imena pri enem otroku ni in da nikjer ne stoji za predlogom —
+obojemu pa bi zadostil izris, s katerega bi imena izginila **povsod**. Tri
+mutacije (`imena_otrok → {}`, `ime_za_prikaz → None`, `_imena → {}`) so pustile
+zbirko zeleno. Celoten aparat, ki obstaja izključno zato, da se oznake
+izrišejo, torej ni bil pokrit v smeri, zaradi katere obstaja.
+
+Dodana je zrcalna trditev. Pomembna podrobnost, ki jo je pokazala šele druga
+ponovitev mutacije: na statistiki ime stoji **tudi v izbirniku otroka**, zato
+trditev „ime je nekje na strani" ostane zelena, tudi če ga glava izgubi.
+Trditev je zato vezana na `<p class="pod">` in ne na celo stran — strani z
+oznako pri vrstici in strani z imenom v glavi se preverjajo ločeno.
+
+**Vrata so zdaj simetrična.** `IzbiraOtroka.ime_za_prikaz` je dvojček
+`Naslovljenec.ime_za_prikaz`; prej je statistika pravilo uveljavljala na
+klicnem mestu — po istem vzorcu, ki je v sestavljalniku odpovedal. `V3-R09` bo
+ta vzorec podedoval, zato naj tam ne bo česa posnemati narobe.

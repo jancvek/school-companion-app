@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.db import MaterialsRepository
 from app.models import Material
 from app.storage import ZACASNA_PODMAPA
-from tests.conftest import CVEK_ID, SejaTesta
+from tests.conftest import CVEK_ID, OTROK_ID, SejaTesta, ustvari_sejo
 
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 UUID_DVA = "a1b2c3d4-e5f6-4789-abcd-ef0123456789"
@@ -358,6 +358,7 @@ class TestOdgovorOdrazaZapis:
         with Session(motor) as seja:
             seja.add(
                 Material(
+                    child_id=OTROK_ID,
                     family_id=CVEK_ID,
                     id=UUID_ENA,
                     subject="MAT",
@@ -399,3 +400,61 @@ class TestOdgovorOdrazaZapis:
             "created": False,
             "archived": False,
         }
+
+
+class TestOtrokNaSnovi:
+    """Snov nosi otroka, ki jo je fotografiral (`V3-R07`, `ADR-039`).
+
+    Otroka pove **seja**, nikoli telo zahteve: pogodba s telefonom se s to
+    zahtevo navzven ne spremeni.
+    """
+
+    def test_snov_dobi_otroka_iz_zetona(
+        self, odjemalec: TestClient, motor: Engine, otrok: str, telefon: SejaTesta
+    ) -> None:
+        odgovor = odjemalec.post(
+            "/materials", data=polja(), files=datoteka(), headers=telefon.glave
+        )
+
+        assert odgovor.status_code == 201, odgovor.text
+        with Session(motor) as seja:
+            zapis = seja.get(Material, UUID_ENA)
+            assert zapis is not None
+            assert zapis.child_id == otrok
+
+    def test_drug_otrok_dobi_svojo_snov(
+        self, odjemalec: TestClient, motor: Engine, brat: str
+    ) -> None:
+        """Skupen telefon, dve identiteti: zapis nosi tistega, ki je prijavljen."""
+        bratov = ustvari_sejo(motor, brat)
+
+        odgovor = odjemalec.post(
+            "/materials", data=polja(), files=datoteka(), headers=bratov.glave
+        )
+        assert odgovor.status_code == 201, odgovor.text
+
+        with Session(motor) as seja:
+            zapis = seja.get(Material, UUID_ENA)
+            assert zapis is not None
+            assert zapis.child_id == brat
+
+    def test_telo_zahteve_otroka_ne_pove(
+        self, odjemalec: TestClient, motor: Engine, otrok: str, telefon: SejaTesta, brat: str
+    ) -> None:
+        """Polje `child_id` v multipartu se prezre — kdo si, pove prijava.
+
+        Brez tega bi bila identiteta trditev odjemalca, in `V3-R04` je to
+        trditev ravno odpravil (`ADR-036`).
+        """
+        odgovor = odjemalec.post(
+            "/materials",
+            data={**polja(), "child_id": brat},
+            files=datoteka(),
+            headers=telefon.glave,
+        )
+
+        assert odgovor.status_code == 201, odgovor.text
+        with Session(motor) as seja:
+            zapis = seja.get(Material, UUID_ENA)
+            assert zapis is not None
+            assert zapis.child_id == otrok

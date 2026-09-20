@@ -44,7 +44,7 @@ from app.statistika import (
     solska_leta,
 )
 from app.subjects import PREDMETI
-from tests.conftest import CVEK_ID, SejaTesta
+from tests.conftest import CVEK_ID, OTROK_ID, SejaTesta
 from tests.test_kvizi import UUID_DVA, UUID_ENA, UUID_TRI, objavi, snov, upokoji
 from tests.test_resevanje import poskus, poslji
 from tests.test_rezultat import postavke
@@ -105,11 +105,13 @@ def vstavi_poskus(
     rating: str = "srednje",
     mode: str = "samoocena",
     kdaj: datetime = KDAJ,
+    child_id: str = OTROK_ID,
 ) -> None:
     """Poskus naravnost v bazi, mimo poti telefona."""
     with Session(motor) as seja:
         seja.add(
             QuestionAttempt(
+                child_id=child_id,
                 family_id=CVEK_ID,
                 id=str(uuid4()),
                 quiz_item_id=quiz_item_id,
@@ -169,6 +171,21 @@ OSNOVA = PoskusZaStatistiko(
     material_taken_at=datetime(2026, 9, 1, 8, 0, tzinfo=UTC),
     upokojeno=False,
 )
+
+
+@pytest.fixture(autouse=True)
+def _druzina_ima_otroka(otrok: str) -> str:
+    """Družina Cvek ima otroka — tako kot na produkciji (migracija `0008`).
+
+    Od `V3-R07` je otrok del pomena teh strani: kviz brez naslovljenca ne
+    obstaja (`docs/odlocitve/ADR-039` A), statistika in pregled po dnevih pa
+    sta vezana nanj (B). Brez te vrstice bi testi tekli nad družino, kakršne
+    na produkciji ni, in bi merili prazno stran.
+
+    `autouse`, ker gre za **okolje** teh testov in ne za njihov vhod; test, ki
+    potrebuje družino **brez** otroka, ga deaktivira ali izbriše sam.
+    """
+    return otrok
 
 
 def p(question_id: str = "q1", rating: str = "srednje", **polja: Any) -> PoskusZaStatistiko:
@@ -885,3 +902,85 @@ class TestPoizvedbe:
 
         assert re.search(r"Postavljena enkrat · 21 vprašanj", predmet(odjemalec))
         assert mnogo == ena
+
+
+class TestIzbiraOtroka:
+    """Statistika je od `V3-R07` ločena po otroku (`ADR-039` B).
+
+    Skupne številke čez dva otroka ni: delež *Nisem vedela* čez oba ni podatek
+    o nobenem od njiju, statistika pa je pripomoček za pogovor z enim otrokom
+    (`ADR-021` A).
+    """
+
+    def test_pri_enem_otroku_izbirnika_ni(self, odjemalec: TestClient) -> None:
+        """Kriterij `V3-R07`: vmesnik družine z enim otrokom se ne spremeni."""
+        assert "Otrok:" not in pregled(odjemalec)
+        assert "Otrok:" not in predmet(odjemalec)
+
+    def test_pri_dveh_otrocih_je_izbirnik_na_obeh_straneh(
+        self, odjemalec: TestClient, brat: str
+    ) -> None:
+        assert "Otrok:" in pregled(odjemalec)
+        assert "Otrok:" in predmet(odjemalec)
+
+    def test_steje_samo_poskuse_izbranega_otroka(
+        self,
+        odjemalec: TestClient,
+        motor: Engine,
+        slike: Path,
+        otrok: str,
+        brat: str,
+        telefon: SejaTesta,
+    ) -> None:
+        """Isti kviz, dva odgovarjalca — vsak vidi svoje in samo svoje."""
+        snov(motor, slike, UUID_ENA, vprasanj=3)
+        quiz_id = kviz_z_ocenami(odjemalec, motor, [UUID_ENA], [], telefon, koliko=3)
+        prva, druga, tretja = postavke(motor, quiz_id)
+        vstavi_poskus(motor, prva, rating="lahko", child_id=otrok)
+        vstavi_poskus(motor, druga, rating="nisem_vedela", child_id=brat)
+        vstavi_poskus(motor, tretja, rating="nisem_vedela", child_id=brat)
+
+        kljuc = '<span class="koda">MAT</span>'
+        assert "1 poskus" in vrstica(pregled(odjemalec, f"?otrok={otrok}"), kljuc)
+        assert "2 poskusa" in vrstica(pregled(odjemalec, f"?otrok={brat}"), kljuc)
+
+    def test_privzeti_otrok_je_prvi_po_imenu(
+        self,
+        odjemalec: TestClient,
+        motor: Engine,
+        slike: Path,
+        otrok: str,
+        brat: str,
+        telefon: SejaTesta,
+    ) -> None:
+        """`Maša` je po abecedi pred `Nejc`, zato je privzeta ona (`ADR-039` B)."""
+        snov(motor, slike, UUID_ENA, vprasanj=1)
+        quiz_id = kviz_z_ocenami(odjemalec, motor, [UUID_ENA], [], telefon, koliko=1)
+        vstavi_poskus(motor, postavke(motor, quiz_id)[0], child_id=brat)
+
+        # Maša nima nobenega poskusa — privzeti pogled je zato prazen in ne
+        # bratov. Brez privzetka bi stran pokazala številke napačnega otroka.
+        assert "V tem obdobju ni nobene ocene." in pregled(odjemalec)
+        assert "V tem obdobju ni nobene ocene." not in pregled(odjemalec, f"?otrok={brat}")
+
+    def test_tuj_otrok_je_404_na_obeh_straneh(
+        self, odjemalec: TestClient, tuj_otrok: str
+    ) -> None:
+        for pot in ("/admin/statistics", "/admin/statistics/subjects/MAT"):
+            odgovor = odjemalec.get(pot, params={"otrok": tuj_otrok})
+            assert odgovor.status_code == 404, pot
+            assert "Tega otroka v tvoji družini ni." in odgovor.text
+
+    def test_izbira_leta_ohrani_otroka(self, odjemalec: TestClient, brat: str) -> None:
+        besedilo = pregled(odjemalec, f"?otrok={brat}")
+
+        assert f"otrok={brat}" in besedilo
+        assert "leto=vse" in besedilo
+
+    def test_povezava_na_predmet_ohrani_otroka(
+        self, odjemalec: TestClient, brat: str
+    ) -> None:
+        besedilo = pregled(odjemalec, f"?otrok={brat}")
+
+        assert "/admin/statistics/subjects/MAT?leto=" in besedilo
+        assert f"otrok={brat}" in besedilo

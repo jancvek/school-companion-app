@@ -31,9 +31,10 @@ from app.casi import (
     solsko_leto,
     solsko_leto_od_do,
 )
-from app.db import StatistikaRepository
-from app.dependencies import daj_repozitorij_statistike
+from app.db import ClaniRepository, StatistikaRepository
+from app.dependencies import daj_repozitorij_clanov, daj_repozitorij_statistike
 from app.models import OCENE, Material, Ocena
+from app.otroci import PARAMETER, IzbiraOtroka, izberi_otroka
 from app.statistika import (
     Razdeljeno,
     Razporeditev,
@@ -60,6 +61,13 @@ router = APIRouter(prefix=PREDPONA)
 
 #: Vrednost parametra `leto` za okno čez vsa šolska leta.
 VSE = "vse"
+
+#: Ime parametra za izbiro otroka; isto na obeh straneh in v `/admin/days`.
+PARAMETER_OTROK = PARAMETER
+
+#: Besedilo, kadar naslov imenuje otroka, ki ga v tej družini ni. Isto za
+#: tujega in za neobstoječega (`docs/odlocitve/ADR-039` B).
+SPOROCILO_NEZNAN_OTROK = "Tega otroka v tvoji družini ni."
 
 #: Meji sprejemljivega leta. Ne okras: `datetime(10000, …)` vrže izjemo, in
 #: ročno vtipkan `?leto=99999` bi bil sicer 500 namesto privzetka.
@@ -89,9 +97,9 @@ class Okno:
         return f"Šolsko leto {oznaka_solskega_leta(self.leto)}"
 
     @property
-    def poizvedba(self) -> str:
-        """Parameter za povezave, ki morajo okno ohraniti."""
-        return f"?leto={VSE if self.leto is None else self.leto}"
+    def vrednost(self) -> str:
+        """Vrednost parametra `leto`, kot gre v naslov."""
+        return VSE if self.leto is None else str(self.leto)
 
 
 def preberi_okno(vrednost: str | None, tekoce: int) -> Okno:
@@ -109,6 +117,23 @@ def preberi_okno(vrednost: str | None, tekoce: int) -> Okno:
     if vrednost.isascii() and vrednost.isdigit() and NAJMANJ_LETO <= int(vrednost) <= NAJVEC_LETO:
         return Okno(int(vrednost))
     return Okno(tekoce, neprebrano=vrednost)
+
+
+def poizvedba(okno: Okno, izbira: IzbiraOtroka, leto: str | None = None) -> str:
+    """Naslovni parameter, ki ohrani **obe** izbiri hkrati.
+
+    Brez otroka v povezavah bi menjava šolskega leta tiho vrnila privzetega
+    otroka, in obratno — dve izbiri, od katerih vsaka pobriše drugo, sta
+    najhitrejši način, da stran postane neuporabna pri dveh otrocih.
+
+    Otrok se zapiše samo, kadar je izbirnik viden: pri enem otroku parameter
+    ne pove ničesar in bi se pojavil v vsaki povezavi družine, ki ga ne
+    potrebuje (`docs/odlocitve/ADR-039` B).
+    """
+    deli = [f"leto={leto if leto is not None else okno.vrednost}"]
+    if izbira.je_izbirnik and izbira.izbrani is not None:
+        deli.append(f"{PARAMETER_OTROK}={quote(izbira.izbrani.user_id, safe='')}")
+    return "?" + "&".join(deli)
 
 
 def _odstotek_opis(vrednost: int | None) -> str:
@@ -136,18 +161,43 @@ def _stevila(razporeditev: Razporeditev) -> dict[str, Any]:
     }
 
 
-def _izbira_let(okno: Okno, tekoce: int, leta: list[int]) -> list[dict[str, Any]]:
+def _izbira_let(
+    okno: Okno, tekoce: int, leta: list[int], izbira: IzbiraOtroka
+) -> list[dict[str, Any]]:
     """Povezave za izbiro okna: vsa leta s poskusi, tekoče leto in „vse"."""
     moznosti = [
         {
             "oznaka": oznaka_solskega_leta(leto),
-            "url": f"?leto={leto}",
+            "url": poizvedba(okno, izbira, str(leto)),
             "izbrano": okno.leto == leto,
         }
         for leto in sorted({*leta, tekoce}, reverse=True)
     ]
-    moznosti.append({"oznaka": "vse", "url": f"?leto={VSE}", "izbrano": okno.leto is None})
+    moznosti.append(
+        {
+            "oznaka": "vse",
+            "url": poizvedba(okno, izbira, VSE),
+            "izbrano": okno.leto is None,
+        }
+    )
     return moznosti
+
+
+def _izbira_otrok(okno: Okno, izbira: IzbiraOtroka) -> list[dict[str, Any]]:
+    """Povezave za izbiro otroka; prazne, kadar se izbirnik ne izriše."""
+    if not izbira.je_izbirnik:
+        return []
+    return [
+        {
+            "oznaka": kdo.display_name,
+            "url": (
+                f"?leto={okno.vrednost}"
+                f"&{PARAMETER_OTROK}={quote(kdo.user_id, safe='')}"
+            ),
+            "izbrano": izbira.izbrani is not None and kdo.user_id == izbira.izbrani.user_id,
+        }
+        for kdo in izbira.vsi
+    ]
 
 
 def _opombe(razdeljeno: Razdeljeno) -> list[str]:
@@ -167,13 +217,27 @@ def _opombe(razdeljeno: Razdeljeno) -> list[str]:
 
 
 def _skupno(
-    okno: Okno, tekoce: int, repozitorij: StatistikaRepository, razdeljeno: Razdeljeno
+    okno: Okno,
+    tekoce: int,
+    repozitorij: StatistikaRepository,
+    razdeljeno: Razdeljeno,
+    izbira: IzbiraOtroka,
 ) -> dict[str, Any]:
-    """Kar imata obe strani: okno, izbiro let, seštevek in opombe."""
+    """Kar imata obe strani: okno, izbiri, seštevek in opombe."""
+    casi = (
+        repozitorij.casi_poskusov(izbira.izbrani.user_id)
+        if izbira.izbrani is not None
+        else []
+    )
     return {
         "okno": okno.opis,
         "neprebrano": okno.neprebrano,
-        "leta": _izbira_let(okno, tekoce, solska_leta(repozitorij.casi_poskusov())),
+        "leta": _izbira_let(okno, tekoce, solska_leta(casi), izbira),
+        "otroci": _izbira_otrok(okno, izbira),
+        # Pravilo „ime samo pri več kot enem otroku" uveljavi **tip**
+        # (`ADR-039` F3); tu se samo prebere.
+        "otrok_ime": izbira.ime_za_prikaz,
+        "brez_otroka": izbira.izbrani is None,
         "skupaj": _stevila(sestej(razdeljeno.stejejo)),
         "opombe": _opombe(razdeljeno),
     }
@@ -188,17 +252,28 @@ def pregled(
     request: Request,
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     repozitorij: Annotated[StatistikaRepository, Depends(daj_repozitorij_statistike)],
+    clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     leto: str | None = None,
+    otrok: str | None = None,
 ) -> Response:
-    """Vsi predmeti z razporeditvijo ocen v izbranem oknu.
+    """Vsi predmeti z razporeditvijo ocen enega otroka v izbranem oknu.
 
     Vseh deset predmetov po urniku, tudi brez ocen, in za njimi kode iz
     podatkov, ki jih na seznamu ni — po vzorcu `/admin`: sicer bi se ocene
     predmeta s preimenovano kodo tiho izgubile iz pregleda.
     """
+    izbira = izberi_otroka(clani.otroci(), otrok)
+    if izbira is None:
+        return ni_najdeno(predloge, request, SPOROCILO_NEZNAN_OTROK)
+
     tekoce = _tekoce()
     okno = preberi_okno(leto, tekoce)
-    razdeljeno = razdeli(repozitorij.poskusi(*okno.meje))
+    poskusi = (
+        repozitorij.poskusi(izbira.izbrani.user_id, *okno.meje)
+        if izbira.izbrani is not None
+        else []
+    )
+    razdeljeno = razdeli(poskusi)
     predmeti = po_predmetih(razdeljeno.stejejo)
 
     def vrstica(koda: str, oznaka: str) -> dict[str, Any]:
@@ -206,7 +281,11 @@ def pregled(
             "koda": koda or "?",
             "oznaka": oznaka,
             # Vprašanje brez predmeta nima kam voditi.
-            "url": f"{PREDPONA}/subjects/{quote(koda, safe='')}{okno.poizvedba}" if koda else None,
+            "url": (
+                f"{PREDPONA}/subjects/{quote(koda, safe='')}{poizvedba(okno, izbira)}"
+                if koda
+                else None
+            ),
             **_stevila(predmeti.get(koda, Razporeditev())),
         }
 
@@ -218,7 +297,7 @@ def pregled(
     return predloge.TemplateResponse(
         request,
         "statistika.html",
-        {"predmeti": vrstice, **_skupno(okno, tekoce, repozitorij, razdeljeno)},
+        {"predmeti": vrstice, **_skupno(okno, tekoce, repozitorij, razdeljeno, izbira)},
     )
 
 
@@ -282,9 +361,11 @@ def predmet(
     koda: str,
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     repozitorij: Annotated[StatistikaRepository, Depends(daj_repozitorij_statistike)],
+    clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     leto: str | None = None,
+    otrok: str | None = None,
 ) -> Response:
-    """En predmet: seštevek, tabela po mesecih, snovi in vprašanja.
+    """En predmet, en otrok: seštevek, tabela po mesecih, snovi in vprašanja.
 
     Koda, ki je na seznamu desetih, ima stran vedno, tudi brez ocen. Koda, ki
     je ni, jo ima samo, če ima kakšen poskus v kateremkoli oknu — sicer bi
@@ -293,12 +374,27 @@ def predmet(
     Stalno število poizvedb ne glede na dolžino: poskusi, snovi, časi za izbiro
     let (in pri neznani kodi še preverba poskusov).
     """
-    if poisci_predmet(koda) is None and not repozitorij.ima_poskuse(koda):
+    izbira = izberi_otroka(clani.otroci(), otrok)
+    if izbira is None:
+        return ni_najdeno(predloge, request, SPOROCILO_NEZNAN_OTROK)
+
+    # Obstoj strani je vezan na **izbranega otroka**: koda zunaj seznama
+    # desetih ima stran samo, kadar ima ta otrok pri njej kakšno oceno. Sicer
+    # bi menjava otroka pustila odprto stran predmeta, ki zanj ne obstaja.
+    ima_poskuse = izbira.izbrani is not None and repozitorij.ima_poskuse(
+        koda, izbira.izbrani.user_id
+    )
+    if poisci_predmet(koda) is None and not ima_poskuse:
         return ni_najdeno(predloge, request, "Predmeta s to kodo ni in nima nobene ocene.")
 
     tekoce = _tekoce()
     okno = preberi_okno(leto, tekoce)
-    razdeljeno = razdeli(repozitorij.poskusi(*okno.meje, subject=koda))
+    poskusi = (
+        repozitorij.poskusi(izbira.izbrani.user_id, *okno.meje, subject=koda)
+        if izbira.izbrani is not None
+        else []
+    )
+    razdeljeno = razdeli(poskusi)
 
     vprasanja = po_vprasanjih(razdeljeno.stejejo)
     veckrat, enkrat = razvrsti(vprasanja)
@@ -324,7 +420,7 @@ def predmet(
         {
             "koda": koda,
             "oznaka": oznaka_predmeta(koda),
-            "nazaj": f"{PREDPONA}{okno.poizvedba}",
+            "nazaj": f"{PREDPONA}{poizvedba(okno, izbira)}",
             "po_mesecih": okno.leto is not None,
             "casovnica": casovnica,
             "snovi": [_snov(snov, snovi) for snov in statistika_snovi],
@@ -332,6 +428,6 @@ def predmet(
             "veckrat_opis": stevilo_z_besedo(len(veckrat), VPRASANJA),
             "enkrat": [_vprasanje(v, snovi) for v in enkrat],
             "enkrat_opis": stevilo_z_besedo(len(enkrat), VPRASANJA),
-            **_skupno(okno, tekoce, repozitorij, razdeljeno),
+            **_skupno(okno, tekoce, repozitorij, razdeljeno, izbira),
         },
     )

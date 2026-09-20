@@ -5,10 +5,12 @@ import KviziScreen from '../app/kvizi/index';
 import { shraniKviz, zapisiPoskus } from '@/db/kvizi';
 import { migriraj } from '@/db/migrations';
 import { KviziProvider } from '@/sync/use-kvizi';
+import { PrijavaProvider } from '@/sync/use-prijava';
 import { theme } from '@/ui/theme';
 
 import { kvizStreznika, poskus } from './kvizi-podatki';
 import { odmikSpodaj, TEST_INSETS, type RouterMockState } from './screen-mocks';
+import { SEJA, ustvariShrambo } from './shramba';
 import { createTestDatabase } from './test-database';
 
 jest.mock('expo-router', () => require('./screen-mocks').expoRouterMock());
@@ -33,9 +35,9 @@ afterEach(() => {
 
 describe('seznam kvizov', () => {
   it('našteje čakajoče, najstarejšega prvega, rešenega ne', async () => {
-    await shraniKviz(db, kvizStreznika('mlajsi', 2, { name: 'MAT — 10. 9. 2026', created_at: '2026-09-10T08:00:00+00:00' }));
-    await shraniKviz(db, kvizStreznika('starejsi', 2, { name: 'SLJ — 8. 9. 2026', created_at: '2026-09-08T08:00:00+00:00' }));
-    await shraniKviz(db, kvizStreznika('resen', 1, { name: 'Rešen' }));
+    await shraniKviz(db, kvizStreznika('mlajsi', 2, { name: 'MAT — 10. 9. 2026', created_at: '2026-09-10T08:00:00+00:00' }), null);
+    await shraniKviz(db, kvizStreznika('starejsi', 2, { name: 'SLJ — 8. 9. 2026', created_at: '2026-09-08T08:00:00+00:00' }), null);
+    await shraniKviz(db, kvizStreznika('resen', 1, { name: 'Rešen' }), null);
     await zapisiPoskus(db, poskus('resen', 1));
 
     await render(<KviziScreen />);
@@ -49,7 +51,7 @@ describe('seznam kvizov', () => {
   });
 
   it('napol rešen kviz pove, koliko je odgovorjenega', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 3));
+    await shraniKviz(db, kvizStreznika('k1', 3), null);
     await zapisiPoskus(db, poskus('k1', 1));
 
     await render(<KviziScreen />);
@@ -58,7 +60,7 @@ describe('seznam kvizov', () => {
   });
 
   it('nov kviz pove število vprašanj', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 3));
+    await shraniKviz(db, kvizStreznika('k1', 3), null);
 
     await render(<KviziScreen />);
 
@@ -72,7 +74,7 @@ describe('seznam kvizov', () => {
   });
 
   it('pritisk odpre kviz', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 1));
+    await shraniKviz(db, kvizStreznika('k1', 1), null);
     await render(<KviziScreen />);
 
     await fireEvent.press(await screen.findByTestId('kviz'));
@@ -84,7 +86,7 @@ describe('seznam kvizov', () => {
   });
 
   it('zadnji kviz ne obtiči pod sistemsko navigacijsko vrstico', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 1));
+    await shraniKviz(db, kvizStreznika('k1', 1), null);
     await render(<KviziScreen />);
 
     const seznam = await screen.findByTestId('seznam-kvizov');
@@ -125,9 +127,9 @@ describe('gumb „Kvizi" na domači strani', () => {
   });
 
   it('kadar kaj čaka, nosi število', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 1));
-    await shraniKviz(db, kvizStreznika('k2', 2));
-    await shraniKviz(db, kvizStreznika('resen', 1));
+    await shraniKviz(db, kvizStreznika('k1', 1), null);
+    await shraniKviz(db, kvizStreznika('k2', 2), null);
+    await shraniKviz(db, kvizStreznika('resen', 1), null);
     await zapisiPoskus(db, poskus('resen', 1));
 
     await izrisi();
@@ -136,7 +138,7 @@ describe('gumb „Kvizi" na domači strani', () => {
   });
 
   it('kadar kaj čaka, ima poudarjen rob', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 1));
+    await shraniKviz(db, kvizStreznika('k1', 1), null);
     await izrisi();
     await screen.findByText('Kvizi · 1');
 
@@ -144,5 +146,42 @@ describe('gumb „Kvizi" na domači strani', () => {
     const slog = JSON.stringify(gumb.props.style);
 
     expect(slog).toContain(theme.accent);
+  });
+});
+
+describe('seznam kvizov s prijavljenim otrokom (V3-R07)', () => {
+  // Ostali testi tega zaslona tečejo brez `PrijavaProvider`, torej z
+  // `lastnik = null`. Filtriranje je dokazano nad `db/kvizi.ts`, tu pa gre za
+  // **vezavo**: zaslon mora lastnika res vzeti iz seje. Brez tega testa bi
+  // `const lastnik = null;` na zaslonu ostal neopazen (`ADR-039` E).
+
+  async function izrisi() {
+    return render(
+      <PrijavaProvider db={db} nastavitve={null} shramba={ustvariShrambo(SEJA)}>
+        <KviziProvider db={db} nastavitve={null}>
+          <KviziScreen />
+        </KviziProvider>
+      </PrijavaProvider>,
+    );
+  }
+
+  it('pokaže svoje kvize in ne kvizov drugega otroka', async () => {
+    await shraniKviz(db, kvizStreznika('masin', 2, { name: 'Mašin kviz' }), SEJA.userId);
+    await shraniKviz(db, kvizStreznika('bratov', 2, { name: 'Bratov kviz' }), 'u-nejc');
+
+    await izrisi();
+
+    await screen.findByText('Mašin kviz');
+    expect(screen.queryByText('Bratov kviz')).toBeNull();
+  });
+
+  it('kviz brez lastnika posvoji razrešena seja', async () => {
+    // Stanje po migraciji 5. Posvojitev je lokalna in ne čaka na strežnik,
+    // sicer otrok brez povezave kvizov ne bi videl.
+    await shraniKviz(db, kvizStreznika('star', 2, { name: 'Star kviz' }), null);
+
+    await izrisi();
+
+    await screen.findByText('Star kviz');
   });
 });

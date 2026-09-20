@@ -18,6 +18,30 @@
     <p class="opozorilo">{{ sporocilo }}</p>
   {% endif %}
 
+  {# Naslovljenec stoji **nad** seznamom, ker odloča, katera snov velja za
+     „že v kvizu" (`docs/odlocitve/ADR-039` G). Svoj obrazec `GET` in ne polje
+     v spodnjem: menjava otroka mora kljukice preračunati po pravilu vstopa,
+     kar zna samo ponoven prihod na stran. Zato se izbere najprej, pred
+     odkljukavanjem. Pri enem otroku se ne izriše — izbirati ni česa. #}
+  {% if je_izbirnik_otrok %}
+    <form method="get" action="/admin/quizzes/new" class="izbira-otroka">
+      <input type="hidden" name="vstop" value="{{ vstop }}">
+      {% if subject %}<input type="hidden" name="subject" value="{{ subject }}">{% endif %}
+      <input type="hidden" name="stevilo" value="{{ stevilo }}">
+      <label>
+        Kviz za:
+        <select name="otrok">
+          {% for otrok in otroci %}
+            <option value="{{ otrok.id }}"
+                    {% if otrok.id == naslovljenec %}selected{% endif %}>{{ otrok.ime }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="gumb" type="submit">Pokaži</button>
+      <span class="drobno">Menjava otroka ponastavi kljukice.</span>
+    </form>
+  {% endif %}
+
   {% if snovi %}
     {# En sam obrazec za oboje: „Sestavi" pelje v predogled, „Nazaj na izbor"
        iz predogleda pripelje sem in obkljuka isto. Brez JavaScripta je to
@@ -26,6 +50,9 @@
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="vstop" value="{{ vstop }}">
       {% if subject %}<input type="hidden" name="subject" value="{{ subject }}">{% endif %}
+      {# Naslovljenec potuje skozi predogled do objave v skritem polju, kot
+         ves ostali izbor: predogled ničesar ne shrani (`ADR-016` C). #}
+      <input type="hidden" name="otrok" value="{{ naslovljenec }}">
 
       <p class="drobno">
         <label>
@@ -59,7 +86,7 @@
               {% endif %}
 
               <span class="opis">
-                <span class="cas">{{ snov.koda }} — {{ snov.cas }}</span>
+                <span class="cas">{{ snov.koda }} — {{ snov.cas }}{% if snov.otrok %} · {{ snov.otrok }}{% endif %}</span>
                 {% if snov.izbirna %}
                   <span class="stanje">{{ snov.vprasanj }}</span>
                 {% else %}

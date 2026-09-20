@@ -24,9 +24,32 @@
 
 {# `razvrsceno` samo tam, kjer je res: pregled po predmetih je po urniku in ne
    po težavnosti, in trditev bi tam lagala. #}
+{# Izbira otroka je povezava in ne obrazec: obe izbiri (otrok, obdobje)
+   sta v naslovu, zato je stran dosegljiva iz zgodovine brskalnika, kot vse
+   pod `/admin`. Prazna, kadar ima družina enega otroka — izbirati ni česa
+   (`docs/odlocitve/ADR-039` B). #}
+{% macro izbira_otrok(otroci) %}
+  {% if otroci %}
+    <p class="izbira-let izbira-otroka">
+      Otrok:
+      {% for otrok in otroci %}
+        {% if otrok.izbrano %}
+          <strong>{{ otrok.oznaka }}</strong>
+        {% else %}
+          <a href="{{ otrok.url }}">{{ otrok.oznaka }}</a>
+        {% endif %}
+      {% endfor %}
+    </p>
+  {% endif %}
+{% endmacro %}
+
+{# Imena tu ni: `ADR-014` zahteva, da je jasno, **čigava** trditev je, in to
+   pove glava strani, ki pri več kot enem otroku nosi izbranega. Zapisano
+   „Mašina" je bilo napačno za vsako družino razen Cveka, ime za predlogom pa
+   bi zahtevalo sklanjanje (`ADR-039` F3). #}
 {% macro samoocena(razvrsceno=True) %}
   <p class="drobno">
-    Ocene so Mašina samoocena po razkritju odgovora, ne preverjeno znanje.
+    Ocene so samoocena po razkritju odgovora, ne preverjeno znanje.
     Pravilne so vse ocene razen „Nisem vedela“; težki sta „Nisem vedela“ in
     „Težko“.{% if razvrsceno %} Najtežje je zgoraj.{% endif %}
   </p>

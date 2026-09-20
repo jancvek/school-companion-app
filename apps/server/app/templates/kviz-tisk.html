@@ -43,7 +43,13 @@
        tudi za reševanje na papir (`docs/verzije/v2.md`, V2-R03). #}
     <div class="tisk">
       <h1>{{ kviz.ime }}</h1>
-      <p class="pod">Rešen {{ kviz.resen_datum }} · {{ stevilo_opis }}</p>
+      {# Ime na **papirju**: natisnjena lista dveh otrok se sicer ne ločita.
+         Kot vrednost polja in samo pri več kot enem otroku, kot povsod
+         (`docs/odlocitve/ADR-039` F3). #}
+      <p class="pod">
+        {%- if kviz.otrok %}{{ kviz.otrok }} · {% endif -%}
+        Rešen {{ kviz.resen_datum }} · {{ stevilo_opis }}
+      </p>
 
       <ol class="tisk-vprasanja">
         {% for vprasanje in vprasanja %}

@@ -1,4 +1,5 @@
 import {
+  cakajociKvizi,
   neprenesenePoskuse,
   pobrisiKvizeRazen,
   shraniKviz,
@@ -162,12 +163,35 @@ describe('posvojitev zapisov brez lastnika', () => {
   });
 
   it('posvoji tudi neprenesene poskuse', async () => {
-    await shraniKviz(db, kvizStreznika('k1', 1));
+    await shraniKviz(db, kvizStreznika('k1', 1), null);
     await zapisiPoskus(db, poskus('k1', 1, { user_id: null }));
 
     await posvojiBrezLastnika(db, MASA);
 
     expect((await neprenesenePoskuse(db, MASA)).map((p) => p.id)).toEqual(['k1-a1']);
+  });
+
+  it('posvoji tudi kvize, brez čakanja na strežnik (V3-R07)', async () => {
+    // Po migraciji 5 so vsi obstoječi kvizi brez lastnika. Če bi jih posvojil
+    // šele obhod usklajevanja, bi jih otrok brez povezave ne videl — in
+    // aplikacija, ki za kvize na telefonu čaka na omrežje, podre načelo iz
+    // `docs/00-namen.md` (`ADR-039` E).
+    await shraniKviz(db, kvizStreznika('star', 2), null);
+    expect(await cakajociKvizi(db, MASA)).toEqual([]);
+
+    await posvojiBrezLastnika(db, MASA);
+
+    expect((await cakajociKvizi(db, MASA)).map((k) => k.id)).toEqual(['star']);
+    expect(await cakajociKvizi(db, null)).toEqual([]);
+  });
+
+  it('tujega **kviza** ne posvoji', async () => {
+    await shraniKviz(db, kvizStreznika('masin', 2), MASA);
+
+    await posvojiBrezLastnika(db, JAKA);
+
+    expect(await cakajociKvizi(db, JAKA)).toEqual([]);
+    expect((await cakajociKvizi(db, MASA)).map((k) => k.id)).toEqual(['masin']);
   });
 
   it('tujega **poskusa** ne posvoji', async () => {
@@ -176,7 +200,7 @@ describe('posvojitev zapisov brez lastnika', () => {
     // neprenesen poskus in ga poslala pod svojim žetonom — statistika na
     // strežniku bi govorila o napačnem otroku (`docs/plan/V3-R04.md`:
     // „za oboje obstaja svoj test").
-    await shraniKviz(db, kvizStreznika('k-masa', 1));
+    await shraniKviz(db, kvizStreznika('k-masa', 1), null);
     await zapisiPoskus(db, poskus('k-masa', 1, { user_id: MASA }));
 
     await posvojiBrezLastnika(db, JAKA);
@@ -207,7 +231,7 @@ describe('lastnik poskusa (ADR-036 C)', () => {
 
   /** Neprenesen poskus dane osebe na svežem kvizu. */
   async function neprenesen(quizId: string, lastnik: string | null): Promise<Poskus> {
-    await shraniKviz(db, kvizStreznika(quizId, 1));
+    await shraniKviz(db, kvizStreznika(quizId, 1), null);
     const p = poskus(quizId, 1, { user_id: lastnik });
     await zapisiPoskus(db, p);
     return p;
@@ -235,7 +259,7 @@ describe('lastnik poskusa (ADR-036 C)', () => {
 
   it('kviz brez tujih neprenesenih poskusov se pobriše kot doslej', async () => {
     // Varovalka ne sme ustaviti običajnega pospravljanja (`ADR-019` B).
-    await shraniKviz(db, kvizStreznika('k-star', 1));
+    await shraniKviz(db, kvizStreznika('k-star', 1), null);
 
     expect(await pobrisiKvizeRazen(db, [], null, MASA)).toBe(1);
   });

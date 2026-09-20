@@ -23,7 +23,7 @@
               <span class="brez-slike">slike na disku ni</span>
             {% endif %}
             <span class="opis">
-              <span class="cas">{{ snov.cas }}</span>
+              <span class="cas">{{ snov.cas }}{% if snov.otrok %} · {{ snov.otrok }}{% endif %}</span>
               <span class="stanje">{{ snov.stanje }}</span>
             </span>
           </a>

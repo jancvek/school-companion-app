@@ -77,6 +77,13 @@ export async function insertMaterial(
  *
  * Zavestna posledica: posnetek, nastal med odjavo enega in prijavo drugega,
  * pripade drugemu (`ADR-036` B in popravki).
+ *
+ * Od `V3-R07` zajame tudi **kvize** (migracija 5): po nadgradnji so vsi
+ * obstoječi brez lastnika. Brez tega bi jih otrok videl šele po obhodu
+ * usklajevanja, torej **šele ko bi strežnik spet dosegel** — in aplikacija,
+ * ki za kvize na telefonu čaka na omrežje, bi podrla načelo iz
+ * `docs/00-namen.md`. `shraniKviz` posvoji isto vrstico ob obhodu; tu se to
+ * zgodi lokalno in takoj.
  */
 export async function posvojiBrezLastnika(
   db: MaterialsDatabase,
@@ -84,6 +91,7 @@ export async function posvojiBrezLastnika(
 ): Promise<void> {
   await db.runAsync('UPDATE materials SET user_id = ? WHERE user_id IS NULL', [userId]);
   await db.runAsync('UPDATE attempts SET user_id = ? WHERE user_id IS NULL', [userId]);
+  await db.runAsync('UPDATE quizzes SET user_id = ? WHERE user_id IS NULL', [userId]);
 }
 
 /** En zapis po `id`, ali `null`, če ga ni. */

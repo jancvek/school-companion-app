@@ -67,6 +67,21 @@ def daj_druzino(request: Request) -> str:
     return daj_prijavo(request).family_id
 
 
+def daj_otroka(request: Request) -> str:
+    """`id` otroka, ki je prijavljen na tej poti telefona (`ADR-039`).
+
+    Otroka na snovi in na poskusu pove **seja**, nikoli telo zahteve: podatek,
+    ki ga pošlje odjemalec, bi bil trditev o tem, kdo je, in tako trditev je
+    prijava že preverila.
+
+    Velja samo na poteh telefona. Tam je vsak žeton otrokov — starš se v
+    mobilno aplikacijo ne more prijaviti (`ADR-036` D), kar `prijava.Vrata`
+    uveljavi ob vsaki uporabi seje. Prav zato `V3-R07` ne potrebuje posebnega
+    primera „zapis brez otroka".
+    """
+    return daj_prijavo(request).user_id
+
+
 def daj_repozitorij(
     request: Request, family_id: Annotated[str, Depends(daj_druzino)]
 ) -> Iterator[MaterialsRepository]:

@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { cakajociKvizi } from '@/db/kvizi';
 import { asMaterialsDatabase } from '@/db/open';
 import { useKvizi } from '@/sync/use-kvizi';
+import { usePrijava } from '@/sync/use-prijava';
 import type { KvizNaSeznamu } from '@/types';
 import { theme } from '@/ui/theme';
 
@@ -21,6 +22,11 @@ export default function KviziScreen() {
   const database = useSQLiteContext();
   const insets = useSafeAreaInsets();
   const { osvezi } = useKvizi();
+  // Seznam je seznam **prijavljenega** otroka (V3-R07): na skupnem telefonu
+  // sicer otrok B vidi kvize otroka A — tiste, ki so ostali, ker na njih visi
+  // neprenesen tuj poskus (`docs/odlocitve/ADR-036` C, `ADR-039` E).
+  const { seja } = usePrijava();
+  const lastnik = seja?.userId ?? null;
 
   const [kvizi, setKvizi] = useState<KvizNaSeznamu[] | null>(null);
   const [napaka, setNapaka] = useState<string | null>(null);
@@ -30,7 +36,7 @@ export default function KviziScreen() {
   useFocusEffect(
     useCallback(() => {
       let aktiven = true;
-      cakajociKvizi(asMaterialsDatabase(database))
+      cakajociKvizi(asMaterialsDatabase(database), lastnik)
         .then((vrstice) => {
           if (aktiven) setKvizi(vrstice);
         })
@@ -42,7 +48,7 @@ export default function KviziScreen() {
       return () => {
         aktiven = false;
       };
-    }, [database, osvezi]),
+    }, [database, lastnik, osvezi]),
   );
 
   if (napaka) {

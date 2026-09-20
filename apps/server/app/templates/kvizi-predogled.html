@@ -5,6 +5,10 @@
 {% block vsebina %}
   <h1>Predogled kviza</h1>
   <p class="pod">
+    {# Ime je vrednost polja in ne del povedi — za predlogom bi slovenščina
+       zahtevala sklanjanje poljubnega imena (`docs/odlocitve/ADR-039` F3).
+       Pri enem otroku ga ni: `ime_za_prikaz` je takrat `None`. #}
+    {%- if naslovljenec_ime %}{{ naslovljenec_ime }} · {% endif -%}
     {# „snovi“ je tu konstanta in ne sklanjana oblika: za predlogom *iz* gre
        rodilnik, ta pa je pri tem samostalniku enak pri vsakem številu —
        „iz 1 snovi“, „iz 2 snovi“, „iz 5 snovi“. #}
@@ -16,8 +20,8 @@
     {# Opozorilo in ne zapora: kviz sme biti dolg, operater mora le vedeti,
        da bo. Meja je kriterij V2-R01, ne okus. #}
     <p class="opozorilo">
-      Kviz ima več kot {{ meja }} vprašanj. Toliko jih Maša naenkrat verjetno
-      ne bo rešila — razmisli, ali ne bi kakšne snovi raje odkljukal.
+      Kviz ima več kot {{ meja }} vprašanj. Toliko jih je za eno reševanje
+      verjetno preveč — razmisli, ali ne bi kakšne snovi raje odkljukal.
     </p>
   {% endif %}
 
@@ -67,6 +71,7 @@
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="vstop" value="{{ vstop }}">
       {% if subject %}<input type="hidden" name="subject" value="{{ subject }}">{% endif %}
+      <input type="hidden" name="otrok" value="{{ naslovljenec }}">
       {% for id in vprasanja_idji %}
         <input type="hidden" name="vprasanje" value="{{ id }}">
       {% endfor %}
@@ -91,6 +96,7 @@
       <input type="hidden" name="vstop" value="{{ vstop }}">
       {% if subject %}<input type="hidden" name="subject" value="{{ subject }}">{% endif %}
       <input type="hidden" name="stevilo" value="{{ stevilo }}">
+      <input type="hidden" name="otrok" value="{{ naslovljenec }}">
       {% for id in izbrane %}
         <input type="hidden" name="snov" value="{{ id }}">
       {% endfor %}
