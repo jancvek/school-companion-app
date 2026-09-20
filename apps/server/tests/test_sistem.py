@@ -182,6 +182,12 @@ def test_dostop_starsa_ni_mogoc(
         assert "Te strani na strežniku ni." in odgovor.text, f"{metoda} {pot}"
 
 
+#: Metode, ki jih generirani test poskusi. Kriterij govori o **vsaki** metodi,
+#: zato tu ni samo `GET` in `POST`: prevod `405 → 404` je vezan na pot in ne na
+#: metodo, in prav to mora test dokazati, ne le opisati.
+METODE = ("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD")
+
+
 def _napacne_metode(aplikacija: FastAPI) -> list[tuple[str, str]]:
     """Vsaka pot pod predpono in **metoda, ki je ta pot nima**.
 
@@ -189,11 +195,15 @@ def _napacne_metode(aplikacija: FastAPI) -> list[tuple[str, str]]:
     vprašanje z druge strani: tam „ali obstoječa kombinacija izda stran",
     tu „ali jo izda neobstoječa kombinacija". Naštet seznam bi zastaral pri
     prvi novi poti.
+
+    `HEAD` je v naboru, čeprav ga Starlette pri poti z `GET` postreže sam in
+    `openapi()` zanj ne ve: za starša mora biti izid isti tudi takrat, in prav
+    to trditev bi ročno naštevanje spustilo.
     """
     return [
         (metoda, pot.replace("{family_id}", DRUGA_ID).replace("{user_id}", "kdorkoli"))
         for pot, metode in aplikacija.openapi()["paths"].items()
-        for metoda in ("GET", "POST")
+        for metoda in METODE
         if pot.startswith(POT) and metoda.lower() not in metode
     ]
 
@@ -221,17 +231,19 @@ def test_starsu_je_napacna_metoda_videti_kot_neobstojeca_pot(
     samo smer `GET` na pot, ki obstaja kot `POST`, medtem ko sta `POST` na
     `/admin/system` in na stran družine še vedno vrnila `405` (drugi pregled).
     """
-    izmisljena = odjemalec.get(f"{POT}/izmisljena-pot", follow_redirects=False)
-    assert izmisljena.status_code == 404
-
     for metoda, pot in _napacne_metode(aplikacija):
-        # Žeton mora biti veljaven: brez njega bi `SejaMiddleware` odgovoril s
-        # `403` še pred usmerjanjem in test bi bil zelen, ne da bi karkoli
-        # povedal o tem, kaj pot razkrije.
-        telo = {"csrf": odjemalec.csrf} if metoda == "POST" else None
+        # Žeton mora biti veljaven pri vsaki nevarni metodi: brez njega bi
+        # `SejaMiddleware` odgovoril s `403` še pred usmerjanjem in test bi bil
+        # zelen, ne da bi karkoli povedal o tem, kaj pot razkrije.
+        telo = None if metoda in ("GET", "HEAD") else {"csrf": odjemalec.csrf}
         odgovor = odjemalec.request(metoda, pot, data=telo, follow_redirects=False)
+        # Primerjalna pot se kliče z **isto** metodo: pri `HEAD` je telo prazno
+        # v obeh primerih in primerjava z odgovorom na `GET` ne bi pomenila nič.
+        izmisljena = odjemalec.request(
+            metoda, f"{POT}/izmisljena-pot", data=telo, follow_redirects=False
+        )
 
-        assert odgovor.status_code == 404, f"{metoda} {pot}"
+        assert odgovor.status_code == izmisljena.status_code == 404, f"{metoda} {pot}"
         assert odgovor.text == izmisljena.text, f"{metoda} {pot}"
         assert "allow" not in odgovor.headers, (
             f"{metoda} {pot}: glava Allow pove, katere metode pot sprejema"

@@ -153,6 +153,12 @@ zato sodi v to zahtevo, ne v novo (`CLAUDE.md` §9b, preizkus uvrstitve).
 
 ### G — „za starša ne obstaja" je odvisnost usmerjevalnika, ne `if` v vsaki poti
 
+> **Zoženo z `ADR-045`.** Skrivanje velja za odgovore aplikacije: vsaka pot pod
+> predpono vrne `404` na vsako metodo, z enakim telesom in brez glave `Allow`.
+> **Ne** velja za usmerjanje okvirja (preusmeritev ob končni poševnici) in ne
+> za shemo poti (`/openapi.json`). Kako smo do te meje prišli — po treh
+> popravkih istega mesta — je zapisano tam.
+
 Kriterij 1 zahteva `404` in ne `403`. Zavrnitev stoji kot odvisnost na
 `APIRouter`, zato velja za **vsako** pot tega usmerjevalnika, tudi za tisto, ki
 bo dodana jutri; dvigne `HTTPException(404)`, ki jo `admin.prestrezi_napako`
