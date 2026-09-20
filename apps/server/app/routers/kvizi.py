@@ -606,8 +606,9 @@ def predogled(
             "stevilo": koliko,
             "izbrane": izbrane,
             # Naslovljenec potuje skozi predogled v skritem polju, kot ves
-            # ostali izbor: predogled ničesar ne shrani (`ADR-016` C). Ime
-            # stoji v naslovu in na gumbu, da privzeti otrok ni tiha izbira.
+            # ostali izbor: predogled ničesar ne shrani (`ADR-016` C). Ime je
+            # vrednost polja v vrstici pod naslovom in ga pri enem otroku ni —
+            # v gumbih ga ni več, ker objava privzetka nima (`ADR-039` F3).
             "naslovljenec": naslovljenec.izbrani.user_id,
             "naslovljenec_ime": naslovljenec.ime_za_prikaz,
             "skupine": [_skupina_pogled(skupina) for skupina in skupine],

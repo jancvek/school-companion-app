@@ -358,3 +358,27 @@ je ime dobila v kontekst, a ga ni izrisala. Natisnjena lista dveh otrok bi se
 zato ne ločila v ničemer — in prav ta list gre z zaslona na mizo. Zdaj ime
 nosi, po istem pravilu. Sweep `TestImenaPriEnemOtroku` te strani ne doseže,
 ker zahteva rešen kviz, zato trditev stoji v `test_rezultat.py`.
+
+## Popravki po tretjem pregledu (20. 9. 2026)
+
+Pregled je dal `PRIPRAVLJENO ZA ČLOVEŠKI PREGLED` z enim opozorilom, ki pa
+zadeva merilo dokončanosti (`CLAUDE.md` §1b: *„Test, ki ostane zelen ob
+pokvarjeni implementaciji, ne šteje"*), zato je zaprto in ne odloženo.
+
+**Oznake z imenom so bile varovane samo v zanikanju.** `TestImenaPriEnemOtroku`
+je trdil, da imena pri enem otroku ni in da nikjer ne stoji za predlogom —
+obojemu pa bi zadostil izris, s katerega bi imena izginila **povsod**. Tri
+mutacije (`imena_otrok → {}`, `ime_za_prikaz → None`, `_imena → {}`) so pustile
+zbirko zeleno. Celoten aparat, ki obstaja izključno zato, da se oznake
+izrišejo, torej ni bil pokrit v smeri, zaradi katere obstaja.
+
+Dodana je zrcalna trditev. Pomembna podrobnost, ki jo je pokazala šele druga
+ponovitev mutacije: na statistiki ime stoji **tudi v izbirniku otroka**, zato
+trditev „ime je nekje na strani" ostane zelena, tudi če ga glava izgubi.
+Trditev je zato vezana na `<p class="pod">` in ne na celo stran — strani z
+oznako pri vrstici in strani z imenom v glavi se preverjajo ločeno.
+
+**Vrata so zdaj simetrična.** `IzbiraOtroka.ime_za_prikaz` je dvojček
+`Naslovljenec.ime_za_prikaz`; prej je statistika pravilo uveljavljala na
+klicnem mestu — po istem vzorcu, ki je v sestavljalniku odpovedal. `V3-R09` bo
+ta vzorec podedoval, zato naj tam ne bo česa posnemati narobe.

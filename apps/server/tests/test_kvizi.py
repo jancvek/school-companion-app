@@ -1816,6 +1816,12 @@ class TestImenaPriEnemOtroku:
         ).text
         return strani
 
+    @staticmethod
+    def _glava(besedilo: str) -> str:
+        """Vsebina `<p class="pod">` — vrstica pod naslovom strani."""
+        najdeno = re.search(r'<p class="pod">(.*?)</p>', besedilo, re.S)
+        return najdeno.group(1) if najdeno else ""
+
     def test_imena_ni_na_nobeni_strani(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
@@ -1841,13 +1847,65 @@ class TestImenaPriEnemOtroku:
         snov(motor, slike)
         quiz_id = objavi(odjemalec, motor, [UUID_ENA])
 
+        # Predlogi, za katerimi bi ime terjalo sklanjanje. Seznam in ne samo
+        # „za": vzorec naj ujame tudi obliko, ki se še ni pojavila.
+        predlogi = ("za", "od", "pri", "z", "s", "o", "k", "h", "na", "v")
         napacne = {
             pot: besedilo
             for pot, besedilo in self._strani(odjemalec, quiz_id).items()
-            if "za Maša" in besedilo or "za Nejc" in besedilo
+            if any(
+                f"{predlog} {ime}" in besedilo
+                for predlog in predlogi
+                for ime in ("Maša", "Nejc")
+            )
         }
 
         assert not napacne, f"ime stoji za predlogom na: {sorted(napacne)}"
+
+    def test_pri_dveh_otrocih_ime_stoji_tam_kjer_mora(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, brat: str
+    ) -> None:
+        """Zrcalo obeh zanikanj zgoraj — in edino, kar varuje oznake same.
+
+        Brez te trditve bi zanikanji zadovoljil izris, s katerega bi imena
+        izginila povsod: mutacija `_imena -> {}` je pred tem testom pustila
+        zbirko zeleno. Oznake obstajajo zaradi `ADR-039` F1 — starš dveh otrok
+        v *Ročni izbiri* sicer vidi pomešan seznam brez podatka, čigava je
+        katera slika.
+        """
+        snov(motor, slike)
+        quiz_id = objavi(odjemalec, motor, [UUID_ENA])
+        strani = self._strani(odjemalec, quiz_id)
+
+        # Strani z oznako **pri vrstici**: ime mora biti nekje v vsebini.
+        brez_oznake = [
+            pot
+            for pot in (
+                "/admin",  # vrstica kviza v razdelku „Kvizi"
+                "/admin/days",
+                "/admin/subjects/MAT",  # oznaka pri vrstici snovi
+                f"/admin/materials/{UUID_ENA}",
+                "/admin/quizzes/new?vstop=nova&subject=MAT",  # vrstica izbirnika
+            )
+            if "Maša" not in strani[pot]
+        ]
+        assert not brez_oznake, f"oznaka z imenom manjka na: {sorted(brez_oznake)}"
+
+        # Strani z imenom v **glavi**: trditev mora biti vezana na `p.pod` in
+        # ne na celo stran. Na statistiki ime stoji tudi v izbirniku otroka,
+        # zato bi trditev „nekje na strani" ostala zelena, tudi če bi glava
+        # ime izgubila — to je mutacija, ki je prvi zapis tega testa ni ujel.
+        brez_glave = [
+            pot
+            for pot in (
+                "/admin/statistics",
+                "/admin/statistics/subjects/MAT",
+                f"/admin/quizzes/{quiz_id}",
+                "/admin/quizzes/preview",
+            )
+            if "Maša" not in self._glava(strani[pot])
+        ]
+        assert not brez_glave, f"ime otroka manjka v glavi: {sorted(brez_glave)}"
 
     def test_pri_dveh_otrocih_predogled_pove_naslovljenca(
         self, odjemalec: TestClient, motor: Engine, slike: Path, brat: str

@@ -234,13 +234,9 @@ def _skupno(
         "neprebrano": okno.neprebrano,
         "leta": _izbira_let(okno, tekoce, solska_leta(casi), izbira),
         "otroci": _izbira_otrok(okno, izbira),
-        # **Samo pri več kot enem otroku** (`ADR-039` F3): vmesnik družine z
-        # enim otrokom se ne spremeni, in ime, ki ne loči ničesar, je šum.
-        "otrok_ime": (
-            izbira.izbrani.display_name
-            if izbira.je_izbirnik and izbira.izbrani is not None
-            else None
-        ),
+        # Pravilo „ime samo pri več kot enem otroku" uveljavi **tip**
+        # (`ADR-039` F3); tu se samo prebere.
+        "otrok_ime": izbira.ime_za_prikaz,
         "brez_otroka": izbira.izbrani is None,
         "skupaj": _stevila(sestej(razdeljeno.stejejo)),
         "opombe": _opombe(razdeljeno),

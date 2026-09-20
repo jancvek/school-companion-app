@@ -53,6 +53,22 @@ class IzbiraOtroka:
         """
         return len(self.vsi) > 1
 
+    @property
+    def ime_za_prikaz(self) -> str | None:
+        """Prikazno ime izbranega otroka, ali `None`, kadar se ne izriše.
+
+        Dvojček `kvizi.Naslovljenec.ime_za_prikaz` in iz istega razloga:
+        pravilo „ime samo pri več kot enem otroku" (`ADR-039` F3) mora
+        uveljaviti **tip**, ne klicno mesto. Prvi zapis te zahteve ga je
+        uveljavljal na klicnih mestih in je zato v sestavljalniku odpadel.
+
+        `V3-R09` bo po `ADR-039` B podedoval ta vzorec za tretji pogled po
+        otroku; tam naj ne bo česa posnemati narobe.
+        """
+        if not self.je_izbirnik or self.izbrani is None:
+            return None
+        return self.izbrani.display_name
+
 
 def izberi_otroka(
     otroci: list[ClanDruzine], zahtevani: str | None
