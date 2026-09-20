@@ -1,4 +1,5 @@
 import {
+  cakajociKvizi,
   neprenesenePoskuse,
   pobrisiKvizeRazen,
   shraniKviz,
@@ -168,6 +169,29 @@ describe('posvojitev zapisov brez lastnika', () => {
     await posvojiBrezLastnika(db, MASA);
 
     expect((await neprenesenePoskuse(db, MASA)).map((p) => p.id)).toEqual(['k1-a1']);
+  });
+
+  it('posvoji tudi kvize, brez čakanja na strežnik (V3-R07)', async () => {
+    // Po migraciji 5 so vsi obstoječi kvizi brez lastnika. Če bi jih posvojil
+    // šele obhod usklajevanja, bi jih otrok brez povezave ne videl — in
+    // aplikacija, ki za kvize na telefonu čaka na omrežje, podre načelo iz
+    // `docs/00-namen.md` (`ADR-039` E).
+    await shraniKviz(db, kvizStreznika('star', 2), null);
+    expect(await cakajociKvizi(db, MASA)).toEqual([]);
+
+    await posvojiBrezLastnika(db, MASA);
+
+    expect((await cakajociKvizi(db, MASA)).map((k) => k.id)).toEqual(['star']);
+    expect(await cakajociKvizi(db, null)).toEqual([]);
+  });
+
+  it('tujega **kviza** ne posvoji', async () => {
+    await shraniKviz(db, kvizStreznika('masin', 2), MASA);
+
+    await posvojiBrezLastnika(db, JAKA);
+
+    expect(await cakajociKvizi(db, JAKA)).toEqual([]);
+    expect((await cakajociKvizi(db, MASA)).map((k) => k.id)).toEqual(['masin']);
   });
 
   it('tujega **poskusa** ne posvoji', async () => {
