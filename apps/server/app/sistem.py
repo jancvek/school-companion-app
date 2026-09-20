@@ -19,6 +19,14 @@ lastnika pred samim sabo.
 
 from app.clani import NAJDALJSE_IME
 
+#: Predpona poti lastnika sistema.
+#:
+#: Živi tu in ne v usmerjevalniku, ker je ne potrebuje samo on: prestreznik
+#: napak v `app/routers/admin.py` mora vedeti, katere poti se morajo delati
+#: neobstoječe (`je_skrita_pot`). Ena vrednost na enem mestu, sicer se
+#: zavrnitev in skrivanje nekoč razideta.
+PREDPONA = "/admin/system"
+
 #: Najdaljše ime družine — natanko širina stolpca `families.name`.
 #:
 #: Meja je v kodi in ne prepuščena bazi, iz istega razloga kot pri članih
@@ -82,6 +90,17 @@ BESEDILO_ZASEBNOST = (
     "istem strežniku ne. Aplikacija ni objavljena in ni namenjena širšemu krogu; "
     "če ti to ne ustreza, družine ne odpiram."
 )
+
+
+def je_skrita_pot(pot: str) -> bool:
+    """Ali pot sodi pod predpono, ki se mora delati neobstoječa.
+
+    Ujame se na `/admin/system` in na tem, kar mu sledi za poševnico, nikoli na
+    `/admin/systematic` — isto ujemanje kot pri `security.je_izvzeta` in
+    `admin.je_admin_pot`. Golo `startswith` bi zajelo vsako pot, ki se slučajno
+    začne enako, in bi bilo videti pravilno do dneva, ko taka pot nastane.
+    """
+    return pot == PREDPONA or pot.startswith(f"{PREDPONA}/")
 
 
 def preveri_ime_druzine(ime: str) -> str | None:

@@ -964,11 +964,18 @@ poizvedbe v `DruzineRepository` in `ClaniRepository`, odločitve v
 - **Za vsakogar drugega ta predpona ne obstaja.** `zahtevaj_lastnika_sistema`
   visi kot odvisnost na `APIRouter`, zato velja za vsako njegovo pot, tudi za
   tisto, ki bo dodana pozneje; dvigne `404`, ki ga izriše isti prestreznik kot
-  vsako neobstoječo pot. `403` bi povedal, da stran obstaja. Prav zato ima
-  `POST /admin/system/families` tudi `GET`: brez njega bi Starlette odgovoril s
-  `405`, še preden bi odvisnost stekla, in razlika med `405` in `404` bi bila
-  sama podatek. **Ostale poti samo s `POST` pod `/admin` se še vedno obnašajo
-  tako** — tam obstoj poti ni skrivnost.
+  vsako neobstoječo pot. `403` bi povedal, da stran obstaja.
+- **Tudi napačna metoda je tu podatek.** Starlette ob ujemanju poti in
+  neujemanju metode odgovori s `405`, še preden steče odvisnost — in razlika
+  med `405` in `404` pove, da pot obstaja. Zato `admin.prestrezi_napako` pod
+  to predpono `405` prevede v `404` in **zavrže glavo `Allow`**, ki bi
+  naštela, kaj pot sprejema (`sistem.je_skrita_pot`). Pravilo je na enem mestu
+  in velja za vsako pot te predpone in vsako metodo, ki je ta pot nima; test
+  se generira iz `openapi()` in zajame tudi pot, dodano pozneje. Brez razlike
+  po vlogi: lastnik ob ročno vtipkanem naslovu izgubi le točnejše sporočilo.
+  **Ostale poti pod `/admin` ostanejo pri `405`** — tam obstoj poti ni
+  skrivnost. `POST /admin/system/families` ima poleg tega registriran `GET`,
+  ki lastnika s `303` pelje na seznam; da pot ne bi bila slepa ulica.
 - **Lastnik vidi imena, števila članov, datum in stanje — vsebine ne.** Ne
   slik, ne prepisov, ne kvizov, ne statistike, ne urnikov (`ADR-044` B). To ni
   stvar izrisa: nobena pot te predpone teh tabel ne bere, `DruzinaZaPregled`

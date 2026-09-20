@@ -58,7 +58,8 @@ from app.models import VLOGA_STARS
 from app.strani import daj_predloge, ni_dovoljeno, ni_najdeno, zavrnjeno
 
 #: Predpona poti. Pod `/admin`, torej za sejo in s CSRF žetonom (`ADR-035`).
-PREDPONA = "/admin/system"
+#: Vrednost je v `app/sistem.py`, ker jo potrebuje tudi prestreznik napak.
+PREDPONA = sistem.PREDPONA
 
 #: Zavrnitev visi na usmerjevalniku in ne v endpointih (`ADR-044` G).
 router = APIRouter(prefix=PREDPONA, dependencies=[Depends(zahtevaj_lastnika_sistema)])

@@ -154,15 +154,83 @@ def test_dostop_starsa_ni_mogoc(
         assert "Te strani na strežniku ni." in odgovor.text, f"{metoda} {pot}"
 
 
+def _napacne_metode(aplikacija: FastAPI) -> list[tuple[str, str]]:
+    """Vsaka pot pod predpono in **metoda, ki je ta pot nima**.
+
+    Generira se iz `openapi()`, enako kot `_primeri_poti`, ker gre za isto
+    vprašanje z druge strani: tam „ali obstoječa kombinacija izda stran",
+    tu „ali jo izda neobstoječa kombinacija". Naštet seznam bi zastaral pri
+    prvi novi poti.
+    """
+    return [
+        (metoda, pot.replace("{family_id}", DRUGA_ID).replace("{user_id}", "kdorkoli"))
+        for pot, metode in aplikacija.openapi()["paths"].items()
+        for metoda in ("GET", "POST")
+        if pot.startswith(POT) and metoda.lower() not in metode
+    ]
+
+
+def test_obstajajo_poti_z_eno_samo_metodo(aplikacija: FastAPI) -> None:
+    """Varovalo: če bi vsaka pot imela obe metodi, bi bil test spodaj prazen.
+
+    Danes sta taki dve: `/admin/system` in stran ene družine, obe samo `GET`.
+    """
+    assert len(_napacne_metode(aplikacija)) >= 2
+
+
+def test_starsu_je_napacna_metoda_videti_kot_neobstojeca_pot(
+    aplikacija: FastAPI, odjemalec: PrijavljenOdjemalec
+) -> None:
+    """Napačna metoda ne sme izdati, da pot obstaja — **404, ne 405**.
+
+    Starlette ob ujemanju poti in neujemanju metode odgovori `405`, še preden
+    steče odvisnost `zahtevaj_lastnika_sistema`; razlika med `405` in `404` je
+    sama po sebi podatek, da pot obstaja. Kriterij `V3-R05` pravi, da za
+    starša ta stran ne obstaja, zato mora biti odgovor **enak** kot za
+    izmišljen naslov — koda, telo in glave.
+
+    Test pomete čez vse kombinacije in ne čez eno pot: prvi popravek je zaprl
+    samo smer `GET` na pot, ki obstaja kot `POST`, medtem ko sta `POST` na
+    `/admin/system` in na stran družine še vedno vrnila `405` (drugi pregled).
+    """
+    izmisljena = odjemalec.get(f"{POT}/izmisljena-pot", follow_redirects=False)
+    assert izmisljena.status_code == 404
+
+    for metoda, pot in _napacne_metode(aplikacija):
+        # Žeton mora biti veljaven: brez njega bi `SejaMiddleware` odgovoril s
+        # `403` še pred usmerjanjem in test bi bil zelen, ne da bi karkoli
+        # povedal o tem, kaj pot razkrije.
+        telo = {"csrf": odjemalec.csrf} if metoda == "POST" else None
+        odgovor = odjemalec.request(metoda, pot, data=telo, follow_redirects=False)
+
+        assert odgovor.status_code == 404, f"{metoda} {pot}"
+        assert odgovor.text == izmisljena.text, f"{metoda} {pot}"
+        assert "allow" not in odgovor.headers, (
+            f"{metoda} {pot}: glava Allow pove, katere metode pot sprejema"
+        )
+
+
+def test_zunaj_predpone_napacna_metoda_ostane_405(
+    odjemalec: PrijavljenOdjemalec,
+) -> None:
+    """Drugod pod `/admin` ostane `405`, ker tam obstoj poti ni skrivnost.
+
+    Trditev je o meji popravka: skrivanje velja za eno predpono in ni tiho
+    spremenilo vedenja vseh poti pod `/admin` (`ADR-044` G).
+    """
+    odgovor = odjemalec.get("/admin/logout", follow_redirects=False)
+
+    assert odgovor.status_code == 405
+
+
 def test_starsu_je_pot_samo_s_postom_videti_kot_neobstojeca(
     odjemalec: PrijavljenOdjemalec,
 ) -> None:
-    """Pot, ki obstaja samo kot `POST`, se staršu ne sme izdati z **405**.
+    """Ista trditev za `GET` na pot, ki obstaja samo kot `POST`.
 
-    Starlette ob ujemanju poti in neujemanju metode odgovori `405`, še preden
-    steče odvisnost — in razlika med `405` in `404` je sama po sebi podatek,
-    da pot obstaja. Kriterij `V3-R05` pravi, da za starša ta stran ne obstaja,
-    zato mora biti odgovor **enak** kot za izmišljen naslov.
+    Posebej in ne samo v generiranem testu zgoraj: `/admin/system/families`
+    ima **registriran** `GET`, ki lastnika pelje na seznam, zato je v
+    generiranem seznamu ni — in prav ta pot je bila prvi najdeni uhajalec.
     """
     obstojeca = odjemalec.get(f"{POT}/families", follow_redirects=False)
     izmisljena = odjemalec.get(f"{POT}/izmisljena-pot", follow_redirects=False)
