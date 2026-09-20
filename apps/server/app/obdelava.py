@@ -46,9 +46,15 @@ def obdelaj_cakajoce(
     **Po družinah** (`docs/odlocitve/ADR-029` B): repozitorija brez družine
     ni, zato obhod vzame družine eno za drugo. „Najstarejši posnetek prvi"
     velja znotraj družine.
+
+    **Ugasnjene družine obhod preskoči** (`ADR-044` D). Njene slike ostanejo
+    `new` in se obdelajo, ko je družina spet prižgana; klic v OpenAI za
+    družino, v katero se nihče ne more prijaviti, bi bil plačan za nič. Isti
+    vzorec kot mirujoči worker brez ključa (`ADR-009` B2): odsotnost pogoja za
+    delo ni napaka in ne sme proizvesti ne dela ne zapisov `failed`.
     """
     with tovarna_sej() as seja:
-        druzine = DruzineRepository(seja).idji()
+        druzine = DruzineRepository(seja).idji_aktivnih()
 
     obdelanih = 0
     for family_id in druzine:

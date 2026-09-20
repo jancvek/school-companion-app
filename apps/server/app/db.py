@@ -7,8 +7,9 @@ oboje skozi isto kodo.
 **Vsak repozitorij podatkov pripada eni družini** (`docs/odlocitve/ADR-025`):
 `family_id` je obvezen argument konstruktorja, vsaka poizvedba in vsak
 `UPDATE` ima pogoj družine, `Session.get` se nad podatki ne uporablja (gre mimo
-vsakega pogoja) in seja je zasebna. `DruzineRepository` bere samo tabelo
-`families`, nikoli podatkov družine.
+vsakega pogoja) in seja je zasebna. `DruzineRepository` bere `families` in šteje
+člane v `users`, nikoli podatkov družine — meja je zapisana v
+`docs/odlocitve/ADR-044` E.
 """
 
 from collections.abc import Iterable, Sequence
@@ -22,6 +23,7 @@ from sqlalchemy import (
     CursorResult,
     Engine,
     Select,
+    case,
     create_engine,
     delete,
     func,
@@ -127,27 +129,235 @@ def _nabor_predmeta(family_id: str, subject: str) -> tuple[ColumnElement[bool], 
 _VRSTNI_RED_PREDMETA = (Material.taken_at.desc(), Material.id.desc())
 
 
-class DruzineRepository:
-    """Branje tabele `families` — edini repozitorij brez družine.
+@dataclass(frozen=True)
+class DruzinaZaPregled:
+    """Ena družina, kot jo vidi lastnik sistema na `/admin/system` (V3-R05).
 
-    Ne bere podatkov nobene družine, zato ni obvoz iz `ADR-025`. Potrebujeta ga
-    obdelava v ozadju, ki gre po družinah (`docs/odlocitve/ADR-029` B), in
-    začasna izbira družine pred prijavo (`app/dependencies.py`, `ADR-029` A).
+    **Tu je vse, kar sme lastnik o tuji družini vedeti** (`ADR-044` B): ime,
+    kdaj je nastala, ali je prižgana, in koliko koga ima. Nobene vsebine —
+    ne snovi, ne vprašanj, ne kvizov, ne urnikov. Da je meja v tipu in ne le v
+    izrisu, pomeni, da je ni mogoče prestopiti po nesreči v predlogi.
+    """
+
+    id: str
+    name: str
+    is_active: bool
+    created_at: datetime
+    starsev: int
+    otrok: int
+
+    @property
+    def clanov(self) -> int:
+        """Skupno število članov — kriterij `V3-R05` govori o številu članov."""
+        return self.starsev + self.otrok
+
+
+class DruzineRepository:
+    """Tabela `families` in štetje članov — edini repozitorij brez družine.
+
+    Podatkov nobene družine ne bere, zato ni obvoz iz `ADR-025`. Do `V3-R05` je
+    bral izključno `families`; odtlej v `users` tudi **šteje** člane, ker
+    lastnik sistema potrebuje pregled čez družine. Meja je zapisana v
+    `docs/odlocitve/ADR-044` E in je ozka namenoma:
+
+    - čez družine se bereta **samo** `families` in `users` — ime, datum,
+      stanje in števila; nikoli `materials`, `questions`, `quizzes`,
+      `quiz_items`, `question_attempts`, `schedules` ali `schedule_entries`;
+    - **imena članov ta razred ne vrne.** Starše lastniku pokaže
+      `ClaniRepository(seja, ciljna_druzina)`, torej repozitorij z družino v
+      konstruktorju, kot zahteva `ADR-025`;
+    - varovalo `test_vsaka_javna_metoda_repozitorija_ima_primer` tega razreda
+      ne gleda (našteva pet repozitorijev z družino), zato ima svojega:
+      `test_tesnjenje.py` primerja seznam njegovih javnih metod z zapisanim.
+      Nova metoda tu je odločitev o tej meji in ne sme nastati tiho.
+
+    Potrebujejo ga obdelava v ozadju, ki gre po družinah (`ADR-029` B), in poti
+    lastnika sistema (`app/routers/sistem.py`).
     """
 
     def __init__(self, session: Session) -> None:
         self._session = session
 
     def idji(self) -> list[str]:
-        """`id` vseh družin, najstarejša prva."""
+        """`id` **vseh** družin, tudi ugasnjenih, najstarejša prva.
+
+        Za `worker.obnovi_obticale`: ta zapis, ki je obtičal v `processing`,
+        vrne v `new` in ne kliče ničesar zunanjega, zato ga ugasnjena družina
+        ne sme izpustiti — vrstica, ki bi tam ostala za vedno, bi bila tiha
+        izguba ob ponovni aktivaciji (`ADR-044` D).
+        """
         return list(
             self._session.scalars(select(Family.id).order_by(Family.created_at, Family.id))
+        )
+
+    def idji_aktivnih(self) -> list[str]:
+        """`id` **prižganih** družin, najstarejša prva.
+
+        Za obhod obdelave (`obdelava.obdelaj_cakajoce`). Slike ugasnjene
+        družine ostanejo `new` in počakajo na ponovno aktivacijo; klic v
+        OpenAI za družino, v katero nihče ne more, bi bil plačan za nič
+        (`ADR-044` D, isti vzorec kot mirujoči worker iz `ADR-009` B2).
+
+        Ločena metoda in ne zastavica na `idji`: dva bralca z različnim
+        pomenom naj imata različni imeni, sicer se pomen tiho spremeni obema.
+        """
+        return list(
+            self._session.scalars(
+                select(Family.id)
+                .where(Family.is_active.is_(True))
+                .order_by(Family.created_at, Family.id)
+            )
         )
 
     def edina(self) -> str | None:
         """`id` edine družine, ali `None`, kadar jih ni natanko ena."""
         idji = list(self._session.scalars(select(Family.id).limit(2)))
         return idji[0] if len(idji) == 1 else None
+
+    def pregled(self) -> list[DruzinaZaPregled]:
+        """Vse družine s števili članov, po imenu.
+
+        Po imenu in ne po datumu nastanka: seznam je imenik, po katerem lastnik
+        išče znanca, in datum je pri tem stolpec, ne vrstni red. Drugi ključ je
+        `id`, da dve družini z istim imenom (ime ni enolično) ne plavata.
+
+        **`outerjoin`, ne `join`:** družina brez članov je stanje, ki ga
+        `ustvari_z_prvim_starsem` sicer ne pusti, shema pa ga dopušča — in
+        družina, ki bi zaradi praznega štetja izginila s seznama, bi bila
+        družina, ki je lastnik ne more niti ugasniti.
+        """
+        vrstice = self._session.execute(
+            self._pregled_poizvedba().order_by(Family.name, Family.id)
+        ).all()
+        return [self._v_druzino(vrstica) for vrstica in vrstice]
+
+    def poisci(self, family_id: str) -> DruzinaZaPregled | None:
+        """Ena družina s števili članov, ali `None`, kadar je ni."""
+        vrstica = self._session.execute(
+            self._pregled_poizvedba().where(Family.id == family_id)
+        ).first()
+        return self._v_druzino(vrstica) if vrstica is not None else None
+
+    def ustvari_z_prvim_starsem(
+        self,
+        *,
+        ime_druzine: str,
+        prikazno_ime: str,
+        identifier: str,
+        secret_hash: str,
+        ko: datetime,
+    ) -> tuple[str, str]:
+        """Ustvari družino in v njej prvega starša; vrne `(family_id, user_id)`.
+
+        **Eno dejanje in ena transakcija** (`V3-R05`, kriterij 2): družina brez
+        starša nima nikogar, ki bi vanjo prišel, in če vstavljanje starša pade
+        na zasedenem identifikatorju, ne sme ostati prazna družina, ki jo bo
+        moral nekdo pospraviti.
+
+        Novi starš **ni lastnik sistema** in družina je prižgana. Zastavice
+        `is_system_owner` ne podeli nobena pot — niti ta (`ADR-038` G).
+
+        Zaseden identifikator je `IdentifikatorZaseden`, enako kot pri
+        `ClaniRepository.ustvari_clana`: enoličnost razsodi baza in ne
+        poizvedba pred vstavljanjem (`ADR-038` E).
+        """
+        family_id = str(uuid4())
+        user_id = str(uuid4())
+        self._session.add(Family(id=family_id, name=ime_druzine, is_active=True, created_at=ko))
+        self._session.add(
+            User(
+                id=user_id,
+                family_id=family_id,
+                role=VLOGA_STARS,
+                display_name=prikazno_ime,
+                is_system_owner=False,
+                is_active=True,
+                created_at=ko,
+            )
+        )
+        self._session.add(
+            Credential(
+                id=str(uuid4()),
+                user_id=user_id,
+                kind=POVERILNICA_GESLO,
+                identifier=identifier,
+                secret_hash=secret_hash,
+                created_at=ko,
+                updated_at=ko,
+            )
+        )
+        try:
+            self._session.commit()
+        except IntegrityError as izjema:
+            self._session.rollback()
+            if not je_zaseden_identifikator(izjema):
+                raise
+            raise IdentifikatorZaseden(identifier) from izjema
+        return family_id, user_id
+
+    def nastavi_aktivnost(self, family_id: str, *, aktivna: bool) -> bool:
+        """Ugasne ali prižge družino. Vrne, ali je bila vrstica spremenjena.
+
+        **Ugasnitev v isti transakciji izbriše seje vseh članov**; prižig jih ne
+        vrne, ker izbrisana vrstica ne obstaja več — isto pravilo kot pri osebi
+        (`ADR-038` A). Lena preverba v `prijava.seja_za_zeton` ostane kot druga
+        plast.
+
+        **Članov se ne dotakne** (`ADR-044` A): `users.is_active` ostane tak,
+        kakršen je bil, zato prižig vrne družino v stanje pred ugasnitvijo in
+        ne v novo. Prav tako se ne dotakne nobenega podatka družine — snov,
+        vprašanja, kvizi, poskusi, urniki in slike ostanejo.
+        """
+        izid = self._session.execute(
+            update(Family).where(Family.id == family_id).values(is_active=aktivna)
+        )
+        if not cast(CursorResult[Any], izid).rowcount:
+            self._session.rollback()
+            return False
+        if not aktivna:
+            self._session.execute(
+                delete(UserSession).where(
+                    UserSession.user_id.in_(select(User.id).where(User.family_id == family_id))
+                )
+            )
+        self._session.commit()
+        return True
+
+    # --- Skupno branje -----------------------------------------------------
+
+    @staticmethod
+    def _stevilo(vloga: str) -> ColumnElement[int]:
+        """Koliko članov te vloge ima družina.
+
+        `count` nad `case` in ne `sum`: `count` prazne množice je 0, `sum` pa
+        `NULL`, in vsak klicatelj bi ga moral znati prevesti nazaj v nič.
+        """
+        return func.count(case((User.role == vloga, User.id)))
+
+    def _pregled_poizvedba(self) -> Select[Any]:
+        return (
+            select(
+                Family.id,
+                Family.name,
+                Family.is_active,
+                Family.created_at,
+                self._stevilo(VLOGA_STARS),
+                self._stevilo(VLOGA_OTROK),
+            )
+            .outerjoin(User, User.family_id == Family.id)
+            .group_by(Family.id, Family.name, Family.is_active, Family.created_at)
+        )
+
+    @staticmethod
+    def _v_druzino(vrstica: Any) -> DruzinaZaPregled:
+        return DruzinaZaPregled(
+            id=vrstica[0],
+            name=vrstica[1],
+            is_active=bool(vrstica[2]),
+            created_at=casi.utc(vrstica[3]),
+            starsev=int(vrstica[4]),
+            otrok=int(vrstica[5]),
+        )
 
 
 class _RepozitorijDruzine:
@@ -1629,6 +1839,11 @@ class PoverilnicaZaPrijavo:
     display_name: str
     is_active: bool
     is_system_owner: bool
+    #: Ali je **družina** prižgana (`V3-R05`). Ugasnjena družina pomeni, da se
+    #: noben njen član ne more prijaviti, ne na admin strani ne na telefonu
+    #: (`docs/odlocitve/ADR-044` A). Tu in ne v drugi poizvedbi, ker se ta na
+    #: `families` že pridružuje zaradi imena družine.
+    family_is_active: bool
     #: `None` pomeni, da geslo ni nastavljeno (`docs/odlocitve/ADR-035` G).
     secret_hash: str | None
 
@@ -1645,6 +1860,10 @@ class SejaUporabnika:
     display_name: str
     is_active: bool
     is_system_owner: bool
+    #: Ali je družina prižgana (`V3-R05`). Bere jo `prijava.seja_za_zeton`:
+    #: seja člana ugasnjene družine neha veljati, tudi če je bila ustvarjena
+    #: prej (`docs/odlocitve/ADR-044` A).
+    family_is_active: bool
     csrf_token: str
     expires_at: datetime
     last_used_at: datetime
@@ -1681,6 +1900,7 @@ class PrijavaRepository:
                 User.display_name,
                 User.is_active,
                 User.is_system_owner,
+                Family.is_active,
             )
             .join(User, User.id == Credential.user_id)
             .join(Family, Family.id == User.family_id)
@@ -1698,6 +1918,7 @@ class PrijavaRepository:
             display_name=vrstica[6],
             is_active=vrstica[7],
             is_system_owner=vrstica[8],
+            family_is_active=bool(vrstica[9]),
         )
 
     def ponastavi_geslo(
@@ -1807,6 +2028,7 @@ class PrijavaRepository:
                 User.display_name,
                 User.is_active,
                 User.is_system_owner,
+                Family.is_active,
             )
             .join(User, User.id == UserSession.user_id)
             .join(Family, Family.id == User.family_id)
@@ -1828,6 +2050,7 @@ class PrijavaRepository:
             display_name=vrstica[8],
             is_active=vrstica[9],
             is_system_owner=vrstica[10],
+            family_is_active=bool(vrstica[11]),
         )
 
     def osvezi_sejo(self, session_id: str, ko: datetime, potece: datetime) -> None:
