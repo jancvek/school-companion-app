@@ -15,10 +15,12 @@ from app.db import (
     KviziRepository,
     MaterialsRepository,
     PrijavaRepository,
+    ScheduleRepository,
     SejaUporabnika,
     StatistikaRepository,
 )
 from app.settings import Settings
+from app.vision import KlicalecUrnika
 
 
 def daj_nastavitve(request: Request) -> Settings:
@@ -127,3 +129,31 @@ def daj_repozitorij_statistike(
     tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
     with tovarna() as seja:
         yield StatistikaRepository(seja, family_id)
+
+
+def daj_repozitorij_urnikov(
+    request: Request, family_id: Annotated[str, Depends(daj_druzino)]
+) -> Iterator[ScheduleRepository]:
+    """Kot `daj_repozitorij`, a za urnike otrok družine (V3-R09).
+
+    Svoja seja in ne deljena z `MaterialsRepository`: pregled po dnevih
+    potrebuje oboje in s tem odpre dve **bralni** seji na zahtevo. To ni
+    težava pravilnosti — pisanje teče izključno skozi pot potrditve in je
+    zato ena seja in ena transakcija (isti razlog kot pri
+    `daj_repozitorij_kvizov`).
+    """
+    tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
+    with tovarna() as seja:
+        yield ScheduleRepository(seja, family_id)
+
+
+def daj_klicalca_urnika(request: Request) -> KlicalecUrnika | None:
+    """Klicalec za sliko urnika, ali `None`, kadar ključa za OpenAI ni.
+
+    `None` in ne izjema: brez ključa mora stran z urnikom še vedno delati —
+    mreža je urejljiva tudi brez slike (`ADR-041` E), zato je odsotnost
+    ključa stanje, ki ga pot pove v slovenščini, in ne napaka strežnika.
+    Isto sklepanje kot pri mirujočem workerju (`ADR-009` B2).
+    """
+    klicalec: KlicalecUrnika | None = request.app.state.klicalec_urnika
+    return klicalec

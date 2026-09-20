@@ -33,6 +33,8 @@ from openai import (
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.settings import Settings
+from app.subjects import PREDMETI
+from app.urnik import DNEVI
 
 dnevnik = logging.getLogger(__name__)
 
@@ -95,6 +97,88 @@ SHEMA_ODGOVORA: dict[str, Any] = {
                 "properties": {
                     "question": {"type": "string"},
                     "answer": {"type": "string"},
+                },
+            },
+        },
+    },
+}
+
+
+#: Oznake dni, kot jih vrne model. Kratke in brez sumnikov: model naj izbira
+#: med petimi nizi in ne piše prostega besedila, ki bi ga bilo treba ugibati.
+#:
+#: Sobote in nedelje na seznamu ni (`docs/odlocitve/ADR-041` F), zato model
+#: šestega stolpca urnika, če bi ga slika imela, sploh ne more vrniti.
+DNEVI_MODELA: tuple[str, ...] = ("pon", "tor", "sre", "cet", "pet")
+
+#: Oznaka dneva → `date.weekday()`.
+_DAN_PO_OZNAKI = dict(zip(DNEVI_MODELA, DNEVI, strict=True))
+
+#: Kode predmetov v promptu, da model preslika sam in ne ugiba naša koda.
+_SEZNAM_PREDMETOV = "\n".join(
+    f"- {predmet.koda} = {predmet.oznaka}" for predmet in PREDMETI
+)
+
+#: Prompt za sliko urnika (V3-R09).
+#:
+#: Model **preslika sam**, ker ime na šolskem urniku in koda nista isto
+#: (`Slovenščina` proti `SLJ`), seznam pa je kratek in ga zna prebrati. Naša
+#: koda preslikave ne ugiba: kar ni ena od desetih kod, je nepreslikana celica,
+#: ki jo vidi starš (`ADR-028` A2).
+#:
+#: **Ure se preberejo, a se ne vrnejo.** Urnik je množica predmetov na dan;
+#: dve uri istega predmeta zahtevata vsaj eno sliko in sta zato ista reč.
+PROMPT_URNIK = f"""\
+Na sliki je šolski urnik osnovnošolke. Preberi, kateri predmeti so kateri dan
+v tednu.
+
+Vrni eno postavko za vsako celico urnika, ki nosi predmet. Če je isti predmet
+v istem dnevu večkrat, ga vseeno vrni večkrat — ure nas ne zanimajo, podvojitve
+odstranimo sami.
+
+Za vsako celico vrni:
+- day: dan v tednu (pon, tor, sre, cet ali pet),
+- text: besedilo, kakršno na tistem mestu res piše, dobesedno,
+- subject: koda predmeta s tega seznama, ali prazen niz, če se celica ne ujema
+  z nobeno kodo.
+
+Kode predmetov:
+{_SEZNAM_PREDMETOV}
+
+Kode si ne izmišljuj in celice ne vrzi stran: če ne veš, katera koda je prava,
+pusti subject prazen in v text napiši, kar piše na sliki. Prazne celice, ure,
+odmore, kosilo in dneve brez pouka izpusti.
+
+Če urnika s slike ni mogoče brati (prazna stran, zamegljenost, na sliki ni
+urnika), nastavi readable na false in vrni prazen seznam celic. V tem primeru
+si vsebine ne izmišljuj.\
+"""
+
+#: Shema odgovora za urnik. `enum` pri dnevu je namenski: `strict: true` ga
+#: uveljavi na strani storitve, zato šesti dan sploh ne pride do nas.
+SHEMA_URNIKA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["readable", "cells"],
+    "properties": {
+        "readable": {
+            "type": "boolean",
+            "description": "Ali je s slike mogoče brati urnik.",
+        },
+        "cells": {
+            "type": "array",
+            "description": "Ena postavka na celico s predmetom; prazno, kadar readable ni true.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["day", "text", "subject"],
+                "properties": {
+                    "day": {"type": "string", "enum": list(DNEVI_MODELA)},
+                    "text": {"type": "string"},
+                    "subject": {
+                        "type": "string",
+                        "description": "Koda predmeta, ali prazen niz, če je ni mogoče določiti.",
+                    },
                 },
             },
         },
@@ -172,6 +256,129 @@ class IzidKlica:
 Klicalec = Callable[[Path], IzidKlica]
 
 
+@dataclass(frozen=True)
+class CelicaUrnika:
+    """Ena prebrana celica urnika.
+
+    `koda` je `None`, kadar celice ni mogoče preslikati na predmet. Taka
+    celica se staršu **pokaže** in ne izpade molče (kriterij `V3-R09`):
+    napačno prebran urnik bi sicer lagal vsak teden, dokler ga nihče ne
+    popravi, in prav zato potrditev ni prijaznost, ampak varovalka.
+    """
+
+    #: `date.weekday()`: 0 = ponedeljek … 4 = petek.
+    dan: int
+
+    #: Besedilo, kakršno je model prebral. Edino, kar staršu pove, katero
+    #: celico naj pogleda.
+    besedilo: str
+
+    #: Koda iz `PREDMETI`, ali `None`.
+    koda: str | None
+
+
+@dataclass(frozen=True)
+class PredlogUrnika:
+    """Kar model prebere z ene slike urnika.
+
+    **Predlog in ne urnik**: v bazo ne gre nikoli, v bazo gre šele to, kar
+    starš potrdi (`ADR-028` A2). Revizijske sledi ne nosi (`ADR-042`).
+    """
+
+    readable: bool
+    celice: tuple[CelicaUrnika, ...]
+
+    @property
+    def nepreslikane(self) -> tuple[CelicaUrnika, ...]:
+        """Celice, ki jih ni bilo mogoče preslikati na predmet."""
+        return tuple(celica for celica in self.celice if celica.koda is None)
+
+
+#: Kar pot urnika potrebuje od tega modula: iz slike naredi predlog.
+KlicalecUrnika = Callable[[Path], PredlogUrnika]
+
+
+class _Celica(BaseModel):
+    """Preverba ene celice iz odgovora."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    day: str
+    text: str
+    subject: str
+
+    @model_validator(mode="after")
+    def _preveri_dan(self) -> "_Celica":
+        if self.day not in _DAN_PO_OZNAKI:
+            raise ValueError(f"dan „{self.day}“ ni eden od {', '.join(DNEVI_MODELA)}")
+        return self
+
+
+class _Urnik(BaseModel):
+    """Preverba celotnega odgovora o urniku.
+
+    `strict: true` je obljuba storitve in ne naša invarianta — isti razlog kot
+    pri `_Odgovor`. Tu ta razlika največ pomeni pri `readable`: shema ne zna
+    povedati, da neberljiva slika ne sme imeti celic.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    readable: bool
+    cells: list[_Celica]
+
+    @model_validator(mode="after")
+    def _preveri_celice(self) -> "_Urnik":
+        if not self.readable and self.cells:
+            # Isto sklepanje kot pri vprašanjih: model trdi, da ni znal brati,
+            # in hkrati navaja, kaj je prebral. Tega ne popravljamo tiho, ker
+            # ne vemo, kateri polovici verjeti.
+            raise ValueError(
+                f"model je urnik označil kot neberljiv, a vrnil {len(self.cells)} celic"
+            )
+        return self
+
+
+def razcleni_urnik(surovo: str) -> PredlogUrnika:
+    """Niz iz odgovora v predlog urnika; ob neskladju vrže `NapakaObdelave`.
+
+    Čista funkcija nad nizom, kot `razcleni_odgovor`, in preizkusljiva brez
+    omrežja. Preslikava kode je tu in ne v `app/urnik.py`, ker je to razumevanje
+    **odgovora modela** in ne pravilo urnika: kar model vrne kot `subject`, je
+    trditev, ki jo je treba preveriti proti `PREDMETI`.
+
+    Koda se pred primerjavo očisti presledkov in zapiše z velikimi črkami —
+    `mat` in `MAT` sta ista koda, `Šport` pa ni nobena.
+    """
+    try:
+        podatki = json.loads(surovo)
+    except json.JSONDecodeError as napaka:
+        raise NapakaObdelave(f"Model ni vrnil veljavnega JSON: {napaka.msg}.") from napaka
+
+    try:
+        odgovor = _Urnik.model_validate(podatki)
+    except ValidationError as napaka:
+        prva = napaka.errors()[0]
+        kje = ".".join(str(del_) for del_ in prva["loc"]) or "odgovor"
+        raise NapakaObdelave(
+            f"Odgovor modela ni po pričakovani obliki ({kje}: {prva['msg']})."
+        ) from napaka
+
+    znane = {predmet.koda for predmet in PREDMETI}
+    celice = []
+    for celica in odgovor.cells:
+        koda = celica.subject.strip().upper()
+        celice.append(
+            CelicaUrnika(
+                dan=_DAN_PO_OZNAKI[celica.day],
+                besedilo=celica.text.strip(),
+                koda=koda if koda in znane else None,
+            )
+        )
+
+    return PredlogUrnika(readable=odgovor.readable, celice=tuple(celice))
+
+
 class _Vprasanje(BaseModel):
     """Preverba enega vprašanja iz odgovora."""
 
@@ -223,17 +430,20 @@ def _slika_kot_podatkovni_url(pot: Path) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(pot.read_bytes()).decode("ascii")
 
 
-def sestavi_sporocila(pot: Path) -> list[dict[str, Any]]:
+def sestavi_sporocila(pot: Path, prompt: str = PROMPT) -> list[dict[str, Any]]:
     """Sporočila enega klica: prompt in slika.
 
     Slika gre kot base64 in ne kot naslov: strežnik slike streže samo pod
     `/admin`, za geslom, zato OpenAI do njih nima dostopa.
+
+    `prompt` je argument od V3-R09, ko je sliko dobil še urnik. Privzetek je
+    prompt za snov, da klicna mesta V1-R03 ostanejo, kakršna so.
     """
     return [
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": PROMPT},
+                {"type": "text", "text": prompt},
                 {"type": "image_url", "image_url": {"url": _slika_kot_podatkovni_url(pot)}},
             ],
         }
@@ -281,6 +491,107 @@ class _OdjemalecKlepeta(Protocol):
     def chat(self) -> Any: ...
 
 
+@dataclass(frozen=True)
+class _SurovOdgovor:
+    """Kar en klic prinese nazaj, preden se odgovor razčleni."""
+
+    raw: str
+    model: str
+    input_tokens: int | None
+    output_tokens: int | None
+
+
+def _izvedi_klic(
+    klepet: _OdjemalecKlepeta,
+    nastavitve: Settings,
+    pot: Path,
+    prompt: str,
+    ime_sheme: str,
+    shema: dict[str, Any],
+) -> _SurovOdgovor:
+    """En klic modela nad eno sliko; napake pretvori v `NapakaObdelave`.
+
+    Skupen obema klicalcema — snovi (V1-R03) in urniku (V3-R09). Obravnava
+    napak storitve je pri obeh ista; podvojena bi se sčasoma razsla prav v
+    tistem delu, ki se izvede najredkeje.
+    """
+    try:
+        odgovor = klepet.chat.completions.create(
+            model=nastavitve.openai_model,
+            messages=sestavi_sporocila(pot, prompt),
+            response_format={
+                "type": "json_schema",
+                "json_schema": {"name": ime_sheme, "strict": True, "schema": shema},
+            },
+        )
+    except APITimeoutError as napaka:
+        # `prompt` tudi tu: zahteva je bila poslana, model se ni odzval. Sled
+        # brez tega ne bi povedala, kaj je dobil.
+        raise NapakaObdelave(
+            f"Model se ni odzval v {nastavitve.openai_timeout_seconds:.0f} sekundah.",
+            prompt=prompt,
+        ) from napaka
+    except APIConnectionError as napaka:
+        raise NapakaObdelave(
+            "Do storitve OpenAI ni bilo mogoče priti. Preveri omrežno povezavo strežnika.",
+            prompt=prompt,
+        ) from napaka
+    except APIStatusError as napaka:
+        raise NapakaObdelave(_opis_statusa(napaka), prompt=prompt) from napaka
+    except APIError as napaka:
+        # Vse ostalo, kar zna vreči `openai` — npr.
+        # `APIResponseValidationError`, ki ni podrazred nobene od zgornjih
+        # treh. Brez te veje bi taka napaka ušla do splošnega lovilca v
+        # `app/obdelava.py` in zapis bi končal v `failed` **brez sledi**,
+        # čeprav je bila zahteva poslana in plačana. Prav to je primer,
+        # kjer kriterij „shrani se poslani prompt" največ pomeni.
+        dnevnik.exception("Klic modela je odpovedal z napako knjižnice openai.")
+        raise NapakaObdelave(
+            f"Klic modela ni uspel ({type(napaka).__name__}). "
+            "Podrobnosti so v dnevniku strežnika.",
+            prompt=prompt,
+        ) from napaka
+
+    uporaba = getattr(odgovor, "usage", None)
+    vhodni = getattr(uporaba, "prompt_tokens", None)
+    izhodni = getattr(uporaba, "completion_tokens", None)
+    # Ime beremo iz odgovora in ne iz nastavitve: storitev zna vzdevek
+    # (`gpt-4.1`) razrešiti v konkretno različico, in za primerjavo med
+    # modeli je merodajno prav to, kar je res odgovorilo.
+    ime_modela = getattr(odgovor, "model", None) or nastavitve.openai_model
+
+    surovo = odgovor.choices[0].message.content if odgovor.choices else None
+    if not surovo:
+        raise NapakaObdelave(
+            "Model je vrnil prazen odgovor.",
+            prompt=prompt,
+            raw_response=surovo,
+            model=ime_modela,
+            input_tokens=vhodni,
+            output_tokens=izhodni,
+        )
+
+    return _SurovOdgovor(
+        raw=surovo, model=ime_modela, input_tokens=vhodni, output_tokens=izhodni
+    )
+
+
+def _s_sledjo(napaka: NapakaObdelave, prompt: str, surov: _SurovOdgovor) -> NapakaObdelave:
+    """Napaki razčlenjevanja doda sled klica.
+
+    `razcleni_odgovor` in `razcleni_urnik` sta čisti funkciji nad nizom in za
+    tokene ne vesta; sled zato dopolnimo tu.
+    """
+    return NapakaObdelave(
+        napaka.sporocilo,
+        prompt=prompt,
+        raw_response=surov.raw,
+        model=surov.model,
+        input_tokens=surov.input_tokens,
+        output_tokens=surov.output_tokens,
+    )
+
+
 def naredi_klicalca(nastavitve: Settings, odjemalec: _OdjemalecKlepeta | None = None) -> Klicalec:
     """Sestavi funkcijo `slika → izid` nad enim odjemalcem OpenAI.
 
@@ -293,88 +604,49 @@ def naredi_klicalca(nastavitve: Settings, odjemalec: _OdjemalecKlepeta | None = 
     )
 
     def poklici(pot: Path) -> IzidKlica:
-        try:
-            odgovor = klepet.chat.completions.create(
-                model=nastavitve.openai_model,
-                messages=sestavi_sporocila(pot),
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "ucna_snov",
-                        "strict": True,
-                        "schema": SHEMA_ODGOVORA,
-                    },
-                },
-            )
-        except APITimeoutError as napaka:
-            # `prompt=PROMPT` tudi tu: zahteva je bila poslana, model se ni
-            # odzval. Sled brez tega ne bi povedala, kaj je dobil.
-            raise NapakaObdelave(
-                f"Model se ni odzval v {nastavitve.openai_timeout_seconds:.0f} sekundah.",
-                prompt=PROMPT,
-            ) from napaka
-        except APIConnectionError as napaka:
-            raise NapakaObdelave(
-                "Do storitve OpenAI ni bilo mogoče priti. Preveri omrežno povezavo strežnika.",
-                prompt=PROMPT,
-            ) from napaka
-        except APIStatusError as napaka:
-            raise NapakaObdelave(_opis_statusa(napaka), prompt=PROMPT) from napaka
-        except APIError as napaka:
-            # Vse ostalo, kar zna vreči `openai` — npr.
-            # `APIResponseValidationError`, ki ni podrazred nobene od zgornjih
-            # treh. Brez te veje bi taka napaka ušla do splošnega lovilca v
-            # `app/obdelava.py` in zapis bi končal v `failed` **brez sledi**,
-            # čeprav je bila zahteva poslana in plačana. Prav to je primer,
-            # kjer kriterij „shrani se poslani prompt" največ pomeni.
-            dnevnik.exception("Klic modela je odpovedal z napako knjižnice openai.")
-            raise NapakaObdelave(
-                f"Klic modela ni uspel ({type(napaka).__name__}). "
-                "Podrobnosti so v dnevniku strežnika.",
-                prompt=PROMPT,
-            ) from napaka
-
-        uporaba = getattr(odgovor, "usage", None)
-        vhodni = getattr(uporaba, "prompt_tokens", None)
-        izhodni = getattr(uporaba, "completion_tokens", None)
-        # Ime beremo iz odgovora in ne iz nastavitve: storitev zna vzdevek
-        # (`gpt-4.1`) razrešiti v konkretno različico, in za primerjavo med
-        # modeli je merodajno prav to, kar je res odgovorilo.
-        ime_modela = getattr(odgovor, "model", None) or nastavitve.openai_model
-
-        surovo = odgovor.choices[0].message.content if odgovor.choices else None
-        if not surovo:
-            raise NapakaObdelave(
-                "Model je vrnil prazen odgovor.",
-                prompt=PROMPT,
-                raw_response=surovo,
-                model=ime_modela,
-                input_tokens=vhodni,
-                output_tokens=izhodni,
-            )
+        surov = _izvedi_klic(klepet, nastavitve, pot, PROMPT, "ucna_snov", SHEMA_ODGOVORA)
 
         try:
-            vsebina = razcleni_odgovor(surovo)
+            vsebina = razcleni_odgovor(surov.raw)
         except NapakaObdelave as napaka:
-            # Sled dopolnimo tu, ker je `razcleni_odgovor` čista funkcija nad
-            # nizom in za tokene ne ve.
-            raise NapakaObdelave(
-                napaka.sporocilo,
-                prompt=PROMPT,
-                raw_response=surovo,
-                model=ime_modela,
-                input_tokens=vhodni,
-                output_tokens=izhodni,
-            ) from napaka
+            raise _s_sledjo(napaka, PROMPT, surov) from napaka
 
         return IzidKlica(
             vsebina=vsebina,
             prompt=PROMPT,
-            raw_response=surovo,
-            model=ime_modela,
-            input_tokens=vhodni,
-            output_tokens=izhodni,
+            raw_response=surov.raw,
+            model=surov.model,
+            input_tokens=surov.input_tokens,
+            output_tokens=surov.output_tokens,
         )
+
+    return poklici
+
+
+def naredi_klicalca_urnika(
+    nastavitve: Settings, odjemalec: _OdjemalecKlepeta | None = None
+) -> KlicalecUrnika:
+    """Sestavi funkcijo `slika urnika → predlog` (V3-R09).
+
+    Svoj klicalec in ne zastavica na obstoječem: prompt, shema in izid so
+    drugi; skupen je samo klic, in prav ta je izvlečen v `_izvedi_klic`.
+
+    **Revizijske sledi izid ne nosi** (`docs/odlocitve/ADR-042`): potrjen urnik
+    ni odgovor modela, ker ga starš vmes popravi, zato bi sled ob njem
+    opisovala nekaj, česar vrstica ne vsebuje. Neuspeh gre v dnevnik.
+    """
+    klepet: _OdjemalecKlepeta = odjemalec or OpenAI(
+        api_key=nastavitve.openai_api_key,
+        timeout=nastavitve.openai_timeout_seconds,
+    )
+
+    def poklici(pot: Path) -> PredlogUrnika:
+        surov = _izvedi_klic(klepet, nastavitve, pot, PROMPT_URNIK, "urnik", SHEMA_URNIKA)
+
+        try:
+            return razcleni_urnik(surov.raw)
+        except NapakaObdelave as napaka:
+            raise _s_sledjo(napaka, PROMPT_URNIK, surov) from napaka
 
     return poklici
 

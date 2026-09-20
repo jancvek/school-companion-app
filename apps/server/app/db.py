@@ -49,9 +49,12 @@ from app.models import (
     QuestionAttempt,
     Quiz,
     QuizItem,
+    Schedule,
+    ScheduleEntry,
     User,
     UserSession,
 )
+from app.urnik import Urnik, Vnos
 
 
 @dataclass(frozen=True)
@@ -2136,3 +2139,141 @@ class ClaniRepository(_RepozitorijDruzine):
             is_system_owner=bool(vrstica[6]),
             created_at=casi.utc(vrstica[7]),
         )
+
+
+class ScheduleRepository(_RepozitorijDruzine):
+    """Urnik otroka: branje veljavnega in potrditev novega (V3-R09).
+
+    **Veljaven urnik je en sam na otroka** in ga uveljavlja ta razred, ne
+    shema: `potrdi` v eni transakciji upokoji prejšnjega in vstavi novega.
+    Delnega indeksa nad `replaced_at IS NULL` ni, ker bi ga bilo treba zapisati
+    dvakrat — za SQLite in za Postgres — in dve različici istega pravila se
+    razideta (`docs/odlocitve/ADR-041` C).
+
+    Otrok je **argument poizvedbe in ne konstruktorja**, enako kot povsod od
+    `V3-R07`: družina je meja izolacije, otrok izbira znotraj nje (`ADR-039` B).
+    """
+
+    def _moje(self) -> ColumnElement[bool]:
+        """Pogoj družine. Nosi ga vsaka poizvedba in vsak `UPDATE`."""
+        return Schedule.family_id == self._family_id
+
+    def _je_moj_otrok(self, child_id: str) -> bool:
+        """Ali je ta `user_id` otrok **te** družine.
+
+        Preverba je tu in ne samo v usmerjevalniku, iz istega razloga kot pri
+        `KviziRepository.objavi`: tuji ključ na `users` pove, da oseba obstaja,
+        ne pa, da je naša — izolacija mora biti lastnost kode (`ADR-025`).
+        """
+        return (
+            self._session.scalars(
+                select(User.id).where(
+                    User.id == child_id,
+                    User.family_id == self._family_id,
+                    User.role == VLOGA_OTROK,
+                )
+            ).first()
+            is not None
+        )
+
+    def veljaven(self, child_id: str) -> Schedule | None:
+        """Trenutno veljaven urnik tega otroka, ali `None`.
+
+        `None` ni napaka: otrok brez potrjenega urnika je običajno stanje in
+        pomeni, da se manjki zanj ne računajo (kriterij `V3-R09`).
+
+        **Pregled za nazaj sodi po tem urniku** in ne po tistem, ki je takrat
+        veljal — zgodovine z `velja_od`/`velja_do` ni (`ADR-028` D2).
+
+        `selectinload` in ne lena naložitev: vnose potrebuje vsak klicatelj,
+        lena pa bi se pri pregledu tedna sprožila sedemkrat.
+        """
+        return self._session.scalars(
+            select(Schedule)
+            .where(
+                self._moje(),
+                Schedule.child_id == child_id,
+                Schedule.replaced_at.is_(None),
+            )
+            .options(selectinload(Schedule.vnosi))
+            # Več veljavnih hkrati ne more nastati — `potrdi` je ena
+            # transakcija —, a vrstni red naredi izid določen tudi, če bi jih
+            # kdaj bilo več, namesto da bi stran pokazala naključnega.
+            .order_by(Schedule.confirmed_at.desc(), Schedule.id.desc())
+        ).first()
+
+    def urnik(self, child_id: str) -> Urnik | None:
+        """Veljaven urnik kot vrednostni tip iz `app/urnik.py`, ali `None`.
+
+        Pravila manjkov delajo nad `app.urnik.Urnik` in ne nad vrstico ORM:
+        tako jih je mogoče preizkusiti brez baze, stran pa po izrisu nima
+        odprte seje, iz katere bi se lena zveza še naložila.
+        """
+        zapis = self.veljaven(child_id)
+        if zapis is None:
+            return None
+        return Urnik.iz_vnosov(
+            Vnos(dan=vnos.weekday, predmet=vnos.subject, se_ne_slika=vnos.skip_photo)
+            for vnos in zapis.vnosi
+        )
+
+    def potrdi(
+        self, child_id: str, vnosi: Iterable[Vnos], image_path: str | None
+    ) -> Schedule | None:
+        """Upokoji prejšnji urnik in vstavi novega — **v eni transakciji**.
+
+        `None` pomeni, da `child_id` ni otrok te družine; usmerjevalnik ga
+        prestreže prej in naredi `404`, ker obstoj tujega računa ni podatek za
+        starša (`ADR-038`).
+
+        En `commit` na koncu in ne dva: ob napaki kjerkoli na poti mora
+        prejšnji urnik ostati cel in veljaven. Napol zamenjan urnik bi pomenil
+        otroka brez pričakovanj ali z dvema hkrati, in kriterij `V3-R09`
+        izrecno zahteva, da se to ne zgodi.
+
+        **Potrditev je celotna zamenjava, ne krpanje:** kar ni med `vnosi`, v
+        novem urniku ne obstaja. Mreža v obrazcu je vedno cela, zato je to
+        tudi to, kar starš vidi.
+
+        Kod se tu ne preverja — to je stvar poti, ki obrazec bere
+        (`app/routers/urnik.py`). Repozitorij varuje **družino**, ne besedišča.
+        """
+        if not self._je_moj_otrok(child_id):
+            return None
+
+        zdaj = datetime.now(UTC)
+
+        # Upokojitev pred vstavljanjem in v istem `UPDATE`: pogoj
+        # `replaced_at IS NULL` zadene natanko toliko vrstic, kolikor jih je
+        # veljavnih, in novi urnik med njimi še ni.
+        self._session.execute(
+            update(Schedule)
+            .where(
+                self._moje(),
+                Schedule.child_id == child_id,
+                Schedule.replaced_at.is_(None),
+            )
+            .values(replaced_at=zdaj)
+        )
+
+        urnik = Schedule(
+            id=str(uuid4()),
+            family_id=self._family_id,
+            child_id=child_id,
+            confirmed_at=zdaj,
+            replaced_at=None,
+            image_path=image_path,
+        )
+        for vnos in Urnik.iz_vnosov(vnosi).vnosi:
+            urnik.vnosi.append(
+                ScheduleEntry(
+                    id=str(uuid4()),
+                    weekday=vnos.dan,
+                    subject=vnos.predmet,
+                    skip_photo=vnos.se_ne_slika,
+                )
+            )
+
+        self._session.add(urnik)
+        self._session.commit()
+        return urnik

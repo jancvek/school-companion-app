@@ -733,3 +733,135 @@ class LoginAttempt(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
+
+
+class Schedule(Base):
+    """Urnik enega otroka: kateri predmeti so kateri dan (`ADR-028`).
+
+    **Urnik je pričakovanje, ne dejstvo** — prvo tako mesto v tej bazi. Vse
+    ostalo tu je zapis o tem, kaj se je zgodilo; urnik pove, kaj naj bi se
+    zgodilo, in prav zato mora skozi potrditev starša (`ADR-028` A2).
+
+    **Veljaven je vedno en sam na otroka.** Nov prejšnjega ne izbriše, ampak
+    upokoji: `replaced_at` je svoja os po istem vzorcu kot `archived_at`
+    (`ADR-011`) in `retired_at` (`ADR-015`). Enoličnost uveljavlja **ena pot
+    pisanja v eni transakciji** (`ScheduleRepository.potrdi`) in ne delni
+    indeks — tega bi bilo treba zapisati dvakrat, za SQLite in za Postgres.
+
+    Vrstice brez potrditve ni: nepotrjen predlog živi v obrazcu in nikoli v
+    bazi. Zato `confirmed_at` ni `NULL`-abilen in stanja `draft` ni.
+    """
+
+    __tablename__ = "schedules"
+
+    #: UUID, generiran **na strežniku** — urnik nastane tu.
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    #: Družina, ki ji zapis pripada (`docs/odlocitve/ADR-025`). Obvezna in
+    #: brez `ondelete`, kot povsod.
+    family_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("families.id", name="fk_schedules_family_id"),
+        nullable=False,
+        index=True,
+    )
+
+    #: Otrok, čigar urnik je to. Obvezen: „urnik nikogar" ni stanje, ki bi ga
+    #: morala znati obravnavati vsaka poizvedba za njim (isto kot pri
+    #: `Quiz.child_id`, `ADR-039` A). Urnik je last otroka in ne namestitve —
+    #: prav zato je ta zahteva v V3 in ne prej (`ADR-028` B2).
+    child_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", name="fk_schedules_child_id"),
+        nullable=False,
+        index=True,
+    )
+
+    #: Kdaj je starš ta urnik potrdil. Hkrati čas nastanka — osnutkov ni.
+    confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    #: Kdaj ga je nadomestil novejši; `NULL` pomeni **veljaven** urnik.
+    #:
+    #: Enosmerno: nazaj na `NULL` ne gre nikoli. Upokojenega urnika ne bere
+    #: nihče in vmesnika zanj ni — ostane, ker načelo „nič se ne briše, vse se
+    #: upokoji" velja povsod (`docs/00-namen.md`), ne ker ga kdo potrebuje.
+    replaced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    #: Pot do slike urnika na disku, ali `NULL`.
+    #:
+    #: `NULL` ni manjkajoč podatek, ampak resnica o nastanku: ta urnik je
+    #: starš **natipkal** in ne prebral s slike (`ADR-041` E). Slika se zapiše
+    #: ob nalaganju in ne ob potrditvi (`ADR-042`), zato jo ta stolpec samo
+    #: poveže z vrstico.
+    #:
+    #: Slika urnika **ni snov**: živi v `<family_id>/urniki/` in nikoli v
+    #: `materials` (`ADR-028`). Sicer bi se pojavila v izbirniku kvizov, v
+    #: statistiki in na strani predmeta, iz ponedeljkove mreže pa bi nastalo
+    #: pet vprašanj o urniku.
+    image_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+
+    #: Vnosi tega urnika, urejeni po dnevu in nato po kodi predmeta.
+    #:
+    #: Kaskada brisanja: vnos brez urnika nima pomena, enako kot postavka brez
+    #: kviza. Urnikov se sicer ne briše — kaskada je tu zato, da shema pove
+    #: resnico.
+    vnosi: Mapped[list["ScheduleEntry"]] = relationship(
+        back_populates="urnik",
+        order_by="ScheduleEntry.weekday, ScheduleEntry.subject",
+        cascade="all, delete-orphan",
+    )
+
+
+class ScheduleEntry(Base):
+    """En vnos urnika: ta predmet je ta dan na urniku.
+
+    **Brez ure in brez zaporedja** (`ADR-028`). Dve uri istega predmeta v istem
+    dnevu sta za manjke ista reč — zahteva se vsaj ena slika —, zato je urnik
+    množica in ne seznam. Enoličnost para *dan + predmet* to pove v shemi in ne
+    le v dogovoru.
+    """
+
+    __tablename__ = "schedule_entries"
+
+    #: UUID, generiran na strežniku.
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    #: Urnik, ki mu vnos pripada. Družine **nima**: izpelje se iz urnika, po
+    #: isti logiki kot pri `quiz_items` (`ADR-029` C).
+    schedule_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("schedules.id", name="fk_schedule_entries_schedule_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    #: Dan v tednu, kot ga šteje `date.weekday()`: 0 = ponedeljek … 4 = petek.
+    #:
+    #: Sobote in nedelje urnik ne pozna (`ADR-041` F), zato manjko tam ne more
+    #: nastati po sami zgradbi in ne po posebnem pravilu. Izmeničnih tednov
+    #: prav tako ne — to bi bila nova dimenzija zapisa in nova zahteva
+    #: (`ADR-028`).
+    weekday: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    #: Koda predmeta. Vedno ena od `app.subjects.PREDMETI` — to uveljavi pot
+    #: potrditve, ker je urnik pričakovanje, ki ga vpiše človek, in ne koda, ki
+    #: pride s telefona iz druge gradnje.
+    subject: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    #: Ali se ta predmet **ta dan** ne slika (`ADR-028` F2).
+    #:
+    #: Lastnost vnosa in ne predmeta: seznam predmetov je trdo zapisan in
+    #: podvojen v TypeScriptu in Pythonu, veljal bi za vse družine, pričakovanje
+    #: pa je last ene. Isti predmet je zato lahko v ponedeljek označen in v
+    #: sredo ne.
+    skip_photo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    urnik: Mapped["Schedule"] = relationship(back_populates="vnosi")
+
+    __table_args__ = (
+        UniqueConstraint("schedule_id", "weekday", "subject", name="uq_schedule_entries_dan"),
+    )

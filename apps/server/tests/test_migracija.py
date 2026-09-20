@@ -1163,3 +1163,71 @@ def test_vrnitev_in_ponoven_zagon_prideta_do_istega_stanja(baza: str, slike: Pat
             ], tabela
     finally:
         motor.dispose()
+
+
+def test_obstojeci_zapisi_prezivijo_urnik(baza: str, slike: Path) -> None:
+    """`0010_urnik` je gol `CREATE TABLE` in se obstoječih vrstic ne dotakne.
+
+    Preverja se prav to, kar migracija **trdi** o sebi: da ni prepisa
+    podatkov. Test zato bazo napolni že pred njo in preverí, da je po njej
+    vsebina enaka — ne le, da novi tabeli obstajata (to pove že varovalo
+    `test_migracija_pokrije_vse_tabele_iz_modelov`).
+    """
+    config = alembic_nastavitve(baza)
+    _polna_baza_pred_druzinami(baza, slike)
+    command.upgrade(config, "0009_otrok_na_zapisu")
+
+    motor = create_engine(baza)
+    try:
+        prej = _stej(motor)
+        assert prej["materials"] >= 1, "test mora teči nad polno bazo"
+
+        command.upgrade(config, "0010_urnik")
+
+        tabele = set(inspect(motor).get_table_names())
+        assert {"schedules", "schedule_entries"} <= tabele
+        assert _stej(motor) == prej, "urnik ne sme premakniti nobene obstoječe vrstice"
+    finally:
+        motor.dispose()
+
+
+def test_razveljavitev_urnika_ohrani_ostalo(baza: str, slike: Path) -> None:
+    """`downgrade` spusti obe tabeli in nič drugega.
+
+    Urniki se pri tem izgubijo dokončno — isti razred kot `0005_kvizi` —,
+    vse ostalo pa mora ostati nedotaknjeno. Vrnitev čezenj je s tem varna za
+    bazo, ki urnika še ni dobila, in nepovratna za tisto, ki ga je.
+    """
+    config = alembic_nastavitve(baza)
+    _polna_baza_pred_druzinami(baza, slike)
+    command.upgrade(config, "head")
+
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            povezava.execute(
+                text(
+                    "INSERT INTO schedules "
+                    "(id, family_id, child_id, confirmed_at, replaced_at, image_path) "
+                    "VALUES ('u1', :druzina, :otrok, '2026-09-07 08:00:00', NULL, NULL)"
+                ),
+                {"druzina": CVEK_ID, "otrok": MASA_ID},
+            )
+            povezava.execute(
+                text(
+                    "INSERT INTO schedule_entries "
+                    "(id, schedule_id, weekday, subject, skip_photo) "
+                    "VALUES ('v1', 'u1', 0, 'MAT', 0)"
+                )
+            )
+
+        prej = _stej(motor)
+
+        command.downgrade(config, "0009_otrok_na_zapisu")
+
+        tabele = set(inspect(motor).get_table_names())
+        assert "schedules" not in tabele
+        assert "schedule_entries" not in tabele
+        assert _stej(motor) == prej, "razveljavitev urnika ne sme vzeti ničesar s sabo"
+    finally:
+        motor.dispose()

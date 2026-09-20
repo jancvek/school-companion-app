@@ -67,6 +67,26 @@ zastavico `Secure` pa odjemalec čez `http` ne pošlje — enako kot brskalnik.
 V brskalniku je `http://localhost` izjema in `Secure` piškotke sprejme, zato
 razvojni zagon mimo Caddyja deluje.
 
+## Preverba (V3-R09)
+
+### `mypy` nad `app/` ni isto kot nad `apps/server`
+
+Zagon `python -m mypy app/` iz mape `apps/server` preveri **samo produkcijsko
+kodo**; testi ostanejo zunaj. Ograja poganja `mypy apps/server` iz korena
+repozitorija (`ADR-005`) in s tem 68 datotek namesto 32.
+
+V `V3-R09` je bilo zaradi tega dvakrat poročano „typecheck čist", ko je bilo v
+testih osem napak. Zbirka je bila ves čas zelena — `pytest` tipov ne preverja,
+zato razlike ni pokazalo nič drugega kot neodvisen pregled.
+
+**Poganjaj ga tako, kot ga požene ograja**, iz korena repozitorija:
+
+```powershell
+python -m mypy apps/server
+```
+
+Isto velja za `ruff`: `ruff check app/` izpusti `tests/` in `alembic/`.
+
 ## Orodja na tem stroju
 
 - **`scripts/` je del ograje** in agentu ni dovoljena za pisanje. Nove skripte

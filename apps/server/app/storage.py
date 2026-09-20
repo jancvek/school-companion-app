@@ -59,23 +59,55 @@ def koncna_pot(images_dir: Path, family_id: str, material_id: str) -> Path:
     return mapa_druzine(images_dir, family_id) / f"{material_id}.jpg"
 
 
+def mapa_urnikov(images_dir: Path, family_id: str) -> Path:
+    """Mapa slik urnikov ene družine, `<images_dir>/<family_id>/urniki` (V3-R09).
+
+    **Slika urnika ni snov** (`docs/odlocitve/ADR-028`), zato ne le svoja
+    tabela, ampak tudi svoja mapa. Podmapa mape družine in ne svoj koren:
+    meja družine iz `V3-R01` mora veljati tudi zanjo, in podmapa jo podeduje
+    skupaj s preverbo kanoničnega UUID.
+    """
+    return mapa_druzine(images_dir, family_id) / "urniki"
+
+
+def shrani_sliko_urnika(images_dir: Path, family_id: str, slika_id: str, vir: BereBajte) -> Path:
+    """Zapiše sliko urnika v `<family_id>/urniki/<slika_id>.jpg`.
+
+    Zapiše se **ob nalaganju** in ne ob potrditvi (`ADR-042`): med predlogom
+    in potrditvijo je nova zahteva in strežnik med njima ne hrani ničesar.
+    Opuščeno nalaganje zato pusti datoteko brez vrstice — isti razred sirote,
+    kot ga pozna `.tmp/`, in sprejeta cena.
+    """
+    return _shrani(mapa_urnikov(images_dir, family_id), f"{slika_id}.jpg", slika_id, vir)
+
+
 def shrani_sliko(images_dir: Path, family_id: str, material_id: str, vir: BereBajte) -> Path:
     """Zapiše `vir` v `<images_dir>/<family_id>/<id>.jpg` in vrne končno pot.
 
     Ob kakršnikoli napaki počisti začasno datoteko in napako prenese naprej —
     klicatelj mora poskrbeti, da v tem primeru ne nastane vrstica v bazi.
     """
-    # `.tmp/` znotraj mape družine: isti datotečni sistem kot končno mesto,
-    # zato `replace` ostane atomaren.
-    zacasna_mapa = mapa_druzine(images_dir, family_id) / ZACASNA_PODMAPA
+    return _shrani(
+        mapa_druzine(images_dir, family_id), f"{material_id}.jpg", material_id, vir
+    )
+
+
+def _shrani(ciljna_mapa: Path, ime: str, predpona: str, vir: BereBajte) -> Path:
+    """Skupno jedro obeh zapisov: v `.tmp/` in nato atomarno na mesto.
+
+    `ciljna_mapa` je mapa družine (snov) ali njena podmapa `urniki` (V3-R09).
+    `.tmp/` nastane **znotraj** nje, ker mora biti na istem dat. sistemu kot
+    cilj — sicer `replace` ni atomaren.
+    """
+    zacasna_mapa = ciljna_mapa / ZACASNA_PODMAPA
     zacasna_mapa.mkdir(parents=True, exist_ok=True)
 
     # Enolično ime, ne `<id>.jpg`: dve hkratni zahtevi z istim `id` bi sicer
     # pisali v isto začasno datoteko in končna slika bi bila mešanica obeh.
     # Prav temu se `.tmp/` izogiba, zato tu ne sme biti trkov.
-    rocica, ime = tempfile.mkstemp(prefix=f"{material_id}-", suffix=".jpg", dir=zacasna_mapa)
-    zacasna = Path(ime)
-    koncna = koncna_pot(images_dir, family_id, material_id)
+    rocica, zacasno_ime = tempfile.mkstemp(prefix=f"{predpona}-", suffix=".jpg", dir=zacasna_mapa)
+    zacasna = Path(zacasno_ime)
+    koncna = ciljna_mapa / ime
 
     try:
         # Pišemo skozi deskriptor, ki ga je vrnil `mkstemp`, in ga s tem tudi

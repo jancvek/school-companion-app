@@ -29,9 +29,10 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from app.casi import danes, dnevi_od_do, pas
-from app.db import MaterialsRepository
+from app.db import MaterialsRepository, ScheduleRepository
 from app.models import STATUS_NOV, Material
 from app.routers.dnevi import DNI_V_TEDNU, Obdobje, preberi_obdobje
+from app.urnik import Vnos
 from tests.conftest import CVEK_ID, OTROK_ID
 
 
@@ -798,3 +799,204 @@ class TestIzbiraOtroka:
         # imata, zato `&` — in Jinja ga v HTML zapiše kot `&amp;`.
         assert f'href="/admin/days?otrok={brat}"' in besedilo
         assert f'href="/admin/days?obdobje=teden&amp;otrok={brat}"' in besedilo
+
+
+class TestManjki:
+    """Vrstica z manjki na `/admin/days` (V3-R09).
+
+    Pravila so preizkušena čisto v `tests/test_urnik.py`; tu gre za to, kaj
+    **stran** izriše — torej da se urnik pravega otroka res prebere in da se
+    manjki pokažejo natanko tam, kjer morajo.
+    """
+
+    #: Ponedeljek, 7. september 2026. Zapisan in ne izračunan: test, ki bi dan
+    #: v tednu izračunal z isto funkcijo kot izvedba, bi bil zelen tudi ob
+    #: napačnem preslikovanju.
+    PONEDELJEK = date(2026, 9, 7)
+
+    def potrdi_urnik(self, motor: Engine, child_id: str, *vnosi: Vnos) -> None:
+        ScheduleRepository(Session(motor), CVEK_ID).potrdi(child_id, list(vnosi), None)
+
+    def stran(self, odjemalec: TestClient, dan: date, **params: str) -> str:
+        return odjemalec.get(POT, params={"dan": dan.isoformat(), **params}).text
+
+    def test_delno_poslikan_dan_nasteje_manjke(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        self.potrdi_urnik(
+            motor,
+            OTROK_ID,
+            Vnos(dan=0, predmet="MAT"),
+            Vnos(dan=0, predmet="SLJ"),
+            Vnos(dan=0, predmet="TJA"),
+        )
+        zapisi(motor, slike, "m1", subject="MAT", taken_at=lokalno(self.PONEDELJEK))
+
+        assert "Manjka: TJA, SLJ." in self.stran(odjemalec, self.PONEDELJEK)
+
+    def test_dan_brez_slik_manjkov_ne_nasteje(
+        self, odjemalec: TestClient, motor: Engine
+    ) -> None:
+        """`ADR-028` E2: praznik ne sme postati vrstica s petimi manjki."""
+        self.potrdi_urnik(motor, OTROK_ID, Vnos(dan=0, predmet="MAT"))
+
+        besedilo = self.stran(odjemalec, self.PONEDELJEK)
+        assert "Tega dne ni nobene slike." in besedilo
+        assert "Manjka:" not in besedilo
+
+    def test_arhivirana_slika_manjka_ne_zapre(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        self.potrdi_urnik(
+            motor, OTROK_ID, Vnos(dan=0, predmet="MAT"), Vnos(dan=0, predmet="SLJ")
+        )
+        zapisi(motor, slike, "m1", subject="SLJ", taken_at=lokalno(self.PONEDELJEK))
+        zapisi(
+            motor,
+            slike,
+            "m2",
+            subject="MAT",
+            taken_at=lokalno(self.PONEDELJEK),
+            arhivirano=PREJETO,
+        )
+
+        assert "Manjka: MAT." in self.stran(odjemalec, self.PONEDELJEK)
+
+    def test_neobdelana_slika_manjko_zapre(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Stanje obdelave in berljivost na manjk ne vplivata (`ADR-028`).
+
+        Zapis iz `zapisi` je `STATUS_NOV` in brez `readable` — torej natanko
+        slika, ki je model še ni videl. Manjka vseeno ne sme biti.
+        """
+        self.potrdi_urnik(motor, OTROK_ID, Vnos(dan=0, predmet="MAT"))
+        zapisi(motor, slike, "m1", subject="MAT", taken_at=lokalno(self.PONEDELJEK))
+
+        assert "Manjka:" not in self.stran(odjemalec, self.PONEDELJEK)
+
+    def test_slika_brez_datoteke_manjko_zapre(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Manjko je o **zapisu**, ne o datoteki: vrstica brez slike je druga
+        napaka in jo stran pokaže posebej („slike na disku ni")."""
+        self.potrdi_urnik(motor, OTROK_ID, Vnos(dan=0, predmet="MAT"))
+        zapisi(
+            motor, slike, "m1", subject="MAT", taken_at=lokalno(self.PONEDELJEK), vsebina=None
+        )
+
+        assert "Manjka:" not in self.stran(odjemalec, self.PONEDELJEK)
+
+    def test_predmet_zunaj_urnika_se_ne_javlja(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        self.potrdi_urnik(motor, OTROK_ID, Vnos(dan=0, predmet="MAT"))
+        zapisi(motor, slike, "m1", subject="GEO", taken_at=lokalno(self.PONEDELJEK))
+
+        besedilo = self.stran(odjemalec, self.PONEDELJEK)
+        assert "Manjka: MAT." in besedilo
+        assert "GEO" not in besedilo.split("Manjka:")[1].split("</p>")[0]
+
+    def test_predmet_ki_se_ne_slika_ne_javlja_manjka(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        self.potrdi_urnik(
+            motor,
+            OTROK_ID,
+            Vnos(dan=0, predmet="MAT"),
+            Vnos(dan=0, predmet="LUM", se_ne_slika=True),
+        )
+        zapisi(motor, slike, "m1", subject="MAT", taken_at=lokalno(self.PONEDELJEK))
+
+        assert "Manjka:" not in self.stran(odjemalec, self.PONEDELJEK)
+
+    def test_vikend_manjkov_nima(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Urnik pozna ponedeljek do petka (`ADR-041` F)."""
+        self.potrdi_urnik(motor, OTROK_ID, Vnos(dan=0, predmet="MAT"))
+        sobota = self.PONEDELJEK + timedelta(days=5)
+        zapisi(motor, slike, "m1", subject="GEO", taken_at=lokalno(sobota))
+
+        assert "Manjka:" not in self.stran(odjemalec, sobota)
+
+    def test_slika_naslednje_jutro_vcerajsnjega_manjka_ne_zapre(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Zamika ni (`ADR-028`): slika šteje k svojemu lokalnemu dnevu."""
+        self.potrdi_urnik(
+            motor, OTROK_ID, Vnos(dan=0, predmet="MAT"), Vnos(dan=0, predmet="SLJ")
+        )
+        zapisi(motor, slike, "m1", subject="SLJ", taken_at=lokalno(self.PONEDELJEK))
+        zapisi(
+            motor,
+            slike,
+            "m2",
+            subject="MAT",
+            taken_at=lokalno(self.PONEDELJEK + timedelta(days=1), ura=7),
+        )
+
+        assert "Manjka: MAT." in self.stran(odjemalec, self.PONEDELJEK)
+
+    def test_manjki_se_racunajo_po_urniku_izbranega_otroka(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, brat: str
+    ) -> None:
+        """Bratov urnik se ne sme uporabiti (kriterij `V3-R09`)."""
+        self.potrdi_urnik(motor, OTROK_ID, Vnos(dan=0, predmet="MAT"))
+        self.potrdi_urnik(motor, brat, Vnos(dan=0, predmet="ZGO"))
+        zapisi(motor, slike, "m1", subject="GEO", taken_at=lokalno(self.PONEDELJEK))
+        zapisi(
+            motor,
+            slike,
+            "m2",
+            subject="GEO",
+            taken_at=lokalno(self.PONEDELJEK),
+            child_id=brat,
+        )
+
+        assert "Manjka: MAT." in self.stran(odjemalec, self.PONEDELJEK)
+        assert "Manjka: ZGO." in self.stran(odjemalec, self.PONEDELJEK, otrok=brat)
+
+    def test_otrok_brez_urnika_ob_bratu_z_urnikom_nima_manjkov(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, brat: str
+    ) -> None:
+        self.potrdi_urnik(motor, brat, Vnos(dan=0, predmet="ZGO"))
+        zapisi(motor, slike, "m1", subject="GEO", taken_at=lokalno(self.PONEDELJEK))
+
+        assert "Manjka:" not in self.stran(odjemalec, self.PONEDELJEK)
+
+    def test_teden_racuna_manjke_za_vsak_dan_posebej(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Današnji dan in včerašnji imata vsak svoj urnik in svoj izid."""
+        danasnji = danes()
+        vceraj = danasnji - timedelta(days=1)
+        self.potrdi_urnik(
+            motor,
+            OTROK_ID,
+            Vnos(dan=danasnji.weekday(), predmet="MAT"),
+            Vnos(dan=danasnji.weekday(), predmet="SLJ"),
+            Vnos(dan=vceraj.weekday(), predmet="GEO"),
+            Vnos(dan=vceraj.weekday(), predmet="ZGO"),
+        )
+        zapisi(motor, slike, "d1", subject="MAT", taken_at=lokalno(danasnji))
+        zapisi(motor, slike, "v1", subject="GEO", taken_at=lokalno(vceraj))
+
+        besedilo = odjemalec.get(POT, params={"obdobje": "teden"}).text
+
+        assert "Manjka: SLJ." in besedilo
+        assert "Manjka: ZGO." in besedilo
+
+    def test_upokojen_urnik_se_ne_uposteva(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Veljaven je zadnji potrjeni; prejšnji ostane zapisan, a nem."""
+        self.potrdi_urnik(
+            motor, OTROK_ID, Vnos(dan=0, predmet="MAT"), Vnos(dan=0, predmet="ZGO")
+        )
+        self.potrdi_urnik(motor, OTROK_ID, Vnos(dan=0, predmet="MAT"))
+        zapisi(motor, slike, "m1", subject="GEO", taken_at=lokalno(self.PONEDELJEK))
+
+        besedilo = self.stran(odjemalec, self.PONEDELJEK)
+        assert "Manjka: MAT." in besedilo
+        assert "ZGO" not in besedilo.split("Manjka:")[1].split("</p>")[0]
