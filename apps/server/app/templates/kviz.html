@@ -8,7 +8,7 @@
     {# Naslovljenec je od V3-R07 del identitete kviza in ne okras: „kviz" brez
        njega v družini z več otroki ne pomeni nič. Izbirnika tu ni — kviz ima
        natanko enega (`docs/odlocitve/ADR-039` F). #}
-    {%- if otrok_ime %}za {{ otrok_ime }} · {% endif -%}
+    {%- if otrok_ime %}{{ otrok_ime }} · {% endif -%}
     {{ kviz.koda }} · {{ kviz.vprasanj_opis }} · objavljen {{ kviz.nastal }}
   </p>
 
@@ -32,8 +32,9 @@
        prednost pri stanju zgoraj, poskusi pa so dejstvo in se pokažejo
        (`docs/plan/V2-R03.md`, odločitev 1). #}
     <p class="drobno">
-      Ocene so samoocena{% if otrok_ime %} otroka {{ otrok_ime }}{% endif %}
-      po razkritju odgovora, ne preverjeno znanje.
+      {# Ime stoji v glavi te strani in ne v tej povedi: za predlogom bi
+         slovenščina zahtevala sklanjanje poljubnega imena (`ADR-039` F3). #}
+      Ocene so samoocena po razkritju odgovora, ne preverjeno znanje.
       Najtežja vprašanja so zgoraj.
     </p>
     <p>

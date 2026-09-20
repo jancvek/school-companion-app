@@ -63,7 +63,9 @@ def izberi_otroka(
     otroka, ki ga v tej družini ni, ne sme pokazati številk nekoga drugega.
     Prav to bi bila najtišja možna napaka te zahteve.
     """
-    if zahtevani is not None:
+    # Prazen niz šteje enako kot manjkajoč parameter: isti parameter ne sme
+    # imeti dveh pomenov, in `?otrok=` iz počiščenega obrazca ne sme biti 404.
+    if zahtevani:
         izbrani = next((otrok for otrok in otroci if otrok.user_id == zahtevani), None)
         if izbrani is None:
             return None

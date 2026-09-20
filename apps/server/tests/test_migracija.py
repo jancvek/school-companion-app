@@ -1090,7 +1090,9 @@ def test_migracija_nasteje_vse_tezave_hkrati(baza: str, slike: Path) -> None:
     with pytest.raises(RuntimeError) as napaka:
         command.upgrade(alembic_nastavitve(baza), "head")
 
-    assert "'Cvek' ima 2 otrok" in str(napaka.value)
+    # Dvojina: „2 otroka", ne „2 otrok". Sporočilo bere človek, ki bazo
+    # popravlja (`CLAUDE.md` §1b).
+    assert "'Cvek' ima 2 otroka" in str(napaka.value)
     assert "'Brez otrok' ima 0 otrok" in str(napaka.value)
 
 
@@ -1107,5 +1109,57 @@ def test_razveljavitev_otroka_ohrani_vrstice(baza: str, slike: Path) -> None:
             assert "child_id" not in {s["name"] for s in inspect(motor).get_columns(tabela)}
         assert _vrstice(motor, "SELECT id FROM materials ORDER BY id") == [("m1",), ("m2",)]
         assert _vrstice(motor, "SELECT id FROM question_attempts") == [("a1",)]
+    finally:
+        motor.dispose()
+
+
+def test_deaktiviran_otrok_se_steje(baza: str, slike: Path) -> None:
+    """Deaktiviran otrok je še vedno otrok — in njegovi zapisi so njegovi.
+
+    `_otrok_na_druzino` `is_active` namenoma ne gleda: deaktivacija ne izbriše
+    ničesar (`V3-R06`), zato družina z enim aktivnim in enim deaktiviranim
+    otrokom **ni** enoumna in se migracija ustavi. Pred zagonom na produkciji
+    to pomeni: preveri, da je v Cveku natanko en zapis z `role='child'`, tudi
+    med neaktivnimi.
+    """
+    _baza_pred_otrokom(baza, slike)
+    _dodaj_otroka(baza, "neaktivni-otrok", "Nejc")
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            povezava.execute(
+                text("UPDATE users SET is_active = 0 WHERE id = 'neaktivni-otrok'")
+            )
+    finally:
+        motor.dispose()
+
+    with pytest.raises(RuntimeError, match="ima 2 otroka"):
+        command.upgrade(alembic_nastavitve(baza), "head")
+
+
+def test_vrnitev_in_ponoven_zagon_prideta_do_istega_stanja(baza: str, slike: Path) -> None:
+    """`downgrade` → `upgrade` mora dati isto, kar je bilo prej.
+
+    Nad bazo z enim otrokom je pripis izpeljiv nazaj, zato je pot obnovljiva.
+    Brez tega testa bi bila trditev iz docstringa migracije samo trditev.
+    """
+    _baza_pred_otrokom(baza, slike)
+    command.upgrade(alembic_nastavitve(baza), "head")
+    motor = create_engine(baza)
+    try:
+        prej = _stej(motor)
+    finally:
+        motor.dispose()
+
+    command.downgrade(alembic_nastavitve(baza), "0008_uporabniki")
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    motor = create_engine(baza)
+    try:
+        assert _stej(motor) == prej
+        for tabela in ("materials", "quizzes", "question_attempts"):
+            assert _vrstice(motor, f"SELECT DISTINCT child_id FROM {tabela}") == [
+                (MASA_ID,)
+            ], tabela
     finally:
         motor.dispose()

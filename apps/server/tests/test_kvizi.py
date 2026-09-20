@@ -670,6 +670,7 @@ class TestObjava:
         odgovor = odjemalec.post(
             "/admin/quizzes",
             data={
+                "otrok": OTROK_ID,
                 "vstop": "nova",
                 "subject": "MAT",
                 "ime": "",
@@ -1108,6 +1109,25 @@ class TestPoizvedbe:
             event.remove(motor, "before_cursor_execute", zabelezi)
         return stevec
 
+    def test_stran_predmeta_je_stalno_stevilo_poizvedb(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Imena otrok se berejo **enkrat na stran**, ne enkrat na vrstico.
+
+        Stran predmeta bo čez šolsko leto dolga nekaj sto vrstic
+        (`docs/odlocitve/ADR-017` A). Dve dolžini in ne ena: samo pri eni bi
+        bil N+1 videti kot konstanta.
+        """
+        for i in range(6):
+            snov(motor, slike, f"kratek-{i:02d}", vprasanj=1)
+        kratka = self._stej(motor, lambda: odjemalec.get("/admin/subjects/MAT"))
+
+        for i in range(6, 18):
+            snov(motor, slike, f"dolg-{i:02d}", vprasanj=1)
+        dolga = self._stej(motor, lambda: odjemalec.get("/admin/subjects/MAT"))
+
+        assert kratka == dolga, f"{kratka} pri 6 snoveh, {dolga} pri 18"
+
     def test_izbirnik_je_stiri_poizvedbe_ne_glede_na_stevilo_snovi(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
@@ -1265,6 +1285,7 @@ class TestPopravkiPoPregledu:
         odgovor = odjemalec.post(
             "/admin/quizzes",
             data={
+                "otrok": OTROK_ID,
                 "vstop": "nova",
                 "subject": "MAT",
                 "ime": "",
@@ -1278,7 +1299,8 @@ class TestPopravkiPoPregledu:
 
     def test_objava_brez_vprasanj_pove_kaj_je_narobe(self, odjemalec: TestClient) -> None:
         odgovor = odjemalec.post(
-            "/admin/quizzes", data={"vstop": "nova", "subject": "MAT", "ime": ""}
+            "/admin/quizzes",
+            data={"vstop": "nova", "subject": "MAT", "ime": "", "otrok": OTROK_ID},
         )
 
         assert odgovor.status_code == 409
@@ -1402,6 +1424,7 @@ class TestObjavaPreverjaVhod:
         odgovor = odjemalec.post(
             "/admin/quizzes",
             data={
+                "otrok": OTROK_ID,
                 "vstop": "nova",
                 "subject": "MAT",
                 "ime": "x" * 201,
@@ -1422,6 +1445,7 @@ class TestObjavaPreverjaVhod:
         odgovor = odjemalec.post(
             "/admin/quizzes",
             data={
+                "otrok": OTROK_ID,
                 "vstop": "nova",
                 "subject": "MAT",
                 "ime": "x" * 200,
@@ -1441,6 +1465,7 @@ class TestObjavaPreverjaVhod:
         odgovor = odjemalec.post(
             "/admin/quizzes",
             data={
+                "otrok": OTROK_ID,
                 "vstop": "nova",
                 "subject": "P" * 17,
                 "ime": "",
@@ -1461,6 +1486,7 @@ class TestObjavaPreverjaVhod:
         odgovor = odjemalec.post(
             "/admin/quizzes",
             data={
+                "otrok": OTROK_ID,
                 "vstop": "izmisljen",
                 "subject": "MAT",
                 "ime": "",
@@ -1498,6 +1524,7 @@ class TestVarovalkeBrezKlika:
         odgovor = odjemalec.post(
             "/admin/quizzes",
             data={
+                "otrok": OTROK_ID,
                 "vstop": "danes",
                 "subject": "MAT",
                 "ime": "",
@@ -1536,7 +1563,9 @@ class TestNaslovljenec:
         quiz_id = objavi(odjemalec, motor, [UUID_ENA])
 
         with Session(motor) as seja:
-            assert seja.get(Quiz, quiz_id).child_id == otrok
+            nastal = seja.get(Quiz, quiz_id)
+            assert nastal is not None
+            assert nastal.child_id == otrok
 
     def test_pri_enem_otroku_izbirnika_ni(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -1568,7 +1597,9 @@ class TestNaslovljenec:
         quiz_id = objavi(odjemalec, motor, [UUID_ENA], otrok=brat)
 
         with Session(motor) as seja:
-            assert seja.get(Quiz, quiz_id).child_id == brat
+            nastal = seja.get(Quiz, quiz_id)
+            assert nastal is not None
+            assert nastal.child_id == brat
 
     def test_tuj_otrok_je_404(
         self, odjemalec: TestClient, motor: Engine, slike: Path, tuj_otrok: str
@@ -1595,13 +1626,81 @@ class TestNaslovljenec:
 
         assert odgovor.status_code == 404
 
+    def test_objava_brez_polja_otrok_je_zavrnjena(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str, brat: str
+    ) -> None:
+        """Kriterij: sestavljalnik naslovljenca **zahteva** ob objavi.
+
+        Tih privzetek bi kviz objavil za prvega otroka po abecedi, čeprav ga
+        ni izbral nihče. Zahtevek brez polja nastane iz osvežene ali
+        zaznamovane strani predogleda izpred te zahteve in iz ponovnega
+        pošiljanja iz zgodovine brskalnika — skrito polje ni varovalka
+        (`ADR-039` A, popravki po prvem pregledu).
+        """
+        snov(motor, slike)
+        predogled = odjemalec.post(
+            "/admin/quizzes/preview",
+            data={"vstop": "nova", "subject": "MAT", "stevilo": "3", "snov": [UUID_ENA]},
+        )
+        idji = re.findall(r'name="vprasanje" value="([^"]+)"', predogled.text)
+
+        odgovor = odjemalec.post(
+            "/admin/quizzes",
+            data={"vstop": "nova", "subject": "MAT", "ime": "", "vprasanje": idji},
+            follow_redirects=False,
+        )
+
+        assert odgovor.status_code == 409
+        assert "kateremu otroku je namenjen" in odgovor.text
+        with Session(motor) as seja:
+            assert seja.scalars(select(Quiz)).all() == []
+
+    def test_prazno_polje_otrok_je_isto_kot_manjkajoce(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, brat: str
+    ) -> None:
+        """Isti parameter ne sme imeti dveh pomenov."""
+        snov(motor, slike)
+        predogled = odjemalec.post(
+            "/admin/quizzes/preview",
+            data={"vstop": "nova", "subject": "MAT", "stevilo": "3", "snov": [UUID_ENA]},
+        )
+        idji = re.findall(r'name="vprasanje" value="([^"]+)"', predogled.text)
+
+        odgovor = odjemalec.post(
+            "/admin/quizzes",
+            data={
+                "vstop": "nova",
+                "subject": "MAT",
+                "ime": "",
+                "vprasanje": idji,
+                "otrok": "",
+            },
+            follow_redirects=False,
+        )
+
+        assert odgovor.status_code == 409
+
+    def test_prazen_parameter_v_izbirniku_pade_na_privzetek(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, brat: str
+    ) -> None:
+        """Branje privzetek ima — `?otrok=` iz počiščenega obrazca ni 404."""
+        snov(motor, slike)
+
+        odgovor = odjemalec.get(
+            "/admin/quizzes/new", params={"vstop": "nova", "subject": "MAT", "otrok": ""}
+        )
+
+        assert odgovor.status_code == 200
+
     def test_deaktiviranega_otroka_izbirnik_ne_ponudi(
         self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str, brat: str
     ) -> None:
         """Deaktiviran otrok se ne more prijaviti, zato kviza zanj ni mogoče rešiti."""
         snov(motor, slike)
         with Session(motor) as seja:
-            seja.get(User, brat).is_active = False
+            nejc = seja.get(User, brat)
+            assert nejc is not None
+            nejc.is_active = False
             seja.commit()
 
         besedilo = izbirnik(odjemalec)
@@ -1680,5 +1779,6 @@ class TestBilaVKvizuPoNaslovljencu:
 
         with Session(motor) as seja:
             kviz = seja.get(Quiz, quiz_id)
+            assert kviz is not None
             assert kviz.child_id == brat
             assert len(kviz.postavke) == 3

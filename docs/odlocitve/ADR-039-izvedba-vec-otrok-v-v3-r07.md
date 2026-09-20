@@ -260,3 +260,53 @@ Dva bralca, dve pravili, in razlika ni okras:
 
 Isto velja za preslikavo imen pri oznakah: vsebuje tudi deaktivirane otroke,
 sicer bi vrstice po deaktivaciji izgubile oznako.
+
+## Popravki po prvem pregledu (20. 9. 2026)
+
+Pregledovalec je vrnil tri kritične točke. Dve sta bili napaki v izvedbi
+(lint in typecheck padeta; objava brez naslovljenca pade na privzetek) in sta
+popravljeni brez spremembe odločitve. Tretja je odkrila, da F ne pove, kaj se
+zgodi z **zapisanimi imeni**, ki so bila v predlogah že prej.
+
+### F3 — ime otroka je vrednost polja, ne del povedi; zapisanih imen ni
+
+F je rekel „oznaka samo pri več kot enem otroku", a je izvedba ime pisala
+vedno na treh mestih: v podnaslov statistike, v stavek o samooceni in v
+podnaslov strani kviza. Družina z enim otrokom je zato dobila spremenjen
+vmesnik, kar kriterij `V3-R07` izrecno prepoveduje.
+
+Hkrati se je pokazalo, da so te predloge **že prej** nosile ime `Maša`
+zapisano na trdo („Mašina samoocena", „Maša je ocenila vsa vprašanja"). To je
+od `ADR-025` napačno za vsako družino razen Cveka in bi se ob prvi tuji
+družini (`V3-R05`) pokazalo kot tuje ime na njihovi strani.
+
+Odslej velja troje:
+
+1. **Ime se izriše samo pri več kot enem otroku**, brez izjeme — isto pravilo
+   kot za izbirnik. Družina z enim otrokom ima vmesnik, kakršen je bil.
+2. **Ime je vrednost polja in ne del povedi**: stoji za ločilom
+   (`Maša · MAT · 3 vprašanja`), nikoli za predlogom. Slovenščina bi za „za
+   Maša" zahtevala tožilnik, sklanjanje poljubnega imena pa je naloga, ki je
+   ta projekt ne rešuje — in „za Maša" je napačna slovenščina, ki jo merilo
+   dokončanosti (`CLAUDE.md` §1b) prepoveduje.
+3. **Zapisanih imen ni nikjer.** Stavek o samooceni in stavek o rešenem kvizu
+   sta preoblikovana tako, da imena ne potrebujeta: *„Ocene so samoocena po
+   razkritju odgovora, ne preverjeno znanje."* in *„Vsa vprašanja so
+   ocenjena."* `ADR-014` zahteva, da je jasno, **čigava** trditev je — pri
+   enem otroku je to družinsko jasno, pri več pa ime stoji v glavi iste
+   strani.
+
+**Zapisana cena:** družina z enim otrokom dve povedi vidi drugače kot prej —
+brez „Mašina" in brez „Maša je ocenila". To je edino odstopanje od „vmesnik se
+ne spremeni" in je zavestno: zapisano ime je bilo napaka, ki jo je ta zahteva
+naredila vidno, in nositi jo naprej bi pomenilo, da prva tuja družina na svoji
+strani bere ime lastnikove hčere. Kriterij v `docs/verzije/v3.md` je popravljen
+s to izjemo.
+
+### F4 — „nazadnje prejeto" na `/admin/days` ostane družinski podatek
+
+Stran je odslej pogled enega otroka, `max(materials.received_at)` pa se še
+naprej šteje čez vso družino. Ostaja tako: poved govori o **strežniku**
+(„Strežnik je nazadnje prejel sliko …") in odgovarja na vprašanje, ali telefon
+sploh prenaša — to ni lastnost otroka. Po otroku bi bila uporabna drugače, a
+bi zahtevala svojo odločitev; zdaj je vsaj zapisana.

@@ -5,10 +5,12 @@ import KviziScreen from '../app/kvizi/index';
 import { shraniKviz, zapisiPoskus } from '@/db/kvizi';
 import { migriraj } from '@/db/migrations';
 import { KviziProvider } from '@/sync/use-kvizi';
+import { PrijavaProvider } from '@/sync/use-prijava';
 import { theme } from '@/ui/theme';
 
 import { kvizStreznika, poskus } from './kvizi-podatki';
 import { odmikSpodaj, TEST_INSETS, type RouterMockState } from './screen-mocks';
+import { SEJA, ustvariShrambo } from './shramba';
 import { createTestDatabase } from './test-database';
 
 jest.mock('expo-router', () => require('./screen-mocks').expoRouterMock());
@@ -144,5 +146,42 @@ describe('gumb „Kvizi" na domači strani', () => {
     const slog = JSON.stringify(gumb.props.style);
 
     expect(slog).toContain(theme.accent);
+  });
+});
+
+describe('seznam kvizov s prijavljenim otrokom (V3-R07)', () => {
+  // Ostali testi tega zaslona tečejo brez `PrijavaProvider`, torej z
+  // `lastnik = null`. Filtriranje je dokazano nad `db/kvizi.ts`, tu pa gre za
+  // **vezavo**: zaslon mora lastnika res vzeti iz seje. Brez tega testa bi
+  // `const lastnik = null;` na zaslonu ostal neopazen (`ADR-039` E).
+
+  async function izrisi() {
+    return render(
+      <PrijavaProvider db={db} nastavitve={null} shramba={ustvariShrambo(SEJA)}>
+        <KviziProvider db={db} nastavitve={null}>
+          <KviziScreen />
+        </KviziProvider>
+      </PrijavaProvider>,
+    );
+  }
+
+  it('pokaže svoje kvize in ne kvizov drugega otroka', async () => {
+    await shraniKviz(db, kvizStreznika('masin', 2, { name: 'Mašin kviz' }), SEJA.userId);
+    await shraniKviz(db, kvizStreznika('bratov', 2, { name: 'Bratov kviz' }), 'u-nejc');
+
+    await izrisi();
+
+    await screen.findByText('Mašin kviz');
+    expect(screen.queryByText('Bratov kviz')).toBeNull();
+  });
+
+  it('kviz brez lastnika posvoji razrešena seja', async () => {
+    // Stanje po migraciji 5. Posvojitev je lokalna in ne čaka na strežnik,
+    // sicer otrok brez povezave kvizov ne bi videl.
+    await shraniKviz(db, kvizStreznika('star', 2, { name: 'Star kviz' }), null);
+
+    await izrisi();
+
+    await screen.findByText('Star kviz');
   });
 });

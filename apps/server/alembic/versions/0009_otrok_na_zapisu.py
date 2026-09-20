@@ -55,6 +55,25 @@ def _indeks(tabela: str) -> str:
     return f"ix_{tabela}_{STOLPEC}"
 
 
+def _otrok(koliko: int) -> str:
+    """„0 otrok", „2 otroka", „3 otroke", „5 otrok" — slovenska dvojina.
+
+    Lastna in ne `app.besedilo.stevilo_z_besedo`: migracija se na aplikacijo
+    ne veže, da ostane veljavna tudi, ko se moduli premaknejo. Sporočilo bere
+    lastnik, ki bazo popravlja, in „ima 2 otrok" bi bilo vidno narobe vsak
+    dan (`CLAUDE.md` §1b).
+    """
+    ostanek_100 = koliko % 100
+    ostanek_10 = koliko % 10
+    if ostanek_100 == 1 or (ostanek_10 == 1 and ostanek_100 != 11):
+        return f"{koliko} otroka"  # „1 otroka" — rodilnik za „ima"
+    if ostanek_100 == 2 or (ostanek_10 == 2 and ostanek_100 != 12):
+        return f"{koliko} otroka"
+    if ostanek_100 in (3, 4) or (ostanek_10 in (3, 4) and ostanek_100 not in (13, 14)):
+        return f"{koliko} otroke"
+    return f"{koliko} otrok"
+
+
 def _otrok_na_druzino(povezava: sa.Connection) -> dict[str, str]:
     """Za vsako družino njen edini otrok, ali `RuntimeError` z razlago.
 
@@ -81,7 +100,7 @@ def _otrok_na_druzino(povezava: sa.Connection) -> dict[str, str]:
             otroci.setdefault(family_id, [])
 
     tezave = [
-        f"  — družina {imena[family_id]!r} ima {len(seznam)} otrok"
+        f"  — družina {imena[family_id]!r} ima {_otrok(len(seznam))}"
         for family_id, seznam in sorted(otroci.items())
         if len(seznam) != 1
     ]

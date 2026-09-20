@@ -256,22 +256,54 @@ class TestSkupine:
         assert "Prekliči kviz" in besedilo
         assert f'action="/admin/quizzes/{quiz_id}/cancel"' in besedilo
 
-    def test_pove_da_je_samoocena_in_cigava(
+    def test_pove_da_je_samoocena(
         self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         """`ADR-014`: kjer se ocena prikaže, mora biti jasno, **čigava** trditev je.
 
-        Do `V3-R07` je bilo ime zapisano na trdo („Mašina samoocena"). V
-        družini z dvema otrokoma bi eno ime lagalo o drugem, zato stavek odslej
-        imenuje naslovljenca kviza (`ADR-039` F). Prepis je zavesten; trditev,
-        ki jo test varuje, je ista.
+        Do `V3-R07` je bilo ime zapisano na trdo („Mašina samoocena"), kar je
+        po `ADR-025` napačno za vsako družino razen Cveka. Odslej ime pove
+        glava strani (in to samo pri več kot enem otroku), poved pa ga ne
+        potrebuje — `ADR-039` F3.
+
+        Trditev je **ena zvezna poved** in ne dve neodvisni: `"samoocena" in
+        besedilo` skupaj z `"Maša" in besedilo` bi bilo zeleno tudi, če bi
+        poved o samooceni izginila, ker ime stoji še v glavi.
         """
         quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
 
+        assert (
+            "Ocene so samoocena po razkritju odgovora, ne preverjeno znanje."
+            in stran(odjemalec, quiz_id)
+        )
+
+    def test_pri_enem_otroku_imena_ni(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
+    ) -> None:
+        """Kriterij `V3-R07`: vmesnik družine z enim otrokom se ne spremeni."""
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
+
         besedilo = stran(odjemalec, quiz_id)
-        assert "samoocena" in besedilo
-        # Ime otroka, ki ga ustvari fixture `otrok`.
-        assert "Maša" in besedilo
+
+        assert "Maša" not in besedilo
+
+    def test_pri_dveh_otrocih_pove_cigav_je_kviz(
+        self,
+        odjemalec: TestClient,
+        motor: Engine,
+        slike: Path,
+        telefon: SejaTesta,
+        brat: str,
+    ) -> None:
+        """„Kviz" brez naslovljenca v družini z dvema otrokoma ne pomeni nič."""
+        quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
+
+        besedilo = stran(odjemalec, quiz_id)
+
+        # Ime je **vrednost polja** in ne del povedi: za predlogom bi
+        # slovenščina zahtevala sklanjanje (`ADR-039` F3).
+        assert "Maša ·" in besedilo
+        assert "za Maša" not in besedilo
 
     def test_rezultat_ponudi_tisk(
         self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta

@@ -43,13 +43,13 @@
   {% endif %}
 {% endmacro %}
 
-{# `ime` je prikazno ime izbranega otroka. Ni zapisano na trdo: `ADR-014`
-   zahteva, da je ob vsaki oceni jasno, **čigava** trditev je, in v družini z
-   dvema otrokoma bi eno ime lagalo o drugem. #}
-{% macro samoocena(razvrsceno=True, ime=None) %}
+{# Imena tu ni: `ADR-014` zahteva, da je jasno, **čigava** trditev je, in to
+   pove glava strani, ki pri več kot enem otroku nosi izbranega. Zapisano
+   „Mašina" je bilo napačno za vsako družino razen Cveka, ime za predlogom pa
+   bi zahtevalo sklanjanje (`ADR-039` F3). #}
+{% macro samoocena(razvrsceno=True) %}
   <p class="drobno">
-    Ocene so samoocena{% if ime %} otroka {{ ime }}{% endif %} po razkritju
-    odgovora, ne preverjeno znanje.
+    Ocene so samoocena po razkritju odgovora, ne preverjeno znanje.
     Pravilne so vse ocene razen „Nisem vedela“; težki sta „Nisem vedela“ in
     „Težko“.{% if razvrsceno %} Najtežje je zgoraj.{% endif %}
   </p>

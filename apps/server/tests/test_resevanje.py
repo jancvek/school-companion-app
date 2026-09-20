@@ -601,4 +601,6 @@ class TestDvaOtroka:
         assert poslji(odjemalec, [poskus(masine[0])], bratov_telefon).status_code == 200
 
         with Session(motor) as seja:
-            assert seja.get(Quiz, masin).solved_at is None
+            tuj = seja.get(Quiz, masin)
+            assert tuj is not None
+            assert tuj.solved_at is None

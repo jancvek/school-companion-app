@@ -367,6 +367,12 @@ def predmet(
             predloge, request, f"Predmeta s kodo „{koda}“ ni ne na seznamu ne v bazi."
         )
 
+    # Imena **pred** zanko in ne v njej: znotraj izpeljanega seznama bi bila
+    # to ena poizvedba na sliko, seznam predmeta pa bo čez šolsko leto dolg
+    # nekaj sto vrstic (`docs/odlocitve/ADR-017` A). Arhiv ima isto potezo.
+    imena = imena_otrok(clani)
+    mapa_slik = mapa_druzine(nastavitve.images_dir, repozitorij.family_id)
+
     return predloge.TemplateResponse(
         request,
         "predmet.html",
@@ -374,14 +380,7 @@ def predmet(
             "koda": koda,
             "oznaka": oznaka_predmeta(koda),
             "koliko_opis": stevilo_z_besedo(len(snovi), SLIKE),
-            "snovi": [
-                _pogled(
-                    snov,
-                    mapa_druzine(nastavitve.images_dir, repozitorij.family_id),
-                    imena_otrok(clani),
-                )
-                for snov in snovi
-            ],
+            "snovi": [_pogled(snov, mapa_slik, imena) for snov in snovi],
         },
     )
 

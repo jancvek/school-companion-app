@@ -12,8 +12,8 @@ strani (CSRF). Novih posledic ni: preklic kviza ničesar ne uniči, objava pa
 ustvari zapis, ki ga je mogoče preklicati.
 """
 
-from datetime import UTC, datetime
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -74,6 +74,13 @@ SPOROCILO_BREZ_OTROKA = (
 #: Isto besedilo za tujega in za neobstoječega otroka (`ADR-038`).
 SPOROCILO_NEZNAN_OTROK = "Tega otroka v tvoji družini ni."
 
+#: Objava brez naslovljenca. Kviz je vedno nekomu namenjen, zato je tih
+#: privzetek tu napačen: kviz bi nastal za otroka, ki ga ni nihče izbral.
+SPOROCILO_BREZ_NASLOVLJENCA = (
+    "Kviza ni bilo mogoče objaviti, ker ni bilo izbrano, kateremu otroku je "
+    "namenjen. Vrni se na izbor snovi, izberi otroka in klikni „Sestavi“."
+)
+
 
 def _imena(otroci: list[ClanDruzine]) -> dict[str, str]:
     """Preslikava `id` → prikazno ime, za oznako pri vrstici snovi.
@@ -88,12 +95,16 @@ def _imena(otroci: list[ClanDruzine]) -> dict[str, str]:
 
 
 def _ime_otroka(otroci: list[ClanDruzine], user_id: str) -> str | None:
-    """Prikazno ime enega otroka, neodvisno od pravila o oznakah.
+    """Prikazno ime naslovljenca, ali `None` pri družini z enim otrokom.
 
-    `_imena` je prazna pri enem otroku, ker gre za **oznako na vrstici**.
-    Stran kviza pa ime potrebuje vedno: stavek „Ocene so samoocena" mora
-    imenovati osebo, ki je ocenjevala, tudi kadar je v družini ena sama.
+    Isto pravilo kot `_imena` in kot izbirnik (`ADR-039` F3): vmesnik družine
+    z enim otrokom se ne spremeni. Prvi zapis te funkcije je ime vračal vedno,
+    z utemeljitvijo, da ga stavek o samooceni potrebuje — stavek je odtlej
+    preoblikovan tako, da ga ne (`ADR-014` je zadoščeno, ker je v družini z
+    enim otrokom jasno, čigava trditev je).
     """
+    if len(otroci) < 2:
+        return None
     return next((o.display_name for o in otroci if o.user_id == user_id), None)
 
 #: Naslov izbirnika za vsak vstop. Operater mora na strani videti, od kod je
@@ -252,6 +263,8 @@ def _naslovljenec(
     request: Request,
     otroci: list[ClanDruzine],
     zahtevani: str | None,
+    *,
+    obvezen: bool = False,
 ) -> Naslovljenec | Response:
     """Naslovljenec iz obrazca, ali privzetek; ob težavi vrne stran z napako.
 
@@ -265,14 +278,28 @@ def _naslovljenec(
       tujega in za neobstoječega: obstoj tujega računa ni podatek za starša.
 
     Privzetek je **prvi po prikaznem imenu**, isti kot na statistiki
-    (`ADR-039` B). Ime naslovljenca stoji na predogledu in na gumbu za objavo,
-    da privzetek ni tiha izbira.
+    (`ADR-039` B), in velja samo pri **branju** — ob prvem prihodu v izbirnik
+    mora biti seznam že preračunan za nekoga. Ime naslovljenca stoji na
+    predogledu in na obeh gumbih, da privzetek ni tiha izbira.
+
+    **`obvezen=True` privzetka nima**, in to je kriterij `V3-R07`
+    („sestavljalnik ga **zahteva** ob objavi"): objava brez polja je `409` in
+    ne tih kviz za prvega otroka po abecedi. Utemeljitev „obrazec ga vedno
+    pošlje" ne vzdrži — osvežena ali zaznamovana stran predogleda izpred te
+    spremembe, ponovno pošiljanje iz zgodovine brskalnika in vsak prihodnji
+    izris, ki bi skrito polje izgubil, dajo natanko tak zahtevek. Skrito polje
+    ni varovalka, po istem pravilu kot gumb, ki ga stran ne izriše.
+
+    Prazen niz šteje enako kot manjkajoče polje — tu in v `app/otroci.py`,
+    da isti parameter nima dveh pomenov.
     """
     aktivni = [otrok for otrok in otroci if otrok.is_active]
     if not aktivni:
         return ni_dovoljeno(predloge, request, SPOROCILO_BREZ_OTROKA)
 
-    if zahtevani is None or zahtevani == "":
+    if not zahtevani:
+        if obvezen:
+            return ni_dovoljeno(predloge, request, SPOROCILO_BREZ_NASLOVLJENCA)
         return Naslovljenec(izbrani=aktivni[0], vsi=tuple(aktivni))
 
     izbrani = next((otrok for otrok in aktivni if otrok.user_id == zahtevani), None)
@@ -631,11 +658,10 @@ def objavi(
     if napaka is not None:
         return napaka
 
-    # Naslovljenec je preverjen **pred** vsem ostalim in nima privzetka po
-    # tihem: `_naslovljenec` sicer privzetek ima, a ga obrazec vedno pošlje,
-    # ker ga je predogled izrisal v skrito polje. Tuj otrok je 404, družina
-    # brez otroka 409 (`ADR-039` A).
-    naslovljenec = _naslovljenec(predloge, request, clani.otroci(), otrok)
+    # Naslovljenec je preverjen **pred** vsem ostalim in tu **nima
+    # privzetka**: kriterij pravi, da ga sestavljalnik ob objavi zahteva.
+    # Manjkajoč je 409, tuj 404, družina brez otroka 409 (`ADR-039` A).
+    naslovljenec = _naslovljenec(predloge, request, clani.otroci(), otrok, obvezen=True)
     if isinstance(naslovljenec, Response):
         return naslovljenec
 
@@ -879,7 +905,7 @@ def kviz(
     # Ime pa je — povedati mora, čigav rezultat bereš.
     otroci = clani.otroci()
     imena = _imena(otroci)
-    ime_otroka = imena.get(najden.child_id) or _ime_otroka(otroci, najden.child_id)
+    ime_otroka = _ime_otroka(otroci, najden.child_id)
 
     if najden.solved_at is not None:
         return predloge.TemplateResponse(

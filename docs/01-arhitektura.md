@@ -221,11 +221,11 @@ nedokončano odjavo pred njo.
 `SHEMA_VERZIJE_4` — dobesedno kopijo baze po migraciji 4, kakršna je na
 Mašinem telefonu pred V3-R07.
 
-`NULL` pomeni isto kot pri `materials`: kviz, ki je na telefon prišel pred to
-migracijo, lastnika nima in ga posvoji prvi obhod prijavljenega otroka
-(`shraniKviz` posodobi **samo iz `NULL`**, vsebina ostane zamrznjena po
-`ADR-016` E). `NOT NULL` bi zahteval ugibanje na napravi, kjer ni nikogar, ki
-bi ga vprašal.
+`NULL` pomeni isto kot pri `materials`: kviz izpred te migracije lastnika
+nima. Posvoji ga **`posvojiBrezLastnika`** ob vsaki razrešeni seji — lokalno in
+brez omrežja, sicer otrok brez povezave kvizov ne bi videl — in tudi
+`shraniKviz` ob obhodu, a samo iz `NULL` (vsebina ostane zamrznjena,
+`ADR-016` E).
 
 Filtrirajo tri poizvedbe, vse po pravilu `user_id IS ?`, ki velja tudi za
 neprijavljeno aplikacijo:
@@ -234,8 +234,7 @@ neprijavljeno aplikacijo:
 - `najdiKviz` — odprtje kviza; tuj kviz je „kviza ni";
 - `postavkeKviza` — **dva** pogoja: stik na `quizzes` (postavke *mojega*
   kviza) in filtriran stik na `attempts`. Drugi je nujen: tuj poskus ne sme
-  postavke narediti odgovorjene, sicer bi jo otrok videl kot rešeno in je ne
-  bi mogel odgovoriti — kviz bi na seznamu visel za vedno.
+  postavke narediti odgovorjene, sicer bi kviz na seznamu visel za vedno.
 
 #### Tabele kvizov (migracija 2, V2-R02)
 
@@ -534,30 +533,24 @@ z več otroki „kviz" in „statistika" brez njega ne povesta nič.
 `child_id VARCHAR(36) NOT NULL` (tuji ključ na `users.id`, brez `ondelete`,
 indeksiran) imajo `materials`, `quizzes` in `question_attempts`.
 
-- **`questions` ga nima** in ga ne dobi: vprašanja ostanejo last družine, da
-  sme starš iz snovi enega otroka sestaviti kviz za drugega. To je kriterij
-  `V3-R07` in zavestna izbira (`ADR-039` G).
-- **`quiz_items` ga izpelje iz kviza**, po isti logiki kot družino
-  (`ADR-029` C).
-- Na `quizzes` je to **naslovljenec** — komu je kviz namenjen; na `materials`
-  in `question_attempts` je to **tisti, ki je posnel oziroma odgovoril**. Ni
-  nujno isti: poskus za kviz drugega otroka se sprejme in **ne zapiše**
-  (`ADR-039` D, drugi tih sprejem poleg „prvi zmaga" iz `ADR-019` E).
-- **Otroka pove seja, nikoli telo zahteve** (`dependencies.daj_otroka`). Na
-  poteh telefona je vsak žeton otrokov, ker se starš v mobilno aplikacijo ne
-  more prijaviti (`ADR-036` D) — zato „zapis brez otroka" ni poseben primer.
-  Pogodba s telefonom se navzven **ne spremeni**: novega polja ni.
+- **`questions` ga nima** — vprašanja ostanejo last družine (`ADR-039` G);
+  **`quiz_items` ga izpelje iz kviza**, kot družino (`ADR-029` C).
+- Na `quizzes` je to **naslovljenec**, na `materials` in `question_attempts`
+  **tisti, ki je posnel oziroma odgovoril**. Ni nujno isti: poskus za kviz
+  drugega otroka se sprejme in **ne zapiše** (`ADR-039` D).
+- **Otroka pove seja, nikoli telo zahteve** (`dependencies.daj_otroka`).
+  Pogodba s telefonom se navzven ne spremeni: novega polja ni.
 - **Otrok je argument poizvedbe in ne konstruktorja repozitorija**, za razliko
-  od družine: družina je meja izolacije, otrok je izbira pogleda znotraj nje.
-  V konstruktorju bi bil videti kot druga meja, kar ni — starš legitimno gleda
-  oba svoja otroka, le ne obeh hkrati.
+  od družine: družina je meja izolacije, otrok izbira pogleda znotraj nje.
+- **Ime otroka se v vmesniku izriše samo pri več kot enem otroku**, in vedno
+  kot vrednost polja (`Maša · MAT · …`), nikoli za predlogom — slovenščina bi
+  zahtevala sklanjanje (`ADR-039` F3).
 
 Migracija `0009_otrok_na_zapisu` doda stolpce kot `NULL`-abilne, jih zapolni z
-**edinim otrokom vsake družine** in nato naredi obvezne. Družina z nič ali več
-kot enim otrokom migracijo **ustavi z razlago** in ne spremeni ničesar;
-preverba teče pred prvim DDL, ker na SQLite DDL ni v transakciji. Ugibanje bi
-tuje odgovore tiho pripisalo napačni osebi. `downgrade` stolpce spusti in
-dokončno izgubi pripis otroka, vrstic pa ne — isti vzorec kot `0004`.
+**edinim otrokom vsake družine** (šteje tudi deaktiviranega) in nato naredi
+obvezne. Družina z nič ali več kot enim otrokom migracijo **ustavi z razlago**
+pred prvim DDL in ne spremeni ničesar. `downgrade` stolpce spusti in dokončno
+izgubi pripis otroka, vrstic pa ne — isti vzorec kot `0004`.
 
 #### Identiteta: uporabniki, poverilnice in seje (V3-R03)
 
@@ -937,23 +930,22 @@ bi obkljukal tri današnje slike.
 usmerjevalniku (`app/casi.py:dan_od_do`) in se repozitoriju poda kot par UTC
 trenutkov — ta za časovne pasove ne ve.
 
-**Kviz ima naslovljenca** (V3-R07): enega otroka svoje družine, obvezno.
-Izbere se **nad seznamom**, ker odloča, katera snov velja za „že v kvizu";
-privzetek je prvi otrok po prikaznem imenu, polje pa se izriše samo pri več kot
-enem. Menjava otroka gre skozi `GET /new` in ne skozi `POST /new`: kljukice se
-morajo preračunati po pravilu vstopa, česar vrnitev iz predogleda ne sme
-narediti. Skozi predogled naslovljenec potuje v skritem polju, kot ves ostali
-izbor (`ADR-016` C). Ime stoji na predogledu in na obeh gumbih, da privzetek ni
-tiha izbira. Družina **brez aktivnega otroka** vstopov na `/admin` ne dobi in
-pot vrne `409` — isto pravilo odloči oboje (`ADR-039` A).
+**Kviz ima naslovljenca** (V3-R07): enega otroka svoje družine. Izbere se
+**nad seznamom**, ker odloča, katera snov velja za „že v kvizu"; polje se
+izriše samo pri več kot enem otroku. Menjava otroka gre skozi `GET /new` in ne
+skozi `POST /new`, ker se morajo kljukice preračunati po pravilu vstopa; skozi
+predogled potuje v skritem polju, kot ves ostali izbor (`ADR-016` C).
 
-**„Bila v kvizu" pomeni: kakšno njeno veljavno vprašanje je v nepreklicanem
-kvizu **tega naslovljenca**.** Vsi trije pogoji štejejo (`ADR-017` B, zožen z
-`ADR-039` G): preklican kviz ni bil pravi, zato se njegova snov spet ponudi;
-ponovno obdelana snov ima novo serijo, ki v kvizu še ni bila; in snov, iz
-katere je nastal kviz za sestro, je za brata še vedno nova — sicer bi *Nova
-snov* skrila natanko tisto snov, ki jo kriterij `V3-R07` izrecno dovoli
-uporabiti.
+**Branje ima privzetek, objava ga nima** (`ADR-039` A): `GET` brez `otrok`
+vzame prvega po prikaznem imenu, `POST /admin/quizzes` brez njega pa je `409`
+— skrito polje ni varovalka. Prazen niz šteje enako kot manjkajoče polje.
+Družina **brez aktivnega otroka** vstopov na `/admin` ne dobi in pot vrne
+`409`; isto pravilo odloči oboje.
+
+**„Bila v kvizu" šteje po naslovljencu** (`ADR-017` B, zožen z `ADR-039` G):
+poleg „kviz ni preklican" in „vprašanje je veljavno" velja še „kviz je bil
+namenjen istemu otroku". Snov, iz katere je nastal kviz za sestro, je za brata
+še vedno nova.
 
 Seznam snovi **ni** omejen na snov naslovljenca: vprašanja so last družine.
 Pri več kot enem otroku vsaka vrstica pove, čigava je snov. Poizvedba gre prek `quiz_items → questions.material_id`;
@@ -1228,14 +1220,10 @@ gresta v razporeditev, a ju stran omeni s številom. Filter načina je v skupnem
 nima.
 
 **Obe strani sta ločeni po otroku** (V3-R07, `?otrok=`), brez možnosti „vsi
-otroci": delež *Nisem vedela* čez dva otroka ni podatek o nobenem od njiju, in
-statistika je pripomoček za pogovor z enim otrokom (`ADR-021` A). Privzet je
-prvi po prikaznem imenu; izbirnik se izriše samo pri več kot enem otroku, in
-tudi deaktivirani so na njem — njihovi podatki ostanejo (`V3-R06`) in seznam,
-ki bi jih izpustil, bi jih naredil nedosegljive. Povezave nosijo obe izbiri
-hkrati, sicer bi menjava leta tiho vrnila privzetega otroka. Stavek o
-samooceni imenuje izbranega otroka; zapisano ime bi v družini z dvema otrokoma
-lagalo o drugem (`ADR-014`).
+otroci" (`ADR-039` B). Privzet je prvi po prikaznem imenu; izbirnik se izriše
+samo pri več kot enem otroku in našteje tudi **deaktivirane** — njihovi podatki
+ostanejo (`V3-R06`). Povezave nosijo obe izbiri hkrati, sicer bi menjava leta
+tiho vrnila privzetega otroka.
 
 **Okno** je šolsko leto (parameter `leto`: `2026` za 2026/27 ali `vse`),
 privzeto tekoče. Meja je lokalna polnoč 1. 9., polodprto — poleti je to 31. 8.
