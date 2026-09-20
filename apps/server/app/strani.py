@@ -87,14 +87,14 @@ def zavrnjeno(predloge: Jinja2Templates, request: Request, sporocilo: str) -> Re
 
 
 def ni_izvedeno(predloge: Jinja2Templates, request: Request, sporocilo: str) -> Response:
-    """403 za dejanje, ki ga nismo izvedli, ker mu ni bilo mogo\u010de zaupati.
+    """403 za dejanje, ki ga nismo izvedli, ker mu ni bilo mogoče zaupati.
 
-    Dvoj\u010dek strani, ki jo ob manjkajo\u010dem CSRF \u017eetonu izri\u0161e `SejaMiddleware`.
-    Obstaja zato, ker ena pot \u017eeton preverja **sama** (`docs/odlocitve/ADR-043`)
-    in mora ob zavrnitvi izgledati enako kot vse ostale \u2014 razli\u010dno besedilo za
+    Dvojček strani, ki jo ob manjkajočem CSRF žetonu izriše `SejaMiddleware`.
+    Obstaja zato, ker ena pot žeton preverja **sama** (`docs/odlocitve/ADR-043`)
+    in mora ob zavrnitvi izgledati enako kot vse ostale — različno besedilo za
     isto stvar bi bralcu povedalo, da se je zgodilo nekaj drugega.
 
-    Ni `zavrnjeno`: tam gre za „ti tega ne sme\u0161" (deaktivacija sebe,
+    Ni `zavrnjeno`: tam gre za „ti tega ne smeš" (deaktivacija sebe,
     `V3-R06`), tu pa za „temu obrazcu ne zaupam".
     """
     return predloge.TemplateResponse(

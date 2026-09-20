@@ -30,7 +30,6 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from sqlalchemy import Engine, Select, select
 from sqlalchemy.orm import Session
 
@@ -361,9 +360,9 @@ NI = frozenset({404})
 PREUSMERITEV = frozenset({303})
 
 #: (odgovor, dovoljeni statusi, poslani identifikatorji tuje družine)
-Klic = Callable[[TestClient, Druzina], tuple[Any, frozenset[int], tuple[str, ...]]]
+Klic = Callable[[PrijavljenOdjemalec, Druzina], tuple[Any, frozenset[int], tuple[str, ...]]]
 
-def _prijava_s_tujim_racunom(odjemalec: TestClient, tuja: Druzina) -> Any:
+def _prijava_s_tujim_racunom(odjemalec: PrijavljenOdjemalec, tuja: Druzina) -> Any:
     """Poskus prijave z identifikatorjem starša tuje družine in napačnim geslom.
 
     Gre skozi prijavni obrazec, ker CSRF žeton prijave pride iz piškotka, ki ga
@@ -648,7 +647,7 @@ def test_vsaka_pot_aplikacije_ima_primer(aplikacija: FastAPI) -> None:
 @pytest.mark.parametrize("primer", sorted(PRIMERI_POTI), ids=" ".join)
 def test_pot_ne_pokaze_in_ne_spremeni_tuje_druzine(
     primer: tuple[str, str],
-    odjemalec: TestClient,
+    odjemalec: PrijavljenOdjemalec,
     motor: Engine,
     slike: Path,
     druzini: tuple[Druzina, Druzina],
@@ -664,7 +663,7 @@ def test_pot_ne_pokaze_in_ne_spremeni_tuje_druzine(
 
 
 def test_druzina_b_na_istih_poteh_vidi_svoje(
-    odjemalec: TestClient, druzini: tuple[Druzina, Druzina]
+    odjemalec: PrijavljenOdjemalec, druzini: tuple[Druzina, Druzina]
 ) -> None:
     """Test zgoraj ni prazen: iste poti družini B njene podatke pokažejo."""
     _, b = druzini

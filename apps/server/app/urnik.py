@@ -104,11 +104,6 @@ class Urnik:
             if vnos.dan == dan and not vnos.se_ne_slika
         )
 
-    def ima_dan(self, dan: int) -> bool:
-        """Ali ta dan na urniku sploh kaj je — z označenimi vnosi vred."""
-        return any(vnos.dan == dan for vnos in self.vnosi)
-
-
 def _kljuc_vnosa(vnos: Vnos) -> tuple[int, int, str]:
     """Razvrstitev vnosov: po dnevu, znotraj dneva po vrstnem redu `PREDMETI`."""
     return (vnos.dan, _MESTO.get(vnos.predmet, _ZADNJI), vnos.predmet)

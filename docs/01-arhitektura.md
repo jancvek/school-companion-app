@@ -1191,6 +1191,17 @@ in manjka tudi ne zapre.
 - **Upokojeni urniki in njihove slike rastejo brez meje** in brez vmesnika, ki
   bi jih pokazal. Pri dveh na leto je to sprejeto.
 - **Zakaj je model kaj prebral narobe, se za nazaj ne da ugotoviti** — sledi ni.
+- **„Veljaven je en sam" drži pri zaporednem pisanju, ne pri sočasnem.**
+  `potrdi` naredi `UPDATE ... WHERE replaced_at IS NULL` in nato `INSERT` v
+  eni transakciji, brez zaklepa nad otrokom. Na Postgresu (`READ COMMITTED`)
+  dve hkratni potrditvi istega otroka zato lahko pustita **dve** veljavni
+  vrstici: `UPDATE` druge transakcije ne zajame vrstice, ki jo je prva vstavila
+  po začetku njegovega skeniranja. Sprozilec je dvojni klik na „Potrdi urnik"
+  — stran nima skripte, ki bi gumb onemogočila. Branje to ublaži
+  (`veljaven` ima `order_by(confirmed_at desc, id desc).first()`), ne odpravi.
+  `ADR-041` C je zavestno izbral, da enoličnosti ne uveljavlja shema; kriterij
+  v `v3.md` pa je zapisan absolutno, zato naj razhajanje stoji tu in ne ostane
+  implicitno. Popravek, ko bo potreben, je zaklep otroka ali delni indeks.
 
 ## Premik slike v drug predmet (V3-R10)
 

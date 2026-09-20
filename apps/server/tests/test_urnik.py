@@ -15,8 +15,12 @@ tako kot pred to zahtevo.
 
 import io
 import json
+import re
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -26,10 +30,18 @@ from sqlalchemy.orm import Session
 from app.db import ScheduleRepository
 from app.main import POTI_S_SVOJIM_CSRF
 from app.models import Material, Question, Schedule
-from app.routers.urnik import POT_PREDLOGA, PREDPONA, ime_polja
+from app.routers.urnik import (
+    NAJVECJA_SLIKA,
+    POT_PREDLOGA,
+    PREDPONA,
+    _pot_slike,
+    ime_polja,
+)
+from app.security import NAJVECJE_TELO_OBRAZCA
+from app.settings import Settings
 from app.urnik import DNEVI, Urnik, Vnos, manjkajoci_predmeti
 from app.vision import NapakaObdelave, PredlogUrnika, razcleni_urnik
-from tests.conftest import CVEK_ID, PrijavljenOdjemalec
+from tests.conftest import CVEK_ID, PrijavljenOdjemalec, prijavi
 
 PON, TOR, SRE, CET, PET = DNEVI
 
@@ -41,6 +53,61 @@ SLIKA = b"\x89PNG\r\n\x1a\n" + b"0" * 64
 def urnik(*vnosi: Vnos) -> Urnik:
     """Urnik iz naštetih vnosov."""
     return Urnik.iz_vnosov(vnosi)
+
+
+def zapisan(repo: ScheduleRepository, child_id: str) -> Urnik:
+    """Veljaven urnik otroka; odsotnost je napaka testa, ne veja.
+
+    `ScheduleRepository.urnik` vrne `Urnik | None`, ker je „otrok brez urnika"
+    običajno stanje. Tam, kjer je test urnik pravkar potrdil, pa `None` pomeni,
+    da je izvedba pokvarjena — trditev to pove takoj in na pravem mestu,
+    namesto da bi se pokazalo kot `AttributeError` vrstico nižje.
+    """
+    najden = repo.urnik(child_id)
+    assert najden is not None, "urnik bi moral obstajati"
+    return najden
+
+
+def izbrano_v_mrezi(besedilo: str, dan: int, koda: str) -> str | None:
+    """Vrednost, ki je v izrisani mreži izbrana za to celico; `None`, če je ni.
+
+    Bere prav `<option ... selected>` znotraj pravega `<select>`, in ne le
+    prisotnost niza kjerkoli na strani: mreža ima petdeset celic in trditev
+    „`da` se pojavi v HTML" bi bila zelena tudi, če bi bila izbrana napačna.
+    """
+    izbirnik = re.search(
+        rf'<select name="{re.escape(ime_polja(dan, koda))}".*?</select>', besedilo, re.S
+    )
+    if izbirnik is None:
+        return None
+    izbrana = re.search(r'<option value="([^"]*)"[^>]*\sselected', izbirnik.group(0))
+    return izbrana.group(1) if izbrana is not None else None
+
+
+@contextmanager
+def odjemalec_s_klicalcem(
+    aplikacija: FastAPI, motor: Engine, stars: str, klicalec: object
+) -> Iterator[PrijavljenOdjemalec]:
+    """Prijavljen odjemalec nad aplikacijo s podtaknjenim klicalcem urnika.
+
+    `with` in ne gol `__enter__`: brez zaprtja ostane nit odjemalca odprta in
+    življenjski cikel aplikacije se nikoli ne konča.
+
+    Na ravni modula in ne v razredu: potrebujeta ga dva razreda testov, in
+    pomočnik, vezan na primerek, bi drugemu pustil past — prav to se je tu že
+    zgodilo.
+    """
+    aplikacija.state.klicalec_urnika = klicalec
+    with PrijavljenOdjemalec(aplikacija, base_url="https://testserver") as odjemalec:
+        prijavi(odjemalec, motor, stars)
+        yield odjemalec
+
+
+@pytest.fixture
+def sklad() -> Iterator[ExitStack]:
+    """Zapre vse, kar test odpre; da vsak test ostane en stavek."""
+    with ExitStack() as odprto:
+        yield odprto
 
 
 def je(dan: int, predmet: str) -> Vnos:
@@ -224,7 +291,7 @@ class TestRepozitorij:
 
         assert len(vsi) == 2, "star urnik se ne sme izbrisati"
         assert len(veljavni) == 1, "veljaven je vedno en sam"
-        assert self.repo(motor).urnik(otrok).predmeti_dneva(PON) == ("SLJ",)
+        assert zapisan(self.repo(motor), otrok).predmeti_dneva(PON) == ("SLJ",)
 
     def test_urnik_je_last_otroka_in_ne_druzine(
         self, motor: Engine, otrok: str, brat: str
@@ -232,8 +299,8 @@ class TestRepozitorij:
         self.repo(motor).potrdi(otrok, [je(PON, "MAT")], None)
         self.repo(motor).potrdi(brat, [je(PON, "SLJ")], None)
 
-        assert self.repo(motor).urnik(otrok).predmeti_dneva(PON) == ("MAT",)
-        assert self.repo(motor).urnik(brat).predmeti_dneva(PON) == ("SLJ",)
+        assert zapisan(self.repo(motor), otrok).predmeti_dneva(PON) == ("MAT",)
+        assert zapisan(self.repo(motor), brat).predmeti_dneva(PON) == ("SLJ",)
 
     def test_tuj_otrok_ne_dobi_urnika(
         self, motor: Engine, otrok: str, tuj_otrok: str
@@ -279,7 +346,7 @@ class TestRepozitorij:
         veljaven = self.repo(motor).veljaven(otrok)
         assert veljaven is not None
         assert veljaven.id != "upokojen-a-novejsi"
-        assert self.repo(motor).urnik(otrok).predmeti_dneva(PON) == ("MAT",)
+        assert zapisan(self.repo(motor), otrok).predmeti_dneva(PON) == ("MAT",)
 
     def test_slika_se_zapise_kadar_je(self, motor: Engine, otrok: str) -> None:
         self.repo(motor).potrdi(otrok, [je(PON, "MAT")], "/data/images/x/urniki/y.jpg")
@@ -299,10 +366,6 @@ class TestRepozitorij:
 class TestStranUrnika:
     """`GET /admin/schedule` in `POST /admin/schedule`."""
 
-    def polja(self, **celice: str) -> dict[str, str]:
-        """Mreža kot jo odda brskalnik: `ime_polja` → vrednost."""
-        return {ime_polja(dan, koda): vrednost for (dan, koda), vrednost in celice.items()}  # type: ignore[misc]
-
     def test_stran_pokaze_mrezo_vseh_desetih_predmetov(
         self, odjemalec: PrijavljenOdjemalec, otrok: str
     ) -> None:
@@ -311,6 +374,32 @@ class TestStranUrnika:
         assert odgovor.status_code == 200
         for koda in ("NAR", "MAT", "TJA", "GEO", "SLJ", "LUM", "ZGO", "TIT", "DKE", "GUM"):
             assert ime_polja(PON, koda) in odgovor.text
+
+    def test_mreza_kaze_trenutno_veljaven_urnik(
+        self, odjemalec: PrijavljenOdjemalec, motor: Engine, otrok: str
+    ) -> None:
+        """`ADR-041` E: mreža kaže veljaven urnik, tudi brez nove slike.
+
+        To ni le vprašanje prikaza. Potrditev je **celotna zamenjava**
+        (`ScheduleRepository.potrdi`), zato bi mreža, ki se izriše prazna,
+        ob prvem kliku na „Potrdi urnik" tiho izbrisala cel urnik. Prav zato
+        se tu bere izbrana vrednost vsake celice in ne le prisotnost niza.
+        """
+        ScheduleRepository(Session(motor), CVEK_ID).potrdi(
+            otrok,
+            [je(PON, "MAT"), ne_slika(PON, "LUM"), je(SRE, "SLJ")],
+            None,
+        )
+
+        besedilo = odjemalec.get(PREDPONA).text
+
+        assert izbrano_v_mrezi(besedilo, PON, "MAT") == "da"
+        assert izbrano_v_mrezi(besedilo, PON, "LUM") == "brez"
+        assert izbrano_v_mrezi(besedilo, SRE, "SLJ") == "da"
+        # In kar na urniku ni, v mreži ni izbrano — sicer bi potrditev
+        # nepovabljene predmete pripisala zraven.
+        assert izbrano_v_mrezi(besedilo, PON, "SLJ") == ""
+        assert izbrano_v_mrezi(besedilo, TOR, "MAT") == ""
 
     def test_mreza_je_urejljiva_tudi_brez_slike(
         self, odjemalec: PrijavljenOdjemalec, otrok: str
@@ -421,19 +510,7 @@ class TestStranUrnika:
 class TestPredlogSSlike:
     """`POST /admin/schedule/proposal` — nalaganje in branje slike."""
 
-    def naredi_odjemalec(
-        self, aplikacija: FastAPI, motor: Engine, stars: str, klicalec: object
-    ) -> PrijavljenOdjemalec:
-        """Odjemalec nad aplikacijo, ki ima podtaknjenega klicalca urnika."""
-        from tests.conftest import prijavi
-
-        aplikacija.state.klicalec_urnika = klicalec
-        odjemalec = PrijavljenOdjemalec(aplikacija, base_url="https://testserver")
-        odjemalec.__enter__()
-        prijavi(odjemalec, motor, stars)
-        return odjemalec
-
-    def naloz(self, odjemalec: PrijavljenOdjemalec, otrok: str) -> object:
+    def naloz(self, odjemalec: PrijavljenOdjemalec, otrok: str) -> Any:
         return odjemalec.post(
             POT_PREDLOGA,
             data={"csrf": odjemalec.csrf, "otrok": otrok},
@@ -441,27 +518,84 @@ class TestPredlogSSlike:
         )
 
     def test_prebrani_predmeti_pridejo_v_mrezo(
-        self, aplikacija: FastAPI, motor: Engine, stars: str, otrok: str
+        self,
+        aplikacija: FastAPI,
+        motor: Engine,
+        stars: str,
+        otrok: str,
+        sklad: ExitStack,
     ) -> None:
         def klicalec(_: Path) -> PredlogUrnika:
             return razcleni_urnik(
                 json.dumps(
                     {
                         "readable": True,
-                        "cells": [{"day": "pon", "text": "Matematika", "subject": "MAT"}],
+                        "cells": [
+                            {"day": "pon", "text": "Matematika", "subject": "MAT"},
+                            {"day": "pet", "text": "Slovenščina", "subject": "SLJ"},
+                        ],
                     }
                 )
             )
 
-        odjemalec = self.naredi_odjemalec(aplikacija, motor, stars, klicalec)
+        odjemalec = sklad.enter_context(
+            odjemalec_s_klicalcem(aplikacija, motor, stars, klicalec)
+        )
         odgovor = self.naloz(odjemalec, otrok)
 
-        assert odgovor.status_code == 200  # type: ignore[attr-defined]
-        # Celica ponedeljek/MAT je izbrana; ostale ostanejo prazne.
-        assert 'name="slika_id"' in odgovor.text  # type: ignore[attr-defined]
+        assert odgovor.status_code == 200
+        besedilo = odgovor.text
+
+        # Osrednji kriterij zahteve: kar je model prebral, je v mreži izbrano.
+        assert izbrano_v_mrezi(besedilo, PON, "MAT") == "da"
+        assert izbrano_v_mrezi(besedilo, PET, "SLJ") == "da"
+        # Kar ni prebral, ostane prazno — predlog ne sme ničesar dodati sam.
+        assert izbrano_v_mrezi(besedilo, TOR, "MAT") == ""
+        assert izbrano_v_mrezi(besedilo, PON, "GEO") == ""
+        # Slika pripada temu predlogu in gre v potrditev kot `id`.
+        assert 'name="slika_id"' in besedilo
+
+    def test_predlog_prekrije_veljaven_urnik_in_ga_ne_dopolni(
+        self,
+        aplikacija: FastAPI,
+        motor: Engine,
+        stars: str,
+        otrok: str,
+        sklad: ExitStack,
+    ) -> None:
+        """Predlog je nov urnik, ne popravek starega.
+
+        Če bi se prebrano zlilo z veljavnim, bi starš po prvi napačni
+        fotografiji dobil mrežo, iz katere starih vnosov ne more odstraniti —
+        in potrditev je celotna zamenjava, zato bi jih zapisal nazaj.
+        """
+        ScheduleRepository(Session(motor), CVEK_ID).potrdi(otrok, [je(SRE, "ZGO")], None)
+
+        def klicalec(_: Path) -> PredlogUrnika:
+            return razcleni_urnik(
+                json.dumps(
+                    {
+                        "readable": True,
+                        "cells": [{"day": "pon", "text": "MAT", "subject": "MAT"}],
+                    }
+                )
+            )
+
+        odjemalec = sklad.enter_context(
+            odjemalec_s_klicalcem(aplikacija, motor, stars, klicalec)
+        )
+        besedilo = self.naloz(odjemalec, otrok).text
+
+        assert izbrano_v_mrezi(besedilo, PON, "MAT") == "da"
+        assert izbrano_v_mrezi(besedilo, SRE, "ZGO") == ""
 
     def test_predlog_sam_ne_zapise_urnika(
-        self, aplikacija: FastAPI, motor: Engine, stars: str, otrok: str
+        self,
+        aplikacija: FastAPI,
+        motor: Engine,
+        stars: str,
+        otrok: str,
+        sklad: ExitStack,
     ) -> None:
         """Nepotrjen predlog ne sproži manjka, ker vrstice sploh ni."""
 
@@ -475,14 +609,21 @@ class TestPredlogSSlike:
                 )
             )
 
-        odjemalec = self.naredi_odjemalec(aplikacija, motor, stars, klicalec)
+        odjemalec = sklad.enter_context(
+            odjemalec_s_klicalcem(aplikacija, motor, stars, klicalec)
+        )
         self.naloz(odjemalec, otrok)
 
         with Session(motor) as seja:
             assert seja.scalars(select(Schedule)).all() == []
 
     def test_nepreslikane_celice_se_izpisejo(
-        self, aplikacija: FastAPI, motor: Engine, stars: str, otrok: str
+        self,
+        aplikacija: FastAPI,
+        motor: Engine,
+        stars: str,
+        otrok: str,
+        sklad: ExitStack,
     ) -> None:
         def klicalec(_: Path) -> PredlogUrnika:
             return razcleni_urnik(
@@ -494,59 +635,90 @@ class TestPredlogSSlike:
                 )
             )
 
-        odjemalec = self.naredi_odjemalec(aplikacija, motor, stars, klicalec)
+        odjemalec = sklad.enter_context(
+            odjemalec_s_klicalcem(aplikacija, motor, stars, klicalec)
+        )
         odgovor = self.naloz(odjemalec, otrok)
 
-        assert "Šport" in odgovor.text  # type: ignore[attr-defined]
-        assert "torek" in odgovor.text  # type: ignore[attr-defined]
+        assert "Šport" in odgovor.text
+        assert "torek" in odgovor.text
 
     def test_neuspel_klic_pove_kaj_narediti_in_pusti_urnik_pri_miru(
-        self, aplikacija: FastAPI, motor: Engine, stars: str, otrok: str
+        self,
+        aplikacija: FastAPI,
+        motor: Engine,
+        stars: str,
+        otrok: str,
+        sklad: ExitStack,
     ) -> None:
         ScheduleRepository(Session(motor), CVEK_ID).potrdi(otrok, [je(PON, "MAT")], None)
 
         def klicalec(_: Path) -> PredlogUrnika:
             raise NapakaObdelave("Model se ni odzval v 120 sekundah.")
 
-        odjemalec = self.naredi_odjemalec(aplikacija, motor, stars, klicalec)
+        odjemalec = sklad.enter_context(
+            odjemalec_s_klicalcem(aplikacija, motor, stars, klicalec)
+        )
         odgovor = self.naloz(odjemalec, otrok)
 
-        assert odgovor.status_code == 200  # type: ignore[attr-defined]
-        assert "Model se ni odzval" in odgovor.text  # type: ignore[attr-defined]
+        assert odgovor.status_code == 200
+        assert "Model se ni odzval" in odgovor.text
         zapisan = ScheduleRepository(Session(motor), CVEK_ID).urnik(otrok)
         assert zapisan is not None
         assert zapisan.predmeti_dneva(PON) == ("MAT",), "prejšnji urnik mora ostati cel"
 
     def test_neberljiva_slika_pove_kaj_narediti(
-        self, aplikacija: FastAPI, motor: Engine, stars: str, otrok: str
+        self,
+        aplikacija: FastAPI,
+        motor: Engine,
+        stars: str,
+        otrok: str,
+        sklad: ExitStack,
     ) -> None:
         def klicalec(_: Path) -> PredlogUrnika:
             return PredlogUrnika(readable=False, celice=())
 
-        odjemalec = self.naredi_odjemalec(aplikacija, motor, stars, klicalec)
+        odjemalec = sklad.enter_context(
+            odjemalec_s_klicalcem(aplikacija, motor, stars, klicalec)
+        )
         odgovor = self.naloz(odjemalec, otrok)
 
-        assert "ni bilo mogoče brati" in odgovor.text  # type: ignore[attr-defined]
+        assert "ni bilo mogoče brati" in odgovor.text
 
     def test_neuspel_klic_ne_pusti_slike_na_disku(
-        self, aplikacija: FastAPI, motor: Engine, stars: str, otrok: str, slike: Path
+        self,
+        aplikacija: FastAPI,
+        motor: Engine,
+        stars: str,
+        otrok: str,
+        slike: Path,
+        sklad: ExitStack,
     ) -> None:
         def klicalec(_: Path) -> PredlogUrnika:
             raise NapakaObdelave("Klic ni uspel.")
 
-        odjemalec = self.naredi_odjemalec(aplikacija, motor, stars, klicalec)
+        odjemalec = sklad.enter_context(
+            odjemalec_s_klicalcem(aplikacija, motor, stars, klicalec)
+        )
         self.naloz(odjemalec, otrok)
 
         mapa = slike / CVEK_ID / "urniki"
         assert list(mapa.glob("*.jpg")) == []
 
     def test_datoteka_ki_ni_slika_je_zavrnjena(
-        self, aplikacija: FastAPI, motor: Engine, stars: str, otrok: str
+        self,
+        aplikacija: FastAPI,
+        motor: Engine,
+        stars: str,
+        otrok: str,
+        sklad: ExitStack,
     ) -> None:
         def klicalec(_: Path) -> PredlogUrnika:  # pragma: no cover - ne sme se poklicati
             raise AssertionError("klicalec se ne sme poklicati")
 
-        odjemalec = self.naredi_odjemalec(aplikacija, motor, stars, klicalec)
+        odjemalec = sklad.enter_context(
+            odjemalec_s_klicalcem(aplikacija, motor, stars, klicalec)
+        )
         odgovor = odjemalec.post(
             POT_PREDLOGA,
             data={"csrf": odjemalec.csrf, "otrok": otrok},
@@ -556,24 +728,38 @@ class TestPredlogSSlike:
         assert "samo sliko" in odgovor.text
 
     def test_brez_kljuca_pove_da_je_mreza_se_vedno_urejljiva(
-        self, aplikacija: FastAPI, motor: Engine, stars: str, otrok: str
+        self,
+        aplikacija: FastAPI,
+        motor: Engine,
+        stars: str,
+        otrok: str,
+        sklad: ExitStack,
     ) -> None:
         """`ADR-009` B2 v malem: odsotnost ključa je stanje, ne napaka."""
-        odjemalec = self.naredi_odjemalec(aplikacija, motor, stars, None)
+        odjemalec = sklad.enter_context(
+            odjemalec_s_klicalcem(aplikacija, motor, stars, None)
+        )
         odgovor = odjemalec.get(PREDPONA)
 
         assert odgovor.status_code == 200
         assert "ključ za OpenAI ni nastavljen" in odgovor.text
 
     def test_nalaganje_brez_csrf_zetona_je_zavrnjeno(
-        self, aplikacija: FastAPI, motor: Engine, stars: str, otrok: str
+        self,
+        aplikacija: FastAPI,
+        motor: Engine,
+        stars: str,
+        otrok: str,
+        sklad: ExitStack,
     ) -> None:
         """Varovalo 1 iz `ADR-043`: izvzeta pot žeton res preveri sama."""
 
         def klicalec(_: Path) -> PredlogUrnika:  # pragma: no cover - ne sme se poklicati
             raise AssertionError("klicalec se ne sme poklicati brez žetona")
 
-        odjemalec = self.naredi_odjemalec(aplikacija, motor, stars, klicalec)
+        odjemalec = sklad.enter_context(
+            odjemalec_s_klicalcem(aplikacija, motor, stars, klicalec)
+        )
         odgovor = odjemalec.post(
             POT_PREDLOGA,
             data={"csrf": "ponarejen", "otrok": otrok},
@@ -596,6 +782,99 @@ class TestPredlogSSlike:
         assert odgovor.headers["location"].startswith("/admin/login")
 
 
+class TestVhodneMeje:
+    """Varovali nad nalozeno datoteko: velikost in oblika `slika_id`."""
+
+    def test_prevelika_slika_je_zavrnjena(
+        self,
+        aplikacija: FastAPI,
+        motor: Engine,
+        stars: str,
+        otrok: str,
+        slike: Path,
+        sklad: ExitStack,
+    ) -> None:
+        """Plan zahteva omejitev velikosti; brez testa je to le namera.
+
+        Meja se uveljavlja **med branjem** in ne iz `Content-Length`: ta je
+        trditev odjemalca. Test zato posilja pravo telo in ne le glave.
+        """
+
+        def klicalec(_: Path) -> PredlogUrnika:  # pragma: no cover
+            raise AssertionError("prevelike slike ne smemo poslati modelu")
+
+        odjemalec = sklad.enter_context(
+            odjemalec_s_klicalcem(aplikacija, motor, stars, klicalec)
+        )
+        prevelika = b"0" * (NAJVECJA_SLIKA + 1)
+
+        odgovor = odjemalec.post(
+            POT_PREDLOGA,
+            data={"csrf": odjemalec.csrf, "otrok": otrok},
+            files={"slika": ("urnik.png", io.BytesIO(prevelika), "image/png")},
+        )
+
+        assert "prevelika" in odgovor.text
+        # In za sabo ne pusti polovicne datoteke.
+        assert list((slike / CVEK_ID / "urniki").glob("*.jpg")) == []
+
+    def test_slika_pod_mejo_plasti_ni_zavrnjena(
+        self,
+        aplikacija: FastAPI,
+        motor: Engine,
+        stars: str,
+        otrok: str,
+        sklad: ExitStack,
+    ) -> None:
+        """Premisa `ADR-043`: prava fotografija je večja od meje plasti.
+
+        `NAJVECJE_TELO_OBRAZCA` je 1 MiB in `SejaMiddleware` bi telo te
+        velikosti zavrnil s `413`. Ta test to premiso pripne: brez njega bi
+        bila zbirka zelena tudi, če bi izvzetje veljalo samo za majhna telesa,
+        in prva prava fotografija na produkciji bi padla.
+        """
+        klican: list[Path] = []
+
+        def klicalec(pot: Path) -> PredlogUrnika:
+            klican.append(pot)
+            return PredlogUrnika(readable=True, celice=())
+
+        odjemalec = sklad.enter_context(
+            odjemalec_s_klicalcem(aplikacija, motor, stars, klicalec)
+        )
+        velika = b"0" * (2 * 1024 * 1024)
+        assert len(velika) > NAJVECJE_TELO_OBRAZCA, "telo mora preseči mejo plasti"
+
+        odgovor = odjemalec.post(
+            POT_PREDLOGA,
+            data={"csrf": odjemalec.csrf, "otrok": otrok},
+            files={"slika": ("urnik.png", io.BytesIO(velika), "image/png")},
+        )
+
+        assert odgovor.status_code == 200
+        assert klican, "klicalec bi moral dobiti sliko"
+
+    def test_pot_slike_sprejme_samo_kanonicen_uuid(self, nastavitve: Settings) -> None:
+        """Pot se sestavi iz `slika_id`, zato ta ne sme biti poljuben niz.
+
+        Vrednost pride iz skritega polja obrazca. Brez te preverbe bi vrstica
+        v bazi lahko kazala kamorkoli po disku — ista nevarnost in ista
+        preverba kot pri `storage.mapa_druzine`.
+        """
+        veljaven = "6f1c0d64-2a3b-4c5d-8e9f-0a1b2c3d4e5f"
+
+        assert _pot_slike(nastavitve, CVEK_ID, veljaven) is not None
+        assert _pot_slike(nastavitve, CVEK_ID, None) is None
+        for zavrnjen in (
+            "../../../etc/passwd",
+            veljaven.upper(),
+            veljaven.replace("-", ""),
+            "",
+            "6f1c0d64-2a3b-4c5d-8e9f",
+        ):
+            assert _pot_slike(nastavitve, CVEK_ID, zavrnjen) is None, zavrnjen
+
+
 def test_izvzeti_nabor_je_enoclanski() -> None:
     """Varovalo 2 iz `ADR-043`.
 
@@ -613,8 +892,8 @@ def test_urnik_ni_snov(
     """Kriterij `V3-R09`: slika urnika se ne pojavi nikjer, kjer je snov.
 
     Dokaz je regresijski in ne sklepanje iz kode: potrjen urnik s sliko se
-    pomete \u010dez **vse \u0161tiri povr\u0161ine**, ki jih kriterij na\u0161teje \u2014 izbirnik
-    kvizov, statistiko, stran predmeta in pregled po dnevih \u2014 in \u010dez obe
+    pomete čez **vse štiri površine**, ki jih kriterij našteje — izbirnik
+    kvizov, statistiko, stran predmeta in pregled po dnevih — in čez obe
     tabeli, ki nosita snov. Slika res nastane na disku, da test ne bi bil
     zelen samo zato, ker je ni.
     """
@@ -627,12 +906,12 @@ def test_urnik_ni_snov(
         otrok, [je(PON, "MAT")], str(mapa / f"{slika_id}.jpg")
     )
 
-    # Snovi in vpra\u0161anja iz nje ne nastanejo.
+    # Snovi in vprašanja iz nje ne nastanejo.
     with Session(motor) as seja:
         assert seja.scalars(select(Material)).all() == []
         assert seja.scalars(select(Question)).all() == []
 
-    # In nikjer je ni videti \u2014 ne po `id` ne po mapi, v kateri le\u017ei.
+    # In nikjer je ni videti — ne po `id` ne po mapi, v kateri leži.
     for pot in (
         "/admin/quizzes/new?vstop=danes",
         "/admin/statistics?leto=vse",
@@ -646,12 +925,12 @@ def test_urnik_ni_snov(
 
 
 def test_slika_urnika_ne_gre_v_obdelavo(motor: Engine, slike: Path, otrok: str) -> None:
-    """Iz slike urnika ne nastane nobeno vpra\u0161anje.
+    """Iz slike urnika ne nastane nobeno vprašanje.
 
-    Obdelava hodi po `materials` in urnika tam ni, zato ne dobi ni\u010desar za
-    delo. Test to pove\u017ee z **workerjem samim** in ne le z odsotnostjo vrstice:
-    kdor bi kdaj urnik vrinil v `materials`, bi tu dobil pet vpra\u0161anj o
-    ponedeljkovi mre\u017ei in ta test bi padel.
+    Obdelava hodi po `materials` in urnika tam ni, zato ne dobi ničesar za
+    delo. Test to poveže z **workerjem samim** in ne le z odsotnostjo vrstice:
+    kdor bi kdaj urnik vrinil v `materials`, bi tu dobil pet vprašanj o
+    ponedeljkovi mreži in ta test bi padel.
     """
     from app.db import naredi_tovarno_sej
     from app.obdelava import obdelaj_cakajoce
@@ -684,12 +963,12 @@ def test_upokojen_urnik_se_ne_bere(motor: Engine, otrok: str) -> None:
 
 
 def test_zamenjava_se_zgodi_v_enem_trenutku(motor: Engine, otrok: str) -> None:
-    """Upokojitev starega in potrditev novega nosita **isti** \u010das.
+    """Upokojitev starega in potrditev novega nosita **isti** čas.
 
     Ni okras: zamenjava je ena transakcija in en trenutek, zato med njima ni
     hipa, v katerem bi otrok imel dva veljavna urnika ali nobenega. Prav zato
-    razvrstitev po `confirmed_at` med njima ne lo\u010di in veljavnost dolo\u010da
-    izklju\u010dno os `replaced_at` \u2014 glej
+    razvrstitev po `confirmed_at` med njima ne loči in veljavnost določa
+    izključno os `replaced_at` — glej
     `TestRepozitorij.test_veljavnost_odloca_os_in_ne_vrstni_red`.
     """
     repo = ScheduleRepository(Session(motor), CVEK_ID)
@@ -706,7 +985,7 @@ def test_zamenjava_se_zgodi_v_enem_trenutku(motor: Engine, otrok: str) -> None:
 
 
 def test_urnik_enega_otroka_ni_urnik_drugega(motor: Engine, otrok: str, brat: str) -> None:
-    """Manjki se ra\u010dunajo po otroku, \u010digar je snov (`V3-R07`).
+    """Manjki se računajo po otroku, čigar je snov (`V3-R07`).
 
     Bratov urnik se ne sme podedovati: dokler ga nima, zanj manjkov ni, tudi
     kadar ima sestra poln urnik.

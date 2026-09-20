@@ -1802,6 +1802,9 @@ class TestImenaPriEnemOtroku:
                 "/admin",
                 "/admin/archive",
                 "/admin/days",
+                # V3-R09: mreža urnika izriše imena v izbirniku otroka, zato
+                # mora pri enem otroku molčati enako kot vse ostale strani.
+                "/admin/schedule",
                 "/admin/statistics",
                 "/admin/statistics/subjects/MAT",
                 "/admin/subjects/MAT",

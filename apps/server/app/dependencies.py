@@ -131,7 +131,6 @@ def daj_repozitorij_statistike(
         yield StatistikaRepository(seja, family_id)
 
 
-
 def daj_repozitorij_urnikov(
     request: Request, family_id: Annotated[str, Depends(daj_druzino)]
 ) -> Iterator[ScheduleRepository]:

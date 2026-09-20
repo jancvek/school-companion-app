@@ -91,9 +91,19 @@ SPOROCILO_BREZ_KLJUCA = (
     "Urnik lahko vseeno vneseš in potrdiš v spodnji mreži."
 )
 
-SPOROCILO_NEBERLJIVA = (
-    "S te slike urnika ni bilo mogoče brati. Poskusi z ostrejšo ali bolj "
-    "osvetljeno sliko, ali pa urnik vnesi v spodnjo mrežo."
+SPOROCILO_NEBERLJIVA = "S te slike urnika ni bilo mogoče brati."
+
+#: Kaj naj starš naredi, ko branje ne uspe — **pripne se vsakemu** sporočilu o
+#: neuspehu, tudi tistim, ki pridejo iz `app/vision.py`.
+#:
+#: Kriterij `V3-R09` zahteva, da neuspela obdelava pove, kaj naj starš naredi;
+#: merilo dokončanosti pa prepoveduje surovo besedilo sistemske napake kot
+#: **edino** vsebino. „Model ni vrnil veljavnega JSON" je oboje: nerazložen in
+#: brez izhoda. Izhod je vedno isti in ga zato doda ena vrstica, ne vsak
+#: klicatelj posebej.
+IZHOD_OB_NEUSPEHU = (
+    "Poskusi z ostrejšo ali bolj osvetljeno sliko, ali pa urnik vnesi in "
+    "potrdi kar v spodnji mreži."
 )
 
 SPOROCILO_PRAZNA_SLIKA = "Slike ni bilo. Izberi datoteko in poskusi znova."
@@ -445,8 +455,15 @@ async def predlagaj_urnik(
 
     veljaven = urniki.urnik(izbira.izbrani.user_id)
 
-    def s_sporocilom(napaka: str) -> Response:
-        """Mreža, kakršna je bila, z razlago. Urnik ostane nedotaknjen."""
+    def s_sporocilom(napaka: str, *, z_izhodom: bool = True) -> Response:
+        """Mreža, kakršna je bila, z razlago. Urnik ostane nedotaknjen.
+
+        `z_izhodom` je privzeto vklopljen: vsako sporočilo o neuspelem branju
+        mora staršu povedati tudi, kaj naj naredi. Izklopi ga samo tisto, ki
+        izhod že vsebuje (npr. „izberi datoteko in poskusi znova").
+        """
+        if z_izhodom:
+            napaka = f"{napaka} {IZHOD_OB_NEUSPEHU}"
         return predloge.TemplateResponse(
             request,
             "urnik.html",
@@ -460,11 +477,11 @@ async def predlagaj_urnik(
         )
 
     if klicalec is None:
-        return s_sporocilom(SPOROCILO_BREZ_KLJUCA)
+        return s_sporocilom(SPOROCILO_BREZ_KLJUCA, z_izhodom=False)
     if slika is None or not slika.filename:
-        return s_sporocilom(SPOROCILO_PRAZNA_SLIKA)
+        return s_sporocilom(SPOROCILO_PRAZNA_SLIKA, z_izhodom=False)
     if slika.content_type not in VRSTE_SLIK:
-        return s_sporocilom(SPOROCILO_NI_SLIKA)
+        return s_sporocilom(SPOROCILO_NI_SLIKA, z_izhodom=False)
 
     slika_id = str(uuid4())
     try:
@@ -475,7 +492,7 @@ async def predlagaj_urnik(
             _OmejenoBranje(slika.file, NAJVECJA_SLIKA),
         )
     except NeveljavenObrazec as prevelika:
-        return s_sporocilom(prevelika.sporocilo)
+        return s_sporocilom(prevelika.sporocilo, z_izhodom=False)
 
     try:
         # V pomožno nit, kot obdelava snovi (`app/obdelava.py`): odjemalec
