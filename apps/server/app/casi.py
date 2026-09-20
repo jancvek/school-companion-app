@@ -146,6 +146,22 @@ MESECI = (
     "december",
 )
 
+#: Imena dni v imenovalniku, po `date.weekday()`: 0 = ponedeljek.
+#:
+#: Tu in ne v `app/urnik.py` iz istega razloga kot `MESECI`: to je koledarsko
+#: poimenovanje in ne pravilo urnika. Vseh sedem, čeprav urnik pozna samo prvih
+#: pet (`docs/odlocitve/ADR-041` F) — seznam, ki bi se končal s petkom, bi
+#: `IMENA_DNI[dan.weekday()]` naredil za past ob prvi soboti.
+IMENA_DNI = (
+    "ponedeljek",
+    "torek",
+    "sreda",
+    "četrtek",
+    "petek",
+    "sobota",
+    "nedelja",
+)
+
 #: Mesec, s katerim se začne šolsko leto (`docs/odlocitve/ADR-021` B).
 ZACETNI_MESEC = 9
 

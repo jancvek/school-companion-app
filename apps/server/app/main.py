@@ -16,11 +16,21 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import prijava, strani
 from app.db import naredi_motor, naredi_tovarno_sej
-from app.routers import admin, clani, dnevi, kvizi, materials, resevanje, statistika, vstop
+from app.routers import (
+    admin,
+    clani,
+    dnevi,
+    kvizi,
+    materials,
+    resevanje,
+    statistika,
+    urnik,
+    vstop,
+)
 from app.schemas import Zivost
 from app.security import SejaMiddleware, ZetonMiddleware
 from app.settings import Settings
-from app.vision import Klicalec, naredi_klicalca
+from app.vision import Klicalec, KlicalecUrnika, naredi_klicalca, naredi_klicalca_urnika
 from app.worker import Obdelovalec
 
 dnevnik = logging.getLogger(__name__)
@@ -93,6 +103,7 @@ def create_app(
     nastavitve: Settings | None = None,
     motor: Engine | None = None,
     klicalec: Klicalec | None = None,
+    klicalec_urnika: KlicalecUrnika | None = None,
 ) -> FastAPI:
     """Sestavi aplikacijo. Brez argumentov prebere nastavitve iz okolja.
 
@@ -106,6 +117,11 @@ def create_app(
         motor = naredi_motor(nastavitve.database_url)
     if klicalec is None and nastavitve.openai_api_key:
         klicalec = naredi_klicalca(nastavitve)
+    # Svoj klicalec za urnik (V3-R09): drug prompt, druga shema, drug izid.
+    # Brez ključa ostane `None` in stran z urnikom to pove v slovenščini —
+    # mreža je urejljiva tudi brez slike (`ADR-041` E).
+    if klicalec_urnika is None and nastavitve.openai_api_key:
+        klicalec_urnika = naredi_klicalca_urnika(nastavitve)
 
     app = FastAPI(
         title="Šolski pomočnik — strežnik",
@@ -122,6 +138,7 @@ def create_app(
         context_processors=[strani.kontekst_prijave],
     )
     app.state.klicalec = klicalec
+    app.state.klicalec_urnika = klicalec_urnika
     app.state.obdelovalec = None
 
     # Vrstni red plasti: zadnja dodana je zunanja. Žeton je torej pred sejo.
@@ -161,6 +178,10 @@ def create_app(
     # ne prekriva in je varovana z isto plastjo kot ves `/admin` (`ADR-035` A);
     # pravila o tem, kdo sme koga, so v `app/clani.py`.
     app.include_router(clani.router)
+    # Urnik otroka (V3-R09), pod `/admin/schedule`. Z nobeno obstoječo potjo se
+    # ne prekriva. Edina pot pod `/admin`, ki sprejme datoteko; varuje jo ista
+    # plast kot ves `/admin`, pravila urnika pa so v `app/urnik.py`.
+    app.include_router(urnik.router)
 
     # Napake pod `/admin` naj bodo stran, ne JSON. Prestreznik se za vse
     # ostale poti umakne privzetemu — glej `admin.prestrezi_napako`.
