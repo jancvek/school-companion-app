@@ -27,6 +27,10 @@ KOREN = Path(__file__).resolve().parent.parent
 #: Stalen `id` družine Cvek iz `0007_druzine`.
 CVEK_ID = "5b0f6c2e-8d3a-4c7e-9a1b-2f4d6e8c0a13"
 
+#: Stalen `id` otroka (Maša) iz `0008_uporabniki`. Edini otrok družine Cvek,
+#: zato je pripis v `0009_otrok_na_zapisu` enoumen.
+MASA_ID = "3e7b9a05-4c12-4f6d-9b83-1d5f8c0a2e47"
+
 
 def alembic_nastavitve(database_url: str) -> Config:
     config = Config(str(KOREN / "alembic.ini"))
@@ -282,10 +286,13 @@ def test_obstojece_vprasanje_je_po_migraciji_veljavno(baza: str) -> None:
         motor.dispose()
 
 
-def _vstavi_kviz(povezava: Any, family_id: str | None = None) -> None:
+def _vstavi_kviz(
+    povezava: Any, family_id: str | None = None, child_id: str | None = None
+) -> None:
     """Kviz z eno postavko, kot ga je pustila `0005_kvizi`.
 
-    Z `family_id` kot po `0007_druzine`, kjer je stolpec obvezen.
+    Z `family_id` kot po `0007_druzine` in s `child_id` kot po
+    `0009_otrok_na_zapisu`, kjer sta stolpca obvezna.
     """
     if family_id is None:
         povezava.execute(
@@ -294,13 +301,22 @@ def _vstavi_kviz(povezava: Any, family_id: str | None = None) -> None:
                 "VALUES ('k1', 'MAT — 9. 9. 2026', 'MAT', '2026-09-09 08:00:00')"
             )
         )
-    else:
+    elif child_id is None:
         povezava.execute(
             text(
                 "INSERT INTO quizzes (id, name, subject, created_at, family_id) "
                 "VALUES ('k1', 'MAT — 9. 9. 2026', 'MAT', '2026-09-09 08:00:00', :druzina)"
             ),
             {"druzina": family_id},
+        )
+    else:
+        povezava.execute(
+            text(
+                "INSERT INTO quizzes (id, name, subject, created_at, family_id, child_id) "
+                "VALUES ('k1', 'MAT — 9. 9. 2026', 'MAT', '2026-09-09 08:00:00', "
+                ":druzina, :otrok)"
+            ),
+            {"druzina": family_id, "otrok": child_id},
         )
     povezava.execute(
         text(
@@ -380,16 +396,16 @@ def test_razveljavitev_poskusov_ohrani_kvize(baza: str) -> None:
     motor = create_engine(baza)
     try:
         with motor.begin() as povezava:
-            _vstavi_kviz(povezava, CVEK_ID)
+            _vstavi_kviz(povezava, CVEK_ID, MASA_ID)
             povezava.execute(
                 text(
                     "INSERT INTO question_attempts (id, quiz_item_id, mode, rating, "
-                    "shown_at, revealed_at, answered_at, received_at, family_id) "
+                    "shown_at, revealed_at, answered_at, received_at, family_id, child_id) "
                     "VALUES ('a1', 'p1', 'samoocena', 'lahko', '2026-09-10 15:00:00', "
                     "'2026-09-10 15:00:07', '2026-09-10 15:00:09', '2026-09-10 15:05:00', "
-                    ":druzina)"
+                    ":druzina, :otrok)"
                 ),
-                {"druzina": CVEK_ID},
+                {"druzina": CVEK_ID, "otrok": MASA_ID},
             )
             povezava.execute(
                 text("UPDATE quizzes SET solved_at = '2026-09-10 15:05:00' WHERE id = 'k1'")
@@ -419,16 +435,18 @@ def test_razveljavitev_prezivi_podatke(baza: str) -> None:
     motor = create_engine(baza)
     try:
         with motor.begin() as povezava:
-            # `family_id` je od `0007_druzine` obvezen; Cvek ustvari migracija sama.
+            # `family_id` je od `0007_druzine` obvezen in `child_id` od
+            # `0009_otrok_na_zapisu`; Cvek in Mašo ustvarita migraciji sami.
             druzina = {"druzina": CVEK_ID}
             povezava.execute(
                 text(
-                    "INSERT INTO materials "
-                    "(id, subject, taken_at, image_path, status, received_at, family_id) "
+                    "INSERT INTO materials (id, subject, taken_at, image_path, status, "
+                    "received_at, family_id, child_id) "
                     "VALUES ('star', 'MAT', '2026-09-01 08:00:00', "
-                    "'/data/images/star.jpg', 'ready', '2026-09-01 08:05:00', :druzina)"
+                    "'/data/images/star.jpg', 'ready', '2026-09-01 08:05:00', "
+                    ":druzina, :otrok)"
                 ),
-                druzina,
+                {**druzina, "otrok": MASA_ID},
             )
             povezava.execute(
                 text(
@@ -882,11 +900,11 @@ def test_razveljavitev_0008_pusti_podatke_druzine(baza: str) -> None:
         with motor.begin() as povezava:
             povezava.execute(
                 text(
-                    "INSERT INTO materials (id, family_id, subject, taken_at, image_path, "
-                    "status, received_at) VALUES ('m1', :druzina, 'MAT', "
-                    "'2026-09-04 07:30:00', '/x.jpg', 'new', '2026-09-04 08:00:00')"
+                    "INSERT INTO materials (id, family_id, child_id, subject, taken_at, "
+                    "image_path, status, received_at) VALUES ('m1', :druzina, :otrok, "
+                    "'MAT', '2026-09-04 07:30:00', '/x.jpg', 'new', '2026-09-04 08:00:00')"
                 ),
-                {"druzina": CVEK_ID},
+                {"druzina": CVEK_ID, "otrok": MASA_ID},
             )
     finally:
         motor.dispose()
@@ -898,5 +916,196 @@ def test_razveljavitev_0008_pusti_podatke_druzine(baza: str) -> None:
         tabele = set(inspect(motor).get_table_names())
         assert not tabele & {"users", "credentials", "sessions", "login_attempts"}
         assert _vrstice(motor, "SELECT id FROM materials") == [("m1",)]
+    finally:
+        motor.dispose()
+
+
+# --- Otrok na zapisu (V3-R07, `0009_otrok_na_zapisu`) ---
+
+
+def _baza_pred_otrokom(baza: str, slike: Path) -> None:
+    """Baza v stanju `0008_uporabniki`: snov, kviz in poskus, vse v Cveku.
+
+    Po migraciji mora vse troje nositi Mašo — edinega otroka te družine.
+    """
+    _polna_baza_pred_druzinami(baza, slike)
+    command.upgrade(alembic_nastavitve(baza), "0008_uporabniki")
+
+
+def _dodaj_otroka(baza: str, user_id: str, ime: str, family_id: str = CVEK_ID) -> None:
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            povezava.execute(
+                text(
+                    "INSERT INTO users (id, family_id, role, display_name, "
+                    "is_system_owner, is_active, created_at) VALUES (:id, :druzina, "
+                    "'child', :ime, 0, 1, '2026-09-20 10:00:00')"
+                ),
+                {"id": user_id, "druzina": family_id, "ime": ime},
+            )
+    finally:
+        motor.dispose()
+
+
+def _dodaj_druzino(baza: str, family_id: str, ime: str) -> None:
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            povezava.execute(
+                text(
+                    "INSERT INTO families (id, name, created_at) "
+                    "VALUES (:id, :ime, '2026-09-20 10:00:00')"
+                ),
+                {"id": family_id, "ime": ime},
+            )
+    finally:
+        motor.dispose()
+
+
+def test_migracija_pripise_edinega_otroka_druzine(baza: str, slike: Path) -> None:
+    """Kriterij V3-R07: obstoječi zapisi dobijo otroka; tu snov, kviz in poskus."""
+    _baza_pred_otrokom(baza, slike)
+
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    motor = create_engine(baza)
+    try:
+        for tabela in ("materials", "quizzes", "question_attempts"):
+            assert _vrstice(motor, f"SELECT DISTINCT child_id FROM {tabela}") == [
+                (MASA_ID,)
+            ], tabela
+        # Vprašanja ostanejo last družine in otroka ne dobijo (`ADR-039` G);
+        # postavka ga izpelje iz kviza, kot družino (`ADR-029` C).
+        for brez in ("questions", "quiz_items"):
+            assert "child_id" not in {s["name"] for s in inspect(motor).get_columns(brez)}
+    finally:
+        motor.dispose()
+
+
+def test_migracija_otroka_ohrani_vse_vrstice(baza: str, slike: Path) -> None:
+    """Pripis otroka ne sme ne izgubiti ne podvojiti nobene vrstice."""
+    _baza_pred_otrokom(baza, slike)
+    motor = create_engine(baza)
+    try:
+        prej = _stej(motor)
+    finally:
+        motor.dispose()
+
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    motor = create_engine(baza)
+    try:
+        assert _stej(motor) == prej
+    finally:
+        motor.dispose()
+
+
+@pytest.mark.parametrize("tabela", ["materials", "quizzes", "question_attempts"])
+def test_otrok_je_obvezen_tuji_kljuc(baza: str, tabela: str) -> None:
+    """`NOT NULL` in tuji ključ na `users` — „kviz za nikogar" ne sme obstajati."""
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    motor = create_engine(baza)
+    try:
+        stolpec = next(
+            s for s in inspect(motor).get_columns(tabela) if s["name"] == "child_id"
+        )
+        assert stolpec["nullable"] is False
+
+        kljuci = [
+            k
+            for k in inspect(motor).get_foreign_keys(tabela)
+            if k["constrained_columns"] == ["child_id"]
+        ]
+        assert len(kljuci) == 1
+        assert kljuci[0]["referred_table"] == "users"
+        # Brez kaskade: račun se ne briše, deaktivira se (`V3-R06`).
+        assert not kljuci[0]["options"].get("ondelete")
+
+        indeksi = [
+            i for i in inspect(motor).get_indexes(tabela) if i["column_names"] == ["child_id"]
+        ]
+        assert len(indeksi) == 1
+    finally:
+        motor.dispose()
+
+
+def test_migracija_z_dvema_otrokoma_se_ne_izvede(baza: str, slike: Path) -> None:
+    """Dvoumnost se ne ugane: migracija se ustavi in ničesar ne spremeni."""
+    _baza_pred_otrokom(baza, slike)
+    _dodaj_otroka(baza, "drugi-otrok", "Nejc")
+
+    with pytest.raises(RuntimeError, match="ne zna ugibati"):
+        command.upgrade(alembic_nastavitve(baza), "head")
+
+    motor = create_engine(baza)
+    try:
+        # Nič ni spremenjeno: stolpca ni na nobeni od treh tabel.
+        for tabela in ("materials", "quizzes", "question_attempts"):
+            assert "child_id" not in {
+                s["name"] for s in inspect(motor).get_columns(tabela)
+            }, tabela
+        assert _vrstice(motor, "SELECT id FROM materials ORDER BY id") == [("m1",), ("m2",)]
+    finally:
+        motor.dispose()
+
+
+def test_migracija_brez_otroka_se_ne_izvede(baza: str, slike: Path) -> None:
+    """Družina brez otroka je ista dvoumnost z druge strani."""
+    _baza_pred_otrokom(baza, slike)
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            povezava.execute(
+                text("DELETE FROM credentials WHERE user_id = :id"), {"id": MASA_ID}
+            )
+            povezava.execute(text("DELETE FROM users WHERE id = :id"), {"id": MASA_ID})
+    finally:
+        motor.dispose()
+
+    with pytest.raises(RuntimeError, match="ima 0 otrok"):
+        command.upgrade(alembic_nastavitve(baza), "head")
+
+
+def test_migracija_zavrne_tudi_druzino_brez_podatkov(baza: str, slike: Path) -> None:
+    """Družina brez vrstic v teh tabelah ni izjema.
+
+    Molk o njej bi pomenil, da se migracija ustavi šele ob njeni prvi sliki —
+    torej takrat, ko je na to vprašanje najtežje odgovoriti.
+    """
+    _baza_pred_otrokom(baza, slike)
+    _dodaj_druzino(baza, "druzina-b", "Brez otrok")
+
+    with pytest.raises(RuntimeError, match="'Brez otrok' ima 0 otrok"):
+        command.upgrade(alembic_nastavitve(baza), "head")
+
+
+def test_migracija_nasteje_vse_tezave_hkrati(baza: str, slike: Path) -> None:
+    """Lastnik dobi cel seznam, ne prve napake od petih."""
+    _baza_pred_otrokom(baza, slike)
+    _dodaj_otroka(baza, "drugi-otrok", "Nejc")
+    _dodaj_druzino(baza, "druzina-b", "Brez otrok")
+
+    with pytest.raises(RuntimeError) as napaka:
+        command.upgrade(alembic_nastavitve(baza), "head")
+
+    assert "'Cvek' ima 2 otrok" in str(napaka.value)
+    assert "'Brez otrok' ima 0 otrok" in str(napaka.value)
+
+
+def test_razveljavitev_otroka_ohrani_vrstice(baza: str, slike: Path) -> None:
+    """`downgrade` spusti stolpce in ne izgubi nobene vrstice."""
+    _baza_pred_otrokom(baza, slike)
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    command.downgrade(alembic_nastavitve(baza), "0008_uporabniki")
+
+    motor = create_engine(baza)
+    try:
+        for tabela in ("materials", "quizzes", "question_attempts"):
+            assert "child_id" not in {s["name"] for s in inspect(motor).get_columns(tabela)}
+        assert _vrstice(motor, "SELECT id FROM materials ORDER BY id") == [("m1",), ("m2",)]
+        assert _vrstice(motor, "SELECT id FROM question_attempts") == [("a1",)]
     finally:
         motor.dispose()
