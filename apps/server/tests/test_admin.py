@@ -1945,7 +1945,6 @@ class TestPonovnaObdelava:
         assert 'method="post"' in besedilo
 
 
-
 class TestPremikVDrugPredmet:
     """`POST /admin/materials/{id}/subject` (V3-R10, `docs/odlocitve/ADR-040`).
 
@@ -2041,6 +2040,34 @@ class TestPremikVDrugPredmet:
         # Premik ni upokojitev in ni brisanje: serije ostanejo take, kot so.
         assert stevilo_vprasanj(motor) == 7
         assert stevilo_veljavnih(motor) == 2
+
+    def test_oba_stavka_sta_ena_transakcija(
+        self, motor: Engine, slike: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Kriterij V3-R10: vmesnega stanja med stavkoma ni.
+
+        Če bi `premakni_v_predmet` prvi `UPDATE` commitala sama, bi snov po
+        odpovedi baze ostala pod novim predmetom, njena vprašanja pa pod
+        starim — in statistika bi bila razcepljena prav na način, ki ga
+        `ADR-040` B1 prepoveduje. Test pusti drugi stavek pasti in zahteva,
+        da se ne spremeni nič.
+        """
+        snov_z_vprasanji(motor, slike)
+
+        with Session(motor) as seja:
+            pravi = seja.execute
+
+            def pade(stavek: Any, *args: Any, **kwargs: Any) -> Any:
+                if "UPDATE questions" in str(stavek):
+                    raise RuntimeError("baza je odpovedala med drugim stavkom")
+                return pravi(stavek, *args, **kwargs)
+
+            monkeypatch.setattr(seja, "execute", pade)
+            with pytest.raises(RuntimeError):
+                MaterialsRepository(seja, CVEK_ID).premakni_v_predmet(UUID_ENA, "SLJ")
+
+        assert self.predmet(motor) == "MAT"
+        assert self.predmeti_vprasanj(motor) == {"MAT"}
 
     def test_vprasanja_druge_snovi_ostanejo_pri_starem_predmetu(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -2357,6 +2384,21 @@ class TestPremikVDrugPredmet:
 
         assert '<option value="MAT" selected>' in besedilo
         assert besedilo.count(" selected>") == 1
+
+    def test_obrazec_snovi_z_neznano_kodo_nima_tihega_privzetka(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Snov s kodo zunaj desetih ne sme dobiti prve možnosti za privzetek.
+
+        Brez vodilne možnosti bi brskalnik pokazal `NAR` in klik na „Premakni"
+        bi snov tiho vložil pod Naravoslovje.
+        """
+        snov_z_vprasanji(motor, slike, subject="FIZ")
+
+        besedilo = odjemalec.get(f"/admin/materials/{UUID_ENA}").text
+
+        assert re.findall(r'<option value="([A-Z]*)" selected', besedilo) == [""]
+        assert "FIZ — ni na seznamu" in besedilo
 
     def test_obrazca_ni_na_arhivirani_snovi_in_na_snovi_v_obdelavi(
         self, odjemalec: TestClient, motor: Engine, slike: Path

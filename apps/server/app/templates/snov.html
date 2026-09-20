@@ -82,6 +82,13 @@
           <label>
             Predmet:
             <select name="subject">
+              {# Snov s kodo zunaj desetih nima trenutne možnosti, zato dobi
+                 vodilno brez vrednosti. Brez nje bi brskalnik izbral prvo
+                 (`NAR`) in klik na „Premakni" bi snov tiho vložil pod
+                 Naravoslovje. Prazna vrednost je 400, ne tih premik. #}
+              {% if not snov.koda_znana %}
+                <option value="" selected>{{ snov.koda }} — ni na seznamu; izberi predmet</option>
+              {% endif %}
               {% for predmet in predmeti %}
                 <option value="{{ predmet.koda }}"{% if predmet.koda == snov.koda %} selected{% endif %}>{{ predmet.koda }} — {{ predmet.oznaka }}</option>
               {% endfor %}

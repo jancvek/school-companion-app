@@ -182,6 +182,11 @@ def _pogled_podrobno(
             # (`ADR-011`). Obrazec, ki ga stran izriše zaman, bi lagal —
             # in gumb, ki ga ne izriše, ni varovalka, zato ista dva pogoja
             # nosi tudi `premakni_v_predmet`.
+            # Ali je trenutna koda med desetimi. Snov s kodo iz starejše
+            # gradnje telefona v izbiri ne more biti označena kot trenutna,
+            # in brez tega bi brskalnik sam pokazal prvo možnost (`NAR`) —
+            # neprevidna potrditev obrazca bi jo vložila pod Naravoslovje.
+            "koda_znana": poisci_predmet(material.subject) is not None,
             "premik_mozen": (
                 material.status != STATUS_V_OBDELAVI and material.archived_at is None
             ),
@@ -420,9 +425,10 @@ def snov(
         request,
         "snov.html",
         # `PREDMETI` in ne kode iz baze: premik je mogoč samo v enega od
-        # desetih predmetov urnika (`ADR-040`). Snov s kodo, ki je na seznamu
-        # ni, je zato v izbiri videti kot nobena — in prav zato je premik
-        # edino, kar jo spravi nazaj med deset.
+        # desetih predmetov urnika (`ADR-040`), in prav premik je edino, kar
+        # snov z neznano kodo spravi nazaj med deset. Da taka snov v izbiri
+        # nima tihega privzetka, poskrbi `koda_znana` in vodilna možnost v
+        # predlogi.
         {"snov": pogled, "povecava": povecava, "predmeti": PREDMETI},
     )
 
