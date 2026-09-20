@@ -36,7 +36,7 @@ from app.models import (
 from app.obdelava import obdelaj_cakajoce
 from app.routers.materials import SPOROCILO_TUJ_ID
 from app.worker import obnovi_obticale
-from tests.conftest import CVEK_ID, SejaTesta
+from tests.conftest import CVEK_ID, OTROK_ID, SejaTesta, ustvari_otroka
 from tests.test_kvizi import objavi
 from tests.test_obdelava import klicalec_vrne, uspesen_izid
 from tests.test_resevanje import poskus, poslji
@@ -45,6 +45,11 @@ from tests.test_rezultat import postavke
 #: Druga družina. Kanoničen UUID, ker iz njega nastane mapa slik.
 DRUGA_ID = "9d4c2b1a-7e6f-4d5c-8b3a-1f2e3d4c5b6a"
 
+#: Otrok **druge** družine (V3-R07). Snov in kviz nosita otroka, ta pa pripada
+#: natanko eni družini — tuja snov z otrokom družine Cvek bi bila stanje, ki
+#: na produkciji ne nastane, in bi test tesnjenja delala lažje, kot je.
+DRUGA_OTROK_ID = "7c8d9e0f-1a2b-4c3d-8e5f-6a7b8c9d0e1f"
+
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 UUID_DVA = "a1b2c3d4-e5f6-4789-abcd-ef0123456789"
 
@@ -52,15 +57,46 @@ UUID_DVA = "a1b2c3d4-e5f6-4789-abcd-ef0123456789"
 REPOZITORIJI = (MaterialsRepository, KviziRepository, StatistikaRepository, ClaniRepository)
 
 
+@pytest.fixture(autouse=True)
+def _cvek_ima_otroka(otrok: str) -> str:
+    """Družina Cvek ima otroka, tako kot na produkciji (migracija `0008`).
+
+    Od `V3-R07` kviz brez naslovljenca ne obstaja (`ADR-039` A); brez te
+    vrstice bi `objavi` vrnil 409 in testi tesnjenja ne bi imeli česa tesniti.
+    """
+    return otrok
+
+
 def dodaj_druzino(
     motor: Engine,
     family_id: str = DRUGA_ID,
     created_at: datetime = datetime(2026, 9, 2, tzinfo=UTC),
-) -> None:
-    """Še ena družina poleg Cvek, ki jo ima vsaka testna baza."""
+    *,
+    z_otrokom: bool = True,
+) -> str | None:
+    """Še ena družina poleg Cvek, ki jo ima vsaka testna baza.
+
+    Privzeto dobi **svojega otroka** (V3-R07) in vrne njegov `id`: od
+    `ADR-039` ima vsaka snov, vsak kviz in vsak poskus otroka, in ta pripada
+    natanko eni družini. Snov s tujim otrokom je stanje, ki na produkciji ne
+    nastane, in bi test tesnjenja delala lažje, kot je.
+
+    `z_otrokom=False` je za klicatelja, ki si otroka ustvari sam
+    (`test_tesnjenje.py`); dva otroka v isti družini bi tam le zameglila,
+    čigava sled je čigava.
+    """
     with Session(motor) as seja:
         seja.add(Family(id=family_id, name="Druga", created_at=created_at))
         seja.commit()
+    if not z_otrokom:
+        return None
+    return ustvari_otroka(
+        motor,
+        user_id=DRUGA_OTROK_ID if family_id == DRUGA_ID else None,
+        family_id=family_id,
+        identifikator=f"otrok-{family_id[:8]}",
+        prikazno_ime="Tuji otrok",
+    )
 
 
 def snov_druzine(
@@ -70,14 +106,23 @@ def snov_druzine(
     material_id: str,
     *,
     status: str = STATUS_NOV,
+    child_id: str | None = None,
 ) -> Path:
-    """Snov dane družine s sliko v mapi te družine; vrne pot do slike."""
+    """Snov dane družine s sliko v mapi te družine; vrne pot do slike.
+
+    Privzeti otrok je otrok **te** družine: Maša za Cvek, tuji otrok za drugo
+    (V3-R07). Snov, ki bi nosila otroka tuje družine, je stanje, ki na
+    produkciji ne nastane.
+    """
+    if child_id is None:
+        child_id = OTROK_ID if family_id == CVEK_ID else DRUGA_OTROK_ID
     pot = slike / family_id / f"{material_id}.jpg"
     pot.parent.mkdir(parents=True, exist_ok=True)
     pot.write_bytes(f"slika-{family_id[:4]}".encode())
     with Session(motor) as seja:
         seja.add(
             Material(
+                child_id=child_id,
                 id=material_id,
                 family_id=family_id,
                 subject="MAT",
@@ -305,6 +350,7 @@ class TestObdelavaPoDruzinah:
         with Session(motor) as seja:
             seja.add(
                 Material(
+                    child_id=OTROK_ID,
                     id=UUID_ENA,
                     family_id=CVEK_ID,
                     subject="MAT",
@@ -398,6 +444,7 @@ class TestMejaMapeVUsmerjevalnikih:
         zdaj = datetime.now(UTC)
         with Session(motor) as seja:
             material = Material(
+                child_id=OTROK_ID,
                 id=UUID_ENA,
                 family_id=CVEK_ID,
                 subject="MAT",

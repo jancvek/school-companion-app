@@ -231,3 +231,32 @@ je zavestna izbira, ne posledica. `questions.child_id` ne obstaja.
   `V2-R02` (zožena pogodba, D), `V2-R03` (oznaka naslovljenca), `V2-R04` in
   `V2-R07` (izbirnik otroka, B in F), `V3-R01` (tesnjenje dobi nove primere),
   `V3-R09` (izbira otroka sledi B).
+
+## Dopolnitve med izvedbo (20. 9. 2026)
+
+Dvoje, česar F ob svojem nastanku ni naštel in se je pokazalo šele ob izrisu.
+Obe **dopolnjujeta** F, ne razveljavljata ga.
+
+### F1 — izbirnik kvizov nosi ime otroka pri vsaki vrstici snovi
+
+F je naštel štiri strani z oznako in izbirnika ni omenil. Brez nje pa starš
+dveh otrok v *Ročni izbiri* vidi pomešan seznam brez podatka, čigava je katera
+slika — in prav ta seznam je edini, kjer je mešanje **namerno** (G: snov je
+last družine, da sme starš iz snovi enega otroka sestaviti kviz za drugega).
+Oznaka je torej cena, ki jo G nalaga sam.
+
+Velja isto pravilo kot povsod: izriše se samo pri več kot enem otroku.
+
+### F2 — kdo je na katerem seznamu otrok
+
+Dva bralca, dve pravili, in razlika ni okras:
+
+- **sestavljalnik kvizov** ponudi samo **aktivne** otroke (A): deaktiviran
+  otrok se ne more prijaviti, zato kviza zanj ni mogoče rešiti;
+- **statistika in pregled po dnevih** naštejeta **vse**, tudi deaktivirane.
+  Podatki deaktiviranega otroka ostanejo (`V3-R06`, „nič se ne briše"), in
+  seznam, ki bi ga izpustil, bi jih naredil nedosegljive — kar bi bilo
+  brisanje po drugi poti, le da tiho.
+
+Isto velja za preslikavo imen pri oznakah: vsebuje tudi deaktivirane otroke,
+sicer bi vrstice po deaktivaciji izgubile oznako.

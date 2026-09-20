@@ -25,6 +25,21 @@ from tests.test_kvizi import UUID_DVA, UUID_ENA, objavi, snov, upokoji
 from tests.test_resevanje import poskus, poslji
 
 
+@pytest.fixture(autouse=True)
+def _druzina_ima_otroka(otrok: str) -> str:
+    """Družina Cvek ima otroka — tako kot na produkciji (migracija `0008`).
+
+    Od `V3-R07` je otrok del pomena teh strani: kviz brez naslovljenca ne
+    obstaja (`docs/odlocitve/ADR-039` A), statistika in pregled po dnevih pa
+    sta vezana nanj (B). Brez te vrstice bi testi tekli nad družino, kakršne
+    na produkciji ni, in bi merili prazno stran.
+
+    `autouse`, ker gre za **okolje** teh testov in ne za njihov vhod; test, ki
+    potrebuje družino **brez** otroka, ga deaktivira ali izbriše sam.
+    """
+    return otrok
+
+
 def postavke(motor: Engine, quiz_id: str) -> list[str]:
     """Identifikatorji postavk kviza po zaporedju."""
     with Session(motor) as seja:
@@ -241,12 +256,22 @@ class TestSkupine:
         assert "Prekliči kviz" in besedilo
         assert f'action="/admin/quizzes/{quiz_id}/cancel"' in besedilo
 
-    def test_pove_da_je_samoocena(
+    def test_pove_da_je_samoocena_in_cigava(
         self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
+        """`ADR-014`: kjer se ocena prikaže, mora biti jasno, **čigava** trditev je.
+
+        Do `V3-R07` je bilo ime zapisano na trdo („Mašina samoocena"). V
+        družini z dvema otrokoma bi eno ime lagalo o drugem, zato stavek odslej
+        imenuje naslovljenca kviza (`ADR-039` F). Prepis je zavesten; trditev,
+        ki jo test varuje, je ista.
+        """
         quiz_id = resen_kviz(odjemalec, motor, slike, ["tezko"], telefon)
 
-        assert "Mašina samoocena" in stran(odjemalec, quiz_id)
+        besedilo = stran(odjemalec, quiz_id)
+        assert "samoocena" in besedilo
+        # Ime otroka, ki ga ustvari fixture `otrok`.
+        assert "Maša" in besedilo
 
     def test_rezultat_ponudi_tisk(
         self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
@@ -714,7 +739,7 @@ def stej_poizvedbe(motor: Engine, klic: Callable[[], object]) -> int:
 class TestPoizvedbe:
     """Rezultat ne sme brati poskusa ali snovi na postavko."""
 
-    def test_rezultat_je_pet_poizvedb(
+    def test_rezultat_je_sest_poizvedb(
         self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta
     ) -> None:
         # Družina pride iz seje in ne iz poizvedbe (V3-R03), branja seje pa
@@ -726,7 +751,13 @@ class TestPoizvedbe:
 
         koliko = stej_poizvedbe(motor, lambda: odjemalec.get(f"/admin/quizzes/{quiz_id}"))
 
-        assert koliko <= 5, f"rezultat je opravil {koliko} poizvedb"
+        # Kviz, postavke, vprašanja, snovi, poskusi — in od V3-R07 še otroci
+        # družine, ker mora stran povedati, čigav rezultat bereš (`ADR-039` F).
+        #
+        # **Pet je postalo šest in to je zavesten prepis:** lastnost, ki jo ta
+        # test varuje, je „stalno število ne glede na dolžino kviza". Dvajset
+        # postavk je tu prav zato, da bi N+1 padel.
+        assert koliko <= 6, f"rezultat je opravil {koliko} poizvedb"
 
     def test_nereseni_kviz_ne_placa_poizvedb_rezultata(
         self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta

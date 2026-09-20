@@ -57,6 +57,7 @@ from app.models import (
 )
 from tests.conftest import (
     CVEK_ID,
+    OTROK_ID,
     PrijavljenOdjemalec,
     prijavi,
     ustvari_otroka,
@@ -132,12 +133,28 @@ def _zgradi(
     posneto = datetime.now(UTC)
     vprasanja = tuple(f"q-{znak}-{i}" for i in range(1, 6))
 
+    # Osebi nastaneta **pred** snovjo: od V3-R07 snov nosi otroka, ki jo je
+    # poslikal (`ADR-039`), in ta mora biti otrok te družine. Snov s tujim
+    # otrokom je stanje, ki na produkciji ne nastane, in bi ta test delala
+    # lažje, kot je.
+    #
+    # `user_id=None` da naključen `id`: obe družini gresta skozi isto pot in
+    # stalni privzetek iz `conftest` bi drugo podrl na primarnem ključu.
+    stars_id = ustvari_starsa(motor, family_id=family_id, identifikator=znak.lower())
+    otrok_id = ustvari_otroka(
+        motor,
+        user_id=None,
+        family_id=family_id,
+        identifikator=f"otrok-{znak}".lower(),
+    )
+
     with Session(motor) as seja:
         for vloga, material_id in idji.items():
             pot = slike / family_id / f"{material_id}.jpg"
             pot.parent.mkdir(parents=True, exist_ok=True)
             pot.write_bytes(f"slika {znak} {vloga}".encode())
             material = Material(
+                child_id=otrok_id,
                 id=material_id,
                 family_id=family_id,
                 subject=subject,
@@ -174,11 +191,7 @@ def _zgradi(
     # telefon z žetonom otroka v glavi. Do V3-R04 je bila druga polovica
     # začasna odvisnost, ki jo je bilo mogoče podtakniti mimo prijave —
     # tesnjenje telefona je zato šele odslej tesnjenje prave poti.
-    stars_id = ustvari_starsa(motor, family_id=family_id, identifikator=znak.lower())
     prijavi(odjemalec, motor, stars_id)
-    otrok_id = ustvari_otroka(
-        motor, family_id=family_id, identifikator=f"otrok-{znak}".lower()
-    )
     telefon = ustvari_sejo(motor, otrok_id)
     odjemalec.headers.update(telefon.glave)
     resen = objavi(
@@ -237,7 +250,8 @@ def druzini(
     sliko prejela prej kot A, da `nazadnje_prejeto` ne more slučajno vrniti
     pravega časa iz napačne družine.
     """
-    dodaj_druzino(motor)
+    # Brez otroka: `_zgradi` ga ustvari sam, za obe družini po isti poti.
+    dodaj_druzino(motor, z_otrokom=False)
     zdaj = datetime.now(UTC)
     a = _zgradi(
         aplikacija,
@@ -698,7 +712,7 @@ PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
         {
             x.id
             for x in _m(s, b).seznam_po_obdobju(
-                b.posneto - timedelta(days=1), b.posneto + timedelta(days=1)
+                b.posneto - timedelta(days=1), b.posneto + timedelta(days=1), b.otrok_id
             )
         }
         == {b.akt, b.nova, b.obticala}
@@ -725,6 +739,7 @@ PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
     ("MaterialsRepository", "vstavi_ce_ga_ni"): lambda s, a, b: (
         _m(s, b).vstavi_ce_ga_ni(
             Material(
+                child_id=OTROK_ID,
                 id=a.akt,
                 family_id=b.family_id,
                 subject=b.subject,
@@ -740,9 +755,20 @@ PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
         _m(s, b).zapisi_izid(a.akt, IzidObdelave(status=STATUS_PRIPRAVLJEN)) is False
     ),
     # KviziRepository
+    # Dva vdora na isti poti, zato dva primera v enem: tuje vprašanje **in**
+    # tuj naslovljenec. Oba sta `ValueError` (`ADR-039` A); usmerjevalnik
+    # drugega prestreže prej in naredi 404.
     ("KviziRepository", "objavi"): lambda s, a, b: _vrze(
         ValueError,
-        lambda: _k(s, b).objavi("Vdor", a.subject, [_nalozi(s, Question, a.vprasanja[0])]),
+        lambda: _k(s, b).objavi(
+            "Vdor", a.subject, [_nalozi(s, Question, a.vprasanja[0])], b.otrok_id
+        ),
+    )
+    and _vrze(
+        ValueError,
+        lambda: _k(s, b).objavi(
+            "Vdor", b.subject, [_nalozi(s, Question, b.vprasanja[0])], a.otrok_id
+        ),
     ),
     ("KviziRepository", "poisci"): lambda s, a, b: _k(s, b).poisci(a.resen_kviz) is None,
     ("KviziRepository", "poskusi_kviza"): lambda s, a, b: (
@@ -753,7 +779,7 @@ PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
         {kviz.id for kviz, _ in _k(s, b).seznam()} == {b.resen_kviz, b.odprt_kviz}
     ),
     ("KviziRepository", "seznam_za_telefon"): lambda s, a, b: (
-        [c.kviz.id for c in _k(s, b).seznam_za_telefon()] == [b.odprt_kviz]
+        [c.kviz.id for c in _k(s, b).seznam_za_telefon(b.otrok_id)] == [b.odprt_kviz]
     ),
     ("KviziRepository", "snovi_postavk"): lambda s, a, b: (
         _k(s, b).snovi_postavk(_nalozi(s, Quiz, a.resen_kviz)) == {}
@@ -762,23 +788,27 @@ PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
         _k(s, b).snovi_z_vprasanji([a.akt], 3) == []
     ),
     ("KviziRepository", "snovi_za_izbor"): lambda s, a, b: (
-        {x.material.id for x in _k(s, b).snovi_za_izbor()} == {b.akt, b.nova, b.obticala}
+        {x.material.id for x in _k(s, b).snovi_za_izbor(b.otrok_id)}
+        == {b.akt, b.nova, b.obticala}
     ),
     ("KviziRepository", "vprasanja_po_idjih"): lambda s, a, b: (
         _k(s, b).vprasanja_po_idjih([a.vprasanja[0]]) is None
     ),
     ("KviziRepository", "zapisi_poskuse"): lambda s, a, b: (
-        _k(s, b).zapisi_poskuse([_poskus(a.postavka_odprtega)]) is None
+        _k(s, b).zapisi_poskuse([_poskus(a.postavka_odprtega)], b.otrok_id) is None
     ),
     # StatistikaRepository
     ("StatistikaRepository", "casi_poskusov"): lambda s, a, b: (
-        len(_s(s, b).casi_poskusov()) == len(b.poskusi)
+        len(_s(s, b).casi_poskusov(b.otrok_id)) == len(b.poskusi)
+        and _s(s, b).casi_poskusov(a.otrok_id) == []
     ),
     ("StatistikaRepository", "ima_poskuse"): lambda s, a, b: (
-        _s(s, b).ima_poskuse(a.subject) is False
+        _s(s, b).ima_poskuse(a.subject, b.otrok_id) is False
+        and _s(s, b).ima_poskuse(b.subject, a.otrok_id) is False
     ),
     ("StatistikaRepository", "poskusi"): lambda s, a, b: (
-        {p.quiz_id for p in _s(s, b).poskusi()} == {b.resen_kviz}
+        {p.quiz_id for p in _s(s, b).poskusi(b.otrok_id)} == {b.resen_kviz}
+        and _s(s, b).poskusi(a.otrok_id) == []
     ),
     ("StatistikaRepository", "snovi"): lambda s, a, b: _s(s, b).snovi([a.akt]) == {},
     # ClaniRepository (V3-R06)
@@ -789,6 +819,12 @@ PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
     ),
     ("ClaniRepository", "nastavi_aktivnost"): lambda s, a, b: (
         _c(s, b).nastavi_aktivnost(a.otrok_id, aktiven=False) is False
+    ),
+    # Nova v `V3-R07`: vir izbirnika otroka in privzetka. Tuj otrok se v njej
+    # ne sme pojaviti — sicer bi ga izbirnik ponudil in `?otrok=` bi ga sprejel.
+    ("ClaniRepository", "otroci"): lambda s, a, b: (
+        {clan.user_id for clan in _c(s, b).otroci()} == {b.otrok_id}
+        and {clan.user_id for clan in _c(s, b).otroci(samo_aktivni=True)} == {b.otrok_id}
     ),
     ("ClaniRepository", "ponastavi_geslo"): lambda s, a, b: (
         _c(s, b).ponastavi_geslo(a.otrok_id, "vlomljena-zgostitev", datetime.now(UTC)) is False

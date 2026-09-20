@@ -79,7 +79,10 @@ export default function ResevanjeKvizaScreen() {
     return () => {
       aktiven = false;
     };
-  }, [database, id]);
+    // `lastnik` je med odvisnostmi namenoma: odjava med odprtim kvizom mora
+    // zaslon ponovno naložiti, sicer bi ostal na vsebini prejšnjega otroka
+    // (V3-R07).
+  }, [database, id, lastnik]);
 
   const indeks = kviz ? kviz.postavke.findIndex((postavka) => !postavka.odgovorjena) : -1;
   const trenutna = kviz && indeks >= 0 ? kviz.postavke[indeks] : null;

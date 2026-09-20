@@ -32,7 +32,22 @@ from app.casi import danes, dnevi_od_do, pas
 from app.db import MaterialsRepository
 from app.models import STATUS_NOV, Material
 from app.routers.dnevi import DNI_V_TEDNU, Obdobje, preberi_obdobje
-from tests.conftest import CVEK_ID
+from tests.conftest import CVEK_ID, OTROK_ID
+
+
+@pytest.fixture(autouse=True)
+def _druzina_ima_otroka(otrok: str) -> str:
+    """Družina Cvek ima otroka — tako kot na produkciji (migracija `0008`).
+
+    Od `V3-R07` je otrok del pomena teh strani: kviz brez naslovljenca ne
+    obstaja (`docs/odlocitve/ADR-039` A), statistika in pregled po dnevih pa
+    sta vezana nanj (B). Brez te vrstice bi testi tekli nad družino, kakršne
+    na produkciji ni, in bi merili prazno stran.
+
+    `autouse`, ker gre za **okolje** teh testov in ne za njihov vhod; test, ki
+    potrebuje družino **brez** otroka, ga deaktivira ali izbriše sam.
+    """
+    return otrok
 
 POT = "/admin/days"
 
@@ -82,6 +97,7 @@ def zapisi(
     received_at: datetime = PREJETO,
     vsebina: bytes | None = b"slika",
     arhivirano: datetime | None = None,
+    child_id: str = OTROK_ID,
 ) -> None:
     """Ustvari zapis in (privzeto) njegovo datoteko."""
     pot = slike / CVEK_ID / f"{material_id}.jpg"
@@ -91,6 +107,7 @@ def zapisi(
     with Session(motor) as seja:
         seja.add(
             Material(
+                child_id=child_id,
                 family_id=CVEK_ID,
                 id=material_id,
                 subject=subject,
@@ -211,7 +228,7 @@ class TestPoizvedbaObdobja:
         od, do = dnevi_od_do(date(2026, 9, 8), date(2026, 9, 8))
 
         with Session(motor) as seja:
-            najdeno = MaterialsRepository(seja, CVEK_ID).seznam_po_obdobju(od, do)
+            najdeno = MaterialsRepository(seja, CVEK_ID).seznam_po_obdobju(od, do, OTROK_ID)
 
         assert [snov.id for snov in najdeno] == ["polnoc"]
 
@@ -222,7 +239,7 @@ class TestPoizvedbaObdobja:
         od, do = dnevi_od_do(date(2026, 9, 8), date(2026, 9, 8))
 
         with Session(motor) as seja:
-            najdeno = MaterialsRepository(seja, CVEK_ID).seznam_po_obdobju(od, do)
+            najdeno = MaterialsRepository(seja, CVEK_ID).seznam_po_obdobju(od, do, OTROK_ID)
 
         assert najdeno == []
 
@@ -233,7 +250,7 @@ class TestPoizvedbaObdobja:
         od, do = dnevi_od_do(date(2026, 9, 6), date(2026, 9, 12))
 
         with Session(motor) as seja:
-            najdeno = MaterialsRepository(seja, CVEK_ID).seznam_po_obdobju(od, do)
+            najdeno = MaterialsRepository(seja, CVEK_ID).seznam_po_obdobju(od, do, OTROK_ID)
 
         assert [snov.id for snov in najdeno] == ["prvi", "zadnji"]
 
@@ -720,3 +737,64 @@ class TestDosegljivostInMeje:
 
         assert "2 sliki" in besedilo
         assert "2 slik" not in besedilo.replace("2 sliki", "")
+
+
+class TestIzbiraOtroka:
+    """Pregled po dnevih je od `V3-R07` ločen po otroku (`ADR-039` B)."""
+
+    def test_pri_enem_otroku_izbirnika_ni(self, odjemalec: TestClient) -> None:
+        """Kriterij `V3-R07`: vmesnik družine z enim otrokom se ne spremeni."""
+        besedilo = odjemalec.get("/admin/days").text
+
+        assert '<select name="otrok">' not in besedilo
+
+    def test_pokaze_samo_snov_izbranega_otroka(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str, brat: str
+    ) -> None:
+        danes_ob = lokalno(danes())
+        zapisi(motor, slike, "masina", taken_at=danes_ob, child_id=otrok)
+        zapisi(motor, slike, "bratova", taken_at=danes_ob, child_id=brat)
+
+        masin = odjemalec.get("/admin/days", params={"otrok": otrok}).text
+        bratov = odjemalec.get("/admin/days", params={"otrok": brat}).text
+
+        assert sidro("masina") in masin
+        assert sidro("bratova") not in masin
+        assert sidro("bratova") in bratov
+        assert sidro("masina") not in bratov
+
+    def test_privzeti_otrok_je_prvi_po_imenu(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str, brat: str
+    ) -> None:
+        """`Maša` je po abecedi pred `Nejc`, zato je privzeta ona."""
+        danes_ob = lokalno(danes())
+        zapisi(motor, slike, "masina", taken_at=danes_ob, child_id=otrok)
+        zapisi(motor, slike, "bratova", taken_at=danes_ob, child_id=brat)
+
+        besedilo = odjemalec.get("/admin/days").text
+
+        assert sidro("masina") in besedilo
+        assert sidro("bratova") not in besedilo
+
+    def test_tuj_otrok_je_404(self, odjemalec: TestClient, tuj_otrok: str) -> None:
+        """Ni 400 in ni tih padec na privzetek: otrok je identiteta podatkov."""
+        odgovor = odjemalec.get("/admin/days", params={"otrok": tuj_otrok})
+
+        assert odgovor.status_code == 404
+        assert "Tega otroka v tvoji družini ni." in odgovor.text
+
+    def test_neznan_otrok_je_404(self, odjemalec: TestClient) -> None:
+        odgovor = odjemalec.get("/admin/days", params={"otrok": "ni-tak-id"})
+
+        assert odgovor.status_code == 404
+
+    def test_gumbi_obdobja_ohranijo_otroka(
+        self, odjemalec: TestClient, brat: str
+    ) -> None:
+        """Dve izbiri, od katerih vsaka pobriše drugo, sta neuporabna vmesnik."""
+        besedilo = odjemalec.get("/admin/days", params={"otrok": brat}).text
+
+        # „Danes" nima drugega parametra, zato `?`; „Včeraj" in „Ta teden" ga
+        # imata, zato `&` — in Jinja ga v HTML zapiše kot `&amp;`.
+        assert f'href="/admin/days?otrok={brat}"' in besedilo
+        assert f'href="/admin/days?obdobje=teden&amp;otrok={brat}"' in besedilo

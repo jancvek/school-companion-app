@@ -20,8 +20,18 @@ from sqlalchemy.orm import Session
 from app.models import OCENE, Question, QuestionAttempt, Quiz
 from app.models import QuizItem as Postavka
 from app.schemas import NAJVEC_POSKUSOV
-from tests.conftest import CVEK_ID, SejaTesta
+from tests.conftest import (
+    CVEK_ID,
+    OTROK_ID,
+    SejaTesta,
+    ustvari_otroka,
+    ustvari_sejo,
+)
 from tests.test_kvizi import UUID_ENA, objavi, snov
+
+#: Stalen `id` drugega otroka družine Cvek (V3-R07). Stalen iz istega razloga
+#: kot `OTROK_ID`: test ga potrebuje v trditvah, ne le ob nastanku.
+BRAT_ID = "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e"
 
 #: Trenutek, ko je bilo prvo vprašanje pokazano. Razmiki do razkritja in ocene
 #: so različni, da test loči tri žige med sabo.
@@ -36,12 +46,19 @@ def kviz(
     postavk: int = 3,
     preklican: bool = False,
     ustvarjen: datetime | None = None,
+    naslovljenec: str = OTROK_ID,
 ) -> tuple[str, list[str]]:
-    """Objavljen kviz z danim številom postavk; vrne `id` kviza in postavk."""
+    """Objavljen kviz z danim številom postavk; vrne `id` kviza in postavk.
+
+    `naslovljenec` je privzeto edini otrok družine Cvek. Test z **dvema**
+    otrokoma ga poda izrecno — od `V3-R07` kviz brez naslovljenca ne obstaja
+    (`docs/odlocitve/ADR-039` A).
+    """
     quiz_id = str(uuid4())
     idji = [str(uuid4()) for _ in range(postavk)]
     with Session(motor) as seja:
         nov = Quiz(
+            child_id=naslovljenec,
             family_id=CVEK_ID,
             id=quiz_id,
             name="MAT — 10. 9. 2026",
@@ -480,3 +497,108 @@ def test_stevilo_kvizov_in_postavk_se_ne_spremeni(
     with Session(motor) as seja:
         assert seja.scalar(select(func.count()).select_from(Quiz)) == 1
         assert seja.scalar(select(func.count()).select_from(Postavka)) == 2
+
+
+class TestDvaOtroka:
+    """Kviz je od `V3-R07` naslovljen na enega otroka (`ADR-039`).
+
+    **Regresijski test z dvema otrokoma iste družine**, in ne z dvema
+    družinama: meja družine je pokrita v `test_tesnjenje.py`, tu gre za mejo
+    **znotraj** ene družine, ki je `V3-R01` ni znal postaviti.
+    """
+
+    @pytest.fixture
+    def brat(self, motor: Engine) -> str:
+        """Drugi otrok iste družine; identifikator je enoličen čez namestitev."""
+        return ustvari_otroka(
+            motor, user_id=BRAT_ID, identifikator="nejc", prikazno_ime="Nejc"
+        )
+
+    @pytest.fixture
+    def bratov_telefon(self, motor: Engine, brat: str) -> SejaTesta:
+        return ustvari_sejo(motor, brat)
+
+    def test_vsak_otrok_dobi_samo_svoje_kvize(
+        self,
+        odjemalec: TestClient,
+        motor: Engine,
+        telefon: SejaTesta,
+        brat: str,
+        bratov_telefon: SejaTesta,
+    ) -> None:
+        masin, _ = kviz(motor, postavk=1)
+        bratov, _ = kviz(motor, postavk=1, naslovljenec=brat)
+
+        assert [k["id"] for k in cakajoci(odjemalec, telefon)] == [masin]
+        assert [k["id"] for k in cakajoci(odjemalec, bratov_telefon)] == [bratov]
+
+    def test_poskus_za_tuj_kviz_se_sprejme_in_ne_zapise(
+        self,
+        odjemalec: TestClient,
+        motor: Engine,
+        brat: str,
+        bratov_telefon: SejaTesta,
+    ) -> None:
+        """`ADR-039` D: `200`, `recorded` ga ne šteje, v bazi ga ni.
+
+        Ne `422`: po `ADR-020` bi telefon paket razbil in tak poskus bi obtičal
+        za vedno. Nastane samo iz zastarelih lokalnih podatkov na skupnem
+        telefonu.
+        """
+        _masin, masine_postavke = kviz(motor, postavk=1)
+
+        odgovor = poslji(odjemalec, [poskus(masine_postavke[0])], bratov_telefon)
+
+        assert odgovor.status_code == 200, odgovor.text
+        assert odgovor.json()["recorded"] == 0
+        assert poskusi_v_bazi(motor) == []
+
+    def test_paket_s_tujim_in_svojim_zapise_samo_svojega(
+        self,
+        odjemalec: TestClient,
+        motor: Engine,
+        brat: str,
+        bratov_telefon: SejaTesta,
+    ) -> None:
+        """Tuja postavka paketa ne podre — ni `None` in ni `422`.
+
+        Postavka, ki je **ni**, paket zavrne v celoti; postavka tujega
+        naslovljenca pa obstaja in se samo preskoči. Razlika mora biti vidna.
+        """
+        _masin, masine = kviz(motor, postavk=1)
+        _bratov, bratove = kviz(motor, postavk=1, naslovljenec=brat)
+
+        odgovor = poslji(
+            odjemalec, [poskus(masine[0]), poskus(bratove[0])], bratov_telefon
+        )
+
+        assert odgovor.status_code == 200, odgovor.text
+        assert odgovor.json()["recorded"] == 1
+        zapisani = poskusi_v_bazi(motor)
+        assert [p.quiz_item_id for p in zapisani] == [bratove[0]]
+        assert [p.child_id for p in zapisani] == [brat]
+
+    def test_poskus_nosi_otroka_iz_seje(
+        self, odjemalec: TestClient, motor: Engine, telefon: SejaTesta
+    ) -> None:
+        """Odgovarjalca pove seja, ne paket — to je trditev, ki jo je prijava že preverila."""
+        _quiz_id, postavke = kviz(motor, postavk=1)
+
+        assert poslji(odjemalec, [poskus(postavke[0])], telefon).status_code == 200
+
+        assert [p.child_id for p in poskusi_v_bazi(motor)] == [OTROK_ID]
+
+    def test_tuj_kviz_ne_postane_resen(
+        self,
+        odjemalec: TestClient,
+        motor: Engine,
+        brat: str,
+        bratov_telefon: SejaTesta,
+    ) -> None:
+        """Preskočen poskus ne sme kviza drugega otroka razglasiti za rešenega."""
+        masin, masine = kviz(motor, postavk=1)
+
+        assert poslji(odjemalec, [poskus(masine[0])], bratov_telefon).status_code == 200
+
+        with Session(motor) as seja:
+            assert seja.get(Quiz, masin).solved_at is None

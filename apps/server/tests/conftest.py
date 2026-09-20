@@ -49,6 +49,13 @@ GESLO_OTROKA = "geslo-otroka"
 #: potrebuje drugega otroka, ga ustvari z izrecnim `user_id`.
 OTROK_ID = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
 
+#: Drugi otrok družine Cvek (fixture `brat`) in otrok **tuje** družine
+#: (fixture `tuj_otrok`). Stalna iz istega razloga kot `OTROK_ID`: test ju
+#: potrebuje v trditvah, ne le ob nastanku.
+BRAT_ID = "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e"
+TUJA_DRUZINA_ID = "9d4c2b1a-7e6f-4d5c-8b3a-1f2e3d4c5b6a"
+TUJ_OTROK_ID = "7c8d9e0f-1a2b-4c3d-8e5f-6a7b8c9d0e1f"
+
 
 @cache
 def zgostitev(geslo: str) -> str:
@@ -359,6 +366,42 @@ def otrok(motor: Engine) -> str:
 def telefon(motor: Engine, otrok: str) -> SejaTesta:
     """Veljavna seja telefona; `telefon.glave` gre v vsako zahtevo telefona."""
     return ustvari_sejo(motor, otrok)
+
+
+@pytest.fixture
+def brat(motor: Engine) -> str:
+    """**Drugi** otrok družine Cvek (V3-R07).
+
+    Test, ki ga zahteva, s tem preide iz družine z enim otrokom v družino z
+    dvema — in šele tam se vidi, ali kviz, statistika in pregled po dnevih
+    sploh kaj pomenijo (`docs/odlocitve/ADR-039`). Prikazno ime je za `Maša`
+    po abecedi, zato je privzeti otrok še vedno Maša.
+    """
+    return ustvari_otroka(
+        motor, user_id=BRAT_ID, identifikator="nejc", prikazno_ime="Nejc"
+    )
+
+
+@pytest.fixture
+def tuj_otrok(motor: Engine) -> str:
+    """Otrok **druge** družine — sled, ki se ne sme pojaviti nikjer.
+
+    Obstoj tujega računa ni podatek, ki bi ga starš smel dobiti: vsaka pot
+    zanj vrne `404` z istim besedilom kot za neobstoječega (`ADR-038`,
+    `ADR-039` B).
+    """
+    with Session(motor) as seja:
+        seja.add(
+            Family(id=TUJA_DRUZINA_ID, name="Tuja", created_at=datetime(2026, 9, 2, tzinfo=UTC))
+        )
+        seja.commit()
+    return ustvari_otroka(
+        motor,
+        user_id=TUJ_OTROK_ID,
+        family_id=TUJA_DRUZINA_ID,
+        identifikator="tuji-otrok",
+        prikazno_ime="Tuji otrok",
+    )
 
 
 @pytest.fixture

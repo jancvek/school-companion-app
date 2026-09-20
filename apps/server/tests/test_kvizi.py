@@ -27,9 +27,25 @@ from app.models import (
     Question,
     Quiz,
     QuizItem,
+    User,
 )
 from app.routers.kvizi import NAJVEC_IME, NAJVEC_KODA, PRIVZETO_STEVILO
-from tests.conftest import CVEK_ID, SejaTesta, je_seja
+from tests.conftest import CVEK_ID, OTROK_ID, SejaTesta, je_seja
+
+
+@pytest.fixture(autouse=True)
+def _druzina_ima_otroka(otrok: str) -> str:
+    """Družina Cvek ima otroka — tako kot na produkciji (migracija `0008`).
+
+    Od `V3-R07` je otrok del pomena teh strani: kviz brez naslovljenca ne
+    obstaja (`docs/odlocitve/ADR-039` A), statistika in pregled po dnevih pa
+    sta vezana nanj (B). Brez te vrstice bi testi tekli nad družino, kakršne
+    na produkciji ni, in bi merili prazno stran.
+
+    `autouse`, ker gre za **okolje** teh testov in ne za njihov vhod; test, ki
+    potrebuje družino **brez** otroka, ga deaktivira ali izbriše sam.
+    """
+    return otrok
 
 #: Trije stabilni identifikatorji; testi jih berejo iz izrisane strani.
 UUID_ENA = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
@@ -64,6 +80,7 @@ def snov(
 
     with Session(motor) as seja:
         material = Material(
+            child_id=OTROK_ID,
             family_id=CVEK_ID,
             id=material_id,
             subject=subject,
@@ -111,6 +128,7 @@ def objavi(
     subject: str | None = "MAT",
     vstop: str = "nova",
     ime: str = "",
+    otrok: str | None = None,
 ) -> str:
     """Objavi kviz iz danih snovi in vrne `id` nastalega kviza.
 
@@ -127,6 +145,7 @@ def objavi(
             "stevilo": str(koliko),
             "snov": material_ids,
             **({"subject": subject} if subject is not None else {}),
+            **({"otrok": otrok} if otrok is not None else {}),
         },
     )
     assert predogled.status_code == 200, predogled.text
@@ -138,6 +157,15 @@ def objavi(
         "ime": ime,
         "vprasanje": idji,
     }
+    # Naslovljenec potuje skozi predogled v skritem polju; tu ga preberemo iz
+    # izrisa in ne sestavimo na novo — test naj hodi po isti poti kot brskalnik
+    # (`ADR-039` G).
+    if otrok is not None:
+        podatki["otrok"] = otrok
+    else:
+        iz_predogleda = re.findall(r'name="otrok" value="([^"]+)"', predogled.text)
+        assert iz_predogleda, predogled.text
+        podatki["otrok"] = iz_predogleda[0]
     if subject is not None:
         podatki["subject"] = subject
 
@@ -146,11 +174,18 @@ def objavi(
     return odgovor.headers["location"].rsplit("/", 1)[-1]
 
 
-def izbirnik(odjemalec: TestClient, vstop: str = "nova", subject: str | None = "MAT") -> str:
+def izbirnik(
+    odjemalec: TestClient,
+    vstop: str = "nova",
+    subject: str | None = "MAT",
+    otrok: str | None = None,
+) -> str:
     """Besedilo izbirnika za dani vstop."""
     poizvedba = {"vstop": vstop}
     if subject is not None:
         poizvedba["subject"] = subject
+    if otrok is not None:
+        poizvedba["otrok"] = otrok
     odgovor = odjemalec.get("/admin/quizzes/new", params=poizvedba)
     assert odgovor.status_code == 200, odgovor.text
     return odgovor.text
@@ -1073,7 +1108,7 @@ class TestPoizvedbe:
             event.remove(motor, "before_cursor_execute", zabelezi)
         return stevec
 
-    def test_izbirnik_je_tri_poizvedbe_ne_glede_na_stevilo_snovi(
+    def test_izbirnik_je_stiri_poizvedbe_ne_glede_na_stevilo_snovi(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
         # Družina pride iz seje in ne iz poizvedbe (V3-R03), branja seje pa
@@ -1083,8 +1118,15 @@ class TestPoizvedbe:
 
         koliko = self._stej(motor, lambda: izbirnik(odjemalec))
 
-        # Ena za snovi, ena za stevila vprasanj, ena za "ze v kvizu".
-        assert koliko == 3
+        # Ena za snovi, ena za števila vprašanj, ena za „že v kvizu" in ena za
+        # otroke družine (V3-R07: naslovljenec in oznake pri vrsticah).
+        #
+        # **Tri je postalo štiri in to je zavesten prepis** (`ADR-039`):
+        # lastnost, ki jo ta test varuje, je „stalno število poizvedb ne glede
+        # na dolžino seznama", in ta drži naprej — otroci so ena poizvedba na
+        # stran, ne ena na vrstico. Dvanajst snovi je tu prav zato, da bi N+1
+        # padel.
+        assert koliko == 4
 
     def test_stran_kviza_ne_bere_vprasanja_na_postavko(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -1481,3 +1523,162 @@ class TestVarovalkeBrezKlika:
         """
         assert Quiz.name.type.length == NAJVEC_IME
         assert Quiz.subject.type.length == NAJVEC_KODA
+
+
+class TestNaslovljenec:
+    """Kviz je namenjen enemu otroku svoje družine (`docs/odlocitve/ADR-039` A)."""
+
+    def test_objavljen_kviz_nosi_naslovljenca(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str
+    ) -> None:
+        snov(motor, slike)
+
+        quiz_id = objavi(odjemalec, motor, [UUID_ENA])
+
+        with Session(motor) as seja:
+            assert seja.get(Quiz, quiz_id).child_id == otrok
+
+    def test_pri_enem_otroku_izbirnika_ni(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        """Kriterij `V3-R07`: izbirnika, ki nima česa izbirati, ni."""
+        snov(motor, slike)
+
+        besedilo = izbirnik(odjemalec)
+
+        assert 'name="otrok"' in besedilo  # skrito polje, ki nese izbiro naprej
+        assert "<select name=\"otrok\">" not in besedilo
+
+    def test_pri_dveh_otrocih_je_izbirnik(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, brat: str
+    ) -> None:
+        snov(motor, slike)
+
+        besedilo = izbirnik(odjemalec)
+
+        assert '<select name="otrok">' in besedilo
+        assert "Maša" in besedilo
+        assert "Nejc" in besedilo
+
+    def test_izbran_otrok_postane_naslovljenec(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, brat: str
+    ) -> None:
+        snov(motor, slike)
+
+        quiz_id = objavi(odjemalec, motor, [UUID_ENA], otrok=brat)
+
+        with Session(motor) as seja:
+            assert seja.get(Quiz, quiz_id).child_id == brat
+
+    def test_tuj_otrok_je_404(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, tuj_otrok: str
+    ) -> None:
+        """Obstoj tujega računa ni podatek za starša — isto kot `V3-R06`."""
+        snov(motor, slike)
+
+        odgovor = odjemalec.get(
+            "/admin/quizzes/new", params={"vstop": "nova", "subject": "MAT", "otrok": tuj_otrok}
+        )
+
+        assert odgovor.status_code == 404
+        assert "Tega otroka v tvoji družini ni." in odgovor.text
+
+    def test_starsa_ni_mogoce_izbrati_za_naslovljenca(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, stars: str
+    ) -> None:
+        """Naslovljenec je otrok; starš se v mobilno aplikacijo ne prijavi (`ADR-036` D)."""
+        snov(motor, slike)
+
+        odgovor = odjemalec.get(
+            "/admin/quizzes/new", params={"vstop": "nova", "subject": "MAT", "otrok": stars}
+        )
+
+        assert odgovor.status_code == 404
+
+    def test_deaktiviranega_otroka_izbirnik_ne_ponudi(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str, brat: str
+    ) -> None:
+        """Deaktiviran otrok se ne more prijaviti, zato kviza zanj ni mogoče rešiti."""
+        snov(motor, slike)
+        with Session(motor) as seja:
+            seja.get(User, brat).is_active = False
+            seja.commit()
+
+        besedilo = izbirnik(odjemalec)
+
+        assert "Nejc" not in besedilo
+        odgovor = odjemalec.get(
+            "/admin/quizzes/new", params={"vstop": "nova", "subject": "MAT", "otrok": brat}
+        )
+        assert odgovor.status_code == 404
+
+
+class TestDruzinaBrezOtroka:
+    """Kviz brez naslovljenca ne obstaja, zato ga taka družina ne sestavi (`ADR-039` A).
+
+    Razred nima fixture `otrok`, ker je prav njegova odsotnost predmet testa;
+    `_druzina_ima_otroka` je zato tu izklopljen.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _druzina_ima_otroka(self) -> None:
+        """Prepiše modulski fixture: ta družina otroka **nima**."""
+        return None
+
+    def test_izbirnik_je_409(self, odjemalec: TestClient) -> None:
+        odgovor = odjemalec.get("/admin/quizzes/new", params={"vstop": "nova", "subject": "MAT"})
+
+        assert odgovor.status_code == 409
+        assert "nima nobenega aktivnega otroka" in odgovor.text
+        assert "Družina" in odgovor.text
+
+    def test_objava_je_409(self, odjemalec: TestClient) -> None:
+        odgovor = odjemalec.post(
+            "/admin/quizzes",
+            data={"vstop": "nova", "subject": "MAT", "ime": "", "vprasanje": ["karkoli"]},
+            follow_redirects=False,
+        )
+
+        assert odgovor.status_code == 409
+
+    def test_pregled_vstopov_ne_ponudi(self, odjemalec: TestClient) -> None:
+        """Isto pravilo, ki dejanje zavrne, ga tudi ne ponudi (vzorec `ADR-038`)."""
+        besedilo = odjemalec.get("/admin").text
+
+        assert 'value="nova"' not in besedilo
+        # Ista poved kot na strani 409, le da je tu prelomljena čez dve vrstici
+        # predloge; trdimo o delu, ki je v obeh primerih v eni vrstici.
+        assert "Najprej dodaj otroka" in besedilo
+
+
+class TestBilaVKvizuPoNaslovljencu:
+    """`ADR-039` G: snov v kvizu za enega otroka je za drugega še vedno nova."""
+
+    def test_snov_v_kvizu_brata_je_za_maso_se_nova(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str, brat: str
+    ) -> None:
+        snov(motor, slike)
+        objavi(odjemalec, motor, [UUID_ENA], otrok=brat)
+
+        assert je_obkljukana(izbirnik(odjemalec, otrok=otrok), UUID_ENA)
+
+    def test_snov_v_lastnem_kvizu_ni_vec_nova(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str, brat: str
+    ) -> None:
+        snov(motor, slike)
+        objavi(odjemalec, motor, [UUID_ENA], otrok=brat)
+
+        assert not je_obkljukana(izbirnik(odjemalec, otrok=brat), UUID_ENA)
+
+    def test_snov_enega_otroka_gre_v_kviz_drugega(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, brat: str
+    ) -> None:
+        """Kriterij `V3-R07`: vprašanja ostanejo last družine, ne otroka."""
+        snov(motor, slike)
+
+        quiz_id = objavi(odjemalec, motor, [UUID_ENA], otrok=brat)
+
+        with Session(motor) as seja:
+            kviz = seja.get(Quiz, quiz_id)
+            assert kviz.child_id == brat
+            assert len(kviz.postavke) == 3

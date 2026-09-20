@@ -86,9 +86,7 @@
               {% endif %}
 
               <span class="opis">
-                <span class="cas">
-                  {{ snov.koda }} — {{ snov.cas }}{% if snov.otrok %} · {{ snov.otrok }}{% endif %}
-                </span>
+                <span class="cas">{{ snov.koda }} — {{ snov.cas }}{% if snov.otrok %} · {{ snov.otrok }}{% endif %}</span>
                 {% if snov.izbirna %}
                   <span class="stanje">{{ snov.vprasanj }}</span>
                 {% else %}

@@ -20,8 +20,8 @@
 
 | Modul | Odgovornost | Datoteke |
 |---|---|---|
-| `apps/mobile` | Kamera, izbira predmeta, lokalna baza, zgodovina, upload worker, brisanje arhiviranih snovi, reševanje kvizov | `apps/mobile/` (od V1-R01; upload worker od V1-R02; brisanje od V1-R07; kvizi od V2-R02) |
-| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju, arhiv, sestavljalnik kvizov, poskusi reševanja, rezultat in tisk, statistika čez kvize, pregled slik po dnevih, povečan prikaz slike | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03; arhiv od V1-R07; kvizi od V2-R01; poskusi od V2-R02; rezultat od V2-R03; statistika od V2-R04; pregled po dnevih od V2-R07; povečan prikaz od V2-R08) |
+| `apps/mobile` | Kamera, izbira predmeta, lokalna baza, zgodovina, upload worker, brisanje arhiviranih snovi, reševanje kvizov (od V3-R07 samo kvizi prijavljenega otroka) | `apps/mobile/` (od V1-R01; upload worker od V1-R02; brisanje od V1-R07; kvizi od V2-R02) |
+| `apps/server` | Prevzem slik (`POST /materials`), preverba ključa, shramba, operaterska stran `/admin`, vision obdelava v ozadju, arhiv, sestavljalnik kvizov, poskusi reševanja, rezultat in tisk, statistika čez kvize, pregled slik po dnevih, povečan prikaz slike, naslovljenec kviza in lastnik zapisa | `apps/server/` (od V1-R02; `/admin` od V1-R04; obdelava od V1-R03; arhiv od V1-R07; kvizi od V2-R01; poskusi od V2-R02; rezultat od V2-R03; statistika od V2-R04; pregled po dnevih od V2-R07; povečan prikaz od V2-R08) |
 
 Ločena mapi namenoma ne delita orodij za monorepo (npr. Turborepo) — gre za
 dva jezika (TypeScript / Python) brez skupne kode, zato vsaka živi s svojim
@@ -79,7 +79,7 @@ logika testljiva brez naprave.
 | `app/routers/dnevi.py` | pregled slik po obdobju in predmetih pod `/admin/days` (V2-R07) |
 | `app/routers/clani.py` | člani družine pod `/admin/family`: seznam, dodajanje, ponastavitev gesla, deaktivacija in aktivacija (V3-R06) |
 | `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository`, `StatistikaRepository` (V2-R04, samo bere) in `ClaniRepository` (V3-R06) — vsak z obvezno družino (V3-R01) — ter `DruzineRepository` in `PrijavaRepository` (V3-R03), edina brez družine; edina pot do baze |
-| `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03) |
+| `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03); `child_id` na snovi, kvizu in poskusu (V3-R07) |
 | `app/storage.py` | zapis, meja mape in brisanje slik na disku; mapa družine (V3-R01) |
 | `app/vision.py` | **edini modul, ki uvaža `openai`**: prompt, shema odgovora, klic |
 | `app/obdelava.py` | kaj se zgodi z enim zapisom: prevzem, klic, zapis izida. Sinhron |
@@ -91,6 +91,7 @@ logika testljiva brez naprave.
 | `app/routers/vstop.py` | prijava in odjava: `GET/POST /admin/login`, `POST /admin/logout` (V3-R03); `POST /auth/login` in `POST /auth/logout` za telefon (V3-R04) |
 | `app/settings.py` | nastavitve iz okolja |
 | `app/dependencies.py` | odvisnosti poti iz `app.state`; družina iz seje — ene same, za obe strani (`daj_druzino`, V3-R04; začasne `daj_druzino_telefona` ni več) |
+| `app/otroci.py` | izbira otroka v pogledih, ki so ločeni po otroku: privzetek, 404 za tujega, kdaj se izbirnik izriše (V3-R07). Brez FastAPI in brez seje |
 | `app/subjects.py` | predmeti, slovenske oznake stanj in oznake ocen (`OZNAKE_OCEN`, tu od V2-R04) |
 | `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03); šolsko leto in meseci (V2-R04); današnji dan, meje poljubnega obdobja in ura brez datuma (V2-R07) |
 | `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01), 400 (V2-R07) ter 403 (V3-R06); obdelovalec konteksta z glavo in CSRF žetonom (V3-R03) |
@@ -188,11 +189,11 @@ vrsta (`listPending`), števci (`countByStatus`), Zgodovina
 (`listBySubject`), vrnitev v vrsto (`retryFailed`) in nepreneseni poskusi
 (`neprenesenePoskuse`).
 
-**Stik na `attempts` v `cakajociKvizi` in `postavkeKviza` lastnika
-namenoma ne filtrira.** Postavka ima en sam poskus (`UNIQUE (quiz_item_id)`
-tu in „prvi zmaga“ na strežniku, `ADR-019` E), zato bi filtriran stik
-drugemu otroku pokazal neodgovorjeno postavko, ki je ne bi mogel
-odgovoriti. V V3-R04 je kviz še last družine; `V3-R07` to reši tam.
+**Od V3-R07 kviz nosi lastnika in vse tri poizvedbe filtrirajo.** Do takrat
+`cakajociKvizi`, `najdiKviz` in `postavkeKviza` niso filtrirale nič, zato je na
+skupnem telefonu otrok B videl kvize otroka A — tiste, ki so ostali, ker na
+njih visi neprenesen tuj poskus (`ADR-036` C) — in v njih postavke, ki so bile
+zanj videti odgovorjene. Podrobnosti so v razdelku o migraciji 5 spodaj.
 
 `pobrisiKvizeRazen` ne pobriše kviza, na katerem visi **tuj neprenesen
 poskus**: seznam s strežnika je seznam prijavljenega otroka, zato bi bil
@@ -213,6 +214,28 @@ ki jih je med tem naredil kdo drug (`ADR-037`).
 Oznaka je v tej bazi in ne v varni shrambi prav zato, ker obstaja za primer,
 ko odpove varna shramba. Prijava jo počisti — nova prijava prekliče vsako
 nedokončano odjavo pred njo.
+
+#### Lastnik kviza (migracija 5, V3-R07)
+
+`quizzes` dobi `user_id TEXT` (indeksiran, `NULL`-abilen). Test teče nad
+`SHEMA_VERZIJE_4` — dobesedno kopijo baze po migraciji 4, kakršna je na
+Mašinem telefonu pred V3-R07.
+
+`NULL` pomeni isto kot pri `materials`: kviz, ki je na telefon prišel pred to
+migracijo, lastnika nima in ga posvoji prvi obhod prijavljenega otroka
+(`shraniKviz` posodobi **samo iz `NULL`**, vsebina ostane zamrznjena po
+`ADR-016` E). `NOT NULL` bi zahteval ugibanje na napravi, kjer ni nikogar, ki
+bi ga vprašal.
+
+Filtrirajo tri poizvedbe, vse po pravilu `user_id IS ?`, ki velja tudi za
+neprijavljeno aplikacijo:
+
+- `cakajociKvizi` — seznam in števec na domači strani;
+- `najdiKviz` — odprtje kviza; tuj kviz je „kviza ni";
+- `postavkeKviza` — **dva** pogoja: stik na `quizzes` (postavke *mojega*
+  kviza) in filtriran stik na `attempts`. Drugi je nujen: tuj poskus ne sme
+  postavke narediti odgovorjene, sicer bi jo otrok videl kot rešeno in je ne
+  bi mogel odgovoriti — kviz bi na seznamu visel za vedno.
 
 #### Tabele kvizov (migracija 2, V2-R02)
 
@@ -503,6 +526,39 @@ najprej v `<mapa družine>/.tmp/` pod enoličnim imenom in se na končno mesto p
 atomarno; vrstica v bazi nastane šele za datoteko. Prekinjen prenos zato ne
 pusti polovične slike na mestu, kjer jo bo V1-R03 iskal kot celo.
 
+#### Otrok kot lastnik zapisa (V3-R07)
+
+Družina je meja **lastništva** (`ADR-025`), otrok je meja **pomena**: v družini
+z več otroki „kviz" in „statistika" brez njega ne povesta nič.
+
+`child_id VARCHAR(36) NOT NULL` (tuji ključ na `users.id`, brez `ondelete`,
+indeksiran) imajo `materials`, `quizzes` in `question_attempts`.
+
+- **`questions` ga nima** in ga ne dobi: vprašanja ostanejo last družine, da
+  sme starš iz snovi enega otroka sestaviti kviz za drugega. To je kriterij
+  `V3-R07` in zavestna izbira (`ADR-039` G).
+- **`quiz_items` ga izpelje iz kviza**, po isti logiki kot družino
+  (`ADR-029` C).
+- Na `quizzes` je to **naslovljenec** — komu je kviz namenjen; na `materials`
+  in `question_attempts` je to **tisti, ki je posnel oziroma odgovoril**. Ni
+  nujno isti: poskus za kviz drugega otroka se sprejme in **ne zapiše**
+  (`ADR-039` D, drugi tih sprejem poleg „prvi zmaga" iz `ADR-019` E).
+- **Otroka pove seja, nikoli telo zahteve** (`dependencies.daj_otroka`). Na
+  poteh telefona je vsak žeton otrokov, ker se starš v mobilno aplikacijo ne
+  more prijaviti (`ADR-036` D) — zato „zapis brez otroka" ni poseben primer.
+  Pogodba s telefonom se navzven **ne spremeni**: novega polja ni.
+- **Otrok je argument poizvedbe in ne konstruktorja repozitorija**, za razliko
+  od družine: družina je meja izolacije, otrok je izbira pogleda znotraj nje.
+  V konstruktorju bi bil videti kot druga meja, kar ni — starš legitimno gleda
+  oba svoja otroka, le ne obeh hkrati.
+
+Migracija `0009_otrok_na_zapisu` doda stolpce kot `NULL`-abilne, jih zapolni z
+**edinim otrokom vsake družine** in nato naredi obvezne. Družina z nič ali več
+kot enim otrokom migracijo **ustavi z razlago** in ne spremeni ničesar;
+preverba teče pred prvim DDL, ker na SQLite DDL ni v transakciji. Ugibanje bi
+tuje odgovore tiho pripisalo napačni osebi. `downgrade` stolpce spusti in
+dokončno izgubi pripis otroka, vrstic pa ne — isti vzorec kot `0004`.
+
 #### Identiteta: uporabniki, poverilnice in seje (V3-R03)
 
 Model je iz `ADR-027`: **poverilnica ni uporabnik**, zato je Google pozneje
@@ -672,9 +728,9 @@ nje in to preverja `TestBrezJavaScripta`, ki izvzame samo `snov.html`.
 | `/admin/quizzes/{id}` | GET | kviz s postavkami (V2-R01); rešen kviz kot rezultat v skupinah po oceni (V2-R03) |
 | `/admin/quizzes/{id}/print` | GET | stran za tisk rešenega kviza: vprašanja brez odgovorov, prelom, ključ; izbor ocen z obrazcem `GET` (V2-R03) |
 | `/admin/quizzes/{id}/cancel` | POST | prekliče kviz, preusmeri (303) (V2-R01) |
-| `/admin/statistics` | GET | statistika čez kvize po predmetih; okno `?leto=2026` ali `?leto=vse` (V2-R04) |
-| `/admin/statistics/subjects/{koda}` | GET | statistika predmeta: po mesecih, snovi, vprašanja od najtežjega (V2-R04) |
-| `/admin/days` | GET | slike dneva ali zadnjih sedmih dni, po dnevu in predmetu; `?dan=YYYY-MM-DD`, `?obdobje=dan\|teden` (V2-R07) |
+| `/admin/statistics` | GET | statistika čez kvize po predmetih; okno `?leto=2026` ali `?leto=vse` (V2-R04); otrok `?otrok=<id>` (V3-R07) |
+| `/admin/statistics/subjects/{koda}` | GET | statistika predmeta: po mesecih, snovi, vprašanja od najtežjega (V2-R04); `?otrok=` (V3-R07) |
+| `/admin/days` | GET | slike **enega otroka** po dnevu in predmetu; `?dan=YYYY-MM-DD`, `?obdobje=dan\|teden` (V2-R07), `?otrok=<id>` (V3-R07) |
 | `/admin/family` | GET | člani družine z vlogo in stanjem, obrazca za dodajanje (V3-R06) |
 | `/admin/family/children` | POST | doda otroka: prikazno ime, uporabniško ime, začetno geslo (V3-R06) |
 | `/admin/family/parents` | POST | doda starša: prikazno ime, e-naslov, začetno geslo (V3-R06) |
@@ -881,16 +937,34 @@ bi obkljukal tri današnje slike.
 usmerjevalniku (`app/casi.py:dan_od_do`) in se repozitoriju poda kot par UTC
 trenutkov — ta za časovne pasove ne ve.
 
+**Kviz ima naslovljenca** (V3-R07): enega otroka svoje družine, obvezno.
+Izbere se **nad seznamom**, ker odloča, katera snov velja za „že v kvizu";
+privzetek je prvi otrok po prikaznem imenu, polje pa se izriše samo pri več kot
+enem. Menjava otroka gre skozi `GET /new` in ne skozi `POST /new`: kljukice se
+morajo preračunati po pravilu vstopa, česar vrnitev iz predogleda ne sme
+narediti. Skozi predogled naslovljenec potuje v skritem polju, kot ves ostali
+izbor (`ADR-016` C). Ime stoji na predogledu in na obeh gumbih, da privzetek ni
+tiha izbira. Družina **brez aktivnega otroka** vstopov na `/admin` ne dobi in
+pot vrne `409` — isto pravilo odloči oboje (`ADR-039` A).
+
 **„Bila v kvizu" pomeni: kakšno njeno veljavno vprašanje je v nepreklicanem
-kvizu.** Oba pogoja štejeta (`ADR-017` B): preklican kviz ni bil pravi, zato
-se njegova snov spet ponudi, ponovno obdelana snov pa ima novo serijo, ki v
-kvizu še ni bila. Poizvedba gre prek `quiz_items → questions.material_id`;
+kvizu **tega naslovljenca**.** Vsi trije pogoji štejejo (`ADR-017` B, zožen z
+`ADR-039` G): preklican kviz ni bil pravi, zato se njegova snov spet ponudi;
+ponovno obdelana snov ima novo serijo, ki v kvizu še ni bila; in snov, iz
+katere je nastal kviz za sestro, je za brata še vedno nova — sicer bi *Nova
+snov* skrila natanko tisto snov, ki jo kriterij `V3-R07` izrecno dovoli
+uporabiti.
+
+Seznam snovi **ni** omejen na snov naslovljenca: vprašanja so last družine.
+Pri več kot enem otroku vsaka vrstica pove, čigava je snov. Poizvedba gre prek `quiz_items → questions.material_id`;
 tabele `quiz_sources` ni in po `ADR-016` (D) ne bo, dokler ne bo naključnega
 izbora.
 
-Izbirnik so **tri poizvedbe** ne glede na dolžino seznama: ena za snovi, ena
+Izbirnik so **štiri poizvedbe** ne glede na dolžino seznama: ena za snovi, ena
 za števila veljavnih vprašanj (`GROUP BY material_id`), ena za množico snovi,
-ki so že v kvizu. Sličice se nalagajo z `loading="lazy"`, kot na strani
+ki so že v kvizu, in ena za otroke družine (V3-R07). Tri je postalo štiri z
+`V3-R07`; lastnost, ki šteje, je „stalno število ne glede na dolžino seznama",
+in otroci so ena poizvedba na stran, ne ena na vrstico. Sličice se nalagajo z `loading="lazy"`, kot na strani
 predmeta. Seznam predmeta bo čez šolsko leto dolg nekaj sto vrstic; če to
 kdaj postane neuporabno, je pravi popravek ostranjevanje in ne tiho krajšanje
 (`ADR-017` A).
@@ -942,7 +1016,8 @@ strani, tudi starejše. Glej razdelek „Slovenske oblike števil" spodaj.
 
 ## Pregled po dnevih (V2-R07)
 
-`GET /admin/days` pokaže **nearhivirane** slike obdobja, grupirane po lokalnem
+`GET /admin/days` pokaže **nearhivirane** slike **enega otroka** (V3-R07) v
+obdobju, grupirane po lokalnem
 koledarskem dnevu (padajoče) in znotraj dneva po vrstnem redu `PREDMETI`;
 slike znotraj predmeta so **naraščajoče** po `taken_at`, ker so zaporedni
 posnetki strani iste snovi (`ADR-003`). Predmet brez slik tistega dne se ne
@@ -959,6 +1034,12 @@ vpliva, ne sme izgledati, kot da nanj vpliva.
 razlikuje od statistike, kjer nerazberljiv `?leto=` pade na tekoče šolsko leto:
 tam je okno pripomoček nad istimi podatki, tu je datum celoten pomen strani.
 Razlog je zapisan v `ADR-023`, da razlika kdaj ne bo odkrita kot nedoslednost.
+
+**Neveljaven `?otrok=` pa je 404** — tretje pravilo za tretjo vrsto parametra
+(`ADR-039` B): otrok ni ne okno ne datum, ampak **identiteta podatkov**, in za
+identiteto v tem projektu že velja `404` z istim besedilom za tujega in za
+neobstoječega (`ADR-038`). Izbira otroka in izbira obdobja sta neodvisni in
+vsaka mora drugo preživeti, zato gumbi obdobja nosijo `otrok` naprej.
 
 **Meje obdobja so polodprte in lokalne** (`ADR-016` B). Izračuna jih
 `app/casi.py:dnevi_od_do` in repozitoriju poda kot par UTC trenutkov;
@@ -1084,9 +1165,11 @@ takrat je prepis na strani snovi novejši od vprašanja. Te oznake so **samo v
 rezultatu**: stran nerešenega kviza se ne sme spremeniti, ker test iz V2-R01
 dokazuje, da je ponovna obdelava ne spremeni (`prej == potem`).
 
-Rešen kviz je **pet poizvedb** ne glede na dolžino: kviz, postavke, vprašanja,
-snovi (`KviziRepository.snovi_postavk`, ena poizvedba po `id`) in poskusi
-(`poskusi_kviza`, ključani po postavki — postavka ima največ en poskus).
+Rešen kviz je **šest poizvedb** ne glede na dolžino: kviz, postavke,
+vprašanja, snovi (`KviziRepository.snovi_postavk`, ena poizvedba po `id`),
+poskusi (`poskusi_kviza`, ključani po postavki — postavka ima največ en poskus)
+in otroci družine (V3-R07: stran mora povedati, čigav rezultat bereš).
+Izbirnika tu ni — kviz ima natanko enega naslovljenca.
 
 **Tisk** (`/admin/quizzes/{id}/print`) je tudi za reševanje na papir:
 
@@ -1144,6 +1227,16 @@ gresta v razporeditev, a ju stran omeni s številom. Filter načina je v skupnem
 **Predmet je `questions.subject`**, ne `quizzes.subject`: dnevni kviz predmeta
 nima.
 
+**Obe strani sta ločeni po otroku** (V3-R07, `?otrok=`), brez možnosti „vsi
+otroci": delež *Nisem vedela* čez dva otroka ni podatek o nobenem od njiju, in
+statistika je pripomoček za pogovor z enim otrokom (`ADR-021` A). Privzet je
+prvi po prikaznem imenu; izbirnik se izriše samo pri več kot enem otroku, in
+tudi deaktivirani so na njem — njihovi podatki ostanejo (`V3-R06`) in seznam,
+ki bi jih izpustil, bi jih naredil nedosegljive. Povezave nosijo obe izbiri
+hkrati, sicer bi menjava leta tiho vrnila privzetega otroka. Stavek o
+samooceni imenuje izbranega otroka; zapisano ime bi v družini z dvema otrokoma
+lagalo o drugem (`ADR-014`).
+
 **Okno** je šolsko leto (parameter `leto`: `2026` za 2026/27 ali `vse`),
 privzeto tekoče. Meja je lokalna polnoč 1. 9., polodprto — poleti je to 31. 8.
 ob 22:00 UTC (`casi.solsko_leto`, `solsko_leto_od_do`). Parameter se bere kot
@@ -1196,7 +1289,7 @@ omrežja. Splošne sinhronizacije vprašanj ni (`ADR-016`, posledice).
 
 | Pot | Kaj |
 |---|---|
-| `GET /quizzes/pending` | **celoten delovni seznam** nepreklicanih in nerešenih kvizov, najstarejši prvi, s postavkami; besedilo je zamrznjeno iz `quiz_items`, ne iz `questions`; pri vsaki postavki `answered` |
+| `GET /quizzes/pending` | **celoten delovni seznam** nepreklicanih in nerešenih kvizov **prijavljenega otroka** (V3-R07), najstarejši prvi, s postavkami; besedilo je zamrznjeno iz `quiz_items`, ne iz `questions`; pri vsaki postavki `answered` |
 | `POST /quiz-attempts` | paket do 1000 poskusov; odgovor `200` z `recorded` = koliko jih je bilo res zapisanih |
 
 Obe poti zahtevata **veljaven žeton otroka** (V3-R04) — nista pod `/admin`
