@@ -281,10 +281,14 @@ async def google_povratek(
     seja_zdaj = _seja_zahteve(request, repo)
 
     if napaka_googla or not koda:
-        return _koncaj(_povej(seja_zdaj, google.OZNAKA_ZAVRNJENO, predloge, request))
+        return _koncaj(
+            _povej(seja_zdaj, povezovanje, google.OZNAKA_ZAVRNJENO, predloge, request)
+        )
 
     if not google.povezava_pripada_seji(stanje, seja_zdaj.user_id if seja_zdaj else None):
-        return _koncaj(_povej(seja_zdaj, google.OZNAKA_STANJE, predloge, request))
+        return _koncaj(
+            _povej(seja_zdaj, povezovanje, google.OZNAKA_STANJE, predloge, request)
+        )
 
     odjemalec: google.OdjemalecGoogla | None = request.app.state.odjemalec_googla
     if odjemalec is None:  # pragma: no cover - pokrije `google_je_nastavljen`
@@ -296,7 +300,9 @@ async def google_povratek(
         # isti razlog kot pri argon2 v geselni prijavi.
         racun_googla = await run_in_threadpool(odjemalec.racun, koda)
     except google.NapakaGoogla:
-        return _koncaj(_povej(seja_zdaj, google.OZNAKA_NEDOSEGLJIV, predloge, request))
+        return _koncaj(
+            _povej(seja_zdaj, povezovanje, google.OZNAKA_NEDOSEGLJIV, predloge, request)
+        )
 
     if povezovanje:
         # Pogoj je postavila `povezava_pripada_seji` zgoraj; brez seje se sem
@@ -329,24 +335,30 @@ def _seja_zahteve(request: Request, repo: PrijavaRepository) -> SejaUporabnika |
 
 def _povej(
     seja: SejaUporabnika | None,
+    povezovanje: bool,
     oznaka: str,
     predloge: Jinja2Templates,
     request: Request,
 ) -> Response:
-    """Napaka pove tam, kjer jo bo bralec videl.
+    """Napaka pove tam, kjer jo bo bralec videl, in tako, kot se ga tiče.
 
-    Odloči **seja in ne namen toka**. Kdor je prijavljen, dobi stran s
-    pojasnilom: preusmeritev na prijavo bi mu povedala, da je bil odjavljen,
-    česar ni bil. Kdor seje nima — ker se šele prijavlja ali ker mu je med
-    Googlovim zaslonom potekla — je nima kje prebrati drugje kot na prijavni
-    strani.
+    Dve vprašanji in dva odgovora, ki se ne ujemata:
 
-    Prva različica je ločevala po namenu toka in je starša, ki mu je seja
-    potekla sredi povezovanja, pustila na strani z 409 brez poti naprej.
+    - **Kam** odloči seja. Kdor je prijavljen, dobi stran s pojasnilom;
+      preusmeritev na prijavo bi mu povedala, da je bil odjavljen, česar ni
+      bil. Kdor seje nima — ker se šele prijavlja ali ker mu je med Googlovim
+      zaslonom potekla — je nima kje prebrati drugje kot na prijavni strani.
+    - **Kaj** odloči tok. Staršu sredi povezovanja nasvet „prijavi se z
+      geslom" ne pove ničesar, ker prijavljen je; napaka se tiče povezovanja
+      in ne prijave (`google.SPOROCILA_POVEZAVE`).
+
+    Prijavna stran pozna samo prijavni slovar, in to je prav: kdor je tam,
+    seje nima, zato je „prijavi se z geslom" zanj spet pravi nasvet.
     """
-    if seja is not None:
-        return _ni_povezano(predloge, request, google.SPOROCILA_PRIJAVE[oznaka])
-    return _na_prijavo(oznaka)
+    if seja is None:
+        return _na_prijavo(oznaka)
+    slovar = google.SPOROCILA_POVEZAVE if povezovanje else google.SPOROCILA_PRIJAVE
+    return _ni_povezano(predloge, request, slovar[oznaka])
 
 
 def _ni_povezano(predloge: Jinja2Templates, request: Request, sporocilo: str) -> Response:

@@ -78,6 +78,28 @@ class TestStanje:
         """Manjkajoč piškotek ne sme biti „ujema se", tudi ob pravem `state`."""
         assert not google.stanje_se_ujema(None, "karkoli")
 
+    @pytest.mark.parametrize("vsiljeno", ["ž", "pravi-state-ž", "\u2028", "😀"])
+    def test_ne_ascii_state_je_neujemanje_in_ne_izjema(self, vsiljeno: str) -> None:
+        """`compare_digest` nad `str` zahteva ASCII in sicer vrže `TypeError`.
+
+        `state` pride iz naslova, torej od zunaj. Izjema bi bila **500 z golim
+        angleškim besedilom na javni poti** in — huje — bi ušla pred brisanjem
+        piškotka stanja, s čimer bi padlo jamstvo `ADR-046` D o enkratni rabi.
+        Neujemanje mora biti neujemanje.
+        """
+        stanje = google.novo_stanje(Namen.PRIJAVA)
+        assert not google.stanje_se_ujema(stanje, vsiljeno)
+
+    def test_ne_ascii_uporabnik_v_piskotku_je_neujemanje(self) -> None:
+        """Isti koren na drugi strani veziva: piškotek je tudi vhod od zunaj.
+
+        Starlette glavo `Cookie` dekodira v latin-1, zato je v `user_id` mogoče
+        spraviti bajt, ki v ASCII ne obstaja.
+        """
+        stanje = Stanje(namen=Namen.POVEZAVA, nakljucje="abc", user_id="uporabnik-ž")
+        assert not google.povezava_pripada_seji(stanje, "uporabnik-1")
+        assert not google.povezava_pripada_seji(stanje, "uporabnik-ž".replace("ž", "z"))
+
 
 class TestPovezavaPripadaSeji:
     """Drugi del veziva: povezovanje se mora vrniti pod isto sejo.
@@ -178,6 +200,36 @@ class TestRazsodbe:
             google.zakaj_ne_sme_odstraniti(ima_geslo=False)
             == google.SPOROCILO_ZADNJA_POVERILNICA
         )
+
+    def test_sporocilo_pove_kje_se_nastavi_geslo(self) -> None:
+        """Nasvet, ki ne pove kraja, je nasvet, ki ga ni mogoče ubogati."""
+        assert "Družina" in google.SPOROCILO_ZADNJA_POVERILNICA
+
+
+class TestSporocilaPoTokovih:
+    """Ista oznaka, drug tok, drugo besedilo."""
+
+    def test_oba_slovarja_pokrivata_iste_oznake_napak(self) -> None:
+        """Vsaka oznaka, ki jo povratni klic uporabi za povezovanje, mora biti
+        v obeh slovarjih — sicer bi bil izid `KeyError` sredi obravnave napake.
+        """
+        za_povezavo = {
+            google.OZNAKA_STANJE,
+            google.OZNAKA_NEDOSEGLJIV,
+            google.OZNAKA_ZAVRNJENO,
+        }
+        assert za_povezavo <= set(google.SPOROCILA_PRIJAVE)
+        assert set(google.SPOROCILA_POVEZAVE) == za_povezavo
+
+    def test_besedili_nista_isti(self) -> None:
+        for oznaka, besedilo in google.SPOROCILA_POVEZAVE.items():
+            assert besedilo != google.SPOROCILA_PRIJAVE[oznaka], oznaka
+
+    def test_povezovanje_ne_svetuje_prijave_z_geslom(self) -> None:
+        """Staršu, ki je prijavljen, tak nasvet ne pove ničesar."""
+        for besedilo in google.SPOROCILA_POVEZAVE.values():
+            assert "prijavi z geslom" not in besedilo
+            assert "prijaviš z geslom" not in besedilo
 
 
 # --- Odjemalec -------------------------------------------------------------

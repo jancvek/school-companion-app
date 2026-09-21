@@ -166,9 +166,36 @@ SPOROCILA_PRIJAVE: dict[str, str] = {
     OZNAKA_ZAVRNJENO: SPOROCILO_ZAVRNJENO,
 }
 
+#: Ista oznaka, drugo besedilo — za **povezovanje**.
+#:
+#: Tokova sta dva in napaki nista ista stvar. Staršu, ki je že prijavljen in je
+#: pravkar poskušal povezati Google, nasvet „prijavi se z geslom" ne pove
+#: ničesar: prijavljen je. Isto besedilo za oba tokova bi bilo krajše in bi
+#: uporabnici povedalo, da se je zgodilo nekaj drugega, kot se je.
+SPOROCILA_POVEZAVE: dict[str, str] = {
+    OZNAKA_STANJE: (
+        "Povezovanja Google računa nisem dokončal, ker se ni končalo tam, kjer "
+        "se je začelo. Poskusi znova v istem oknu brskalnika."
+    ),
+    OZNAKA_NEDOSEGLJIV: (
+        "Googla trenutno ne morem doseči, zato računa nisem povezal. "
+        "Poskusi čez nekaj minut."
+    ),
+    OZNAKA_ZAVRNJENO: (
+        "Povezovanja nisi dokončala — Google je sporočil, da je bilo zavrnjeno "
+        "ali preklicano. Lahko poskusiš znova."
+    ),
+}
+
+#: Pot, na kateri si starš nastavi svoje geslo (`V3-R06`).
+#:
+#: Sporočilo, ki naroči dejanje, mora povedati tudi, kje se opravi. „Nastavi
+#: geslo" brez kraja je nasvet, ki ga uporabnica ne more ubogati.
+POT_GESLA = "/admin/family"
+
 SPOROCILO_ZADNJA_POVERILNICA = (
-    "Najprej nastavi geslo, sicer se ne boš mogel več prijaviti. Ko je geslo "
-    "nastavljeno, lahko Google račun odstraniš."
+    "Najprej si na strani Družina nastavi geslo, sicer se ne boš mogel več "
+    "prijaviti. Ko je geslo nastavljeno, lahko Google račun odstraniš."
 )
 
 
@@ -256,16 +283,32 @@ def novo_stanje(namen: Namen, user_id: str | None = None) -> Stanje:
     return Stanje(namen=namen, nakljucje=secrets.token_urlsafe(32), user_id=user_id)
 
 
-def stanje_se_ujema(iz_piskotka: Stanje | None, iz_googla: str | None) -> bool:
-    """Ali povratek pripada odhodu.
+def _enaka(prvi: str | None, drugi: str | None) -> bool:
+    """Primerja v konstantnem času; manjkajoča ali nenavadna vrednost ne velja.
+
+    **Primerjata se bajta, ne niza**, in to ni podrobnost: `compare_digest` nad
+    `str` zahteva čiste ASCII znake in ob vsakem drugem vrže `TypeError`.
+    Oba vhodna niza tu prideta od zunaj — `state` iz naslova in piškotek, ki ga
+    Starlette dekodira v latin-1 —, zato bi bila taka izjema **500 z golim
+    angleškim besedilom na javni poti**, in, kar je huje, bi ušla pred
+    `pobrisi_stanje`: piškotek bi ostal živ in `ADR-046` D o enkratni rabi bi
+    padel. Z `encode` je vsak vhod veljaven bajtni niz in neujemanje je
+    neujemanje, ne izjema.
 
     Primerjava je `compare_digest` in ne `==`: vrednost je skrivnost za
     trajanje enega toka, in primerjava, ki odneha pri prvem različnem znaku,
     o njej pove več, kot je treba.
     """
-    if iz_piskotka is None or not iz_googla:
+    if not prvi or not drugi:
         return False
-    return secrets.compare_digest(iz_piskotka.nakljucje, iz_googla)
+    return secrets.compare_digest(prvi.encode("utf-8"), drugi.encode("utf-8"))
+
+
+def stanje_se_ujema(iz_piskotka: Stanje | None, iz_googla: str | None) -> bool:
+    """Ali povratek pripada odhodu."""
+    if iz_piskotka is None:
+        return False
+    return _enaka(iz_piskotka.nakljucje, iz_googla)
 
 
 def povezava_pripada_seji(stanje: Stanje, user_id_seje: str | None) -> bool:
@@ -278,9 +321,7 @@ def povezava_pripada_seji(stanje: Stanje, user_id_seje: str | None) -> bool:
     """
     if stanje.namen is not Namen.POVEZAVA:
         return True
-    if stanje.user_id is None or user_id_seje is None:
-        return False
-    return secrets.compare_digest(stanje.user_id, user_id_seje)
+    return _enaka(stanje.user_id, user_id_seje)
 
 
 # --- Naslovi ---------------------------------------------------------------

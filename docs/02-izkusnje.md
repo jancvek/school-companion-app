@@ -87,6 +87,35 @@ python -m mypy apps/server
 
 Isto velja za `ruff`: `ruff check app/` izpusti `tests/` in `alembic/`.
 
+## Google prijava (V3-R08)
+
+### `secrets.compare_digest` nad `str` zahteva ASCII
+**Kaj:** povratni klic `GET /auth/google/callback?state=ž` je vrnil **500 z golim
+angleškim `Internal Server Error`** — na javni, neavtenticirani poti.
+**Zakaj:** `compare_digest` ob `str` z znakom izven ASCII vrže `TypeError`.
+Vsi trije vhodi, ki jih primerjamo, pridejo od zunaj: `state` iz naslova, CSRF
+žeton iz obrazca in vsak piškotek (Starlette glavo `Cookie` dekodira v latin-1).
+Huje od kode odgovora je bila druga posledica: izjema je ušla **pred** brisanjem
+piškotka stanja, zato je ta ostal živ in jamstvo o enkratni rabi je padlo.
+**Kako:** primerjaj **bajte**, ne nizov — `compare_digest(a.encode("utf-8"),
+b.encode("utf-8"))`. Takrat je vsak vhod veljaven in neujemanje je neujemanje,
+ne izjema. Velja za vsako primerjavo skrivnosti, ki pride iz zahteve.
+
+### Ista oznaka, dva tokova, dve besedili
+**Kaj:** starš, ki je bil prijavljen in je poskušal povezati Google, je ob
+napaki dobil „…ali se prijavi z geslom" — nasvet, ki ga ne more ubogati, ker
+prijavljen je.
+**Zakaj:** en slovar sporočil za dva tokova. Oznaka napake je res ista
+(`stanje`, `nedosegljiv`, `zavrnjeno`), pomen zanjo pa ne.
+**Kako:** **kam** odgovoriti odloči seja, **kaj** odgovoriti odloči tok. Dva
+slovarja nad istimi ključi sta cenejša od enega, ki polovici bralcev laže.
+
+### `git checkout <datoteka>` odnese necommitane popravke
+**Kaj:** med mutacijskim preizkusom sem mutacijo vrnil z `git checkout` — in s
+tem pobrisal tudi popravke, ki na tej datoteki še niso bili commitani.
+**Kako:** pred mutacijo naredi kopijo datoteke (`cp` v začasno mapo) in jo vrni
+s `cp`. `git checkout` vrne **commitano** stanje, ne stanja pred mutacijo.
+
 ## Orodja na tem stroju
 
 - **`scripts/` je del ograje** in agentu ni dovoljena za pisanje. Nove skripte

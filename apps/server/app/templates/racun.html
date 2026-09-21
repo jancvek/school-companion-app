@@ -41,7 +41,12 @@
               <span class="stanje">ni nastavljeno</span>
             {% endif %}
           </td>
-          <td class="stanje">nastavi ga lastnik sistema</td>
+          {# Geslo si starš nastavi sam, na strani Družina (V3-R06): tam je
+             ponastavitev lastnega gesla dovoljena vsakemu. Trditev „nastavi ga
+             lastnik sistema" je veljala do V3-R03 in bi tu pomenila, da stran
+             v sosednji celici naroči dejanje, za katerega hkrati trdi, da ga
+             ne smeš opraviti. #}
+          <td><a href="/admin/family">Nastavi na strani Družina</a></td>
         </tr>
         <tr>
           <td>Google</td>

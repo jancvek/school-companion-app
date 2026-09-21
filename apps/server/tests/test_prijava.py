@@ -27,7 +27,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import Session
 
-from app import prijava
+from app import main, prijava
 from app.models import VLOGA_OTROK, LoginAttempt, Material, UserSession
 from app.routers import admin, clani, dnevi, kvizi, racun, sistem, statistika, urnik, vstop
 from app.routers.admin import MAPA_PREDLOG
@@ -181,6 +181,25 @@ class TestDosegljivost:
         }
 
         assert iz_usmerjevalnikov == iz_openapi
+
+    def test_izvzete_predpone_ostanejo_enoclanske(self) -> None:
+        """`/admin` je edina predpona, ki je `ZetonMiddleware` ne varuje.
+
+        Varovalo in ne komentar (`docs/odlocitve/ADR-046` B): vsaka predpona na
+        tem seznamu je cela veja poti brez te plasti, in `V3-R08` je pokazal,
+        da je nove Googlove poti mogoče izvzeti **poimensko**. Naslednja
+        zahteva naj predpone ne doda tiho. Isti vzorec kot pri
+        `POTI_S_SVOJIM_CSRF` v `test_urnik.py`.
+        """
+        assert frozenset({"/admin"}) == main.IZVZETE_PREDPONE
+
+    def test_poti_brez_seje_ostane_samo_prijava(self) -> None:
+        """`SejaMiddleware` pod `/admin` nima druge izjeme kot prijavno stran.
+
+        `V3-R08` je povezovanje Googla namenoma pustil pod `/admin` prav zato,
+        da te izjeme ne bi potreboval (`ADR-046` B).
+        """
+        assert frozenset({prijava.POT_PRIJAVE}) == main.POTI_BREZ_SEJE
 
     def test_prijavna_stran_je_dosegljiva_brez_seje(self, brez_prijave: TestClient) -> None:
         odgovor = brez_prijave.get(prijava.POT_PRIJAVE)

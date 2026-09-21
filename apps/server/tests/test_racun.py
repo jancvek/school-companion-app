@@ -337,7 +337,9 @@ class TestPovezovanje:
             odgovor = _povratek(odjemalec, _zacni_povezovanje(odjemalec))
 
         assert odgovor.status_code == 409
-        assert google.SPOROCILO_NEDOSEGLJIV in odgovor.text
+        assert (
+            google.SPOROCILA_POVEZAVE[google.OZNAKA_NEDOSEGLJIV] in odgovor.text
+        )
         assert _google_poverilnica(motor, stars) is None
 
     def test_zavrnjena_privolitev(
@@ -350,7 +352,7 @@ class TestPovezovanje:
         )
 
         assert odgovor.status_code == 409
-        assert google.SPOROCILO_ZAVRNJENO in odgovor.text
+        assert google.SPOROCILA_POVEZAVE[google.OZNAKA_ZAVRNJENO] in odgovor.text
         assert _google_poverilnica(motor, stars) is None
 
 
@@ -761,7 +763,7 @@ class TestStranRacuna:
 class TestBrezGoogla:
     """Privzeta namestitev Googla nima in mora delovati natanko kot prej."""
 
-    def test_vse_stiri_poti_vrnejo_404(self, odjemalec: PrijavljenOdjemalec) -> None:
+    def test_poti_pod_adminom_vrnejo_404(self, odjemalec: PrijavljenOdjemalec) -> None:
         assert odjemalec.get(google.POT_RACUNA).status_code == 404
         assert odjemalec.post(google.POT_POVEZAVE).status_code == 404
         assert odjemalec.post(google.POT_ODSTRANITVE).status_code == 404
@@ -786,6 +788,116 @@ class TestBrezGoogla:
         """Manjkajoča nastavitev ustavi eno zmožnost, ne strežnika."""
         assert odjemalec.get("/admin").status_code == 200
         assert odjemalec.get("/health").status_code == 200
+
+
+# --- Popravki po prvem pregledu ---------------------------------------------
+
+
+class TestVhodOdZunaj:
+    """Povratni klic je javna pot; vsak njen vhod je poljuben niz."""
+
+    @pytest.mark.parametrize("vsiljeno", ["ž", "😀", "a\u0301"])
+    def test_ne_ascii_state_ne_da_500_in_pobrise_piskotek(
+        self, aplikacija_z_googlom: FastAPI, motor: Engine, stars: str, vsiljeno: str
+    ) -> None:
+        """Dve trditvi hkrati, ker sta bili obe pokvarjeni z isto vrstico.
+
+        `compare_digest` nad `str` z ne-ASCII znakom vrže `TypeError`. Ta je
+        ušel pred `_koncaj`, zato odgovor ni bil le 500 z golim angleškim
+        besedilom — **piškotek stanja je ostal živ** in jamstvo `ADR-046` D o
+        enkratni rabi je padlo.
+        """
+        with PrijavljenOdjemalec(
+            aplikacija_z_googlom,
+            base_url="https://testserver",
+            follow_redirects=False,
+            raise_server_exceptions=False,
+        ) as odjemalec:
+            prijavi(odjemalec, motor, stars)
+            _zacni_povezovanje(odjemalec)
+            odgovor = odjemalec.get(
+                google.POT_POVRATNA, params={"code": "k", "state": vsiljeno}
+            )
+
+            assert odgovor.status_code != 500, odgovor.text[:200]
+            assert "Internal Server Error" not in odgovor.text
+            assert odjemalec.cookies.get(google.PISKOTEK_STANJA) is None
+
+        assert _google_poverilnica(motor, stars) is None
+
+    # Drugi vhod od zunaj je **piskotek** (`user_id` v stanju), ki ga Starlette
+    # dekodira v latin-1. Testa na tej ravni zanj ni in ne more biti: `httpx`
+    # glavo `Cookie` kodira v ASCII in take vrednosti sploh ne poslje, medtem
+    # ko surov odjemalec bajt 0xE9 poslje brez tezav. Pravilo zato pokriva test
+    # enote (`test_ne_ascii_uporabnik_v_piskotku_je_neujemanje`), ki klice isto
+    # skupno funkcijo `_enaka` kot ta pot.
+
+
+class TestBesediloPoTokovih:
+    """Napaka pove tam, kjer jo bo bralec videl, in tako, kot se ga tiče."""
+
+    def test_povezovanje_ne_pove_naj_se_prijavi(
+        self, odjemalec_g: PrijavljenOdjemalec
+    ) -> None:
+        stanje = _zacni_povezovanje(odjemalec_g)
+        odgovor = odjemalec_g.get(
+            google.POT_POVRATNA, params={"state": stanje, "error": "access_denied"}
+        )
+
+        assert odgovor.status_code == 409
+        assert "prijaviš z geslom" not in odgovor.text
+        assert google.SPOROCILA_POVEZAVE[google.OZNAKA_ZAVRNJENO] in odgovor.text
+
+    def test_prijava_brez_seje_pove_naj_se_prijavi(
+        self, brez_prijave: PrijavljenOdjemalec
+    ) -> None:
+        """Isti oznaki na prijavni strani pripada prijavno besedilo."""
+        stanje = _zacni_prijavo(brez_prijave)
+        odgovor = brez_prijave.get(
+            google.POT_POVRATNA, params={"state": stanje, "error": "access_denied"}
+        )
+        assert odgovor.status_code == 303
+
+        stran = brez_prijave.get(prijava.POT_PRIJAVE, params={"napaka": google.OZNAKA_ZAVRNJENO})
+        assert google.SPOROCILO_ZAVRNJENO in stran.text
+
+
+class TestStranPoveKjeSeNastaviGeslo:
+    def test_racun_pelje_na_stran_druzine(
+        self, odjemalec_g: PrijavljenOdjemalec
+    ) -> None:
+        """Trditev „nastavi ga lastnik sistema" od `V3-R06` ne drži več."""
+        besedilo = odjemalec_g.get(google.POT_RACUNA).text
+        assert "nastavi ga lastnik sistema" not in besedilo
+        assert 'href="/admin/family"' in besedilo
+
+    def test_starsi_si_geslo_res_lahko_nastavi_sam(
+        self, odjemalec_g: PrijavljenOdjemalec, stars: str
+    ) -> None:
+        """Protitest: stran ne sme kazati na dejanje, ki bi bilo zavrnjeno."""
+        odgovor = odjemalec_g.post(
+            f"/admin/family/members/{stars}/password",
+            data={"geslo": "novo-geslo-123", "geslo_znova": "novo-geslo-123"},
+        )
+        assert odgovor.status_code == 303, odgovor.text[:300]
+
+
+class TestOznakaIzidaNaRacunu:
+    def test_vsiljeno_besedilo_se_ne_izrise(
+        self, odjemalec_g: PrijavljenOdjemalec
+    ) -> None:
+        """Isto varovalo kot na prijavni strani: skozi naslov gre oznaka."""
+        vsiljeno = "Poslji geslo na drugo stran"
+        odgovor = odjemalec_g.get(google.POT_RACUNA, params={"izid": vsiljeno})
+
+        assert odgovor.status_code == 200
+        assert vsiljeno not in odgovor.text
+
+    def test_znana_oznaka_se_izrise(self, odjemalec_g: PrijavljenOdjemalec) -> None:
+        odgovor = odjemalec_g.get(
+            google.POT_RACUNA, params={"izid": google.IZID_ODSTRANJENO}
+        )
+        assert google.SPOROCILO_ODSTRANJENO in odgovor.text
 
 
 # --- Kar bi Google lahko tiho pokvaril drugje -------------------------------

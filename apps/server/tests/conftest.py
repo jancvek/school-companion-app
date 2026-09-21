@@ -163,6 +163,12 @@ def naredi_testne_nastavitve(slike: Path) -> Settings:
         openai_model="model-ki-se-ne-uporabi",
         openai_timeout_seconds=1.0,
         worker_interval_seconds=0.01,
+        # Privzeta testna namestitev Googla **nima** (V3-R08): tako je videti
+        # namestitev, ki ga ni nastavila, in tako se prepriča `TestBrezGoogla`.
+        # Test, ki Googla potrebuje, si ga prižge z `model_copy`.
+        domena="",
+        google_client_id="",
+        google_client_secret="",
     )
 
 

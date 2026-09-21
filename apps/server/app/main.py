@@ -45,11 +45,15 @@ dnevnik = logging.getLogger(__name__)
 #: pot, na kateri žeton šele nastane; **odjave tu ni** — ta zahteva žeton kot
 #: vsaka druga pot telefona (`docs/odlocitve/ADR-036` G).
 #: `POST /auth/google/login` in `GET /auth/google/callback` sta tu z `V3-R08`
-#: (`docs/odlocitve/ADR-046` B). Sta **točni poti**, ne predpona: sprožita ju
-#: brskalnik brez seje in Googlova preusmeritev, in nobena od njiju ne more
-#: nositi žetona telefona. Izvzetje iz žetona ne pomeni, da sta odprti —
-#: prvo varuje dvojno oddan CSRF žeton prijavnega obrazca, drugo vezivo stanja.
-#: Povezovanje Googla **ni** tu: to je pod `/admin` in ga plast pokrije sama.
+#: (`docs/odlocitve/ADR-046` B). Sta **točni poti**, ne predpona.
+#:
+#: Izvzeti sta iz **žetona telefona**, ne iz seje: govori ju brskalnik, ki
+#: žetona v glavi nikoli ne nosi. To ne pomeni, da sta odprti — prvo varuje
+#: dvojno oddan CSRF žeton prijavnega obrazca, drugo vezivo stanja. Povratni
+#: klic sejo v toku povezovanja celo **zahteva** in jo razreši sam
+#: (`vstop._seja_zahteve`); pod `/admin` ga ni prav zato, ker mora delovati
+#: tudi v prijavnem toku, kjer seje še ni. Povezovanje samo **ni** tu: to je
+#: pod `/admin` in ga plast pokrije brez izjeme.
 IZVZETE_POTI = frozenset(
     {
         "/health",
