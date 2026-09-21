@@ -839,6 +839,12 @@ Odločitve so v `ADR-027` (model) in `ADR-035` (izvedba).
 - **Žeton seje** je `secrets.token_urlsafe(32)`; v bazi je samo njegova
   SHA-256. Piškotek `seja` je `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`,
   z veljavnostjo 30 dni. **Rok je drseči** in se osveži največ enkrat na uro.
+- **Primerjava žetonov gre skozi `prijava.zetona_se_ujemata` in primerja
+  bajte** (popravljeno v `V3-R08`). `compare_digest` nad `str` zahteva čisti
+  ASCII in sicer vrže `TypeError`; žeton pride iz obrazca, torej od zunaj, zato
+  je bila taka izjema `500` z golim angleškim besedilom na vsakem `POST` pod
+  `/admin`. Pogodba je nespremenjena — tak žeton ni bil veljaven nikoli, le
+  namesto `403` je dal `500`. Pokritost varuje test, generiran iz `openapi()`.
 - **CSRF žeton živi v vrstici seje** in pride v vsako predlogo prek
   `context_processors` izrisovalnika. `SejaMiddleware` ga pri `POST` prebere iz
   telesa (samo `application/x-www-form-urlencoded`, največ 1 MiB), primerja s
@@ -1106,7 +1112,11 @@ ali z Googlom in obe poti dasta sejo v isti tabeli `sessions`. Odločitve so v
   `state` iz naslova in piškotek (latin-1) pa sta oba vhod od zunaj. Taka
   izjema bi bila 500 z golim angleškim besedilom na javni poti in bi ušla pred
   brisanjem piškotka, s čimer bi padla prav enkratna raba (najdeno v prvem
-  pregledu `V3-R08`).
+  pregledu `V3-R08`). Primerjava **ni svoja**: gre skozi
+  `prijava.zetona_se_ujemata`, ki od `V3-R08` primerja bajte in pokriva vsa
+  štiri klicna mesta — obe prijavi, `SejaMiddleware` in nalaganje urnika.
+  Svoja dvojnica je bila prvi popravek te napake in je razhajanje tudi
+  povzročila (`docs/02-izkusnje.md`).
   Brez tega veziva bi napadalec svoj Google račun prilepil na starševega in v
   njegovo družino vstopal, kolikor dolgo bi hotel — zato ima vsak od teh
   pogojev svoj test, ki dokaže tudi, da poverilnica **ni** nastala in da do

@@ -240,10 +240,27 @@ def zgostitev_zetona(zeton: str) -> str:
 
 
 def zetona_se_ujemata(prvi: str | None, drugi: str | None) -> bool:
-    """Primerja žetona v konstantnem času; manjkajoč žeton ne velja nikoli."""
+    """Primerja žetona v konstantnem času; manjkajoč žeton ne velja nikoli.
+
+    **Primerjata se bajta, ne niza**, in to ni podrobnost (popravljeno v
+    `V3-R08`, drugi pregled). `secrets.compare_digest` nad `str` zahteva čiste
+    ASCII znake in ob vsakem drugem vrže `TypeError`. Vsaj en vhod vsakega
+    klicatelja pride od zunaj — CSRF žeton iz obrazca, piškotek `csrf_prijava`
+    (Starlette glavo `Cookie` dekodira v latin-1) —, zato je bila taka izjema
+    **500 z golim angleškim besedilom** na štirih poteh naenkrat:
+    `POST /admin/login`, `POST /auth/google/login`, vsak `POST` pod `/admin`
+    prek `SejaMiddleware` in nalaganje slike urnika.
+
+    Z `encode` je vsak vhod veljaven bajtni niz, zato je neujemanje
+    neujemanje in ne izjema. Pogodba se s tem **ne spremeni**: žeton z
+    ne-ASCII znakom ni bil veljaven nikoli, le namesto `403` je dal `500`.
+
+    Velja za vsako primerjavo skrivnosti, ki pride iz zahteve
+    (`docs/02-izkusnje.md`).
+    """
     if not prvi or not drugi:
         return False
-    return secrets.compare_digest(prvi, drugi)
+    return secrets.compare_digest(prvi.encode("utf-8"), drugi.encode("utf-8"))
 
 
 # --- Omejevanje ugibanja ---------------------------------------------------

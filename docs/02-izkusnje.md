@@ -101,6 +101,16 @@ piškotka stanja, zato je ta ostal živ in jamstvo o enkratni rabi je padlo.
 b.encode("utf-8"))`. Takrat je vsak vhod veljaven in neujemanje je neujemanje,
 ne izjema. Velja za vsako primerjavo skrivnosti, ki pride iz zahteve.
 
+**Kar me je stalo drugega kroga pregleda:** prvi popravek je naredil svojo
+kopijo primerjave v `app/google.py` in popravil samo tisti dve klicni mesti,
+ki sta bili v obsegu zahteve. Koren pa je `prijava.zetona_se_ujemata`, ki ima
+**štiri** klicna mesta (obe prijavi, `SejaMiddleware`, nalaganje urnika) — in
+tri od njih so še naprej dajale 500. Popravek, ki podvoji pravilo namesto da
+bi popravil skupnega, ni popravek; je drugo pravilo, ki se z uro razide od
+prvega. Pravilo je zdaj eno samo in `google.py` svoje kopije nima.
+**Pokritost varuje generiran test** (`test_vsak_post_pod_adminom_prenese_ne_ascii_zeton`),
+ki poti bere iz `openapi()` in zato zajame tudi pot, dodano jutri.
+
 ### Ista oznaka, dva tokova, dve besedili
 **Kaj:** starš, ki je bil prijavljen in je poskušal povezati Google, je ob
 napaki dobil „…ali se prijavi z geslom" — nasvet, ki ga ne more ubogati, ker

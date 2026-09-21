@@ -833,7 +833,7 @@ class TestVhodOdZunaj:
     # glavo `Cookie` kodira v ASCII in take vrednosti sploh ne poslje, medtem
     # ko surov odjemalec bajt 0xE9 poslje brez tezav. Pravilo zato pokriva test
     # enote (`test_ne_ascii_uporabnik_v_piskotku_je_neujemanje`), ki klice isto
-    # skupno funkcijo `_enaka` kot ta pot.
+    # skupno funkcijo `prijava.zetona_se_ujemata` kot ta pot.
 
 
 class TestBesediloPoTokovih:
@@ -968,3 +968,57 @@ class TestSeStarejseZahteve:
         assert odgovor.status_code == 401
         assert not brez_prijave.cookies.get(prijava.PISKOTEK_SEJE)
         assert stran.status_code == 200
+
+
+class TestNeAsciiZetonNaVsehStirih:
+    """Ne-ASCII CSRF žeton je zavrnitev, ne 500 — na vseh štirih poteh.
+
+    Koren je `prijava.zetona_se_ujemata` (`V3-R03`), popravljen v `V3-R08` po
+    drugem pregledu. Klicna mesta so štiri in vsako je svoja pot do istega
+    zloma, zato ima vsako svoj primer:
+
+    | Pot | Zahteva | Kje |
+    |---|---|---|
+    | `POST /admin/login` | V3-R03 | tu |
+    | `POST /auth/google/login` | V3-R08 | tu |
+    | vsak `POST` pod `/admin` | V3-R03 (`SejaMiddleware`) | `test_prijava.py` |
+    | nalaganje slike urnika | V3-R09 | `test_urnik.py` ima svoj CSRF test |
+    """
+
+    def test_google_prijava(self, brez_prijave: PrijavljenOdjemalec) -> None:
+        """Pot, ki jo je ustvarila prav ta zahteva."""
+        brez_prijave.get(prijava.POT_PRIJAVE)
+
+        odgovor = brez_prijave.post(google.POT_PRIJAVE, data={"csrf": "ž"})
+
+        assert odgovor.status_code == 403, odgovor.text[:200]
+        assert "Internal Server Error" not in odgovor.text
+        assert not brez_prijave.cookies.get(prijava.PISKOTEK_SEJE)
+
+    def test_admin_prijava(self, brez_prijave: PrijavljenOdjemalec) -> None:
+        """Isti koren na poti iz `V3-R03`; popravek pokrije obe hkrati."""
+        brez_prijave.get(prijava.POT_PRIJAVE)
+
+        odgovor = brez_prijave.post(
+            prijava.POT_PRIJAVE,
+            data={"identifikator": "kdorkoli@primer.test", "geslo": "x", "csrf": "ž"},
+        )
+
+        assert odgovor.status_code == 403, odgovor.text[:200]
+        assert "Internal Server Error" not in odgovor.text
+
+    def test_zavrnitev_je_ista_kot_za_navaden_napacen_zeton(
+        self, brez_prijave: PrijavljenOdjemalec
+    ) -> None:
+        """Pogodba se ni spremenila: ne-ASCII žeton ni bil veljaven nikoli.
+
+        Popravek je 500 zamenjal s 403, ne 403 s 200 — in to dokaže primerjava
+        z navadnim napačnim žetonom, ne golo branje kode.
+        """
+        brez_prijave.get(prijava.POT_PRIJAVE)
+        ascii_odgovor = brez_prijave.post(google.POT_PRIJAVE, data={"csrf": "napacen"})
+
+        brez_prijave.get(prijava.POT_PRIJAVE)
+        ne_ascii = brez_prijave.post(google.POT_PRIJAVE, data={"csrf": "ž"})
+
+        assert ne_ascii.status_code == ascii_odgovor.status_code == 403

@@ -28,6 +28,10 @@ same:
   prilepil na tuj račun in v tujo družino vstopal, kolikor dolgo bi hotel.
   Zato `Stanje` nosi poleg naključja še namen in — pri povezovanju —
   uporabnika, ki je tok sprožil.
+- **Primerjave skrivnosti so ene same.** Vse gredo skozi
+  `prijava.zetona_se_ujemata`, ki primerja bajte; svoje dvojnice tu ni.
+  Prva različica `V3-R08` jo je imela in je s tem razhajanje tudi povzročila
+  (`docs/02-izkusnje.md`).
 """
 
 import logging
@@ -40,6 +44,7 @@ from urllib.parse import urlencode
 import httpx
 from starlette.responses import Response
 
+from app import prijava
 from app.settings import Settings
 
 dnevnik = logging.getLogger(__name__)
@@ -283,32 +288,20 @@ def novo_stanje(namen: Namen, user_id: str | None = None) -> Stanje:
     return Stanje(namen=namen, nakljucje=secrets.token_urlsafe(32), user_id=user_id)
 
 
-def _enaka(prvi: str | None, drugi: str | None) -> bool:
-    """Primerja v konstantnem času; manjkajoča ali nenavadna vrednost ne velja.
-
-    **Primerjata se bajta, ne niza**, in to ni podrobnost: `compare_digest` nad
-    `str` zahteva čiste ASCII znake in ob vsakem drugem vrže `TypeError`.
-    Oba vhodna niza tu prideta od zunaj — `state` iz naslova in piškotek, ki ga
-    Starlette dekodira v latin-1 —, zato bi bila taka izjema **500 z golim
-    angleškim besedilom na javni poti**, in, kar je huje, bi ušla pred
-    `pobrisi_stanje`: piškotek bi ostal živ in `ADR-046` D o enkratni rabi bi
-    padel. Z `encode` je vsak vhod veljaven bajtni niz in neujemanje je
-    neujemanje, ne izjema.
-
-    Primerjava je `compare_digest` in ne `==`: vrednost je skrivnost za
-    trajanje enega toka, in primerjava, ki odneha pri prvem različnem znaku,
-    o njej pove več, kot je treba.
-    """
-    if not prvi or not drugi:
-        return False
-    return secrets.compare_digest(prvi.encode("utf-8"), drugi.encode("utf-8"))
-
-
 def stanje_se_ujema(iz_piskotka: Stanje | None, iz_googla: str | None) -> bool:
-    """Ali povratek pripada odhodu."""
+    """Ali povratek pripada odhodu.
+
+    Primerjava gre skozi `prijava.zetona_se_ujemata` in ne skozi svojo
+    dvojnico: to je ista stvar — primerjava skrivnosti, ki pride iz zahteve —
+    in dve pravili o isti stvari se prej ali slej razideta (`ADR-046` H).
+    Prvi popravek v `V3-R08` je imel svojo `_enaka` in je razhajanje tudi
+    povzročil: ena kopija je bajte primerjala, druga ne, zato je `state` iz
+    naslova pravilno zavrnila, CSRF žeton na sosednji poti pa je še vedno dal
+    500 (drugi pregled).
+    """
     if iz_piskotka is None:
         return False
-    return _enaka(iz_piskotka.nakljucje, iz_googla)
+    return prijava.zetona_se_ujemata(iz_piskotka.nakljucje, iz_googla)
 
 
 def povezava_pripada_seji(stanje: Stanje, user_id_seje: str | None) -> bool:
@@ -321,7 +314,7 @@ def povezava_pripada_seji(stanje: Stanje, user_id_seje: str | None) -> bool:
     """
     if stanje.namen is not Namen.POVEZAVA:
         return True
-    return _enaka(stanje.user_id, user_id_seje)
+    return prijava.zetona_se_ujemata(stanje.user_id, user_id_seje)
 
 
 # --- Naslovi ---------------------------------------------------------------
