@@ -85,3 +85,45 @@ def test_ime_modela_pride_iz_okolja(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_MODEL", "nekaj-novejsega")
 
     assert Settings().openai_model == "nekaj-novejsega"
+
+
+# --- Google (V3-R08) -------------------------------------------------------
+
+
+def test_google_pride_iz_okolja(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Skrivnost odjemalca pride iz okolja in nikoli iz repozitorija."""
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "odjemalec-1")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "skrivnost-1")
+    monkeypatch.setenv("DOMENA", "solski.test")
+
+    nastavitve = Settings()
+
+    assert nastavitve.google_je_nastavljen
+    assert nastavitve.google_client_secret == "skrivnost-1"
+
+
+def test_brez_googla_se_streznik_vseeno_zazene() -> None:
+    """Manjkajoča nastavitev ustavi eno zmožnost, ne strežnika (`ADR-046` F).
+
+    Ista drža kot pri `OPENAI_API_KEY` (`ADR-009`): namestitev, ki Googla ne
+    omenja, ga nima — brez posebnega koraka in brez napake ob zagonu.
+    """
+    nastavitve = Settings(database_url="sqlite://")
+
+    assert nastavitve.google_client_id == ""
+    assert nastavitve.google_client_secret == ""
+    assert not nastavitve.google_je_nastavljen
+
+
+def test_skrivnosti_odjemalca_ni_v_repozitoriju() -> None:
+    """`okolje.primer` nosi imeni brez vrednosti, kot vse druge skrivnosti.
+
+    Isti razred varovala kot pri zgostitvi gesla v `test_postavitev.py`: da
+    skrivnosti v repozitoriju ni, mora biti preverjeno, ne le dogovorjeno
+    (`CLAUDE.md`, trdi rob 6).
+    """
+    predloga = Path(__file__).resolve().parents[1] / "okolje.primer"
+    besedilo = predloga.read_text(encoding="utf-8")
+
+    assert "GOOGLE_CLIENT_SECRET=\n" in besedilo
+    assert "GOOGLE_CLIENT_ID=\n" in besedilo

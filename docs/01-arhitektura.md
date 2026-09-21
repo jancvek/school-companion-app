@@ -80,8 +80,10 @@ logika testljiva brez naprave.
 | `app/routers/urnik.py` | urnik otroka pod `/admin/schedule`: mreža, predlog s slike, potrditev (V3-R09) |
 | `app/routers/clani.py` | člani družine pod `/admin/family`: seznam, dodajanje, ponastavitev gesla, deaktivacija in aktivacija (V3-R06) |
 | `app/routers/sistem.py` | stran lastnika sistema pod `/admin/system`: družine, odpiranje nove, stanje družine in dejanja nad starši (V3-R05) |
+| `app/routers/racun.py` | nastavitve prijavljenega starša pod `/admin/racun`: načini prijave, povezava in odstranitev Googla (V3-R08) |
+| `app/google.py` | Google prijava: poti, naslovi, vezivo stanja, razsodbe in **edini modul, ki govori z Googlom** (V3-R08). Brez FastAPI in brez baze |
 | `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository`, `StatistikaRepository` (V2-R04, samo bere), `ClaniRepository` (V3-R06) in `ScheduleRepository` (V3-R09) — vsak z obvezno družino (V3-R01) — ter `DruzineRepository` (od V3-R05 tudi pregled čez družine) in `PrijavaRepository` (V3-R03), edina brez družine; edina pot do baze |
-| `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03); `child_id` na snovi, kvizu in poskusu (V3-R07); `schedules` in `schedule_entries` (V3-R09) |
+| `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03); `child_id` na snovi, kvizu in poskusu (V3-R07); `schedules` in `schedule_entries` (V3-R09); `credentials.label` (V3-R08) |
 | `app/storage.py` | zapis, meja mape in brisanje slik na disku; mapa družine (V3-R01); podmapa `urniki/` (V3-R09) |
 | `app/vision.py` | **edini modul, ki uvaža `openai`**: prompta, shemi odgovorov, klic. Dva klicalca — snov (V1-R03) in urnik (V3-R09) — nad skupnim `_izvedi_klic` |
 | `app/obdelava.py` | kaj se zgodi z enim zapisom: prevzem, klic, zapis izida. Sinhron |
@@ -91,14 +93,14 @@ logika testljiva brez naprave.
 | `app/ukazi.py` | `python -m app.ukazi nastavi-geslo <identifikator>`; geslo z `getpass`, nikoli iz argumenta (V3-R03); prekliče seje računa (V3-R06) |
 | `app/clani.py` | pravila o članih družine: veljaven vnos in kdo sme koga — brez FastAPI in brez baze (V3-R06) |
 | `app/sistem.py` | pravila lastnika sistema: ime družine, česa niti on ne sme, besedilo o zunanjem vision API-ju — brez FastAPI in brez baze (V3-R05) |
-| `app/routers/vstop.py` | prijava in odjava: `GET/POST /admin/login`, `POST /admin/logout` (V3-R03); `POST /auth/login` in `POST /auth/logout` za telefon (V3-R04) |
+| `app/routers/vstop.py` | prijava in odjava: `GET/POST /admin/login`, `POST /admin/logout` (V3-R03); `POST /auth/login` in `POST /auth/logout` za telefon (V3-R04); `POST /auth/google/login` in `GET /auth/google/callback` (V3-R08) |
 | `app/settings.py` | nastavitve iz okolja |
 | `app/dependencies.py` | odvisnosti poti iz `app.state`; družina iz seje — ene same, za obe strani (`daj_druzino`, V3-R04; začasne `daj_druzino_telefona` ni več) |
 | `app/urnik.py` | pravila urnika in manjkov: kateri predmeti so kateri dan, česa tisti dan ni na sliki (V3-R09). Brez FastAPI in brez baze |
 | `app/otroci.py` | izbira otroka v pogledih, ki so ločeni po otroku: privzetek, 404 za tujega, kdaj se izbirnik izriše (V3-R07). Brez FastAPI in brez seje |
 | `app/subjects.py` | predmeti, slovenske oznake stanj in oznake ocen (`OZNAKE_OCEN`, tu od V2-R04) |
 | `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03); šolsko leto in meseci (V2-R04); današnji dan, meje poljubnega obdobja in ura brez datuma (V2-R07) |
-| `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01), 400 (V2-R07) ter 403 (V3-R06); obdelovalec konteksta z glavo in CSRF žetonom (V3-R03) |
+| `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01), 400 (V2-R07) ter 403 (V3-R06); obdelovalec konteksta z glavo, CSRF žetonom (V3-R03) in `google_na_voljo` (V3-R08) |
 | `app/besedilo.py` | slovenske oblike števil (dvojina) |
 | `Caddyfile` | Caddy pred `api`: domena, TLS-ALPN, ikona zavihka (V3-R02); `basic_auth` je padel z V3-R03 |
 | `varnostna-kopija/` | `kopija.ps1` in `obnova.ps1` (V3-R02) |
@@ -570,13 +572,14 @@ izgubi pripis otroka, vrstic pa ne — isti vzorec kot `0004`.
 
 #### Identiteta: uporabniki, poverilnice in seje (V3-R03)
 
-Model je iz `ADR-027`: **poverilnica ni uporabnik**, zato je Google pozneje
-(`V3-R08`) nova vrstica in ne nova shema.
+Model je iz `ADR-027`: **poverilnica ni uporabnik**. `V3-R08` je to preveril in
+potrdil — Google je nova vrstica (`kind='google'`) in en `NULL`-abilen stolpec,
+ne nova shema; `users` in `sessions` se nista dotaknila.
 
 | Tabela | Stolpci | Opomba |
 |---|---|---|
 | `users` | `id`, `family_id NOT NULL` (FK, indeks), `role` (`parent`\|`child`), `display_name`, `is_system_owner`, `is_active`, `created_at` | oseba brez gesla; `is_active` pišeta in bereta poti `V3-R06` (glej „Člani družine"), `is_system_owner` odpira `/admin/system` (`V3-R05`) |
-| `credentials` | `id`, `user_id NOT NULL` (FK, indeks), `kind` (`password`), `identifier` **UNIQUE**, `secret_hash`, `created_at`, `updated_at` | `identifier` je e-naslov starša ali uporabniško ime otroka, enoličen čez celo namestitev; `secret_hash IS NULL` pomeni „geslo ni nastavljeno" |
+| `credentials` | `id`, `user_id NOT NULL` (FK, indeks), `kind` (`password`\|`google`), `identifier` **UNIQUE**, `secret_hash`, `label`, `created_at`, `updated_at` | `identifier` je e-naslov starša, uporabniško ime otroka ali Googlov `sub` (V3-R08), enoličen čez celo namestitev; `secret_hash IS NULL` pomeni „geslo ni nastavljeno" — pri `google` pomeni, da ta vrsta zgostitve nima; `label` je e-naslov Google računa **samo za izris** (V3-R08) |
 | `sessions` | `id`, `user_id NOT NULL` (FK, indeks), `token_hash` **UNIQUE**, `csrf_token`, `created_at`, `expires_at`, `last_used_at`, `device_label` | žetona v bazi ni, samo SHA-256 |
 | `login_attempts` | `id`, `identifier` (indeks), `ip_address`, `created_at` (indeks) | **edina tabela brez družine**: poskus se zabeleži tudi za identifikator, ki ne obstaja |
 
@@ -765,6 +768,13 @@ nje in to preverja `TestBrezJavaScripta`, ki izvzame samo `snov.html`.
 | `/admin/system/families/{id}/parents/{user_id}/password` | GET, POST | ponastavitev gesla staršu (V3-R05) |
 | `/admin/system/families/{id}/parents/{user_id}/deactivate` | GET, POST | vmesna stran in deaktivacija starša (V3-R05) |
 | `/admin/system/families/{id}/parents/{user_id}/activate` | GET, POST | vmesna stran in aktivacija starša (V3-R05) |
+| `/admin/racun` | GET | načini prijave prijavljenega starša; `user_id` iz seje, nikoli iz naslova (V3-R08) |
+| `/admin/racun/google` | POST | začne povezovanje: postavi piškotek stanja in pelje na Googlov zaslon (V3-R08) |
+| `/admin/racun/google/odstrani` | POST | odstrani Google povezavo; gesla in sej se ne dotakne (V3-R08) |
+
+Googlovi poti, ki ju sproži nekdo **brez** seje, sta zunaj `/admin` in zato
+nista v tej tabeli: `POST /auth/google/login` in `GET /auth/google/callback`
+(glej „Google prijava za starša").
 
 Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Vsaka od njih
 zahteva sejo** (V3-R03, glej „Prijava, seje in CSRF"); vsak `POST` nosi CSRF
@@ -829,6 +839,12 @@ Odločitve so v `ADR-027` (model) in `ADR-035` (izvedba).
 - **Žeton seje** je `secrets.token_urlsafe(32)`; v bazi je samo njegova
   SHA-256. Piškotek `seja` je `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`,
   z veljavnostjo 30 dni. **Rok je drseči** in se osveži največ enkrat na uro.
+- **Primerjava žetonov gre skozi `prijava.zetona_se_ujemata` in primerja
+  bajte** (popravljeno v `V3-R08`). `compare_digest` nad `str` zahteva čisti
+  ASCII in sicer vrže `TypeError`; žeton pride iz obrazca, torej od zunaj, zato
+  je bila taka izjema `500` z golim angleškim besedilom na vsakem `POST` pod
+  `/admin`. Pogodba je nespremenjena — tak žeton ni bil veljaven nikoli, le
+  namesto `403` je dal `500`. Pokritost varuje test, generiran iz `openapi()`.
 - **CSRF žeton živi v vrstici seje** in pride v vsako predlogo prek
   `context_processors` izrisovalnika. `SejaMiddleware` ga pri `POST` prebere iz
   telesa (samo `application/x-www-form-urlencoded`, največ 1 MiB), primerja s
@@ -1047,6 +1063,151 @@ pa ne — isti vzorec kot `0004` in `0009`.
   žetonu, tudi otrokovemu.** Brez žetona so `401` (`ZetonMiddleware`), z njim
   vrnejo celotno shemo poti — tudi `/admin/family` (V3-R06) in `/admin/system`.
   Tako je od `V1`; to **ni** lastnost `V3-R05`. Zaprtje je svoja zahteva.
+
+## Google prijava za starša (V3-R08)
+
+Starš na `/admin/racun` poveže svoj Google račun; od takrat se prijavi z geslom
+ali z Googlom in obe poti dasta sejo v isti tabeli `sessions`. Odločitve so v
+`docs/odlocitve/ADR-046`, pravila v `app/google.py`, poizvedbe v
+`PrijavaRepository`.
+
+**`ADR-027` je s tem preverjen in drži:** Google je nova vrstica v
+`credentials`, ne nova shema. `users` in `sessions` se nista dotaknila.
+
+| Pot | Metoda | Plast | Kdo jo sproži |
+|---|---|---|---|
+| `/admin/racun` | GET | `SejaMiddleware`, brez izjeme | prijavljen starš |
+| `/admin/racun/google` | POST | `SejaMiddleware` + CSRF | prijavljen starš |
+| `/admin/racun/google/odstrani` | POST | `SejaMiddleware` + CSRF | prijavljen starš |
+| `/auth/google/login` | POST | izvzeta iz `ZetonMiddleware`; CSRF preveri sama | obiskovalec brez seje |
+| `/auth/google/callback` | GET | izvzeta iz `ZetonMiddleware`; veže `state` | Googlova preusmeritev |
+
+- **Razcep poti gre po tem, kdo klic sproži** (`ADR-046` B). Povezovanje in
+  odstranitev sta pod `/admin`, ker ju sproži prijavljen starš — sejo in CSRF
+  jima preveri ista plast kot vsaki drugi strani, in generirani test
+  dosegljivosti (`V3-R03`) ju pokrije brez izjeme. Zunaj `/admin` sta samo
+  tisti dve poti, ki ju sproži nekdo brez seje. `IZVZETE_POTI` je s tem
+  zrasel za **dve točni poti**; `IZVZETE_PREDPONE` ostaja enočlanska.
+- **`identifier` Google poverilnice je Googlov `sub`, ne e-naslov**
+  (`ADR-046` A). `credentials.identifier` je enoličen čez celo namestitev, zato
+  bi e-naslov podrl prav stanje, ki ga zahteva kriterij 2 — starša z geslom in
+  Googlom na istem naslovu. `sub` je hkrati edina vrednost, za katero Google
+  jamči, da se ne spremeni. E-naslov živi v novem stolpcu `credentials.label`
+  in služi **izključno izrisu**: po njem se nikoli ne išče in nikoli ne
+  prijavlja. Ob vsaki prijavi z Googlom se osveži.
+- **Povratni klic je en sam za oba tokova** (`ADR-046` C). Kaj se dogaja, pove
+  piškotek stanja, ne naslov; v Googlovi konzoli je zato vpisan en sam
+  povratni naslov. Ta se sestavi iz nastavitve `DOMENA` in ne iz `request.url`:
+  za Caddyjem je gostitelj v zahtevi notranje ime vsebnika.
+- **`state` je vezivo in ne okras** (`ADR-046` D). Povratni klic je navaden
+  `GET` iz tujega konteksta. Naključje iz `Stanje` živi v piškotku
+  `google_state` (`HttpOnly`, `Secure`, `SameSite=Lax`, 10 minut) in se ob
+  povratku primerja s `compare_digest`; piškotek nosi še **namen** in, pri
+  povezovanju, **`user_id` starša, ki je tok sprožil**, ki se mora ujemati z
+  dejavno sejo. Piškotek se pobriše ob **vsakem** izidu — enkratna raba je del
+  veziva. `SameSite=Lax` je pravi in ne ohlapni: Googlova preusmeritev je
+  vrhnja navigacija, zato piškotek pride s seboj, `Strict` bi tok pokvaril in
+  `None` bi vezivo izničil. **Primerjata se bajta, ne niza:** `compare_digest`
+  nad `str` zahteva čisti ASCII in ob vsakem drugem znaku vrže `TypeError` —
+  `state` iz naslova in piškotek (latin-1) pa sta oba vhod od zunaj. Taka
+  izjema bi bila 500 z golim angleškim besedilom na javni poti in bi ušla pred
+  brisanjem piškotka, s čimer bi padla prav enkratna raba (najdeno v prvem
+  pregledu `V3-R08`). Primerjava **ni svoja**: gre skozi
+  `prijava.zetona_se_ujemata`, ki od `V3-R08` primerja bajte in pokriva vsa
+  štiri klicna mesta — obe prijavi, `SejaMiddleware` in nalaganje urnika.
+  Svoja dvojnica je bila prvi popravek te napake in je razhajanje tudi
+  povzročila (`docs/02-izkusnje.md`).
+  Brez tega veziva bi napadalec svoj Google račun prilepil na starševega in v
+  njegovo družino vstopal, kolikor dolgo bi hotel — zato ima vsak od teh
+  pogojev svoj test, ki dokaže tudi, da poverilnica **ni** nastala in da do
+  Googla sploh ni prišlo.
+- **Prijava nikoli ne ustvari uporabnika ali družine** (kriterij 3,
+  `ADR-025`). Neznan `sub`, deaktiviran račun in ugasnjena družina dajo **isto**
+  oznako napake; razlika bi bila podatek o tem, kdo v tej namestitvi obstaja.
+  Registracija ostane zaprta.
+- **Skozi naslov potuje oznaka, nikoli besedilo.** Prijavna stran izriše samo
+  oznako, ki jo pozna `google.SPOROCILA_PRIJAVE`; neznana ne pokaže ničesar.
+  Prosto besedilo v naslovu bi pomenilo, da lahko kdorkoli s pripravljeno
+  povezavo nariše poljubno sporočilo na prijavno stran — in prav ta stran je
+  tista, kjer je tako sporočilo vabilo.
+- **Napaka pove tam, kjer jo bo bralec videl, in tako, kot se ga tiče.**
+  **Kam** odloči seja: kdor je prijavljen, dobi stran s pojasnilom (`409`),
+  kdor seje nima, prijavno stran — preusmeritev prijavljenega starša na prijavo
+  bi mu povedala, da je bil odjavljen, česar ni bil. **Kaj** odloči tok:
+  `SPOROCILA_POVEZAVE` in `SPOROCILA_PRIJAVE` sta dva slovarja nad istimi
+  oznakami, ker staršu sredi povezovanja nasvet „prijavi se z geslom" ne pove
+  ničesar (prijavljen je), na prijavni strani pa je prav ta nasvet pravi.
+- **Odstranitev povezave ne odjavi in ne odnese gesla** (kriterij 6). Ni
+  ponastavitev gesla, zato sej ne prekliče. Odstranitev, po kateri na računu ne
+  bi ostala nobena poverilnica za prijavo — račun brez gesla shema dopušča in
+  tako ga pusti migracija `0008` — se **zavrne** (`ADR-046` G); isto pravilo
+  gumba tudi ne ponudi in stran pove, zakaj ga ni.
+- **Enoličnost `sub` razsodi baza**, ne poizvedba pred vstavljanjem: ta bi bila
+  tekma. `IntegrityError` prevede `je_zaseden_identifikator` v isto izjemo kot
+  pri članih družine (`ADR-038` E) — kršitev je ista omejitev na istem stolpcu.
+- **Google velja izključno za starša**, in to pove `prijava.Vrata`, ne nov
+  `if`. Poverilnica `kind='google'` na otrokovem računu po nobeni poti ne more
+  nastati, ker povezovanje teče pod `/admin`; pravilo vseeno stoji tam, kjer
+  seja nastane (`ADR-046` H). Otrokov Google račun je izven obsega V3.
+- **Podpisa ID žetona ne preverjamo, in to je zavestno** (`ADR-046` E).
+  Podatke dobimo neposredno od Googla prek TLS, ne prek brskalnika; preverba
+  podpisa je potrebna takrat, ko žeton pride po nezaupani poti. Zato ni
+  `authlib` in ni `pyjwt[crypto]` z JWKS predpomnilnikom. `httpx` ni nov paket
+  — nameščen je že prek `openai` —, a je odslej izrecno v `dependencies`.
+- **Zahtevani obsegi so samo `openid`, `email` in `profile`.** Obseg, ki ga
+  prosimo, je tisto, kar starš na Googlovem zaslonu prebere o nas.
+- **Klic Googlu ima časovno omejitev (15 s) in teče v niti**, iz istega razloga
+  kot argon2 v geselni prijavi: sinhron klic na zanki dogodkov bi ustavil vse
+  ostale zahteve, tudi prenos slike s telefona.
+
+### Namestitev brez Googla
+
+Brez `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` ali `DOMENA` Google v tej
+namestitvi ni na voljo (`Settings.google_je_nastavljen`, `ADR-046` F):
+
+- gumba „Prijava z Google računom" na prijavni strani ni,
+- ime v glavi ni povezava na `/admin/racun`,
+- vseh **pet** Googlovih poti vrne **404** (ne 503: pot, ki je ta namestitev
+  nima, za obiskovalca ne obstaja). Pet in ne štiri: poleg obeh dejanj in
+  obeh poti zunaj `/admin` je tu tudi `GET /admin/racun` sam.
+
+Strežnik se zažene normalno — ista drža kot pri manjkajočem `OPENAI_API_KEY`
+(`ADR-009`): manjkajoča nastavitev ustavi eno zmožnost, ne strežnika. Prijava z
+geslom ne potrebuje ničesar od tega.
+
+Ali je Google na voljo, pove `google_na_voljo` iz obdelovalca konteksta
+(`app/strani.py`) in ne posamezna pot: obdelovalec ključe, ki jih poda pot,
+prepiše, zato ima vsak ključ enega samega lastnika (`docs/02-izkusnje.md`).
+
+### Sklop zunaj repozitorija
+
+V Google Cloud Console: projekt, **OAuth consent screen** tipa *External* z
+obsegi `openid`/`email`/`profile`, nato **Credentials → OAuth client ID** tipa
+*Web application* s povratnim naslovom
+`https://school-buddy.duckdns.org/auth/google/callback` — **točno tako**, brez
+končne poševnice, ker Google ujemanje zahteva znak za znak.
+
+Aplikacija ostane v načinu **Testing**: prijavijo se lahko samo ročno vpisani
+preizkusni računi (do 100). Za krog znancev je to dovolj in prihrani Googlovo
+preverjanje aplikacije; širši krog je nova zahteva, ne popravek (`ADR-025`).
+
+`client_id` in `client_secret` gresta v `apps/server/.env` kot
+`GOOGLE_CLIENT_ID` in `GOOGLE_CLIENT_SECRET`. Skrivnosti v repozitoriju ni in
+ne sme biti; `okolje.primer` nosi imeni brez vrednosti, kar varuje test.
+
+### Znane omejitve
+
+- **`credentials.label` je lahko zastarel.** Osveži se ob prijavi z Googlom,
+  ne ob spremembi pri Googlu. Vrednost je prikaz in iz nje ne izhaja nobena
+  pravica, zato je zastarel izpis cenejši od poizvedbe brez razloga.
+- **Lastnik sistema tujih Google povezav ne ureja.** Povezavo sproži in
+  odstrani izključno starš sam (kriterij 4); `/admin/system` se ni spremenil.
+  Starš, ki izgubi dostop do svojega Google računa, se prijavi z geslom — to mu
+  ponastavi lastnik sistema.
+- **Kdaj je bila seja ustvarjena z Googlom, ni zapisano.** `sessions` se ni
+  dotaknila (kriterij 1) in seznama prijavljenih naprav ni (`ADR-038` H).
+- **Odjava iz Googla ni naša.** Naša odjava izbriše našo sejo; Googlove ne in
+  je ne sme.
 
 ## Sestavljalnik kvizov (V2-R01)
 

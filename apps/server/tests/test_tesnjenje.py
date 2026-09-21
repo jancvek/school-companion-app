@@ -33,6 +33,7 @@ from fastapi import FastAPI
 from sqlalchemy import Engine, Select, event, select
 from sqlalchemy.orm import Session
 
+from app import google
 from app.db import (
     ClaniRepository,
     DruzineRepository,
@@ -44,6 +45,7 @@ from app.db import (
     ScheduleRepository,
     StatistikaRepository,
 )
+from app.main import create_app
 from app.models import (
     NACIN_SAMOOCENA,
     STATUS_NOV,
@@ -58,11 +60,13 @@ from app.models import (
     Schedule,
     User,
 )
+from app.settings import Settings
 from app.urnik import Vnos
 from tests.conftest import (
     CVEK_ID,
     OTROK_ID,
     PrijavljenOdjemalec,
+    naredi_testne_nastavitve,
     prijavi,
     ustvari_otroka,
     ustvari_sejo,
@@ -70,6 +74,7 @@ from tests.conftest import (
 )
 from tests.test_druzine import DRUGA_ID, dodaj_druzino
 from tests.test_kvizi import objavi
+from tests.test_racun import PonarejenGoogle
 from tests.test_resevanje import POKAZANO, poskus, poslji
 from tests.test_rezultat import postavke
 
@@ -361,6 +366,37 @@ def brez_sledi(besedilo: str, tuja: Druzina, poslano: tuple[str, ...]) -> None:
             assert sled not in besedilo, f"odgovor vsebuje sled tuje družine: {sled}"
 
 
+# --- Aplikacija tesnjenja ---
+
+#: Aplikacija tega testa ima **Google prizgan** (V3-R08), za razliko od
+#: privzete iz `conftest.py`.
+#:
+#: Brez tega bi Googlove poti vrnile 404, ker Google v tej namestitvi ni
+#: nastavljen (`docs/odlocitve/ADR-046` F) — in njihovi primeri spodaj bi bili
+#: zeleni, ne da bi karkoli dokazali. Varovalo `test_vsaka_pot_aplikacije_ima_primer`
+#: bi bilo zadovoljeno, tesnjenje pa nepreverjeno. To je natanko oblika testa,
+#: ki jo merilo dokoncanosti prepoveduje (`CLAUDE.md` §1b: „test, ki ostane
+#: zelen ob pokvarjeni implementaciji, ne steje").
+
+
+@pytest.fixture
+def aplikacija(slike: Path, motor: Engine) -> FastAPI:
+    """Prepise fixture iz `conftest.py`: vse zmoznosti so prizgane.
+
+    Odjemalec Googla je ponaredek in do omreza ne pride (`ADR-046` F).
+    """
+    nastavitve: Settings = naredi_testne_nastavitve(slike).model_copy(
+        update={
+            "google_client_id": "odjemalec-tesnjenja",
+            "google_client_secret": "skrivnost-tesnjenja",
+            "domena": "tesnjenje.test",
+        }
+    )
+    return create_app(
+        nastavitve=nastavitve, motor=motor, odjemalec_googla=PonarejenGoogle()
+    )
+
+
 # --- Poti ---
 
 OK = frozenset({200})
@@ -388,6 +424,33 @@ def _prijava_s_tujim_racunom(odjemalec: PrijavljenOdjemalec, tuja: Druzina) -> A
         },
         follow_redirects=False,
     )
+
+
+def _google_zeton_prijave(odjemalec: PrijavljenOdjemalec) -> str:
+    """CSRF zeton prijavnega obrazca; Googlov gumb nosi istega (`ADR-035` D)."""
+    stran = odjemalec.get("/admin/login")
+    zeton = re.search(r'name="csrf" value="([^"]+)"', stran.text)
+    assert zeton is not None, stran.text
+    return zeton.group(1)
+
+
+def _povratek_s_tujim_stanjem(odjemalec: PrijavljenOdjemalec, tuja: Druzina) -> Any:
+    """Povratni klic s piskotkom stanja, ki nosi **tujega** starsa.
+
+    To je oblika napada, ki ji je namenjen `ADR-046` D, prevedena v jezik tega
+    testa: identifikator druzine A, poslan v imenu druzine B. Ce bi pot
+    piskotku verjela, bi se Google racun druzine B pripisal starsu druzine A —
+    in ta bi od takrat vstopal v tujo druzino, kadar bi hotel.
+    """
+    stanje = google.novo_stanje(google.Namen.POVEZAVA, tuja.stars_id)
+    odjemalec.cookies.set(google.PISKOTEK_STANJA, stanje.zapis())
+    odgovor = odjemalec.get(
+        google.POT_POVRATNA,
+        params={"code": "koda-tesnjenja", "state": stanje.nakljucje},
+        follow_redirects=False,
+    )
+    odjemalec.cookies.delete(google.PISKOTEK_STANJA)
+    return odgovor
 
 
 PRIMERI_POTI: dict[tuple[str, str], Klic] = {
@@ -711,6 +774,37 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
         o.post("/materials/deleted-on-device", json={"ids": [a.za_brisanje]}),
         OK,
         (a.za_brisanje,),
+    ),
+    # --- Google (V3-R08) ---
+    #
+    # Nobena od teh poti tujega identifikatorja ne sprejme kot vhod: vse
+    # delajo nad `user_id` iz seje. Primeri zato dokazujejo drugo plat istega
+    # pravila — da pot, ki je o **meni**, ne pokaze in ne spremeni nicesar
+    # tujega, tudi kadar ji tujega starsa vrinemo v piskotek.
+    ("GET", google.POT_RACUNA): lambda o, a: (o.get(google.POT_RACUNA), OK, ()),
+    ("POST", google.POT_POVEZAVE): lambda o, a: (
+        o.post(google.POT_POVEZAVE, follow_redirects=False),
+        PREUSMERITEV,
+        (),
+    ),
+    ("POST", google.POT_ODSTRANITVE): lambda o, a: (
+        o.post(google.POT_ODSTRANITVE, follow_redirects=False),
+        PREUSMERITEV,
+        (),
+    ),
+    ("POST", google.POT_PRIJAVE): lambda o, a: (
+        o.post(
+            google.POT_PRIJAVE,
+            data={"csrf": _google_zeton_prijave(o)},
+            follow_redirects=False,
+        ),
+        PREUSMERITEV,
+        (),
+    ),
+    ("GET", google.POT_POVRATNA): lambda o, a: (
+        _povratek_s_tujim_stanjem(o, a),
+        frozenset({409}),
+        (a.stars_id,),
     ),
     ("GET", "/quizzes/pending"): lambda o, a: (
         o.get("/quizzes/pending"),

@@ -1,0 +1,94 @@
+{# Nastavitve prijavljenega starša (V3-R08).
+
+   Stran je izključno o **tebi**: `user_id` pride iz seje, ne iz naslova, zato
+   tu ni ne izbirnika ne seznama drugih ljudi. Kdo je kdo v družini, je na
+   `/admin/family` (V3-R06) — dva pojma, dve strani.
+
+   Dejanji sta gumba in ne povezavi na vmesno stran: nobeno od njiju ni
+   nepovratno na način, ki bi vmesno potrditev opravičil. Povezovanje pelje na
+   Googlov privolitveni zaslon, ki je sam po sebi potrditev; odstranitev pa je
+   obrnljiva z istim gumbom. Isti premislek kot `ADR-038` F. #}
+{% extends "osnova.html" %}
+
+{% block naslov %}Moj račun{% endblock %}
+
+{% block vsebina %}
+  <h1>Moj račun</h1>
+  <p class="pod">{{ pogled.ime }} — {{ pogled.identifikator }}</p>
+
+  {% if pogled.sporocilo %}
+    <p class="opozorilo">{{ pogled.sporocilo }}</p>
+  {% endif %}
+
+  <h2>Načini prijave</h2>
+
+  <div class="tabela-ovoj">
+    <table class="tabela">
+      <thead>
+        <tr>
+          <th>Način</th>
+          <th>Stanje</th>
+          <th>Dejanja</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Geslo</td>
+          <td>
+            {% if pogled.geslo_nastavljeno %}
+              nastavljeno
+            {% else %}
+              <span class="stanje">ni nastavljeno</span>
+            {% endif %}
+          </td>
+          {# Geslo si starš nastavi sam, na strani Družina (V3-R06): tam je
+             ponastavitev lastnega gesla dovoljena vsakemu. Trditev „nastavi ga
+             lastnik sistema" je veljala do V3-R03 in bi tu pomenila, da stran
+             v sosednji celici naroči dejanje, za katerega hkrati trdi, da ga
+             ne smeš opraviti. #}
+          <td><a href="/admin/family">Nastavi na strani Družina</a></td>
+        </tr>
+        <tr>
+          <td>Google</td>
+          <td>
+            {% if pogled.google_povezan %}
+              povezan
+              {% if pogled.google_oznaka %}
+                <span class="stanje">— {{ pogled.google_oznaka }}</span>
+              {% endif %}
+            {% else %}
+              <span class="stanje">ni povezan</span>
+            {% endif %}
+          </td>
+          <td>
+            {# Obrazec in ne povezava: klik, ki sproži tok prijave, je `POST` s
+               CSRF žetonom, da ga tuja stran ne more sprožiti namesto tebe. #}
+            {% if not pogled.google_povezan %}
+              <form method="post" action="/admin/racun/google">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <button class="gumb gumb-obdelava" type="submit">Poveži Google račun</button>
+              </form>
+            {% elif pogled.sme_odstraniti %}
+              <form method="post" action="/admin/racun/google/odstrani">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <button class="gumb" type="submit">Odstrani povezavo</button>
+              </form>
+            {% else %}
+              {# Gumba ni — in stran pove, zakaj ga ni. Skrit gumb brez razlage
+                 bi bil videti kot napaka strani. #}
+              <span class="stanje">{{ pogled.zakaj_ne_sme }}</span>
+            {% endif %}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="drobno">
+    Google računa ne moreš povezati z računom, ki ga še ni — s to povezavo se
+    prijaviš v račun, ki v tej namestitvi že obstaja. Nov račun odpre starš
+    svojemu otroku na strani Družina, novo družino pa lastnik sistema.
+  </p>
+
+  <a class="nazaj" href="/admin">Nazaj na pregled</a>
+{% endblock %}

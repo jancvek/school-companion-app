@@ -1288,3 +1288,82 @@ def test_razveljavitev_stanja_druzine_ohrani_podatke(baza: str, slike: Path) -> 
         assert _stej(motor) == prej, "razveljavitev ne sme vzeti nobene vrstice s sabo"
     finally:
         motor.dispose()
+
+
+# --- Google poverilnica (V3-R08, `0012_google_poverilnica`) ---
+
+
+def test_obstojece_poverilnice_prezivijo_google(baza: str, slike: Path) -> None:
+    """`0012_google_poverilnica` doda stolpec in nobene vrstice ne premakne.
+
+    Kriterij `V3-R08` zahteva več kot to: **`users` in `sessions` se ne smeta
+    dotakniti.** Če bi se, bi bil `ADR-027` („Google je nova vrstica, ne nova
+    shema") ovržen in zahteva bi se ustavila. Zato test primerja shemi obeh
+    tabel pred migracijo in po njej, ne le števila vrstic.
+    """
+    config = alembic_nastavitve(baza)
+    _polna_baza_pred_druzinami(baza, slike)
+    command.upgrade(config, "0011_stanje_druzine")
+
+    motor = create_engine(baza)
+    try:
+        prej = _stej(motor)
+        poverilnic = _vrstice(motor, "SELECT count(*) FROM credentials")[0][0]
+        assert poverilnic >= 1, "test mora teči nad bazo s poverilnicami"
+        uporabniki_prej = {s["name"] for s in inspect(motor).get_columns("users")}
+        seje_prej = {s["name"] for s in inspect(motor).get_columns("sessions")}
+
+        command.upgrade(config, "0012_google_poverilnica")
+
+        pregled = inspect(motor)
+        assert {s["name"] for s in pregled.get_columns("users")} == uporabniki_prej
+        assert {s["name"] for s in pregled.get_columns("sessions")} == seje_prej
+        assert "label" in {s["name"] for s in pregled.get_columns("credentials")}
+        assert _stej(motor) == prej, "google poverilnica ne sme premakniti nobene vrstice"
+        assert _vrstice(motor, "SELECT count(*) FROM credentials")[0][0] == poverilnic
+        # Geselne poverilnice oznake nimajo in je ne potrebujejo.
+        assert _vrstice(motor, "SELECT DISTINCT label FROM credentials") == [(None,)]
+    finally:
+        motor.dispose()
+
+
+def test_razveljavitev_google_ohrani_prijavo(baza: str, slike: Path) -> None:
+    """`downgrade` spusti `label` in **nobene poverilnice ne odnese**.
+
+    To je najblažja razveljavitev v tem projektu: `identifier` (Googlov `sub`),
+    po katerem prijava dejansko teče, je v drugem stolpcu in ostane. Izgubi se
+    samo berljiv izpis v nastavitvah.
+    """
+    config = alembic_nastavitve(baza)
+    _polna_baza_pred_druzinami(baza, slike)
+    command.upgrade(config, "head")
+
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            uporabnik = povezava.execute(text("SELECT id FROM users LIMIT 1")).scalar_one()
+            povezava.execute(
+                text(
+                    "INSERT INTO credentials "
+                    "(id, user_id, kind, identifier, secret_hash, label, created_at, updated_at) "
+                    "VALUES ('g1', :u, 'google', 'sub-104829', NULL, 'ana@primer.test', "
+                    "'2026-09-21 10:00:00', '2026-09-21 10:00:00')"
+                ),
+                {"u": uporabnik},
+            )
+        prej = _stej(motor)
+        poverilnic = _vrstice(motor, "SELECT count(*) FROM credentials")[0][0]
+
+        command.downgrade(config, "0011_stanje_druzine")
+
+        stolpci = {stolpec["name"] for stolpec in inspect(motor).get_columns("credentials")}
+        assert "label" not in stolpci
+        assert _stej(motor) == prej
+        assert _vrstice(motor, "SELECT count(*) FROM credentials")[0][0] == poverilnic, (
+            "razveljavitev ne sme vzeti nobene poverilnice s sabo"
+        )
+        assert _vrstice(motor, "SELECT identifier FROM credentials WHERE id = 'g1'") == [
+            ("sub-104829",)
+        ]
+    finally:
+        motor.dispose()

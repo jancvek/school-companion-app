@@ -87,6 +87,61 @@ python -m mypy apps/server
 
 Isto velja za `ruff`: `ruff check app/` izpusti `tests/` in `alembic/`.
 
+## Google prijava (V3-R08)
+
+### `secrets.compare_digest` nad `str` zahteva ASCII
+**Kaj:** povratni klic `GET /auth/google/callback?state=ž` je vrnil **500 z golim
+angleškim `Internal Server Error`** — na javni, neavtenticirani poti.
+**Zakaj:** `compare_digest` ob `str` z znakom izven ASCII vrže `TypeError`.
+Vsi trije vhodi, ki jih primerjamo, pridejo od zunaj: `state` iz naslova, CSRF
+žeton iz obrazca in vsak piškotek (Starlette glavo `Cookie` dekodira v latin-1).
+Huje od kode odgovora je bila druga posledica: izjema je ušla **pred** brisanjem
+piškotka stanja, zato je ta ostal živ in jamstvo o enkratni rabi je padlo.
+**Kako:** primerjaj **bajte**, ne nizov — `compare_digest(a.encode("utf-8"),
+b.encode("utf-8"))`. Takrat je vsak vhod veljaven in neujemanje je neujemanje,
+ne izjema. Velja za vsako primerjavo skrivnosti, ki pride iz zahteve.
+
+**Kar me je stalo drugega kroga pregleda:** prvi popravek je naredil svojo
+kopijo primerjave v `app/google.py` in popravil samo tisti dve klicni mesti,
+ki sta bili v obsegu zahteve. Koren pa je `prijava.zetona_se_ujemata`, ki ima
+**štiri** klicna mesta (obe prijavi, `SejaMiddleware`, nalaganje urnika) — in
+tri od njih so še naprej dajale 500. Popravek, ki podvoji pravilo namesto da
+bi popravil skupnega, ni popravek; je drugo pravilo, ki se z uro razide od
+prvega. Pravilo je zdaj eno samo in `google.py` svoje kopije nima.
+**Pokritost varuje generiran test** (`test_vsak_post_pod_adminom_prenese_ne_ascii_zeton`),
+ki poti bere iz `openapi()` in zato zajame tudi pot, dodano jutri.
+
+### Ista oznaka, dva tokova, dve besedili
+**Kaj:** starš, ki je bil prijavljen in je poskušal povezati Google, je ob
+napaki dobil „…ali se prijavi z geslom" — nasvet, ki ga ne more ubogati, ker
+prijavljen je.
+**Zakaj:** en slovar sporočil za dva tokova. Oznaka napake je res ista
+(`stanje`, `nedosegljiv`, `zavrnjeno`), pomen zanjo pa ne.
+**Kako:** **kam** odgovoriti odloči seja, **kaj** odgovoriti odloči tok. Dva
+slovarja nad istimi ključi sta cenejša od enega, ki polovici bralcev laže.
+
+### `git checkout <datoteka>` odnese necommitane popravke
+**Kaj:** med mutacijskim preizkusom sem mutacijo vrnil z `git checkout` — in s
+tem pobrisal tudi popravke, ki na tej datoteki še niso bili commitani.
+**Kako:** pred mutacijo naredi kopijo datoteke (`cp` v začasno mapo) in jo vrni
+s `cp`. `git checkout` vrne **commitano** stanje, ne stanja pred mutacijo.
+
+### Mutacijski preizkus v delovnem drevesu zastrupi vzporeden verify
+**Kaj:** lastnikov `verify.ps1` je padel z 12 testi, ki so v resnici zeleni.
+Izpis je kazal izvorno vrstico z `.encode("utf-8")`, izjema pa je govorila
+o primerjavi **nizov** — izvorna in izvedena koda si nista ustrezali.
+**Zakaj:** mutacijski preizkus (namerno pokvarim kodo in preverim, da test
+pade) sem delal kar v delovnem drevesu. Okno je bilo pol minute; v njem je
+`verify.ps1` modul uvozil in ga je nato 4 minute in 40 sekund držal v
+pomnilniku. Python modul uvozi enkrat, zato vrnitev datoteke na to nima
+vpliva. Drevo je takrat imelo **nove teste in staro napako** — kombinacijo,
+ki v nobenem commitu ne obstaja.
+**Kako:** mutacija je namenoma pokvarjena koda in v skupnem drevesu je mina.
+Bodisi teče v ločeni kopiji repozitorija, bodisi lastnika vnaprej opozorim,
+naj v tem času ne poganja verify. Rdeč izid, ki mu ne ustreza noben commit,
+je treba prepoznati in zavreči, ne popravljati — sicer se popravlja napaka,
+ki je ni.
+
 ## Orodja na tem stroju
 
 - **`scripts/` je del ograje** in agentu ni dovoljena za pisanje. Nove skripte

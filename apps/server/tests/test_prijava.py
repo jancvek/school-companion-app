@@ -27,9 +27,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import Session
 
-from app import prijava
+from app import main, prijava
 from app.models import VLOGA_OTROK, LoginAttempt, Material, UserSession
-from app.routers import admin, clani, dnevi, kvizi, sistem, statistika, urnik, vstop
+from app.routers import admin, clani, dnevi, kvizi, racun, sistem, statistika, urnik, vstop
 from app.routers.admin import MAPA_PREDLOG
 from app.security import SPOROCILO_BREZ_CSRF, SPOROCILO_NEVELJAVEN_ZETON
 from tests.conftest import (
@@ -158,7 +158,17 @@ class TestDosegljivost:
         """
         iz_usmerjevalnikov = {
             (metoda, brez_pretvornika(pot.path))
-            for modul in (admin, clani, dnevi, kvizi, sistem, statistika, urnik, vstop)
+            for modul in (
+                admin,
+                clani,
+                dnevi,
+                kvizi,
+                racun,
+                sistem,
+                statistika,
+                urnik,
+                vstop,
+            )
             for pot in modul.router.routes
             for metoda in getattr(pot, "methods", set())
             if pot.path.startswith("/admin")
@@ -171,6 +181,56 @@ class TestDosegljivost:
         }
 
         assert iz_usmerjevalnikov == iz_openapi
+
+    def test_vsak_post_pod_adminom_prenese_ne_ascii_zeton(
+        self, odjemalec: PrijavljenOdjemalec, aplikacija: FastAPI
+    ) -> None:
+        """Ne-ASCII CSRF žeton je **zavrnitev**, ne 500 (popravljeno v V3-R08).
+
+        `secrets.compare_digest` nad `str` zahteva čiste ASCII znake in sicer
+        vrže `TypeError`. Žeton pride iz obrazca, torej od zunaj, zato je bila
+        taka izjema 500 z golim angleškim besedilom na **vsakem** `POST` pod
+        `/admin` — kar `CLAUDE.md` §1b izrecno prepoveduje.
+
+        Test se generira iz `openapi()` in ne našteva poti ročno: pot, ki bo
+        dodana jutri, mora biti pokrita brez posega v ta test — isto sklepanje
+        kot pri generiranem testu dosegljivosti zgoraj.
+        """
+        posti = [
+            (metoda, pot)
+            for pot, metode in aplikacija.openapi()["paths"].items()
+            for metoda in metode
+            if pot.startswith("/admin") and metoda.upper() == "POST"
+        ]
+        assert len(posti) >= 7, "seznam POST poti je sumljivo kratek"
+
+        for _, pot in posti:
+            odgovor = odjemalec.post(
+                brez_pretvornika(pot).replace("{", "").replace("}", ""),
+                data={"csrf": "\u017e"},
+                follow_redirects=False,
+            )
+            assert odgovor.status_code != 500, f"POST {pot} → 500"
+            assert "Internal Server Error" not in odgovor.text, pot
+
+    def test_izvzete_predpone_ostanejo_enoclanske(self) -> None:
+        """`/admin` je edina predpona, ki je `ZetonMiddleware` ne varuje.
+
+        Varovalo in ne komentar (`docs/odlocitve/ADR-046` B): vsaka predpona na
+        tem seznamu je cela veja poti brez te plasti, in `V3-R08` je pokazal,
+        da je nove Googlove poti mogoče izvzeti **poimensko**. Naslednja
+        zahteva naj predpone ne doda tiho. Isti vzorec kot pri
+        `POTI_S_SVOJIM_CSRF` v `test_urnik.py`.
+        """
+        assert frozenset({"/admin"}) == main.IZVZETE_PREDPONE
+
+    def test_poti_brez_seje_ostane_samo_prijava(self) -> None:
+        """`SejaMiddleware` pod `/admin` nima druge izjeme kot prijavno stran.
+
+        `V3-R08` je povezovanje Googla namenoma pustil pod `/admin` prav zato,
+        da te izjeme ne bi potreboval (`ADR-046` B).
+        """
+        assert frozenset({prijava.POT_PRIJAVE}) == main.POTI_BREZ_SEJE
 
     def test_prijavna_stran_je_dosegljiva_brez_seje(self, brez_prijave: TestClient) -> None:
         odgovor = brez_prijave.get(prijava.POT_PRIJAVE)

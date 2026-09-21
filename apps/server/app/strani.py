@@ -13,6 +13,8 @@ from fastapi import Request
 from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
+from app.settings import Settings
+
 
 def daj_predloge(request: Request) -> Jinja2Templates:
     """Izrisovalnik predlog te aplikacije.
@@ -25,22 +27,31 @@ def daj_predloge(request: Request) -> Jinja2Templates:
 
 
 def kontekst_prijave(request: Request) -> dict[str, object]:
-    """Kdo je prijavljen in kakšen CSRF žeton nosijo obrazci te strani.
+    """Kdo je prijavljen, kakšen CSRF žeton nosijo obrazci te strani in ali je
+    v tej namestitvi na voljo Google.
 
     Vpisan je kot `context_processors` izrisovalnika (`app/main.py`), zato
     velja za **vsako** predlogo — glava z imenom družine in skrito polje v
     obrazcu tako ne potrebujeta dopolnila v 27 klicih `TemplateResponse`
     (`docs/odlocitve/ADR-035` D).
 
-    Brez seje se vrne **samo** `prijava: None`, brez ključa `csrf`. Razlog je v
-    Starlette: obdelovalci konteksta tečejo za klicateljem in njegove vrednosti
-    prepišejo. Prazen `csrf` bi torej pobrisal žeton, ki ga prijavna stran poda
-    sama — in prijavni obrazec bi ostal brez žetona, pri vsakem poskusu 403.
+    Brez seje se vrne **samo** `prijava: None` in `google_na_voljo`, brez
+    ključa `csrf`. Razlog je v Starlette: obdelovalci konteksta tečejo za
+    klicateljem in njegove vrednosti prepišejo. Prazen `csrf` bi torej
+    pobrisal žeton, ki ga prijavna stran poda sama — in prijavni obrazec bi
+    ostal brez žetona, pri vsakem poskusu 403.
+
+    `google_na_voljo` je tu in ne v posamezni poti prav zaradi iste pasti
+    (V3-R08): vrednost potrebujeta glava (povezava na `/admin/racun`) in
+    prijavna stran (gumb), in ključ, ki bi ga obdelovalec vračal *poleg* tega,
+    kar poda pot, bi se s tisto vrednostjo boril. Zato je lastnik en sam.
     """
+    nastavitve: Settings = request.app.state.nastavitve
+    skupno: dict[str, object] = {"google_na_voljo": nastavitve.google_je_nastavljen}
     seja = getattr(request.state, "prijava", None)
     if seja is None:
-        return {"prijava": None}
-    return {"prijava": seja, "csrf": seja.csrf_token}
+        return {**skupno, "prijava": None}
+    return {**skupno, "prijava": seja, "csrf": seja.csrf_token}
 
 
 def ni_najdeno(predloge: Jinja2Templates, request: Request, sporocilo: str) -> Response:

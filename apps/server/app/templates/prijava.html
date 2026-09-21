@@ -27,6 +27,23 @@
     <button class="gumb gumb-obdelava" type="submit">Prijavi me</button>
   </form>
 
+  {# Google (V3-R08). Obrazec in ne povezava: `GET` bi pomenil, da lahko tuja
+     stran tok sproži in brskalnik odnese h Googlu brez tvoje vednosti. Nosi
+     isti dvojno oddani žeton kot obrazec zgoraj (`ADR-035` D).
+
+     Gumba ni, kadar Google v tej namestitvi ni nastavljen (`ADR-046` F) —
+     ponudba, ki ne bi delovala, je slabša od odsotnosti. #}
+  {% if google_na_voljo %}
+    <form method="post" action="/auth/google/login" class="prijava">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="gumb" type="submit">Prijava z Google računom</button>
+    </form>
+    <p class="drobno">
+      Z Googlom se lahko prijaviš le, če si svoj Google račun prej povezal v
+      nastavitvah svojega računa. Nove prijave z Googlom ni mogoče odpreti.
+    </p>
+  {% endif %}
+
   <p class="drobno">
     Gesla ne moreš ponastaviti sam: otroku ga nastavi starš, staršu lastnik
     sistema.

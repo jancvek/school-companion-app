@@ -44,7 +44,31 @@ WORKER_INTERVAL_SECONDS=30
 
 # Domena, na kateri je strežnik dosegljiv prek HTTPS (V3-R02). Caddy zanjo
 # pridobi certifikat. Brez nje se Caddy ne zažene.
+#
+# Od V3-R08 jo bere tudi `api`: iz nje nastane povratni naslov za Google, ki
+# mora biti absoluten in enak tistemu v Googlovi konzoli.
 DOMENA=school-buddy.duckdns.org
+
+# Google prijava za starša (V3-R08). Dobiš ju v Google Cloud Console:
+# APIs & Services → Credentials → Create credentials → OAuth client ID,
+# tip „Web application". Pod „Authorized redirect URIs" vpiši **točno**
+#   https://school-buddy.duckdns.org/auth/google/callback
+# (brez končne poševnice; Google ujemanje zahteva znak za znak).
+#
+# Obsegi so samo `openid`, `email` in `profile` — nič drugega ne prosimo.
+# Aplikacija ostane v načinu „Testing", kjer se lahko prijavijo samo ročno
+# vpisani preizkusni računi (do 100). Za krog znancev je to dovolj in prihrani
+# Googlovo preverjanje aplikacije; širši krog bi bil nova zahteva, ne popravek
+# (`docs/odlocitve/ADR-025`).
+#
+# Brez teh dveh vrednosti strežnik normalno steče — samo gumba „Prijava z
+# Google računom" ni in Googlove poti vrnejo 404 (`ADR-046` F). Prijava z
+# geslom ne potrebuje ničesar od tega.
+#
+# Skrivnost odjemalca **ne sme v repozitorij**. Ta datoteka je predloga brez
+# vrednosti; prava `.env` je v `.gitignore`.
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
 
 # Spremenljivk ADMIN_UPORABNIK in ADMIN_ZGOSTITEV ni več (V3-R03): začasni
 # `basic_auth` v Caddyju je padel, admin varuje prijava v aplikaciji sami

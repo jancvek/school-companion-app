@@ -18,10 +18,14 @@ dependencies = [
     "jinja2",
     "openai",
     "argon2-cffi",
+    # Za Googlov OAuth (V3-R08). Ni nov paket: `openai` ga ze prinasa. Tu je
+    # izrecno, ker se na tranzitivno odvisnost ne zanasamo — dan, ko `openai`
+    # zamenja odjemalca, ne sme biti dan, ko pade prijava (`ADR-046` E).
+    "httpx",
 ]
 
 [project.optional-dependencies]
-dev = ["ruff", "mypy", "pytest", "httpx"]
+dev = ["ruff", "mypy", "pytest"]
 
 [tool.setuptools]
 packages = ["app", "app.routers"]

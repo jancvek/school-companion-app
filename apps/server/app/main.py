@@ -14,14 +14,16 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import Engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app import prijava, strani
+from app import google, prijava, strani
 from app.db import naredi_motor, naredi_tovarno_sej
+from app.google import OdjemalecGoogla, naredi_odjemalca
 from app.routers import (
     admin,
     clani,
     dnevi,
     kvizi,
     materials,
+    racun,
     resevanje,
     sistem,
     statistika,
@@ -42,7 +44,24 @@ dnevnik = logging.getLogger(__name__)
 #: loči „strežnik ne teče" od „prijava ni veljavna". `POST /auth/login` je
 #: pot, na kateri žeton šele nastane; **odjave tu ni** — ta zahteva žeton kot
 #: vsaka druga pot telefona (`docs/odlocitve/ADR-036` G).
-IZVZETE_POTI = frozenset({"/health", prijava.POT_PRIJAVE_TELEFONA})
+#: `POST /auth/google/login` in `GET /auth/google/callback` sta tu z `V3-R08`
+#: (`docs/odlocitve/ADR-046` B). Sta **točni poti**, ne predpona.
+#:
+#: Izvzeti sta iz **žetona telefona**, ne iz seje: govori ju brskalnik, ki
+#: žetona v glavi nikoli ne nosi. To ne pomeni, da sta odprti — prvo varuje
+#: dvojno oddan CSRF žeton prijavnega obrazca, drugo vezivo stanja. Povratni
+#: klic sejo v toku povezovanja celo **zahteva** in jo razreši sam
+#: (`vstop._seja_zahteve`); pod `/admin` ga ni prav zato, ker mora delovati
+#: tudi v prijavnem toku, kjer seje še ni. Povezovanje samo **ni** tu: to je
+#: pod `/admin` in ga plast pokrije brez izjeme.
+IZVZETE_POTI = frozenset(
+    {
+        "/health",
+        prijava.POT_PRIJAVE_TELEFONA,
+        google.POT_PRIJAVE,
+        google.POT_POVRATNA,
+    }
+)
 
 #: Predpone, ki žetona ne zahtevajo.
 #:
@@ -113,6 +132,7 @@ def create_app(
     motor: Engine | None = None,
     klicalec: Klicalec | None = None,
     klicalec_urnika: KlicalecUrnika | None = None,
+    odjemalec_googla: OdjemalecGoogla | None = None,
 ) -> FastAPI:
     """Sestavi aplikacijo. Brez argumentov prebere nastavitve iz okolja.
 
@@ -131,6 +151,11 @@ def create_app(
     # mreža je urejljiva tudi brez slike (`ADR-041` E).
     if klicalec_urnika is None and nastavitve.openai_api_key:
         klicalec_urnika = naredi_klicalca_urnika(nastavitve)
+    # Odjemalec Googla (V3-R08), po istem vzorcu in iz istega razloga: testi
+    # dobijo ponaredek in nikoli ne pridejo do omrežja (`ADR-046` F). Brez
+    # nastavljenega odjemalca ostane `None` in Googlove poti vrnejo 404.
+    if odjemalec_googla is None and nastavitve.google_je_nastavljen:
+        odjemalec_googla = naredi_odjemalca(nastavitve)
 
     app = FastAPI(
         title="Šolski pomočnik — strežnik",
@@ -148,6 +173,7 @@ def create_app(
     )
     app.state.klicalec = klicalec
     app.state.klicalec_urnika = klicalec_urnika
+    app.state.odjemalec_googla = odjemalec_googla
     app.state.obdelovalec = None
 
     # Vrstni red plasti: zadnja dodana je zunanja. Žeton je torej pred sejo.
@@ -200,6 +226,11 @@ def create_app(
     # na samem usmerjevalniku: za starša ta predpona ne obstaja (404, ne 403;
     # `docs/odlocitve/ADR-044` G).
     app.include_router(sistem.router)
+    # Nastavitve prijavljenega starša (V3-R08), pod `/admin/racun`. Z nobeno
+    # obstoječo potjo se ne prekriva. Brez posebne odvisnosti: `user_id` pride
+    # iz seje, ki jo je razrešila ista plast kot povsod pod `/admin`, in stran
+    # zato ne more pokazati ničesar tujega (`docs/odlocitve/ADR-046` B).
+    app.include_router(racun.router)
 
     # Napake pod `/admin` naj bodo stran, ne JSON. Prestreznik se za vse
     # ostale poti umakne privzetemu — glej `admin.prestrezi_napako`.
