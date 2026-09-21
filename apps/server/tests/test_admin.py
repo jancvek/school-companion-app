@@ -3038,6 +3038,12 @@ class TestSkriptaPrepisov:
     Pytest skripte **ne izvede**; dokazljivo je samo, kaj je v izrisu. Kako se
     gumb res obnaša, dokaže ročni preizkus v fazi 9b — enako kot pri povečanem
     prikazu (`ADR-024`, „Posledice").
+
+    **Trditve so vezane na obliko skripte, ne na njeno vedenje**: na imeni
+    `neuspeh` in `napaka` ter na zapis `.then(fn, fn)`. Drugače ne gre, dokler
+    skripte ne izvedemo. Kdor skripto preoblikuje, naj popravi te trditve
+    skupaj z njo — niso pokvarjene, le berejo izvorno obliko. Odkril pregled
+    v fazi 7.
     """
 
     def stran(self, odjemalec: TestClient, motor: Engine, slike: Path) -> str:
@@ -3165,6 +3171,11 @@ class TestVelikIzborNePade:
     ) -> None:
         # Meja, ki ostane, je ena sama in govori slovensko. Prag je 1 MiB
         # telesa; polje je tu eno samo in dovolj veliko, da ga preseže.
+        #
+        # Ta trditev je o `SejaMiddleware` in ne o tej poti — 413 pade, preden
+        # zahteva sem sploh pride. Stoji tu zato, ker je to **edina** meja, ki
+        # temu obrazcu ostane, in ker mora biti ob testu zgoraj vidno, da ni
+        # ostala brez sporočila. Odkril pregled v fazi 7.
         zapisi(motor, slike)
 
         odgovor = odjemalec.post(

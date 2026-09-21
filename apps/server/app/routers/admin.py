@@ -422,11 +422,27 @@ def _pot_predmeta(koda: str) -> str:
 
 #: „Koliko polj sme imeti obrazec" — odgovor je: koliko jih gre v 1 MiB telesa.
 #:
-#: Neskončnost in ne veliko število: edina meja tega obrazca je velikost
-#: telesa, ki jo postavi `SejaMiddleware` in na katero odgovori slovensko.
-#: Poljubno izbrana številka tu bi bila druga meja, ki bi jo bilo treba
-#: vzdrževati ob prvi, in prva, ki bi jo kdo prekoračil, bi bila napačna.
-#: Telo je ob prihodu sem že prebrano in omejeno, zato pomnilnik ni odprt.
+#: Neskončnost in ne veliko število, ker bi **vsaka končna meja vrnila prav
+#: tisto stran, zaradi katere je ta konstanta nastala**: ob preseženi
+#: `max_fields` vrže Starlette `MultiPartException`, ta postane `400`, in
+#: uporabnica dobi golo angleško besedilo kot edino vsebino. Druga meja tu bi
+#: torej problem samo premaknila navzgor, ne odpravila.
+#:
+#: **Cena je izmerjena, ne predpostavljena** (Python 3.12, `FormParser`):
+#:
+#: | telo | polj | čas razčlenjevanja |
+#: |---|---|---|
+#: | pošten izbor 1200 slik (50 KiB) | 1 200 | 0,012 s |
+#: | 1 MiB samih praznih polj (`a=&`) | 349 525 | 3,4 s |
+#:
+#: Zgornja vrstica je to, kar zna poslati „Izberi vse"; spodnja je najslabše,
+#: kar gre v telo, ki ga `SejaMiddleware` še sprejme (`NAJVECJE_TELO_OBRAZCA`).
+#: Pomnilnik je s tem omejen (vrh ~85 MiB), **ni pa zastonj**: uvicorn teče brez
+#: `--workers`, zato tak zahtevek za tri sekunde zadrži tudi prevzem slik s
+#: telefona. Poslati ga zna samo prijavljen starš z veljavnim CSRF žetonom —
+#: v modelu groženj te namestitve (`ADR-025`, `ADR-026`) torej lastnik sam, na
+#: svojem strežniku. To je sprejeto zavestno; če se krog uporabnikov kdaj
+#: razširi čez znance, je to ena od stvari, ki jih je treba premisliti znova.
 BREZ_MEJE_POLJ = math.inf
 
 
@@ -495,7 +511,8 @@ async def prepisi_izbranih(
     `SejaMiddleware` (`NAJVECJE_TELO_OBRAZCA`, 1 MiB) in nanjo odgovori
     slovensko, preden zahteva sploh pride sem. Druga, skrita meja na številu
     polj bi pomenila dve različni odpovedi za isto dejanje — in ena od njiju
-    ne bi znala povedati, kaj naj uporabnica naredi.
+    ne bi znala povedati, kaj naj uporabnica naredi. Kaj to stane, je
+    izmerjeno pri `BREZ_MEJE_POLJ`.
     """
     obrazec = await request.form(max_fields=BREZ_MEJE_POLJ)
     # Vrsta vsebine je `application/x-www-form-urlencoded`, zato so vse
