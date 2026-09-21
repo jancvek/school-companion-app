@@ -1231,6 +1231,8 @@ class TestPakiranje:
             "sistem.html",
             "sistem-druzina.html",
             "sistem-stanje.html",
+            # V3-R08.
+            "racun.html",
         }
 
 

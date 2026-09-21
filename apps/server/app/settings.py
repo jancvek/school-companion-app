@@ -56,3 +56,33 @@ class Settings(BaseSettings):
 
     #: Razmik med obhodi worker zanke, v sekundah (kriterij pravi ~30).
     worker_interval_seconds: float = 30.0
+
+    #: Domena, na kateri je strežnik dosegljiv (V3-R02). Tu zato, ker iz nje
+    #: nastane povratni naslov za Google (`V3-R08`): ta mora biti **absoluten**
+    #: in mora biti znan tudi takrat, ko zahteva pride skozi Caddy in je zato
+    #: `request.url` lahko notranji naslov vsebnika.
+    #:
+    #: Privzetek je prazen niz, kot pri `openai_api_key`: brez njega Google ne
+    #: dela, strežnik pa teče naprej.
+    domena: str = ""
+
+    #: Odjemalec Google OAuth (V3-R08). **Skrivnost, ki pride iz okolja in
+    #: nikoli iz repozitorija** (kriterij `V3-R08`).
+    #:
+    #: Prazna vrednost pomeni „Google v tej namestitvi ni nastavljen": gumba na
+    #: prijavni strani ni, razdelka v nastavitvah ni in vse štiri Googlove poti
+    #: vrnejo 404. Strežnik se zažene normalno — ista drža kot pri manjkajočem
+    #: `openai_api_key` (`ADR-009`, `ADR-046` F). Manjkajoča nastavitev ustavi
+    #: eno zmožnost, ne strežnika.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+
+    @property
+    def google_je_nastavljen(self) -> bool:
+        """Ali je Google prijava v tej namestitvi sploh na voljo.
+
+        Vse tri vrednosti, ne le ključa: brez domene ni povratnega naslova, in
+        odjemalec brez povratnega naslova bi dal napako šele pri Googlu —
+        torej na mestu, kjer je za uporabnico neberljiva.
+        """
+        return bool(self.google_client_id and self.google_client_secret and self.domena)

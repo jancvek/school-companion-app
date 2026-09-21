@@ -283,7 +283,14 @@
     {% if prijava %}
       <span class="kdo">
         <span class="druzina">{{ prijava.family_name }}</span>
-        <span class="zamolklo">{{ prijava.display_name }}</span>
+        {# Ime je od V3-R08 povezava na lastne nastavitve: kdo si, in kaj s tem
+           lahko narediš, sta ista misel. Kadar Googla v tej namestitvi ni,
+           strani ni (`ADR-046` F) in ime ostane samo ime. #}
+        {% if google_na_voljo %}
+          <a href="/admin/racun">{{ prijava.display_name }}</a>
+        {% else %}
+          <span class="zamolklo">{{ prijava.display_name }}</span>
+        {% endif %}
         <form method="post" action="/admin/logout">
           <input type="hidden" name="csrf" value="{{ csrf }}">
           <button class="gumb-povezava" type="submit">Odjava</button>

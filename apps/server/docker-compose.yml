@@ -60,6 +60,16 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1}
       OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-120}
       WORKER_INTERVAL_SECONDS: ${WORKER_INTERVAL_SECONDS:-30}
+      # Google prijava za starsa (V3-R08). Domena je tu zato, ker iz nje
+      # nastane povratni naslov, ta pa mora biti absoluten in enak tistemu
+      # v Googlovi konzoli — `request.url` je za Caddyjem notranji naslov
+      # vsebnika (`docs/odlocitve/ADR-046`).
+      #
+      # `:-` in ne `:?`, iz istega razloga kot pri OPENAI_API_KEY: brez teh
+      # vrednosti streznik normalno tece, le Googlovih poti nima.
+      DOMENA: ${DOMENA:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
     volumes:
       - slike:/data/images
     networks:

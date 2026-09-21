@@ -38,6 +38,7 @@ from app import casi
 from app.models import (
     NACIN_SAMOOCENA,
     POVERILNICA_GESLO,
+    POVERILNICA_GOOGLE,
     STATUS_NOV,
     STATUS_PRIPRAVLJEN,
     STATUS_V_OBDELAVI,
@@ -1849,6 +1850,36 @@ class PoverilnicaZaPrijavo:
 
 
 @dataclass(frozen=True)
+class NaciniPrijave:
+    """Kako se ena oseba lahko prijavi — vir strani `/admin/racun` (V3-R08).
+
+    Zgostitve gesla in Googlovega `sub` ni v tem tipu in ne sme biti: stran o
+    njiju ne pokaže ničesar, in vrednost, ki pride v izris, je vrednost, ki
+    lahko uide v izris. Isti rez kot pri `ClanDruzine`, kjer je poverilnica
+    zvedena na identifikator in eno logično vrednost.
+    """
+
+    #: Identifikator geselne poverilnice (e-naslov starša), ali `None`.
+    identifikator: str | None
+    #: `secret_hash IS NOT NULL`. Račun brez gesla shema dopušča in tako ga
+    #: pusti migracija `0008_uporabniki` (`ADR-035` G).
+    geslo_nastavljeno: bool
+    #: `id` Google poverilnice, ali `None`, kadar Google ni povezan. Potreben
+    #: je prav `id`: odstranitev gre po njem, ne po `sub`, ki je skrivnost
+    #: nobenega, a tudi podatek, ki mu v obrazcu ni treba biti.
+    google_credential_id: str | None
+    #: E-naslov Google računa, samo za izris (`ADR-046` A). Sme biti `None`
+    #: tudi pri povezanem računu — po `downgrade` migracije `0012` je prav to
+    #: stanje vseh povezav.
+    google_oznaka: str | None
+
+    @property
+    def google_povezan(self) -> bool:
+        """Ali je Google povezan. Odloči `id`, ne oznaka, ki je lahko prazna."""
+        return self.google_credential_id is not None
+
+
+@dataclass(frozen=True)
 class SejaUporabnika:
     """Seja skupaj z osebo in družino, ki ji pripada."""
 
@@ -1920,6 +1951,153 @@ class PrijavaRepository:
             is_system_owner=vrstica[8],
             family_is_active=bool(vrstica[9]),
         )
+
+    def poverilnica_google(self, sub: str) -> PoverilnicaZaPrijavo | None:
+        """Poverilnica za Googlov `sub` (V3-R08), ali `None`, če je ni.
+
+        Dvojnica `poverilnica` in ne njena razširitev s parametrom `kind`:
+        klicatelja sta dva in vsak sme videti **samo svojo** vrsto. Skupna
+        metoda s privzetkom bi pomenila, da bi geselna prijava ob napaki v
+        klicu lahko sprejela Googlov `sub` kot uporabniško ime — in to je
+        napaka, ki se v pregledu ne vidi, ker je oblika klica pravilna.
+
+        `secret_hash` Google poverilnice je vedno `None` in se ne preverja:
+        skrivnost je dokazal Google, ne mi (`docs/odlocitve/ADR-046`).
+        """
+        vrstica = self._session.execute(
+            select(
+                Credential.id,
+                Credential.secret_hash,
+                User.id,
+                User.family_id,
+                Family.name,
+                User.role,
+                User.display_name,
+                User.is_active,
+                User.is_system_owner,
+                Family.is_active,
+            )
+            .join(User, User.id == Credential.user_id)
+            .join(Family, Family.id == User.family_id)
+            .where(Credential.identifier == sub, Credential.kind == POVERILNICA_GOOGLE)
+        ).first()
+        if vrstica is None:
+            return None
+        return PoverilnicaZaPrijavo(
+            credential_id=vrstica[0],
+            secret_hash=vrstica[1],
+            user_id=vrstica[2],
+            family_id=vrstica[3],
+            family_name=vrstica[4],
+            role=vrstica[5],
+            display_name=vrstica[6],
+            is_active=vrstica[7],
+            is_system_owner=vrstica[8],
+            family_is_active=bool(vrstica[9]),
+        )
+
+    def nacini_prijave(self, user_id: str) -> NaciniPrijave:
+        """Kako se ta oseba lahko prijavi — za stran `/admin/racun` (V3-R08).
+
+        Ena poizvedba čez obe vrsti: stran mora vedeti oboje (ali je geslo
+        nastavljeno in ali je Google povezan), in dve poizvedbi za dve vrstici
+        iste tabele bi bili dve poizvedbi preveč.
+
+        `user_id` pride iz **seje**, nikoli iz naslova: starš vidi in ureja
+        izključno svoje načine prijave (`V3-R08`, kriterij 4). Prav zato ta
+        metoda ne potrebuje družine in ne krši `ADR-025` — čez mejo ne bere,
+        ker bere eno samo osebo, ki je že dokazala, kdo je.
+        """
+        vrstice = self._session.execute(
+            select(
+                Credential.id,
+                Credential.kind,
+                Credential.identifier,
+                Credential.label,
+                Credential.secret_hash,
+            ).where(Credential.user_id == user_id)
+        ).all()
+        geslo = next((v for v in vrstice if v[1] == POVERILNICA_GESLO), None)
+        google = next((v for v in vrstice if v[1] == POVERILNICA_GOOGLE), None)
+        return NaciniPrijave(
+            identifikator=geslo[2] if geslo is not None else None,
+            # `secret_hash IS NOT NULL` — geslo je nastavljeno (`ADR-035` G).
+            # Obstoj vrstice ne zadošča: migracija `0008_uporabniki` ustvari
+            # poverilnico **brez** zgostitve, in prav ta primer odloči, ali je
+            # odstranitev Googla dovoljena (`ADR-046` G).
+            geslo_nastavljeno=geslo is not None and geslo[4] is not None,
+            google_credential_id=google[0] if google is not None else None,
+            google_oznaka=google[3] if google is not None else None,
+        )
+
+    def povezi_google(
+        self, *, user_id: str, sub: str, email: str | None, ko: datetime
+    ) -> None:
+        """Poveže Google račun z **obstoječim** uporabnikom (V3-R08).
+
+        Uporabnika ne ustvari in družine ne ustvari — registracija ostane
+        zaprta (`ADR-025`, kriterij 3). `user_id` pride iz seje, ki je bila
+        razrešena, preden je ta metoda sploh poklicana.
+
+        **Enoličnost `sub` razsodi baza**, ne poizvedba pred vstavljanjem:
+        ta bi bila tekma, ne preverba. `IntegrityError` prevede
+        `je_zaseden_identifikator` v isto izjemo kot pri članih družine
+        (`ADR-038` E) — kršitev je namreč ista omejitev na istem stolpcu.
+        """
+        self._session.add(
+            Credential(
+                id=str(uuid4()),
+                user_id=user_id,
+                kind=POVERILNICA_GOOGLE,
+                identifier=sub,
+                # Google skrivnosti ne hrani pri nas; dokaže jo on, ob vsaki
+                # prijavi. `NULL` tu ne pomeni „geslo ni nastavljeno", ampak
+                # „ta vrsta poverilnice zgostitve nima".
+                secret_hash=None,
+                label=email,
+                created_at=ko,
+                updated_at=ko,
+            )
+        )
+        try:
+            self._session.commit()
+        except IntegrityError as izjema:
+            self._session.rollback()
+            if je_zaseden_identifikator(izjema):
+                raise IdentifikatorZaseden from izjema
+            raise
+
+    def osvezi_oznako_google(self, credential_id: str, email: str | None, ko: datetime) -> None:
+        """Osveži prikazni e-naslov ob prijavi (`ADR-046` A).
+
+        Samo `label`; `identifier` (`sub`) se ne dotakne nikoli — to je ključ,
+        po katerem je bila ta vrstica pravkar najdena.
+        """
+        self._session.execute(
+            update(Credential)
+            .where(Credential.id == credential_id)
+            .values(label=email, updated_at=ko)
+        )
+        self._session.commit()
+
+    def odstrani_google(self, credential_id: str, user_id: str) -> None:
+        """Odstrani Google povezavo. **Uporabnika in gesla se ne dotakne.**
+
+        To je kriterij 6 zahteve, zapisan kot `DELETE` nad eno samo vrstico.
+        `user_id` je v pogoju poleg `credential_id`: brez njega bi napaka v
+        klicatelju odstranila tujo povezavo, in ta napaka bi bila tiha.
+
+        Sej **ne** prekliče. Odstranitev povezave ni ponastavitev gesla
+        (`V3-R06`): starš se ni odjavil, samo enega načina prijave nima več.
+        """
+        self._session.execute(
+            delete(Credential).where(
+                Credential.id == credential_id,
+                Credential.user_id == user_id,
+                Credential.kind == POVERILNICA_GOOGLE,
+            )
+        )
+        self._session.commit()
 
     def ponastavi_geslo(
         self, credential_id: str, user_id: str, secret_hash: str, ko: datetime

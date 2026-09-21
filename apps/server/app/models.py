@@ -580,10 +580,11 @@ Vloga = Literal["parent", "child"]
 VLOGA_STARS: Vloga = "parent"
 VLOGA_OTROK: Vloga = "child"
 
-#: Vrste poverilnic. V V3 nastane samo `password`; `google` pride z `V3-R08`
-#: kot nova vrstica iste tabele (`ADR-027`).
+#: Vrste poverilnic. Obe nastaneta v V3: `password` v `V3-R03`, `google` v
+#: `V3-R08` — kot nova vrstica iste tabele, natanko kot je napovedal `ADR-027`.
 VrstaPoverilnice = Literal["password", "google"]
 POVERILNICA_GESLO: VrstaPoverilnice = "password"
+POVERILNICA_GOOGLE: VrstaPoverilnice = "google"
 
 
 class User(Base):
@@ -649,12 +650,28 @@ class Credential(Base):
     #: Ena od `VrstaPoverilnice`.
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
 
-    #: E-naslov starša ali uporabniško ime otroka.
+    #: E-naslov starša ali uporabniško ime otroka; pri `google` Googlov `sub`.
     #:
     #: **Enolično čez celotno namestitev**, ne po družini: prijava pozna samo
     #: identifikator in geslo, zato bi dvoje enakih imen pomenilo, da strežnik
     #: ne ve, kdo se prijavlja (`docs/verzije/v3.md`, `V3-R06`).
+    #:
+    #: Pri Googlu tu **ne** stoji e-naslov (`docs/odlocitve/ADR-046` A): starš,
+    #: ki ima geslo in Google na istem naslovu, bi s tem podrl prav to
+    #: enoličnost — torej stanje, ki ga `V3-R08` zahteva kot običajno. `sub` je
+    #: hkrati edina vrednost, za katero Google jamči, da se ne spremeni.
     identifier: Mapped[str] = mapped_column(String(320), nullable=False)
+
+    #: E-naslov Google računa, **samo za izris** (`ADR-046` A, `V3-R08`).
+    #:
+    #: Po njem se nikoli ne išče in nikoli ne prijavlja — sicer bi bil drugi
+    #: identifikator in bi terjal svojo enoličnost. Pri geselnih poverilnicah
+    #: ostane `NULL`; `identifier` je tam že berljiv in oznake ne rabi.
+    #:
+    #: Vrednost je lahko zastarela do naslednje prijave z Googlom, ki jo
+    #: osveži. Zastarel **prikaz** je cenejši od poizvedbe pri Googlu brez
+    #: razloga; pravice iz te vrednosti ne izhajajo nobene.
+    label: Mapped[str | None] = mapped_column(String(320), nullable=True)
 
     #: Zgostitev gesla (argon2id). **`NULL` pomeni, da geslo ni nastavljeno** —
     #: tak račun obstaja, prijava z njim pa ne uspe nikoli (`ADR-035` G). Tako

@@ -96,6 +96,12 @@ CVEK_ID = "5b0f6c2e-8d3a-4c7e-9a1b-2f4d6e8c0a13"
 #: slike bi zares odpotovale na api.openai.com, na račun lastnika. „Testi ne
 #: kličejo omrežja" mora biti lastnost kode, ne lastnost stroja, na katerem
 #: tečejo (CLAUDE.md: zbirka je zelena tudi na svežem klonu).
+#: Od V3-R08 so tu tudi `DOMENA`, `GOOGLE_CLIENT_ID` in `GOOGLE_CLIENT_SECRET`,
+#: in to iz istega razloga, le z ostrejšo posledico: če bi jih zbirka podedovala
+#: z lastnikovega stroja, bi `create_app` zgradil **pravi** odjemalec Googla in
+#: povratni klic bi v testu zares odšel na `oauth2.googleapis.com`. Poleg tega
+#: bi privzeta aplikacija Google imela — in testi, ki dokazujejo, da je brez
+#: njega strežnik nedotaknjen (`ADR-046` F), bi preverjali nasprotje.
 OKOLJSKE_NASTAVITVE = (
     "DATABASE_URL",
     "IMAGES_DIR",
@@ -103,6 +109,9 @@ OKOLJSKE_NASTAVITVE = (
     "OPENAI_MODEL",
     "OPENAI_TIMEOUT_SECONDS",
     "WORKER_INTERVAL_SECONDS",
+    "DOMENA",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
 )
 
 
