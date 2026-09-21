@@ -126,6 +126,22 @@ tem pobrisal tudi popravke, ki na tej datoteki še niso bili commitani.
 **Kako:** pred mutacijo naredi kopijo datoteke (`cp` v začasno mapo) in jo vrni
 s `cp`. `git checkout` vrne **commitano** stanje, ne stanja pred mutacijo.
 
+### Mutacijski preizkus v delovnem drevesu zastrupi vzporeden verify
+**Kaj:** lastnikov `verify.ps1` je padel z 12 testi, ki so v resnici zeleni.
+Izpis je kazal izvorno vrstico z `.encode("utf-8")`, izjema pa je govorila
+o primerjavi **nizov** — izvorna in izvedena koda si nista ustrezali.
+**Zakaj:** mutacijski preizkus (namerno pokvarim kodo in preverim, da test
+pade) sem delal kar v delovnem drevesu. Okno je bilo pol minute; v njem je
+`verify.ps1` modul uvozil in ga je nato 4 minute in 40 sekund držal v
+pomnilniku. Python modul uvozi enkrat, zato vrnitev datoteke na to nima
+vpliva. Drevo je takrat imelo **nove teste in staro napako** — kombinacijo,
+ki v nobenem commitu ne obstaja.
+**Kako:** mutacija je namenoma pokvarjena koda in v skupnem drevesu je mina.
+Bodisi teče v ločeni kopiji repozitorija, bodisi lastnika vnaprej opozorim,
+naj v tem času ne poganja verify. Rdeč izid, ki mu ne ustreza noben commit,
+je treba prepoznati in zavreči, ne popravljati — sicer se popravlja napaka,
+ki je ni.
+
 ## Orodja na tem stroju
 
 - **`scripts/` je del ograje** in agentu ni dovoljena za pisanje. Nove skripte
