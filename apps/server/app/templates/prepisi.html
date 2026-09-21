@@ -81,20 +81,26 @@
           return;
         }
 
+        function neuspeh() {
+          oznaci();
+          rocno.hidden = false;
+          povej("Kopiranje ni uspelo. Kopiraj s Ctrl+C.");
+        }
+
         gumb.hidden = false;
         rocno.hidden = true;
 
         gumb.addEventListener("click", function () {
-          navigator.clipboard.writeText(polje.value).then(
-            function () {
+          // `try` in ne samo zavrnjena obljuba: `writeText` sme vreči tudi
+          // sinhrono ali vrniti kaj, kar ni obljuba. Gumb, ki takrat ne naredi
+          // in ne pove nič, je tiho neuspešen gumb iz točke 4 zgoraj.
+          try {
+            navigator.clipboard.writeText(polje.value).then(function () {
               povej("Kopirano.");
-            },
-            function () {
-              oznaci();
-              rocno.hidden = false;
-              povej("Kopiranje ni uspelo. Kopiraj s Ctrl+C.");
-            }
-          );
+            }, neuspeh);
+          } catch (napaka) {
+            neuspeh();
+          }
         });
       })();
     </script>

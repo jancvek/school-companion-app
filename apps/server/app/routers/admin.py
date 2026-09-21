@@ -12,6 +12,7 @@ vrne v vrsto; ker to zavrže prejšnji rezultat, je `POST` in ne povezava
 (`docs/odlocitve/ADR-009`).
 """
 
+import math
 import re
 from pathlib import Path
 from typing import Annotated, Any
@@ -21,6 +22,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from starlette.datastructures import FormData
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
@@ -418,6 +420,22 @@ def _pot_predmeta(koda: str) -> str:
     return f"{PREDPONA}/subjects/{quote(koda, safe='')}"
 
 
+#: „Koliko polj sme imeti obrazec" — odgovor je: koliko jih gre v 1 MiB telesa.
+#:
+#: Neskončnost in ne veliko število: edina meja tega obrazca je velikost
+#: telesa, ki jo postavi `SejaMiddleware` in na katero odgovori slovensko.
+#: Poljubno izbrana številka tu bi bila druga meja, ki bi jo bilo treba
+#: vzdrževati ob prvi, in prva, ki bi jo kdo prekoračil, bi bila napačna.
+#: Telo je ob prihodu sem že prebrano in omejeno, zato pomnilnik ni odprt.
+BREZ_MEJE_POLJ = math.inf
+
+
+def _polje_obrazca(obrazec: FormData, ime: str) -> str:
+    """Eno besedilno polje obrazca; karkoli drugega velja za neposlano."""
+    vrednost = obrazec.get(ime)
+    return vrednost if isinstance(vrednost, str) else ""
+
+
 def _za_prepis(material: Material, imena: dict[str, str]) -> SnovZaPrepis:
     """`Material` → vhod za sestavljanje besedila (V3-R11).
 
@@ -447,13 +465,11 @@ def prepisi_nazaj() -> RedirectResponse:
 
 
 @router.post("/transcripts")
-def prepisi_izbranih(
+async def prepisi_izbranih(
     request: Request,
     repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
     clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
-    subject: Annotated[str, Form()] = "",
-    snov: Annotated[list[str] | None, Form()] = None,
 ) -> Response:
     """Prepisi izbranih slik enega predmeta v enem polju (V3-R11).
 
@@ -464,13 +480,33 @@ def prepisi_izbranih(
     **Ničesar ne zapiše** — ne v bazo in ne na disk. Nabor je isti seznam, ki
     ga izriše stran predmeta, zato tuj, arhiviran, tujepredmetni in
     neobstoječ identifikator iz njega preprosto izpadejo (`ADR-048` F).
+
+    **`async def` in obrazec prebran sam**, namesto `Form()` parametrov (isti
+    prijem kot `POST /admin/schedule`): ta izbor je eno polje na sliko, FastAPI
+    pa telo prebere s Starlettejevim privzetkom `max_fields=1000`. Meja ni v
+    `FormParser.parse`, ampak v povratnem klicu `on_field_end`, in ob preseženi
+    vrže `MultiPartException` — stran s prepisi bi bila `400` z golim angleškim
+    besedilom kot edino vsebino, in to bi „Izberi vse" na dovolj velikem
+    predmetu dosegel z enim klikom. To je natanko odpoved pri največjem izboru,
+    zaradi katere je `ADR-048` B izbral `POST` namesto `GET`, le pri drugem
+    številu.
+
+    Zato velja **ena sama meja: velikost telesa.** Tisto postavi
+    `SejaMiddleware` (`NAJVECJE_TELO_OBRAZCA`, 1 MiB) in nanjo odgovori
+    slovensko, preden zahteva sploh pride sem. Druga, skrita meja na številu
+    polj bi pomenila dve različni odpovedi za isto dejanje — in ena od njiju
+    ne bi znala povedati, kaj naj uporabnica naredi.
     """
-    koda = subject.rstrip("/")
+    obrazec = await request.form(max_fields=BREZ_MEJE_POLJ)
+    # Vrsta vsebine je `application/x-www-form-urlencoded`, zato so vse
+    # vrednosti nizi; `isinstance` je tu zato, da tega ne trdi samo komentar.
+    koda = _polje_obrazca(obrazec, "subject").rstrip("/")
+    snov = [vrednost for vrednost in obrazec.getlist("snov") if isinstance(vrednost, str)]
     nabor = repozitorij.seznam_po_predmetu(koda) if koda else []
     imena = imena_otrok(clani)
 
     nabor_za_prepis = [_za_prepis(material, imena) for material in nabor]
-    izid = sestavi(izbrane(nabor_za_prepis, snov or []))
+    izid = sestavi(izbrane(nabor_za_prepis, snov))
 
     return predloge.TemplateResponse(
         request,

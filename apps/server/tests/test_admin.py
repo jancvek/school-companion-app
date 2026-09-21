@@ -7,10 +7,12 @@ stanje, ne poti, po kateri je stanje nastalo. Vsak test, ki gre skozi prenos,
 bi ob spremembi prenosa padel iz razloga, ki s to zahtevo nima zveze.
 """
 
+import html
 import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -2671,9 +2673,16 @@ def obrazec_izbora(besedilo: str) -> str:
 
 
 def polje_prepisov(besedilo: str) -> str:
-    """Vsebina polja `<textarea>` na strani s prepisi."""
+    """Vsebina polja `<textarea>`, **neubežana** — kot jo vidi uporabnica.
+
+    Brez `unescape` bi bile trditve o dolžini in o vsebini odvisne od tega, ali
+    prepis vsebuje `&`, `<` ali `>`: strežnik šteje neubežano besedilo,
+    predloga pa v HTML zapiše ubežanega. Odkril pregled v fazi 7.
+    """
     zacetek = besedilo.index("<textarea")
-    return besedilo[besedilo.index(">", zacetek) + 1 : besedilo.index("</textarea>")]
+    return html.unescape(
+        besedilo[besedilo.index(">", zacetek) + 1 : besedilo.index("</textarea>")]
+    )
 
 
 def prepisi(odjemalec: TestClient, koda: str = "MAT", *snovi: str) -> Any:
@@ -3091,6 +3100,11 @@ class TestSkriptaPrepisov:
 
         assert "polje.select()" in telo
         assert "Ctrl+C" in telo
+        # Trditev o **klicu** in ne le o definiciji: `polje.select()` stoji v
+        # `oznaci()`, in če bi zavrnitvena veja tega ne klicala, bi bil test
+        # zelen ob gumbu, ki ob neuspehu ne označi ničesar. Odkril pregled.
+        assert "}, neuspeh);" in telo
+        assert re.search(r"catch \(napaka\) \{\s*neuspeh\(\);", telo) is not None
 
     def test_gumb_je_skrit_dokler_ga_skripta_ne_odkrije(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -3110,3 +3124,146 @@ class TestSkriptaPrepisov:
         odgovor = prepisi(odjemalec, "MAT")
 
         assert "<script" not in odgovor.text
+
+
+class TestVelikIzborNePade:
+    """„Izberi vse" na velikem predmetu ne sme odpovedati (odkril pregled v fazi 7).
+
+    Starlettejev `FormParser` ima privzeto `max_fields=1000` — meja ni v
+    `parse`, ampak v povratnem klicu `on_field_end` — in ta izbor je eno polje
+    na sliko. Brez popravka je `POST` s tisoč in eno sliko vrnil `400` z
+    besedilom „Too many fields. Maximum number of fields is 1000." kot edino
+    vsebino strani. To je odpoved pri največjem izboru, zaradi katere je
+    `ADR-048` B izbral `POST` namesto `GET`, in hkrati kršitev merila
+    dokončanosti (`CLAUDE.md` §1b: brez surovega besedila sistemske napake).
+
+    Odslej velja ena sama meja — velikost telesa (`NAJVECJE_TELO_OBRAZCA`),
+    ki ima slovensko sporočilo in jo postavi `SejaMiddleware`.
+    """
+
+    #: Čez Starlettejev privzetek, a še krepko pod 1 MiB telesa.
+    KOLIKO = 1200
+
+    def test_izbor_cez_tisoc_polj_uspe(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        obdelaj(motor)
+        # Ena resnična slika, ostalo izmišljeni identifikatorji: dokazuje se
+        # število polj, ne nabor. Tuji se tiho izpustijo kot vedno.
+        izbor = [UUID_ENA] + [f"{i:08d}-0000-4000-8000-000000000000" for i in range(self.KOLIKO)]
+
+        odgovor = prepisi(odjemalec, "MAT", *izbor)
+
+        assert odgovor.status_code == 200
+        assert "Too many fields" not in odgovor.text
+        assert "1 slika" in odgovor.text
+        assert "Delci snovi se gibljejo." in polje_prepisov(odgovor.text)
+
+    def test_prevelik_obrazec_pove_slovensko(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Meja, ki ostane, je ena sama in govori slovensko. Prag je 1 MiB
+        # telesa; polje je tu eno samo in dovolj veliko, da ga preseže.
+        zapisi(motor, slike)
+
+        odgovor = odjemalec.post(
+            "/admin/transcripts",
+            data={"subject": "MAT", "snov": "x" * (1024 * 1024 + 1)},
+        )
+
+        assert odgovor.status_code == 413
+        assert "Poslani obrazec je prevelik" in odgovor.text
+
+
+class TestKodaPredmetaSPosebnimiZnaki:
+    """Koda predmeta sme vsebovati karkoli (odkril pregled v fazi 7).
+
+    `POST /materials` jo omejuje samo po dolžini, `oznaka_predmeta` pa neznano
+    kodo izrecno dopušča — zapis s `/` ali `?` v `subject` torej lahko nastane.
+    Zato gre koda v povezave skozi `quote` in se na poševnico ne konča. Obe
+    vrstici sta imeli komentar z utemeljitvijo, nista pa imeli testa.
+    """
+
+    KODA = "MAT/2?a"
+
+    def test_povezavi_za_izbor_sta_ubezani(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, subject=self.KODA)
+
+        besedilo = odjemalec.get(f"/admin/subjects/{quote(self.KODA, safe='')}").text
+
+        # Brez `quote` bi `?` povezavo prerezal na poizvedbo in „Izberi vse"
+        # bi peljal na drug predmet.
+        assert 'href="/admin/subjects/MAT%2F2%3Fa?vse=1"' in besedilo
+        assert 'href="/admin/subjects/MAT%2F2%3Fa"' in besedilo
+
+    def test_izbor_v_takem_predmetu_dela(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, subject=self.KODA)
+        obdelaj(motor)
+
+        odgovor = prepisi(odjemalec, self.KODA, UUID_ENA)
+
+        assert odgovor.status_code == 200
+        assert "Delci snovi se gibljejo." in polje_prepisov(odgovor.text)
+
+    def test_koncna_posevnica_zadene_isti_nabor(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Pretvornik `:path` požre končno poševnico, zato jo odreže tudi ta
+        # pot — sicer bi obrazec s strani `MAT/` pokazal prazen izbor.
+        zapisi(motor, slike, subject="MAT")
+        obdelaj(motor)
+
+        odgovor = prepisi(odjemalec, "MAT/", UUID_ENA)
+
+        assert "1 slika" in odgovor.text
+
+
+class TestPrepisNeRazbijeStrani:
+    """Prepis je besedilo z zunanjega modela in gre v HTML kot podatek.
+
+    Prepis, ki bi vseboval `</textarea>`, bi brez ubežanja polje zaprl sredi
+    besedila in ostanek zlil v stran. Odkril pregled v fazi 7.
+    """
+
+    NAGAJIV = "Zapis: a < b & c > d </textarea><script>alert(1)</script>"
+
+    def prepis(self, motor: Engine, besedilo: str) -> None:
+        with Session(motor) as seja:
+            material = seja.get(Material, UUID_ENA)
+            assert material is not None
+            material.status = STATUS_PRIPRAVLJEN
+            material.readable = True
+            material.transcript = besedilo
+            seja.commit()
+
+    def test_znaki_html_ostanejo_v_polju_in_ne_v_strani(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        self.prepis(motor, self.NAGAJIV)
+
+        odgovor = prepisi(odjemalec, "MAT", UUID_ENA)
+
+        # Vsebina polja je natanko prepis — to je obljuba `ADR-048` C1.
+        assert polje_prepisov(odgovor.text).endswith(self.NAGAJIV + "\n")
+        # Polje se konča tam, kjer ga konča predloga, in ne sredi prepisa.
+        assert odgovor.text.count("</textarea>") == 1
+        # Zunaj izvzete skripte te strani ni nobene druge (`ADR-024`).
+        assert odgovor.text.count("<script") == 1
+
+    def test_stevec_znakov_steje_neubezano_besedilo(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Uporabnica prilepi neubežano besedilo, zato mora tudi števec govoriti
+        # o njem. Ubežani zapis je daljši in bi lagal.
+        zapisi(motor, slike)
+        self.prepis(motor, self.NAGAJIV)
+
+        odgovor = prepisi(odjemalec, "MAT", UUID_ENA)
+
+        assert f"{len(polje_prepisov(odgovor.text))} znakov" in odgovor.text
