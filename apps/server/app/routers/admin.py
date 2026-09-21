@@ -25,7 +25,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from app import sistem
-from app.besedilo import SLIKE, stevilo_z_besedo
+from app.besedilo import SLIKE, ZNAKI, stevilo_z_besedo
 from app.casi import cas, cas_ali_prazno, v_domacem
 from app.db import ClaniRepository, KviziRepository, MaterialsRepository
 from app.dependencies import (
@@ -35,6 +35,7 @@ from app.dependencies import (
     daj_repozitorij_kvizov,
 )
 from app.models import STATUS_V_OBDELAVI, Material
+from app.prepisi import SnovZaPrepis, izbrane, sestavi
 from app.routers.kvizi import seznam_kvizov
 from app.settings import Settings
 from app.storage import je_znotraj, mapa_druzine, pobrisi_sliko, velikost_slike
@@ -367,8 +368,15 @@ def predmet(
     clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
+    vse: str | None = None,
 ) -> Response:
-    """Slike enega predmeta, najnovejša prva."""
+    """Slike enega predmeta, najnovejša prva.
+
+    `?vse=1` izriše isto stran z vsemi kljukicami (V3-R11). Povezava in ne
+    skripta: „Izberi vse" mora delati tudi brez nje (`docs/odlocitve/ADR-048`
+    G). Parameter se primerja točno z `1` — vrednost, ki je ne izriše nobena
+    naša povezava, ne sme po tihem obkljukati celega predmeta.
+    """
     # Pretvornik `:path` požre tudi končno poševnico, zato `MAT/` ne bi bil
     # `MAT`. Starlette bi to sicer preusmeril sam, a pri `:path` pot obstaja
     # in preusmeritve ni. Koda predmeta se na poševnico nikoli ne konča.
@@ -396,6 +404,90 @@ def predmet(
             "oznaka": oznaka_predmeta(koda),
             "koliko_opis": stevilo_z_besedo(len(snovi), SLIKE),
             "snovi": [_pogled(snov, mapa_slik, imena) for snov in snovi],
+            # Pot je tu in ne v predlogi, ker mora skozi `quote`: koda s
+            # poševnico ali vprašajem bi sicer povezavo razbila (isti razlog
+            # kot pri `_po_umiku`).
+            "pot_predmeta": _pot_predmeta(koda),
+            "vse_obkljukano": vse == "1",
+        },
+    )
+
+
+def _pot_predmeta(koda: str) -> str:
+    """Naslov strani predmeta, ubežan za URL."""
+    return f"{PREDPONA}/subjects/{quote(koda, safe='')}"
+
+
+def _za_prepis(material: Material, imena: dict[str, str]) -> SnovZaPrepis:
+    """`Material` → vhod za sestavljanje besedila (V3-R11).
+
+    Tu in ne v `app/prepisi.py`: ta pretvorba je edino mesto, kjer se odloči,
+    katera polja snovi sploh smejo v besedilo, in modul za sestavljanje zato
+    ostane brez sheme baze.
+    """
+    return SnovZaPrepis(
+        id=material.id,
+        koda=material.subject,
+        taken_at=material.taken_at,
+        otrok=imena.get(material.child_id),
+        prepis=material.transcript,
+    )
+
+
+@router.get("/transcripts")
+def prepisi_nazaj() -> RedirectResponse:
+    """Stran s prepisi nastane samo iz obrazca; `GET` pelje na pregled.
+
+    Obstaja zato, da pot ni videti kot 405 (isti prijem kot
+    `GET /admin/system/families` v V3-R05). Stran je trenutni izpis in ne
+    stanje (`docs/odlocitve/ADR-048` B), zato je ni mogoče osvežiti ali dati
+    med zaznamke — kdor to poskusi, pristane na pregledu in ne na napaki.
+    """
+    return RedirectResponse(PREDPONA, status_code=303)
+
+
+@router.post("/transcripts")
+def prepisi_izbranih(
+    request: Request,
+    repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    subject: Annotated[str, Form()] = "",
+    snov: Annotated[list[str] | None, Form()] = None,
+) -> Response:
+    """Prepisi izbranih slik enega predmeta v enem polju (V3-R11).
+
+    `POST` in ne `GET`: predmet bo čez šolsko leto nosil nekaj sto slik in
+    ponovljen parameter z UUID bi dal naslov, ki bi odpovedal prav pri
+    največjem izboru (`docs/odlocitve/ADR-048` B).
+
+    **Ničesar ne zapiše** — ne v bazo in ne na disk. Nabor je isti seznam, ki
+    ga izriše stran predmeta, zato tuj, arhiviran, tujepredmetni in
+    neobstoječ identifikator iz njega preprosto izpadejo (`ADR-048` F).
+    """
+    koda = subject.rstrip("/")
+    nabor = repozitorij.seznam_po_predmetu(koda) if koda else []
+    imena = imena_otrok(clani)
+
+    nabor_za_prepis = [_za_prepis(material, imena) for material in nabor]
+    izid = sestavi(izbrane(nabor_za_prepis, snov or []))
+
+    return predloge.TemplateResponse(
+        request,
+        "prepisi.html",
+        {
+            "koda": koda,
+            "besedilo": izid.besedilo if izid.slik else None,
+            "slik_opis": stevilo_z_besedo(izid.slik, SLIKE),
+            "znakov_opis": stevilo_z_besedo(izid.znakov, ZNAKI),
+            # Prazen izbor ni napaka strežnika, ampak nedokončano dejanje;
+            # sporočilo pove, kaj naj uporabnica naredi. Pot nazaj gre na
+            # pregled, kadar bi bila stran predmeta 404 — enako kot `_po_umiku`.
+            "pot_nazaj": (
+                _pot_predmeta(koda)
+                if nabor or poisci_predmet(koda) is not None
+                else PREDPONA
+            ),
         },
     )
 

@@ -1233,6 +1233,8 @@ class TestPakiranje:
             "sistem-stanje.html",
             # V3-R08.
             "racun.html",
+            # V3-R11.
+            "prepisi.html",
         }
 
 
@@ -1253,7 +1255,8 @@ class TestBrezJavaScripta:
     VZORCI = ("<script", "javascript:", "onclick=", "onload=", "onerror=", "onsubmit=")
 
     #: Predloge, ki skripto smejo imeti. `snov.html`: povečan prikaz, V2-R08.
-    IZVZETE = ("snov.html",)
+    #: `prepisi.html`: gumb „Kopiraj v odložišče", V3-R11 (`ADR-048` C).
+    IZVZETE = ("snov.html", "prepisi.html")
 
     def test_v_predlogah_ni_javascripta(self) -> None:
         from app.routers.admin import MAPA_PREDLOG
@@ -2641,3 +2644,469 @@ class TestSlovenskaStevila:
         ]
 
         assert najdeno == []
+
+
+# --- Prepisi izbranih slik (V3-R11) ---
+
+
+def blok_povezave(besedilo: str, material_id: str) -> str:
+    """Del strani med `<a href="/admin/materials/{id}">` in koncem te povezave.
+
+    Kriterij zahteva, da je kljukica **zunaj** povezave na snov: klik nanjo ne
+    sme odpreti podrobnosti. To je trditev o ugnezdenosti in ne o vrstnem redu
+    nizov, zato test gleda natanko v ta blok.
+    """
+    zacetek = besedilo.index(f'<a href="/admin/materials/{material_id}">')
+    return besedilo[zacetek : besedilo.index("</a>", zacetek)]
+
+
+def obrazec_izbora(besedilo: str) -> str:
+    """Obrazec za izbor slik na strani predmeta, brez ostanka strani.
+
+    Glava strani ima svoj obrazec za odjavo (V3-R03), zato trditve o „enem
+    obrazcu" tečejo nad tem izrezom in ne nad celo stranjo.
+    """
+    zacetek = besedilo.index('<form method="post" action="/admin/transcripts">')
+    return besedilo[zacetek : besedilo.index("</form>", zacetek)]
+
+
+def polje_prepisov(besedilo: str) -> str:
+    """Vsebina polja `<textarea>` na strani s prepisi."""
+    zacetek = besedilo.index("<textarea")
+    return besedilo[besedilo.index(">", zacetek) + 1 : besedilo.index("</textarea>")]
+
+
+def prepisi(odjemalec: TestClient, koda: str = "MAT", *snovi: str) -> Any:
+    """`POST /admin/transcripts` z izborom, kot bi ga poslal obrazec."""
+    return odjemalec.post("/admin/transcripts", data={"subject": koda, "snov": list(snovi)})
+
+
+class TestKljukiceNaStraniPredmeta:
+    """Izbor slik na `/admin/subjects/{koda}` (V3-R11).
+
+    Brez JavaScripta: celoten seznam je en obrazec s ponovljenim poljem `snov`,
+    „Izberi vse" pa je povezava (`docs/odlocitve/ADR-048` B in G).
+    """
+
+    def test_vsaka_slika_ima_kljukico(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, UUID_ENA)
+        zapisi(motor, slike, UUID_DVA)
+
+        besedilo = odjemalec.get("/admin/subjects/MAT").text
+
+        for material_id in (UUID_ENA, UUID_DVA):
+            assert f'type="checkbox" name="snov" value="{material_id}"' in besedilo
+
+    def test_privzeto_ni_obkljukana_nobena(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+
+        assert "checked" not in odjemalec.get("/admin/subjects/MAT").text
+
+    def test_kljukica_je_zunaj_povezave_na_snov(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Sicer bi klik nanjo odprl podrobnosti namesto izbral sliko.
+        zapisi(motor, slike)
+
+        besedilo = odjemalec.get("/admin/subjects/MAT").text
+
+        assert "checkbox" not in blok_povezave(besedilo, UUID_ENA)
+
+    def test_seznam_je_en_obrazec_s_csrf_zetonom_in_predmetom(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+
+        besedilo = odjemalec.get("/admin/subjects/MAT").text
+
+        # Natanko en tak obrazec. Trditev o `<form` nasploh ne bi šla: glava
+        # strani ima svojega za odjavo (V3-R03).
+        assert besedilo.count('action="/admin/transcripts"') == 1
+        assert '<form method="post" action="/admin/transcripts">' in besedilo
+        assert 'name="csrf"' in obrazec_izbora(besedilo)
+        assert '<input type="hidden" name="subject" value="MAT">' in besedilo
+
+    def test_gumb_stoji_nad_seznamom_in_pod_njim(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Predmet nosi čez leto nekaj sto slik; en sam gumb na dnu bi pomenil
+        # drsenje čez cel predmet po vsakem izboru na vrhu.
+        zapisi(motor, slike)
+
+        besedilo = odjemalec.get("/admin/subjects/MAT").text
+
+        assert besedilo.count("Prepisi izbranih") == 2
+        # Oba **v istem obrazcu**: gumb zunaj njega ne bi poslal ničesar.
+        assert obrazec_izbora(besedilo).count("Prepisi izbranih") == 2
+
+    def test_izberi_vse_obkljuka_vse(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, UUID_ENA)
+        zapisi(motor, slike, UUID_DVA)
+
+        besedilo = odjemalec.get("/admin/subjects/MAT?vse=1").text
+
+        assert besedilo.count("checked") == 2
+
+    def test_povezavi_za_izbor_in_ciscenje(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+
+        besedilo = odjemalec.get("/admin/subjects/MAT").text
+
+        assert 'href="/admin/subjects/MAT?vse=1">Izberi vse' in besedilo
+        assert 'href="/admin/subjects/MAT">Počisti izbor' in besedilo
+
+    def test_druga_vrednost_parametra_ne_obkljuka(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Vrednost, ki je ne izriše nobena naša povezava, ne sme po tihem
+        # obkljukati celega predmeta.
+        zapisi(motor, slike)
+
+        assert "checked" not in odjemalec.get("/admin/subjects/MAT?vse=0").text
+        assert "checked" not in odjemalec.get("/admin/subjects/MAT?vse=da").text
+
+    def test_prazen_predmet_obrazca_nima(self, odjemalec: TestClient) -> None:
+        besedilo = odjemalec.get("/admin/subjects/MAT").text
+
+        assert 'action="/admin/transcripts"' not in besedilo
+        assert "Prepisi izbranih" not in besedilo
+        assert "Izberi vse" not in besedilo
+
+
+class TestPrepisiIzbranih:
+    """Stran `POST /admin/transcripts` (V3-R11).
+
+    Stran je **trenutni izpis in ne stanje** (`docs/odlocitve/ADR-048` B): v
+    bazo se ne zapiše nič, zato je ponovljen `POST` neškodljiv.
+    """
+
+    def test_prepis_izbrane_slike_je_v_polju(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        obdelaj(motor)
+
+        odgovor = prepisi(odjemalec, "MAT", UUID_ENA)
+
+        assert odgovor.status_code == 200
+        assert "Delci snovi se gibljejo." in polje_prepisov(odgovor.text)
+
+    def test_glava_nosi_kodo_datum_in_uro(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Posneto 07:30 UTC, torej 09:30 doma. Ime meseca in ne `9.`:
+        # besedilo se bere zunaj admina (`ADR-048` D).
+        zapisi(motor, slike, taken_at="2026-09-04T07:30:00+00:00")
+        obdelaj(motor)
+
+        polje = polje_prepisov(prepisi(odjemalec, "MAT", UUID_ENA).text)
+
+        assert polje.startswith("## MAT — 4. september 2026, 09:30")
+
+    def test_ime_otroka_je_v_glavi_pri_vec_otrocih(
+        self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str, brat: str
+    ) -> None:
+        # Oba otroka: `imena_otrok` je pri enem prazna (`ADR-039` F), zato bi
+        # test brez `brat` dokazoval nasprotje od tega, kar pravi ime.
+        zapisi(motor, slike)
+        obdelaj(motor)
+
+        polje = polje_prepisov(prepisi(odjemalec, "MAT", UUID_ENA).text)
+
+        assert "· Maša" in polje
+
+    def test_druzina_z_enim_otrokom_imena_nima(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        obdelaj(motor)
+
+        assert "·" not in polje_prepisov(prepisi(odjemalec, "MAT", UUID_ENA).text)
+
+    def test_vrstni_red_je_od_najstarejse(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Stran predmeta kaže najnovejše prve; besedilo teče obratno.
+        zapisi(motor, slike, UUID_ENA, taken_at="2026-09-01T07:00:00+00:00")
+        zapisi(motor, slike, UUID_DVA, taken_at="2026-09-04T07:00:00+00:00")
+        obdelaj(motor, UUID_ENA)
+        obdelaj(motor, UUID_DVA)
+
+        polje = polje_prepisov(prepisi(odjemalec, "MAT", UUID_ENA, UUID_DVA).text)
+
+        assert polje.index("1. september") < polje.index("4. september")
+
+    def test_slika_brez_prepisa_prispeva_samo_glavo(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Neberljiva snov je obdelana, a brez prepisa (`ADR-011`). Kljukica je
+        # navadna in v besedilu ostane glava kot sled (`ADR-048` E).
+        zapisi(motor, slike)
+        obdelaj(motor, readable=False)
+
+        polje = polje_prepisov(prepisi(odjemalec, "MAT", UUID_ENA).text)
+
+        assert polje == "## MAT — 4. september 2026, 09:30\n"
+
+    def test_slika_v_obdelavi_prispeva_samo_glavo(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+
+        polje = polje_prepisov(prepisi(odjemalec, "MAT", UUID_ENA).text)
+
+        assert polje == "## MAT — 4. september 2026, 09:30\n"
+
+    def test_stevca_stojita_nad_poljem_in_nista_v_njem(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, UUID_ENA)
+        zapisi(motor, slike, UUID_DVA)
+        obdelaj(motor, UUID_ENA)
+        obdelaj(motor, UUID_DVA)
+
+        besedilo = prepisi(odjemalec, "MAT", UUID_ENA, UUID_DVA).text
+        polje = polje_prepisov(besedilo)
+
+        assert "2 sliki" in besedilo
+        assert f"{len(polje)} znakov" in besedilo
+        # Števca sta podatek o besedilu, ne del besedila (`ADR-048` A).
+        assert "2 sliki" not in polje
+        assert besedilo.index("2 sliki") < besedilo.index("<textarea")
+
+    def test_stevca_sklanjata(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+
+        besedilo = prepisi(odjemalec, "MAT", UUID_ENA).text
+
+        assert "1 slika" in besedilo
+
+    def test_polje_je_samo_za_branje(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Meja 3 iz `ADR-024`: Ctrl+A in Ctrl+C delata tudi brez skripte.
+        zapisi(motor, slike)
+
+        besedilo = prepisi(odjemalec, "MAT", UUID_ENA).text
+
+        assert '<textarea id="besedilo" class="prepisi" readonly' in besedilo
+
+    def test_brez_izbora_pove_kaj_narediti_in_polja_nima(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+
+        odgovor = prepisi(odjemalec, "MAT")
+
+        assert odgovor.status_code == 200
+        assert "Izberi vsaj eno sliko" in odgovor.text
+        assert "<textarea" not in odgovor.text
+        assert 'href="/admin/subjects/MAT"' in odgovor.text
+
+    def test_brez_izbora_pri_neznanem_predmetu_pelje_na_pregled(
+        self, odjemalec: TestClient
+    ) -> None:
+        # Stran predmeta, ki nima slik in ni na seznamu desetih, je 404;
+        # povezava nanjo bi peljala na „Tega ni" (isto pravilo kot `_po_umiku`).
+        odgovor = prepisi(odjemalec, "XYZ")
+
+        assert odgovor.status_code == 200
+        assert "Izberi vsaj eno sliko" in odgovor.text
+        assert 'class="nazaj" href="/admin"' in odgovor.text
+
+    def test_prazen_predmet_s_seznama_pelje_nazaj_nanj(self, odjemalec: TestClient) -> None:
+        # Znan predmet ostane dosegljiv tudi prazen.
+        odgovor = prepisi(odjemalec, "MAT")
+
+        assert 'class="nazaj" href="/admin/subjects/MAT"' in odgovor.text
+
+
+class TestNaborPredmetaOmejujeIzbor:
+    """Šteje samo identifikator iz nabora strani predmeta (`ADR-048` F).
+
+    Vsak tak identifikator se **tiho izpusti**: iz izrisanega obrazca ne more
+    nastati, zato ni napaka uporabnice, ki bi jo bilo treba razložiti, in
+    odgovor z njim ne sme izdati, da tuja snov obstaja.
+    """
+
+    def test_arhivirana_snov_se_izpusti(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, UUID_ENA)
+        zapisi(motor, slike, UUID_DVA)
+        obdelaj(motor, UUID_ENA)
+        obdelaj(motor, UUID_DVA)
+        arhiviraj(motor, UUID_ENA)
+
+        odgovor = prepisi(odjemalec, "MAT", UUID_ENA, UUID_DVA)
+
+        assert "1 slika" in odgovor.text
+
+    def test_snov_drugega_predmeta_se_izpusti(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, UUID_ENA, subject="MAT")
+        zapisi(motor, slike, UUID_DVA, subject="SLO")
+        obdelaj(motor, UUID_ENA)
+        obdelaj(motor, UUID_DVA)
+
+        odgovor = prepisi(odjemalec, "MAT", UUID_ENA, UUID_DVA)
+
+        assert "1 slika" in odgovor.text
+        assert "SLO" not in polje_prepisov(odgovor.text)
+
+    def test_neobstojec_identifikator_se_izpusti(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        obdelaj(motor)
+
+        odgovor = prepisi(
+            odjemalec, "MAT", UUID_ENA, "00000000-0000-4000-8000-000000000000"
+        )
+
+        assert "1 slika" in odgovor.text
+
+    def test_sam_tuj_identifikator_da_prazno_stran(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+
+        odgovor = prepisi(odjemalec, "MAT", "00000000-0000-4000-8000-000000000000")
+
+        assert "Izberi vsaj eno sliko" in odgovor.text
+
+
+class TestPrepisiNicesarNeZapisejo:
+    """`ADR-048` F: sestavljanje je čista funkcija, nič se ne shrani."""
+
+    def test_baza_se_ne_spremeni(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        obdelaj(motor)
+        with Session(motor) as seja:
+            prej = seja.get(Material, UUID_ENA)
+            assert prej is not None
+            stanje = (prej.status, prej.transcript, prej.subject, prej.archived_at)
+
+        prepisi(odjemalec, "MAT", UUID_ENA)
+        prepisi(odjemalec, "MAT", UUID_ENA)
+
+        assert stevilo_vrstic(motor) == 1
+        with Session(motor) as seja:
+            potem = seja.get(Material, UUID_ENA)
+            assert potem is not None
+            assert (
+                potem.status,
+                potem.transcript,
+                potem.subject,
+                potem.archived_at,
+            ) == stanje
+
+    def test_get_pelje_na_pregled_in_ne_na_405(self, odjemalec: TestClient) -> None:
+        # Stran ni zaznamek in je ni mogoče osvežiti; kdor to poskusi, naj
+        # pristane na pregledu in ne na strani z napako.
+        odgovor = odjemalec.get("/admin/transcripts", follow_redirects=False)
+
+        assert odgovor.status_code == 303
+        assert odgovor.headers["location"] == "/admin"
+
+
+class TestSkriptaPrepisov:
+    """Meje skripte na strani s prepisi (`ADR-024` 1-4, `ADR-048` C 1-3).
+
+    Pytest skripte **ne izvede**; dokazljivo je samo, kaj je v izrisu. Kako se
+    gumb res obnaša, dokaže ročni preizkus v fazi 9b — enako kot pri povečanem
+    prikazu (`ADR-024`, „Posledice").
+    """
+
+    def stran(self, odjemalec: TestClient, motor: Engine, slike: Path) -> str:
+        zapisi(motor, slike)
+        obdelaj(motor)
+        return prepisi(odjemalec, "MAT", UUID_ENA).text
+
+    def test_skripta_je_vgrajena_in_brez_zunanje_knjiznice(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        besedilo = self.stran(odjemalec, motor, slike)
+
+        assert "<script>" in besedilo
+        # Nobenega `src`: niti CDN niti datoteke iz repozitorija (meji 1 in 2).
+        assert "<script src" not in besedilo
+
+    def test_skripta_ne_klice_streznika_in_ne_poslja_obrazca(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        telo = skripta(self.stran(odjemalec, motor, slike)).lower()
+
+        for prepovedano in ("fetch(", "xmlhttprequest", "sendbeacon", ".submit(", "<form"):
+            assert prepovedano not in telo
+
+    def test_ta_stran_obrazca_sploh_nima(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Stran je izpis in ne dejanje; edini obrazec je odjava v glavi.
+        besedilo = self.stran(odjemalec, motor, slike)
+
+        assert besedilo.count("<form") == 1
+        assert 'action="/admin/logout"' in besedilo
+
+    def test_na_strani_ni_nobenega_atributa_on(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Vsak `on…=` in ne le štirje iz `TestBrezJavaScripta.VZORCI`:
+        # izvzetje od tistega testa ne sme odpreti `onkeydown=` ali `onfocus=`.
+        besedilo = self.stran(odjemalec, motor, slike).lower()
+
+        assert re.search(r"\son[a-z]+\s*=", besedilo) is None
+
+    def test_skripta_bere_isto_polje_kot_ga_izrise_stran(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Meja 1 iz `ADR-048` C: kar je v odložišču, je natanko to, kar je v
+        # polju. Skripta bere `value` in ne sestavlja svojega besedila.
+        besedilo = self.stran(odjemalec, motor, slike)
+        telo = skripta(besedilo)
+
+        assert 'id="besedilo"' in besedilo
+        assert 'document.getElementById("besedilo")' in telo
+        assert "navigator.clipboard.writeText(polje.value)" in telo
+
+    def test_ob_neuspehu_oznaci_in_pove_za_ctrl_c(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Meja 3: tiho neuspešen gumb je huje kot gumba nič.
+        telo = skripta(self.stran(odjemalec, motor, slike))
+
+        assert "polje.select()" in telo
+        assert "Ctrl+C" in telo
+
+    def test_gumb_je_skrit_dokler_ga_skripta_ne_odkrije(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Brez skripte gumba ni — izrisan in mrtev bi bil ravno tisto, kar
+        # meja 3 prepoveduje. Namesto njega je navodilo za Ctrl+A in Ctrl+C.
+        besedilo = self.stran(odjemalec, motor, slike)
+
+        assert 'id="kopiraj" class="gumb gumb-obdelava" type="button" hidden' in besedilo
+        assert "gumb.hidden = false;" in skripta(besedilo)
+        assert "Ctrl+A" in besedilo
+
+    def test_stran_brez_izbora_skripte_nima(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Polja ni, zato tudi brati ni česa; skripta bi tam padla na `null`.
+        odgovor = prepisi(odjemalec, "MAT")
+
+        assert "<script" not in odgovor.text

@@ -87,6 +87,21 @@ def cas(trenutek: datetime) -> str:
     return f"{datum(trenutek)} ob {lokalni:%H:%M}"
 
 
+def cas_z_mesecem(trenutek: datetime) -> str:
+    """Trenutek z imenom meseca (`12. september 2026, 10:32`).
+
+    Oblika glave v besedilu s prepisi (`docs/odlocitve/ADR-048` D). Ločena od
+    `cas()` namenoma: to besedilo se bere zunaj admina — v ChatGPT in v
+    navadnem urejevalniku — kjer `12. 9. 2026` ni nedvoumen, medtem ko je
+    znotraj admina prav kratka oblika tista, ki je povsod.
+
+    Ime meseca je iz `MESECI`, v imenovalniku: *12. september 2026* je
+    slovenski zapis datuma, ne sklon po predlogu.
+    """
+    lokalni = v_domacem(trenutek)
+    return f"{lokalni.day}. {MESECI[lokalni.month - 1]} {lokalni.year}, {lokalni:%H:%M}"
+
+
 def ura(trenutek: datetime) -> str:
     """Samo ura in minuta v domačem pasu (`08:05`).
 

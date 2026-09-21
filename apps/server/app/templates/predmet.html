@@ -7,29 +7,75 @@
 
   {% if snovi %}
     <p class="pod">{{ koliko_opis }}, najnovejša prva.</p>
-    <ul class="mreza">
-      {% for snov in snovi %}
-        <li>
-          <a href="/admin/materials/{{ snov.id }}">
-            {% if snov.velikost is not none %}
-              {# `loading="lazy"` je edino, kar ta seznam drži hiter: brskalnik
-                 naloži samo slike, ki so na zaslonu. Brez tega bi stran z dvesto
-                 posnetki prenesla ~80 MB (odločitev iz faze 1). #}
-              <img src="/admin/materials/{{ snov.id }}/image" alt="" loading="lazy">
-            {% else %}
-              {# Brez tega bi brskalnik na tem mestu narisal ikono pokvarjene
-                 slike — kar je videti kot napaka strani, ne kot podatek o
-                 manjkajoči datoteki. #}
-              <span class="brez-slike">slike na disku ni</span>
-            {% endif %}
-            <span class="opis">
-              <span class="cas">{{ snov.cas }}{% if snov.otrok %} · {{ snov.otrok }}{% endif %}</span>
-              <span class="stanje">{{ snov.stanje }}</span>
-            </span>
-          </a>
-        </li>
-      {% endfor %}
-    </ul>
+
+    {# Celoten seznam je en obrazec: izbor gre s `POST` in ne z `GET`, ker bi
+       tristo identifikatorjev dalo naslov, ki odpove prav pri največjem
+       izboru (`docs/odlocitve/ADR-048` B). Brez JavaScripta je to navaden
+       obrazec s ponovljenim poljem `snov`, enako kot izbirnik kvizov. #}
+    <form method="post" action="/admin/transcripts">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="subject" value="{{ koda }}">
+
+      {# Gumb stoji nad seznamom **in** pod njim. Predmet nosi čez šolsko leto
+         nekaj sto slik; en sam gumb na dnu bi pomenil, da se po odkljukanju
+         treh slik na vrhu odvrtiš čez vse ostale. Oba sta v istem obrazcu in
+         delata isto. #}
+      <p class="izbor">
+        <button class="gumb gumb-obdelava" type="submit">Prepisi izbranih</button>
+        {# „Izberi vse" je povezava in ne skripta (`ADR-048` G); „Počisti
+           izbor" je ista stran brez parametra. Privzeto ni obkljukana
+           nobena. #}
+        <a href="{{ pot_predmeta }}?vse=1">Izberi vse</a>
+        <a href="{{ pot_predmeta }}">Počisti izbor</a>
+      </p>
+
+      <ul class="mreza">
+        {% for snov in snovi %}
+          <li>
+            {# Kljukica je **sosed** povezave in ne njen otrok: klik nanjo ne
+               sme odpreti podrobnosti (kriterij V3-R11). Zato svoja `label`,
+               ki zajame tudi čas — zadetna površina je večja od okvirčka,
+               povezava pa ostane cela. #}
+            <label class="kljukica">
+              {# `aria-label` na vnosu, ker je vidna beseda pri vseh enaka:
+                 bralnik zaslona bi sicer prebral dvajset enakih „Izberi" brez
+                 podatka, katero sliko izbira. Čas je isti niz kot v opisu
+                 spodaj. #}
+              <input type="checkbox" name="snov" value="{{ snov.id }}"
+                     aria-label="Izberi sliko {{ snov.cas }}"
+                     {% if vse_obkljukano %}checked{% endif %}>
+              Izberi
+            </label>
+
+            <a href="/admin/materials/{{ snov.id }}">
+              {% if snov.velikost is not none %}
+                {# `loading="lazy"` je edino, kar ta seznam drži hiter: brskalnik
+                   naloži samo slike, ki so na zaslonu. Brez tega bi stran z dvesto
+                   posnetki prenesla ~80 MB (odločitev iz faze 1). #}
+                <img src="/admin/materials/{{ snov.id }}/image" alt="" loading="lazy">
+              {% else %}
+                {# Brez tega bi brskalnik na tem mestu narisal ikono pokvarjene
+                   slike — kar je videti kot napaka strani, ne kot podatek o
+                   manjkajoči datoteki. #}
+                <span class="brez-slike">slike na disku ni</span>
+              {% endif %}
+              <span class="opis">
+                <span class="cas">{{ snov.cas }}{% if snov.otrok %} · {{ snov.otrok }}{% endif %}</span>
+                <span class="stanje">{{ snov.stanje }}</span>
+              </span>
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
+
+      <p class="izbor">
+        <button class="gumb gumb-obdelava" type="submit">Prepisi izbranih</button>
+        <span class="drobno">
+          Prepisi označenih slik se izpišejo v enem polju, od najstarejše
+          naprej. Nič se ne shrani.
+        </span>
+      </p>
+    </form>
   {% else %}
     <p class="opozorilo">
       Za ta predmet na strežniku še ni nobene slike. Če je bila slika

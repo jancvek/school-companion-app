@@ -80,6 +80,29 @@
     .mreza .opis { padding: 0.6rem 0.7rem; font-size: 0.9rem; }
     .mreza .cas { display: block; }
     .mreza .stanje { color: var(--zamolklo); }
+    /* V3-R11: kljukica je sosed povezave in ne njen otrok — klik nanjo ne sme
+       odpreti podrobnosti. Zato stoji nad okvirčkom, v svoji vrstici. */
+    .mreza .kljukica {
+      display: flex; align-items: center; gap: 0.4rem;
+      padding: 0 0.25rem 0.35rem; cursor: pointer;
+      font-size: 0.85rem; color: var(--zamolklo);
+    }
+    /* Vrstica z gumbom in povezavami ob njem. Gumb ima sicer `margin-top`, ki
+       bi ga v tej vrstici potisnil pod besedilo. */
+    .izbor {
+      display: flex; align-items: center; flex-wrap: wrap;
+      gap: 1rem; margin: 1rem 0;
+    }
+    .izbor .gumb { margin-top: 0; }
+    .izbor .drobno { margin: 0; }
+    .prepisi {
+      display: block; width: 100%; box-sizing: border-box;
+      padding: 0.75rem; border: 1px solid var(--rob); border-radius: 6px;
+      background: var(--ploskev); color: var(--besedilo);
+      font: inherit; font-size: 0.85rem; line-height: 1.5;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      resize: vertical;
+    }
     .snov { display: grid; gap: 2rem; grid-template-columns: minmax(0, 1fr) 22rem; align-items: start; }
     /* `max-height` ni okras: posnetek zvezka je pogosto pokončen, in slika
        čez celo širino bi bila višja od zaslona — podatki ob njej bi končali
