@@ -1080,8 +1080,8 @@ ali z Googlom in obe poti dasta sejo v isti tabeli `sessions`. Odločitve so v
   odstranitev sta pod `/admin`, ker ju sproži prijavljen starš — sejo in CSRF
   jima preveri ista plast kot vsaki drugi strani, in generirani test
   dosegljivosti (`V3-R03`) ju pokrije brez izjeme. Zunaj `/admin` sta samo
-  tisti dve poti, ki ju sproži nekdo brez seje. `IZVZETE_POTI` sta s tem
-  zrasle za **dve točni poti**; `IZVZETE_PREDPONE` ostaja enočlanska.
+  tisti dve poti, ki ju sproži nekdo brez seje. `IZVZETE_POTI` je s tem
+  zrasel za **dve točni poti**; `IZVZETE_PREDPONE` ostaja enočlanska.
 - **`identifier` Google poverilnice je Googlov `sub`, ne e-naslov**
   (`ADR-046` A). `credentials.identifier` je enoličen čez celo namestitev, zato
   bi e-naslov podrl prav stanje, ki ga zahteva kriterij 2 — starša z geslom in
@@ -1157,8 +1157,9 @@ namestitvi ni na voljo (`Settings.google_je_nastavljen`, `ADR-046` F):
 
 - gumba „Prijava z Google računom" na prijavni strani ni,
 - ime v glavi ni povezava na `/admin/racun`,
-- vse štiri Googlove poti vrnejo **404** (ne 503: pot, ki je ta namestitev
-  nima, za obiskovalca ne obstaja).
+- vseh **pet** Googlovih poti vrne **404** (ne 503: pot, ki je ta namestitev
+  nima, za obiskovalca ne obstaja). Pet in ne štiri: poleg obeh dejanj in
+  obeh poti zunaj `/admin` je tu tudi `GET /admin/racun` sam.
 
 Strežnik se zažene normalno — ista drža kot pri manjkajočem `OPENAI_API_KEY`
 (`ADR-009`): manjkajoča nastavitev ustavi eno zmožnost, ne strežnika. Prijava z

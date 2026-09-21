@@ -819,7 +819,10 @@ class TestVhodOdZunaj:
                 google.POT_POVRATNA, params={"code": "k", "state": vsiljeno}
             )
 
-            assert odgovor.status_code != 500, odgovor.text[:200]
+            # Trditev je **pozitivna**: `!= 500` bi spustil mimo tudi 404 ali
+            # 400, torej dve drugi napaki, ki bi bili prav tako narobe.
+            assert odgovor.status_code == 303, odgovor.text[:200]
+            assert google.OZNAKA_STANJE in odgovor.headers["location"]
             assert "Internal Server Error" not in odgovor.text
             assert odjemalec.cookies.get(google.PISKOTEK_STANJA) is None
 

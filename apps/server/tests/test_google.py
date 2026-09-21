@@ -226,10 +226,16 @@ class TestSporocilaPoTokovih:
             assert besedilo != google.SPOROCILA_PRIJAVE[oznaka], oznaka
 
     def test_povezovanje_ne_svetuje_prijave_z_geslom(self) -> None:
-        """Staršu, ki je prijavljen, tak nasvet ne pove ničesar."""
-        for besedilo in google.SPOROCILA_POVEZAVE.values():
-            assert "prijavi z geslom" not in besedilo
-            assert "prijaviš z geslom" not in besedilo
+        """Staršu, ki je prijavljen, tak nasvet ne pove ničesar.
+
+        Iskanje gre po **korenu** in ne po dveh točnih oblikah: „prijavite se
+        z geslom" bi šla mimo seznama oblik, mimo korena pa ne. Beseda „geslo"
+        v teh treh sporočilih nima kaj iskati v nobeni obliki — vsa tri
+        govorijo o povezovanju Google računa.
+        """
+        for oznaka, besedilo in google.SPOROCILA_POVEZAVE.items():
+            assert "gesl" not in besedilo.lower(), oznaka
+            assert "prijav" not in besedilo.lower().replace("prijavljen", ""), oznaka
 
 
 # --- Odjemalec -------------------------------------------------------------
