@@ -7,11 +7,12 @@ stanja na ravni modula in vsak test dobi svojo, popolnoma ločeno aplikacijo.
 from collections.abc import Iterator
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db import (
     ClaniRepository,
+    DruzineRepository,
     KviziRepository,
     MaterialsRepository,
     PrijavaRepository,
@@ -116,6 +117,58 @@ def daj_repozitorij_clanov(
     Svoja seja in ne deljena s `PrijavaRepository`: ta je brez družine in ga
     dobi vmesna plast, ta pa je vezan na družino iz seje. Da sta ločena, je
     vidno v tipu in ne le v dogovoru (`docs/odlocitve/ADR-025`).
+    """
+    tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
+    with tovarna() as seja:
+        yield ClaniRepository(seja, family_id)
+
+
+def zahtevaj_lastnika_sistema(
+    seja: Annotated[SejaUporabnika, Depends(daj_prijavo)],
+) -> SejaUporabnika:
+    """Seja lastnika sistema; za vsakogar drugega je stran **404** (V3-R05).
+
+    Visi na `APIRouter` in ne v posameznem endpointu, zato velja za vsako pot
+    tega usmerjevalnika — tudi za tisto, ki bo dodana jutri. `if` v vsakem
+    endpointu bi bil pravilo, ki ga je mogoče pozabiti, pozabljeno pa bi tiho
+    odprlo pogled čez vse družine (`docs/odlocitve/ADR-044` G; isto sklepanje
+    kot pri `SejaMiddleware`, `ADR-035` A).
+
+    **404 in ne 403** (kriterij `V3-R05`): za starša ta stran ne obstaja, in
+    `403` bi povedal, da obstaja in da ni zanj. `admin.prestrezi_napako` jo
+    izriše z istim besedilom kot vsako resnično neobstoječo pot.
+    """
+    if not seja.is_system_owner:
+        raise HTTPException(status_code=404)
+    return seja
+
+
+def daj_repozitorij_druzin(request: Request) -> Iterator[DruzineRepository]:
+    """Družine s števili članov — **brez** družine v konstruktorju (V3-R05).
+
+    Eden od dveh repozitorijev brez družine (drugi je `PrijavaRepository`) in
+    edini, ki bere čez vse. Meja je v `ADR-044` E: `families` in štetje v
+    `users`, nikoli podatkov družine. Ta odvisnost sodi izključno na poti
+    lastnika sistema, ki jih varuje `zahtevaj_lastnika_sistema`.
+    """
+    tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
+    with tovarna() as seja:
+        yield DruzineRepository(seja)
+
+
+def daj_repozitorij_clanov_ciljne_druzine(
+    request: Request, family_id: str
+) -> Iterator[ClaniRepository]:
+    """Člani družine **iz naslova**, ne iz seje (V3-R05).
+
+    Lastnik sistema ureja starše tuje družine, zato družina ne more priti iz
+    njegove seje. Pride iz poti — in gre v konstruktor, kot zahteva `ADR-025`:
+    repozitorij je na eno družino vezan enako trdno kot pri starševi strani,
+    le da jo izbere naslov in ne prijava.
+
+    Neobstoječa družina tu ni napaka: poizvedbe vrnejo prazno in usmerjevalnik
+    odgovori s `404`, ker je družino tako ali tako moral poiskati, da o njej
+    kaj pokaže.
     """
     tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
     with tovarna() as seja:

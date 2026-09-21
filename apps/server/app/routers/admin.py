@@ -24,6 +24,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
+from app import sistem
 from app.besedilo import SLIKE, stevilo_z_besedo
 from app.casi import cas, cas_ali_prazno, v_domacem
 from app.db import ClaniRepository, KviziRepository, MaterialsRepository
@@ -710,9 +711,27 @@ async def prestrezi_napako(request: Request, izjema: Exception) -> Response:
     napaki (odločitev 7 v `docs/plan/V1-R04.md`).
     """
     if isinstance(izjema, StarletteHTTPException) and je_admin_pot(request.url.path):
-        if izjema.status_code == 404:
+        koda = izjema.status_code
+        glave = izjema.headers
+        if koda == 405 and sistem.je_skrita_pot(request.url.path):
+            # Pod predpono lastnika sistema je **napačna metoda podatek**:
+            # `405` pove, da pot obstaja, in kriterij `V3-R05` zahteva, da za
+            # vse razen lastnika ne obstaja. Zato tu in ne v usmerjevalniku —
+            # pravilo velja za vsako pot te predpone, tudi za tisto, ki bo
+            # dodana jutri, in za vsako metodo, ki je ta pot nima
+            # (`docs/odlocitve/ADR-044` G).
+            #
+            # **Glava `Allow` mora odpasti z njim:** ta našteje metode, ki jih
+            # pot sprejema, in bi povedala natanko to, kar 404 skriva.
+            #
+            # Brez razlike po vlogi: lastnik tu izgubi le točnejše sporočilo ob
+            # ročno vtipkanem naslovu, pravilo, ki bi se ravnalo po tem, kdo
+            # sprašuje, pa bi imelo dve obnašanji in dve priložnosti za zmoto.
+            koda = 404
+            glave = None
+        if koda == 404:
             sporocilo = "Te strani na strežniku ni."
-        elif izjema.status_code == 405:
+        elif koda == 405:
             sporocilo = "Ta stran tega dejanja ne podpira."
         else:
             # Sporočilo je sestavila naša koda in je slovensko — npr.
@@ -723,10 +742,11 @@ async def prestrezi_napako(request: Request, izjema: Exception) -> Response:
             request,
             "najdena-ni.html",
             {"sporocilo": sporocilo},
-            status_code=izjema.status_code,
+            status_code=koda,
             # Privzeti ročnik pri 405 pošlje glavo `Allow`; brskalniku je vseeno,
-            # orodjem ni, in zavreči jo brez razloga ni prav.
-            headers=izjema.headers,
+            # orodjem ni, in zavreči jo brez razloga ni prav. Razlog je en sam:
+            # skrita predpona zgoraj, kjer bi glava izdala, kaj pot sprejema.
+            headers=glave,
         )
 
     return await http_exception_handler(request, izjema)  # type: ignore[arg-type]

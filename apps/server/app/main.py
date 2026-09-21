@@ -23,6 +23,7 @@ from app.routers import (
     kvizi,
     materials,
     resevanje,
+    sistem,
     statistika,
     urnik,
     vstop,
@@ -194,6 +195,11 @@ def create_app(
     # ne prekriva. Edina pot pod `/admin`, ki sprejme datoteko; varuje jo ista
     # plast kot ves `/admin`, pravila urnika pa so v `app/urnik.py`.
     app.include_router(urnik.router)
+    # Stran lastnika sistema (V3-R05), pod `/admin/system`. Z nobeno obstoječo
+    # potjo se ne prekriva. Poleg seje jo varuje še `zahtevaj_lastnika_sistema`
+    # na samem usmerjevalniku: za starša ta predpona ne obstaja (404, ne 403;
+    # `docs/odlocitve/ADR-044` G).
+    app.include_router(sistem.router)
 
     # Napake pod `/admin` naj bodo stran, ne JSON. Prestreznik se za vse
     # ostale poti umakne privzetemu — glej `admin.prestrezi_napako`.

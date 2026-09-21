@@ -69,8 +69,16 @@ class Family(Base):
     #: UUID, generiran na strežniku. Je tudi ime mape slik družine.
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
 
-    #: Ime za prikaz, npr. `Cvek`.
+    #: Ime za prikaz, npr. `Cvek`. **Ni enolično** — družina ni identiteta za
+    #: prijavo; enoličnost nosi `credentials.identifier` (`ADR-038` E).
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    #: Ugasnjena družina se ne more prijaviti, podatki pa ostanejo (`V3-R05`).
+    #: Zastavica in ne `deactivated_at`: družina se lahko vrne, in ponovna
+    #: aktivacija mora vrniti stanje pred deaktivacijo, ne novo stanje
+    #: (`docs/odlocitve/ADR-044` A). Članov se ne dotaknemo — kdor je bil
+    #: deaktiviran prej, ostane deaktiviran.
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

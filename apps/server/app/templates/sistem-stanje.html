@@ -1,0 +1,57 @@
+{# Vmesna stran pred deaktivacijo ali aktivacijo **družine** (V3-R05).
+
+   Svoja predloga in ne `clani-stanje.html`: tam gre za en račun, tu za vse
+   člane naenkrat in za obdelavo slik, in prav to opozorilo je edini razlog,
+   da vmesna stran obstaja. Skupni predlogi bi se besedili prepletli v pogojih,
+   dokler ne bi nobeno več povedalo, kaj se zgodi. #}
+{% extends "osnova.html" %}
+
+{% block naslov %}{% if aktiviramo %}Aktivirati družino?{% else %}Deaktivirati družino?{% endif %}{% endblock %}
+
+{% block vsebina %}
+  {% if aktiviramo %}
+    <h1>Vrniti družino {{ druzina.ime }} v uporabo?</h1>
+  {% else %}
+    <h1>Deaktivirati družino {{ druzina.ime }}?</h1>
+  {% endif %}
+  <p class="pod">
+    {{ druzina.clanov_opis }} ({{ druzina.starsev_opis }}, {{ druzina.otrok_opis }})
+    &middot; nastala {{ druzina.nastala }}
+  </p>
+
+  {% if aktiviramo %}
+    <p class="opozorilo">
+      Člani se bodo spet lahko prijavili, z istimi gesli kot prej, in slike te
+      družine bodo šle v obdelavo. <strong>Prijavljen ni nihče</strong> — seje
+      so bile ob deaktivaciji preklicane in se ne vrnejo.
+    </p>
+    <p class="drobno">
+      Kdor je bil deaktiviran že pred tem, ostane deaktiviran. Aktivacija
+      družine vrne stanje, kakršno je bilo, in ne prižge računov, ki jih je
+      izklopil njen starš.
+    </p>
+  {% else %}
+    <p class="opozorilo">
+      Prijava odslej ne bo mogoča <strong>nobenemu članu te družine</strong> —
+      ne staršem na tej strani ne otrokom v aplikaciji — in <strong>vse seje
+      padejo takoj</strong>. Otroku bo kamera delala naprej, posnetki pa bodo
+      čakali na prenos do ponovne aktivacije.
+    </p>
+    <p class="drobno">
+      <strong>Nič se ne izbriše.</strong> Snov, vprašanja, kvizi, poskusi in
+      urniki te družine ostanejo, slike na strežniku tudi. Nove slike ne bodo
+      šle v obdelavo, dokler družina ni spet aktivna.
+    </p>
+  {% endif %}
+
+  <form method="post" action="{{ pot_dejanja }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% if aktiviramo %}
+      <button class="gumb gumb-obdelava" type="submit">Da, aktiviraj družino</button>
+    {% else %}
+      <button class="gumb" type="submit">Da, deaktiviraj družino</button>
+    {% endif %}
+  </form>
+
+  <a class="nazaj" href="{{ pot_nazaj }}">← Ne, vrni se</a>
+{% endblock %}

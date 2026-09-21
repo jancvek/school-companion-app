@@ -39,7 +39,10 @@ def obnovi_obticale(tovarna_sej: sessionmaker[Session]) -> int:
     gre za dva zaporedna, vsak zase veljavna prehoda. Zato je obdelava v
     ozadju vezana na en proces; glej `docs/01-arhitektura.md`.
     """
-    # Po družinah, kot obdelava (`docs/odlocitve/ADR-029` B).
+    # Po družinah, kot obdelava (`docs/odlocitve/ADR-029` B) — a čez **vse**,
+    # tudi ugasnjene (`ADR-044` D). Ta pot ne kliče ničesar zunanjega in ne
+    # stane nič; zapis, ki bi v ugasnjeni družini ostal `processing` za vedno,
+    # bi bil po ponovni aktivaciji tiha izguba.
     koliko = 0
     with tovarna_sej() as seja:
         for family_id in DruzineRepository(seja).idji():

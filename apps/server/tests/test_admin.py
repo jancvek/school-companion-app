@@ -1227,6 +1227,10 @@ class TestPakiranje:
             "clani-stanje.html",
             # V3-R09.
             "urnik.html",
+            # V3-R05.
+            "sistem.html",
+            "sistem-druzina.html",
+            "sistem-stanje.html",
         }
 
 

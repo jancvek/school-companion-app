@@ -296,6 +296,12 @@ def preveri_prijavo(
     pravilo mora veljati za obe vrati in za vsak zapis v `login_attempts`, in
     pravilo, ki bi ga moral vsak klicatelj ponoviti, je pravilo, ki ga bo kdo
     kdaj pozabil.
+
+    **Ugasnjena družina je isto kot ugasnjen račun** (`V3-R05`, `ADR-044` A):
+    ista zavrnitev, isto besedilo, isti zapis v `login_attempts`. Stoji v
+    istem pogoju kot `is_active` in ne v svojem, ker bi ločen `if` z lastnim
+    sporočilom povedal, da družina obstaja in je ugasnjena — in to je podatek
+    o tuji družini.
     """
     identifikator = normaliziraj_identifikator(identifikator)
 
@@ -309,7 +315,11 @@ def preveri_prijavo(
         repo.zabelezi_neuspeh(identifikator, ip, ko)
         return IzidPrijave(Izid.ZAVRNJENO, SPOROCILO_NEUSPELA_PRIJAVA)
 
-    if not geslo_se_ujema(poverilnica.secret_hash, geslo) or not poverilnica.is_active:
+    if (
+        not geslo_se_ujema(poverilnica.secret_hash, geslo)
+        or not poverilnica.is_active
+        or not poverilnica.family_is_active
+    ):
         repo.zabelezi_neuspeh(identifikator, ip, ko)
         return IzidPrijave(Izid.ZAVRNJENO, SPOROCILO_NEUSPELA_PRIJAVA)
 
@@ -349,13 +359,18 @@ def seja_za_zeton(
     Potekla seja se tu **izbriše** — vrstica, ki je nihče ne pobriše, bi v bazi
     ostala za vedno (`ADR-035` C). Veljavni seji se drseči rok odmakne naprej,
     a največ enkrat na `RAZMIK_OSVEZITVE`.
+
+    Seja neha veljati tudi, kadar je **račun** deaktiviran (`V3-R06`) ali
+    kadar je ugasnjena **družina** (`V3-R05`). Obe dejanji seje že izbrišeta v
+    svoji transakciji; ta preverba je druga plast in ujame sejo, ki je
+    nastala v isti sapi kot deaktivacija (`ADR-044` A).
     """
     if not zeton:
         return None
     seja = repo.seja(zgostitev_zetona(zeton))
     if seja is None:
         return None
-    if seja.expires_at <= ko or not seja.is_active:
+    if seja.expires_at <= ko or not seja.is_active or not seja.family_is_active:
         # Ne samo ta vrstica: potekla seja je znak, da jih je verjetno več
         # (ista naprava, ista ura poteka), in čiščenje je ena poizvedba.
         repo.izbrisi_sejo(seja.session_id)

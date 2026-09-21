@@ -1,3 +1,6 @@
+{# Vmesna stran za deaktivacijo in aktivacijo računa. Nastala v V3-R06 za
+   `/admin/family`, od V3-R05 jo uporablja tudi lastnikova stran — naslov
+   dejanja in pot nazaj prideta iz konteksta, ker sta edina razlika. #}
 {% extends "osnova.html" %}
 
 {% block naslov %}{% if aktiviramo %}Aktivirati račun?{% else %}Deaktivirati račun?{% endif %}{% endblock %}
@@ -32,16 +35,16 @@
   {% endif %}
 
   {% if aktiviramo %}
-    <form method="post" action="/admin/family/members/{{ clan.id }}/activate">
+    <form method="post" action="{{ pot_dejanja }}">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <button class="gumb gumb-obdelava" type="submit">Da, aktiviraj</button>
     </form>
   {% else %}
-    <form method="post" action="/admin/family/members/{{ clan.id }}/deactivate">
+    <form method="post" action="{{ pot_dejanja }}">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <button class="gumb" type="submit">Da, deaktiviraj</button>
     </form>
   {% endif %}
 
-  <a class="nazaj" href="/admin/family">← Ne, vrni se</a>
+  <a class="nazaj" href="{{ pot_nazaj }}">← Ne, vrni se</a>
 {% endblock %}
