@@ -12,6 +12,7 @@ vrne v vrsto; ker to zavrže prejšnji rezultat, je `POST` in ne povezava
 (`docs/odlocitve/ADR-009`).
 """
 
+import math
 import re
 from pathlib import Path
 from typing import Annotated, Any
@@ -21,11 +22,12 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from starlette.datastructures import FormData
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from app import sistem
-from app.besedilo import SLIKE, stevilo_z_besedo
+from app.besedilo import SLIKE, ZNAKI, stevilo_z_besedo
 from app.casi import cas, cas_ali_prazno, v_domacem
 from app.db import ClaniRepository, KviziRepository, MaterialsRepository
 from app.dependencies import (
@@ -35,6 +37,7 @@ from app.dependencies import (
     daj_repozitorij_kvizov,
 )
 from app.models import STATUS_V_OBDELAVI, Material
+from app.prepisi import SnovZaPrepis, izbrane, sestavi
 from app.routers.kvizi import seznam_kvizov
 from app.settings import Settings
 from app.storage import je_znotraj, mapa_druzine, pobrisi_sliko, velikost_slike
@@ -367,8 +370,15 @@ def predmet(
     clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
+    vse: str | None = None,
 ) -> Response:
-    """Slike enega predmeta, najnovejša prva."""
+    """Slike enega predmeta, najnovejša prva.
+
+    `?vse=1` izriše isto stran z vsemi kljukicami (V3-R11). Povezava in ne
+    skripta: „Izberi vse" mora delati tudi brez nje (`docs/odlocitve/ADR-048`
+    G). Parameter se primerja točno z `1` — vrednost, ki je ne izriše nobena
+    naša povezava, ne sme po tihem obkljukati celega predmeta.
+    """
     # Pretvornik `:path` požre tudi končno poševnico, zato `MAT/` ne bi bil
     # `MAT`. Starlette bi to sicer preusmeril sam, a pri `:path` pot obstaja
     # in preusmeritve ni. Koda predmeta se na poševnico nikoli ne konča.
@@ -396,6 +406,141 @@ def predmet(
             "oznaka": oznaka_predmeta(koda),
             "koliko_opis": stevilo_z_besedo(len(snovi), SLIKE),
             "snovi": [_pogled(snov, mapa_slik, imena) for snov in snovi],
+            # Pot je tu in ne v predlogi, ker mora skozi `quote`: koda s
+            # poševnico ali vprašajem bi sicer povezavo razbila (isti razlog
+            # kot pri `_po_umiku`).
+            "pot_predmeta": _pot_predmeta(koda),
+            "vse_obkljukano": vse == "1",
+        },
+    )
+
+
+def _pot_predmeta(koda: str) -> str:
+    """Naslov strani predmeta, ubežan za URL."""
+    return f"{PREDPONA}/subjects/{quote(koda, safe='')}"
+
+
+#: „Koliko polj sme imeti obrazec" — odgovor je: koliko jih gre v 1 MiB telesa.
+#:
+#: Neskončnost in ne veliko število, ker bi **vsaka končna meja vrnila prav
+#: tisto stran, zaradi katere je ta konstanta nastala**: ob preseženi
+#: `max_fields` vrže Starlette `MultiPartException`, ta postane `400`, in
+#: uporabnica dobi golo angleško besedilo kot edino vsebino. Druga meja tu bi
+#: torej problem samo premaknila navzgor, ne odpravila.
+#:
+#: **Cena je izmerjena, ne predpostavljena** (Python 3.12, `FormParser`):
+#:
+#: | telo | polj | čas razčlenjevanja |
+#: |---|---|---|
+#: | pošten izbor 1200 slik (50 KiB) | 1 200 | 0,012 s |
+#: | 1 MiB samih praznih polj (`a=&`) | 349 525 | 3,4 s |
+#:
+#: Zgornja vrstica je to, kar zna poslati „Izberi vse"; spodnja je najslabše,
+#: kar gre v telo, ki ga `SejaMiddleware` še sprejme (`NAJVECJE_TELO_OBRAZCA`).
+#: Pomnilnik je s tem omejen (vrh ~85 MiB), **ni pa zastonj**: uvicorn teče brez
+#: `--workers`, zato tak zahtevek za tri sekunde zadrži tudi prevzem slik s
+#: telefona. Poslati ga zna samo prijavljen starš z veljavnim CSRF žetonom —
+#: v modelu groženj te namestitve (`ADR-025`, `ADR-026`) torej lastnik sam, na
+#: svojem strežniku. To je sprejeto zavestno; če se krog uporabnikov kdaj
+#: razširi čez znance, je to ena od stvari, ki jih je treba premisliti znova.
+BREZ_MEJE_POLJ = math.inf
+
+
+def _polje_obrazca(obrazec: FormData, ime: str) -> str:
+    """Eno besedilno polje obrazca; karkoli drugega velja za neposlano."""
+    vrednost = obrazec.get(ime)
+    return vrednost if isinstance(vrednost, str) else ""
+
+
+def _za_prepis(material: Material, imena: dict[str, str]) -> SnovZaPrepis:
+    """`Material` → vhod za sestavljanje besedila (V3-R11).
+
+    Tu in ne v `app/prepisi.py`: ta pretvorba je edino mesto, kjer se odloči,
+    katera polja snovi sploh smejo v besedilo, in modul za sestavljanje zato
+    ostane brez sheme baze.
+    """
+    return SnovZaPrepis(
+        id=material.id,
+        koda=material.subject,
+        taken_at=material.taken_at,
+        otrok=imena.get(material.child_id),
+        prepis=material.transcript,
+    )
+
+
+@router.get("/transcripts")
+def prepisi_nazaj() -> RedirectResponse:
+    """Stran s prepisi nastane samo iz obrazca; `GET` pelje na pregled.
+
+    Obstaja zato, da pot ni videti kot 405 (isti prijem kot
+    `GET /admin/system/families` v V3-R05). Stran je trenutni izpis in ne
+    stanje (`docs/odlocitve/ADR-048` B), zato je ni mogoče osvežiti ali dati
+    med zaznamke — kdor to poskusi, pristane na pregledu in ne na napaki.
+    """
+    return RedirectResponse(PREDPONA, status_code=303)
+
+
+@router.post("/transcripts")
+async def prepisi_izbranih(
+    request: Request,
+    repozitorij: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+) -> Response:
+    """Prepisi izbranih slik enega predmeta v enem polju (V3-R11).
+
+    `POST` in ne `GET`: predmet bo čez šolsko leto nosil nekaj sto slik in
+    ponovljen parameter z UUID bi dal naslov, ki bi odpovedal prav pri
+    največjem izboru (`docs/odlocitve/ADR-048` B).
+
+    **Ničesar ne zapiše** — ne v bazo in ne na disk. Nabor je isti seznam, ki
+    ga izriše stran predmeta, zato tuj, arhiviran, tujepredmetni in
+    neobstoječ identifikator iz njega preprosto izpadejo (`ADR-048` F).
+
+    **`async def` in obrazec prebran sam**, namesto `Form()` parametrov (isti
+    prijem kot `POST /admin/schedule`): ta izbor je eno polje na sliko, FastAPI
+    pa telo prebere s Starlettejevim privzetkom `max_fields=1000`. Meja ni v
+    `FormParser.parse`, ampak v povratnem klicu `on_field_end`, in ob preseženi
+    vrže `MultiPartException` — stran s prepisi bi bila `400` z golim angleškim
+    besedilom kot edino vsebino, in to bi „Izberi vse" na dovolj velikem
+    predmetu dosegel z enim klikom. To je natanko odpoved pri največjem izboru,
+    zaradi katere je `ADR-048` B izbral `POST` namesto `GET`, le pri drugem
+    številu.
+
+    Zato velja **ena sama meja: velikost telesa.** Tisto postavi
+    `SejaMiddleware` (`NAJVECJE_TELO_OBRAZCA`, 1 MiB) in nanjo odgovori
+    slovensko, preden zahteva sploh pride sem. Druga, skrita meja na številu
+    polj bi pomenila dve različni odpovedi za isto dejanje — in ena od njiju
+    ne bi znala povedati, kaj naj uporabnica naredi. Kaj to stane, je
+    izmerjeno pri `BREZ_MEJE_POLJ`.
+    """
+    obrazec = await request.form(max_fields=BREZ_MEJE_POLJ)
+    # Vrsta vsebine je `application/x-www-form-urlencoded`, zato so vse
+    # vrednosti nizi; `isinstance` je tu zato, da tega ne trdi samo komentar.
+    koda = _polje_obrazca(obrazec, "subject").rstrip("/")
+    snov = [vrednost for vrednost in obrazec.getlist("snov") if isinstance(vrednost, str)]
+    nabor = repozitorij.seznam_po_predmetu(koda) if koda else []
+    imena = imena_otrok(clani)
+
+    nabor_za_prepis = [_za_prepis(material, imena) for material in nabor]
+    izid = sestavi(izbrane(nabor_za_prepis, snov))
+
+    return predloge.TemplateResponse(
+        request,
+        "prepisi.html",
+        {
+            "koda": koda,
+            "besedilo": izid.besedilo if izid.slik else None,
+            "slik_opis": stevilo_z_besedo(izid.slik, SLIKE),
+            "znakov_opis": stevilo_z_besedo(izid.znakov, ZNAKI),
+            # Prazen izbor ni napaka strežnika, ampak nedokončano dejanje;
+            # sporočilo pove, kaj naj uporabnica naredi. Pot nazaj gre na
+            # pregled, kadar bi bila stran predmeta 404 — enako kot `_po_umiku`.
+            "pot_nazaj": (
+                _pot_predmeta(koda)
+                if nabor or poisci_predmet(koda) is not None
+                else PREDPONA
+            ),
         },
     )
 

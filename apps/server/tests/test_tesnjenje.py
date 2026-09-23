@@ -461,6 +461,18 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
     ("GET", "/admin/subjects/{koda}"): lambda o, a: (
         o.get(f"/admin/subjects/{a.subject}"), OK, (),
     ),
+    # V3-R11. Prepis tuje snovi ne sme priti v besedilo: nabor je stran
+    # predmeta te družine, zato tuj identifikator iz njega izpade (`ADR-048`
+    # F). Močnejši primer — izbor v **svojem** predmetu, pomešan s tujim
+    # identifikatorjem — je spodaj v svojem testu.
+    ("GET", "/admin/transcripts"): lambda o, a: (
+        o.get("/admin/transcripts", follow_redirects=False), PREUSMERITEV, (),
+    ),
+    ("POST", "/admin/transcripts"): lambda o, a: (
+        o.post("/admin/transcripts", data={"subject": a.subject, "snov": [a.akt]}),
+        OK,
+        (a.akt,),
+    ),
     ("GET", "/admin/materials/{material_id}"): lambda o, a: (
         o.get(f"/admin/materials/{a.akt}"), NI, (a.akt,),
     ),
@@ -860,6 +872,30 @@ def test_druzina_b_na_istih_poteh_vidi_svoje(
     assert b.odprt_kviz in odjemalec.get("/quizzes/pending").text
     assert b.za_brisanje in odjemalec.get("/materials/pending-deletion").text
     assert b.otrok_id in odjemalec.get("/admin/family").text
+
+
+def test_prepis_tuje_druzine_ne_pride_v_besedilo(
+    odjemalec: PrijavljenOdjemalec, druzini: tuple[Druzina, Druzina]
+) -> None:
+    """Kriterij V3-R11: izbor v **svojem** predmetu s tujim identifikatorjem vred.
+
+    Primer v `PRIMERI_POTI` pošlje tuj predmet in tam je nabor prazen že zato,
+    ker družina B v predmetu A nima ničesar. Tu je test močnejši: predmet je
+    B-jev, njen lastni izbor uspe — in prav med njenimi identifikatorji potuje
+    tudi identifikator snovi družine A. Če bi presejanje teklo po izboru
+    namesto po naboru, bi se tu videl prepis družine A.
+    """
+    a, b = druzini
+
+    odgovor = odjemalec.post(
+        "/admin/transcripts", data={"subject": b.subject, "snov": [b.akt, a.akt]}
+    )
+
+    assert odgovor.status_code == 200
+    # Svoje vidi — sicer bi bila trditev spodaj zelena nad prazno stranjo.
+    assert b.znak in odgovor.text
+    assert a.znak not in odgovor.text
+    assert a.akt not in odgovor.text
 
 
 # --- Lastnik sistema (V3-R05) ---

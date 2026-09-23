@@ -9,7 +9,7 @@ stran.
 
 import pytest
 
-from app.besedilo import SLIKE, SNOVI, VPRASANJA, Oblike, stevilo_z_besedo
+from app.besedilo import SLIKE, SNOVI, VPRASANJA, ZNAKI, Oblike, stevilo_z_besedo
 
 
 @pytest.mark.parametrize(
@@ -65,7 +65,16 @@ def test_snovi(koliko: int, pricakovano: str) -> None:
     assert stevilo_z_besedo(koliko, SNOVI) == pricakovano
 
 
-@pytest.mark.parametrize("oblike", [SLIKE, VPRASANJA, SNOVI])
+@pytest.mark.parametrize(
+    ("koliko", "pricakovano"),
+    [(1, "1 znak"), (2, "2 znaka"), (3, "3 znaki"), (5, "5 znakov")],
+)
+def test_znaki(koliko: int, pricakovano: str) -> None:
+    """Števec znakov nad poljem s prepisi (V3-R11)."""
+    assert stevilo_z_besedo(koliko, ZNAKI) == pricakovano
+
+
+@pytest.mark.parametrize("oblike", [SLIKE, VPRASANJA, SNOVI, ZNAKI])
 def test_vsaka_cetverica_je_res_cetverica(oblike: Oblike) -> None:
     """Varovalka pred trojico, ki bi tiho izpustila dvojino.
 

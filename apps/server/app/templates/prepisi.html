@@ -1,0 +1,108 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}Prepisi izbranih{% endblock %}
+
+{% block vsebina %}
+  <h1>Prepisi izbranih</h1>
+
+  {% if besedilo is none %}
+    {# Prazen izbor ni napaka strežnika, ampak nedokončano dejanje, zato
+       `opozorilo` in ne `napaka`. Polja tu ni — prazno polje bi bilo videti
+       kot izgubljeno besedilo. #}
+    <p class="opozorilo">
+      Izberi vsaj eno sliko. Na strani predmeta obkljukaj slike, katerih
+      prepise potrebuješ, in znova pritisni „Prepisi izbranih".
+    </p>
+  {% else %}
+    <p class="pod">
+      {{ koda }} — {{ slik_opis }}, {{ znakov_opis }}, od najstarejše naprej.
+      Koliko tega gre v en pogovor, presodi sama; strežnik besedila ne reže.
+    </p>
+
+    {# Polje samo za branje je meja 3 iz `docs/odlocitve/ADR-024`: Ctrl+A in
+       Ctrl+C delata vedno, tudi brez skripte in brez HTTPS. Gumb spodaj je
+       nadgradnja, ne pogoj. #}
+    <textarea id="besedilo" class="prepisi" readonly rows="24"
+              aria-label="Prepisi izbranih slik">{{ besedilo }}</textarea>
+
+    {# Gumb je `hidden` in ga odkrije skripta. Izrisan gumb, ki bi bil brez
+       skripte mrtev, bi bil ravno tisto, kar `ADR-048` C prepoveduje ob
+       neuspehu — tiho neuspešen gumb je huje kot gumba nič. #}
+    <p class="izbor">
+      <button id="kopiraj" class="gumb gumb-obdelava" type="button" hidden>
+        Kopiraj v odložišče
+      </button>
+      <span id="izid-kopiranja" class="drobno" role="status"></span>
+    </p>
+    <p class="drobno" id="rocno">
+      Brez gumba: klikni v polje, označi vse s Ctrl+A in kopiraj s Ctrl+C.
+    </p>
+  {% endif %}
+
+  <a class="nazaj" href="{{ pot_nazaj }}">← Nazaj</a>
+
+  {% if besedilo is not none %}
+    {#
+      Druga izjema od „stran je brez skripte" (`docs/odlocitve/ADR-024`,
+      razširjena z `ADR-048` C). Vse meje veljajo in so tu na enem mestu:
+
+      1. Vgrajena v predlogo, brez `npm`, bundlerja in zunanje knjižnice.
+      2. Bere **samo** vsebino polja na strani in jo preda
+         `navigator.clipboard.writeText`. Besedila ne sestavlja, ne krajša in
+         ne preoblikuje — kar je v odložišču, je natanko to, kar je v polju.
+      3. Ne kliče strežnika (`fetch`, `XMLHttpRequest`, `sendBeacon`) in ne
+         pošilja obrazcev. Te strani obrazec sploh nima.
+      4. Ob neuspehu — stran ni v varnem kontekstu ali brskalnik dostop
+         zavrne — besedilo označi in pove, naj se kopira s Ctrl+C.
+
+      `navigator.clipboard` dela samo v varnem kontekstu. Prek Caddyja
+      (`ADR-026`) je stran na HTTPS in to drži; ob dostopu prek golega
+      `http://` z lokalnega naslova pademo v točko 4, polje pa dela naprej.
+    #}
+    <script>
+      (function () {
+        var polje = document.getElementById("besedilo");
+        var gumb = document.getElementById("kopiraj");
+        var izid = document.getElementById("izid-kopiranja");
+        var rocno = document.getElementById("rocno");
+
+        function oznaci() {
+          polje.focus();
+          polje.select();
+        }
+
+        function povej(sporocilo) {
+          izid.textContent = sporocilo;
+        }
+
+        // Brez odložišča gumba sploh ne odkrijemo: navodilo za Ctrl+C je že
+        // na strani in gumb, ki ne more uspeti, bi samo lagal.
+        if (!navigator.clipboard || !navigator.clipboard.writeText) {
+          return;
+        }
+
+        function neuspeh() {
+          oznaci();
+          rocno.hidden = false;
+          povej("Kopiranje ni uspelo. Kopiraj s Ctrl+C.");
+        }
+
+        gumb.hidden = false;
+        rocno.hidden = true;
+
+        gumb.addEventListener("click", function () {
+          // `try` in ne samo zavrnjena obljuba: `writeText` sme vreči tudi
+          // sinhrono ali vrniti kaj, kar ni obljuba. Gumb, ki takrat ne naredi
+          // in ne pove nič, je tiho neuspešen gumb iz točke 4 zgoraj.
+          try {
+            navigator.clipboard.writeText(polje.value).then(function () {
+              povej("Kopirano.");
+            }, neuspeh);
+          } catch (napaka) {
+            neuspeh();
+          }
+        });
+      })();
+    </script>
+  {% endif %}
+{% endblock %}

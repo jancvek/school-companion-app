@@ -98,10 +98,11 @@ logika testljiva brez naprave.
 | `app/dependencies.py` | odvisnosti poti iz `app.state`; družina iz seje — ene same, za obe strani (`daj_druzino`, V3-R04; začasne `daj_druzino_telefona` ni več) |
 | `app/urnik.py` | pravila urnika in manjkov: kateri predmeti so kateri dan, česa tisti dan ni na sliki (V3-R09). Brez FastAPI in brez baze |
 | `app/otroci.py` | izbira otroka v pogledih, ki so ločeni po otroku: privzetek, 404 za tujega, kdaj se izbirnik izriše (V3-R07). Brez FastAPI in brez seje |
+| `app/prepisi.py` | sestavljanje besedila s prepisi izbranih slik: presejanje po naboru, vrstni red, glave (V3-R11). Brez FastAPI in brez baze |
 | `app/subjects.py` | predmeti, slovenske oznake stanj in oznake ocen (`OZNAKE_OCEN`, tu od V2-R04) |
-| `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03); šolsko leto in meseci (V2-R04); današnji dan, meje poljubnega obdobja in ura brez datuma (V2-R07) |
+| `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03); šolsko leto in meseci (V2-R04); današnji dan, meje poljubnega obdobja in ura brez datuma (V2-R07); `cas_z_mesecem` za glave v prepisih (V3-R11) |
 | `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01), 400 (V2-R07) ter 403 (V3-R06); obdelovalec konteksta z glavo, CSRF žetonom (V3-R03) in `google_na_voljo` (V3-R08) |
-| `app/besedilo.py` | slovenske oblike števil (dvojina) |
+| `app/besedilo.py` | slovenske oblike števil (dvojina); `ZNAKI` od V3-R11 |
 | `Caddyfile` | Caddy pred `api`: domena, TLS-ALPN, ikona zavihka (V3-R02); `basic_auth` je padel z V3-R03 |
 | `varnostna-kopija/` | `kopija.ps1` in `obnova.ps1` (V3-R02) |
 
@@ -719,14 +720,19 @@ Strežniško izrisan HTML za lastnika sistema (`docs/00-namen.md`, vloga
 „spremlja delovanje"). Brez gradnje frontenda in brez `npm` v `apps/server`.
 Nastala v V1-R04; V1-R03 jo je razširila s prikazom obdelave.
 
-**Skripta je izjema, ne privzetek** (`ADR-024`): edina je na strani s
-podrobnostmi snovi (V2-R08), vgrajena v `snov.html`. Vse ostale strani so brez
-nje in to preverja `TestBrezJavaScripta`, ki izvzame samo `snov.html`.
+**Skripta je izjema, ne privzetek** (`ADR-024`): od V3-R11 sta izjemi **dve** —
+povečan prikaz snovi (V2-R08, `snov.html`) in gumb „Kopiraj v odložišče" na
+strani s prepisi (V3-R11, `prepisi.html`). Obe sta vgrajeni v svojo predlogo.
+Vse ostale strani so brez skripte in to preverja `TestBrezJavaScripta`, ki
+izvzame natanko ti dve predlogi; meje obeh je treba preverjati izrecno
+(`ADR-048` „Posledice").
 
 | Pot | Metoda | Kaj |
 |---|---|---|
 | `/admin` | GET | vseh deset predmetov s števci; predmet iz baze, ki ga na seznamu ni, je viden pod svojo kodo |
-| `/admin/subjects/{koda}` | GET | slike predmeta, najnovejša prva, lena naložitev |
+| `/admin/subjects/{koda}` | GET | slike predmeta, najnovejša prva, lena naložitev; kljukice za izbor, `?vse=1` obkljuka vse (V3-R11) |
+| `/admin/transcripts` | GET | 303 na pregled; obstaja zato, da pot ni videti kot 405 (V3-R11) |
+| `/admin/transcripts` | POST | prepisi izbranih slik enega predmeta v enem polju; **ničesar ne shrani** (V3-R11) |
 | `/admin/materials/{id}` | GET | podrobnosti ene slike |
 | `/admin/materials/{id}/image` | GET | datoteka slike |
 | `/admin/archive` | GET | arhivirane snovi, najnovejše arhivirane prve (V1-R07) |
@@ -1478,6 +1484,65 @@ in manjka tudi ne zapre.
   `ADR-041` C je zavestno izbral, da enoličnosti ne uveljavlja shema; kriterij
   v `v3.md` pa je zapisan absolutno, zato naj razhajanje stoji tu in ne ostane
   implicitno. Popravek, ko bo potreben, je zaklep otroka ali delni indeks.
+
+## Prepisi izbranih slik (V3-R11)
+
+Lastnik prepise lepi v ChatGPT, da iz njih sestavi vaje. Na strani predmeta
+ima zato vsaka slika kljukico, celoten seznam pa je en obrazec
+`POST /admin/transcripts`. Odločitve so v `ADR-048`.
+
+- **Kljukica je sosed povezave na snov, ne njen otrok**, sicer bi klik nanjo
+  odprl podrobnosti. Privzeto ni obkljukana nobena; „Izberi vse" je povezava
+  `?vse=1` in „Počisti izbor" ista pot brez parametra — brez skripte in brez
+  nove izjeme. Gumb „Prepisi izbranih" stoji nad seznamom in pod njim, oba v
+  istem obrazcu: predmet nosi čez leto nekaj sto slik.
+- **`POST` in ne `GET`**: ponovljen parameter z UUID bi pri nekaj sto slikah
+  dal naslov, ki bi odpovedal prav pri največjem izboru (`ADR-048` B). Pot je
+  svoja in ne pod `subjects/{koda:path}`, kjer bi pretvornik `:path` požrl
+  pripono.
+- **Ena sama meja velja za ta obrazec: velikost telesa.** Pot obrazec prebere
+  sama (`async def` + `await request.form(max_fields=BREZ_MEJE_POLJ)`, kjer je
+  to `math.inf`), ker ima Starlettejev `FormParser` privzeto `max_fields=1000`
+  — meja ni v `parse`, ampak v povratnem klicu `on_field_end` — ta izbor pa je
+  eno polje na sliko. Brez tega bi „Izberi vse" na dovolj velikem predmetu z
+  enim klikom vrnil `400` z golim angleškim besedilom. Končna meja bi to samo
+  premaknila navzgor, ker se prekoračena `max_fields` konča z isto stranjo.
+  Telo je ob prihodu v pot že prebrano in omejeno na `NAJVECJE_TELO_OBRAZCA`
+  (1 MiB) v `SejaMiddleware`, ki nanj odgovori slovensko. **Cena je
+  izmerjena:** pošten izbor 1200 slik se razčleni v 0,012 s, 1 MiB samih
+  praznih polj (349 525 polj) pa v 3,4 s in z vrhom ~85 MiB. Uvicorn teče brez
+  `--workers`, zato tak zahtevek za tri sekunde zadrži tudi prevzem slik s
+  telefona; poslati ga zna samo prijavljen starš z veljavnim CSRF žetonom, kar
+  je v tej namestitvi lastnik sam. Sprejeto zavestno.
+- **Nabor je isti seznam, ki ga izriše stran predmeta** (`seznam_po_predmetu`
+  nad `_nabor_predmeta`), izbor se preseje v Pythonu. Tuj, arhiviran,
+  tujepredmetni in neobstoječ identifikator se **tiho izpustijo**: iz
+  izrisanega obrazca ne morejo nastati, odgovor pa ne sme izdati, da tuja snov
+  obstaja. V bazo se ne zapiše nič.
+- **Sestavljanje je čista funkcija** v `app/prepisi.py`: `izbrane` preseje in
+  uredi od najstarejše (`taken_at`, ob enakem odloči `id`), `sestavi` vrne
+  besedilo in oba števca. Glava je `## <koda> — <čas z imenom meseca>[ ·
+  <otrok>]`; slika brez prepisa prispeva samo glavo in šteje v števec.
+  Modul ne pozna sheme baze — pretvorbo `Material` → `SnovZaPrepis` naredi
+  usmerjevalnik.
+- **Števca sta nad poljem in nista del besedila.** Strežnik ne reže in ne
+  opozarja na prag: kar količino res omeji, je cilj lepljenja, in ta meja se
+  spreminja brez nas (`ADR-048` A).
+- **Gumb „Kopiraj v odložišče" je v izrisu `hidden`**; odkrije ga skripta, in
+  samo kadar `navigator.clipboard.writeText` obstaja. Brez skripte gumba ni,
+  namesto njega stoji navodilo za Ctrl+A in Ctrl+C. Skripta bere izključno
+  `value` polja, ne kliče strežnika in ne pošilja obrazca — te strani obrazec
+  sploh nima. Zavrnjena obljuba in sinhrono vržena napaka gresta v isto vejo:
+  besedilo se označi in pove se, naj se kopira s Ctrl+C.
+
+### Znane omejitve
+
+- **Stran ni zaznamek.** Nastane samo iz obrazca; osvežitev zahteva ponoven
+  `POST`, `GET` pa pelje na pregled. Izbor se ob vrnitvi na predmet ne ohrani.
+- **Vedenja gumba testi ne dokažejo** — samo to, kaj je v izrisu. Kopiranje in
+  njegov neuspeh se preverita v brskalniku (`ADR-024`, „Posledice").
+- **Izbor je en predmet**, ker je `_nabor_predmeta` en predmet. Čez več
+  predmetov ali čez arhiv ne gre.
 
 ## Premik slike v drug predmet (V3-R10)
 
