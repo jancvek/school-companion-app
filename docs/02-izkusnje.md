@@ -37,8 +37,9 @@ Compose, bi tekla kot svoj ukaz; `uvicorn` bi tekel brez nje, brez napake.
 
 ### `docker compose up -d` ne zgradi nove slike
 **Kaj:** po V3-R08 je pol ure tekla stara koda in migracija `0012` ni stekla.
-**Zakaj:** `up -d` vsebnik ustvari na novo, sliko `api` (`build: .`) pa zgradi
-samo, če je še ni — spremenjene kode ne vidi.
+**Zakaj:** sliko `api` (`build: .`) `up -d` zgradi samo, če je še ni —
+spremenjene kode ne vidi. Vsebnik ustvari na novo le ob spremembi nastavitve
+(pri V3-R08 nove spremenljivke `GOOGLE_*`), in še takrat iz stare slike.
 **Kako:** po vsaki spremembi `apps/server` `docker compose up -d --build`.
 Simptom: `Settings` nima novega polja, gumba na strani ni, `alembic current`
 kaže staro revizijo.
