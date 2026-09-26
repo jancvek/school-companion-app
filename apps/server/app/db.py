@@ -470,6 +470,39 @@ class MaterialsRepository(_RepozitorijDruzine):
             )
         )
 
+    def veljavna_vprasanja_snovi(
+        self, material_ids: Iterable[str]
+    ) -> dict[str, list[Question]]:
+        """Veljavna vprašanja danih snovi, po snovi in po `position` (V3-R12).
+
+        **Ena poizvedba** za vse snovi. Branje `Material.veljavna_vprasanja`
+        po snoveh bi pri „Izberi vse" pomenilo eno poizvedbo na sliko
+        (`docs/odlocitve/ADR-049` E).
+
+        Pogoj družine in `retired_at IS NULL` sta v sami poizvedbi: meja ne
+        sloni na tem, da je klicalec identifikatorje že prečistil (`ADR-049`
+        E), upokojena serija pa v besedilo ne sme nikoli (`ADR-015`). Snov
+        brez veljavnih vprašanj v slovarju nima ključa. Prazen vhod poizvedbe
+        ne sproži.
+        """
+        idji = list(dict.fromkeys(material_ids))
+        if not idji:
+            return {}
+
+        po_snoveh: dict[str, list[Question]] = {}
+        for vprasanje in self._session.scalars(
+            select(Question)
+            .where(
+                Question.family_id == self._family_id,
+                Question.material_id.in_(idji),
+                Question.retired_at.is_(None),
+            )
+            .order_by(Question.material_id, Question.position)
+        ):
+            # `material_id` ni `NULL`: pogoj `IN` ga izloči.
+            po_snoveh.setdefault(cast(str, vprasanje.material_id), []).append(vprasanje)
+        return po_snoveh
+
     def sosedi_v_predmetu(self, material: Material) -> tuple[str | None, str | None]:
         """`id` slike pred `material` in za njim v `seznam_po_predmetu`.
 

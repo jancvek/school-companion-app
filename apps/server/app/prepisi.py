@@ -1,4 +1,4 @@
-"""Sestavljanje besedila s prepisi izbranih slik (V3-R11).
+"""Sestavljanje besedila s prepisi izbranih slik (V3-R11, V3-R12).
 
 Čista funkcija: izbor snovi → besedilo. Brez FastAPI, brez baze in brez
 predloge, po istem načelu kot `app/urnik.py` in `app/clani.py`. Javno ime,
@@ -23,6 +23,22 @@ from app.casi import cas_z_mesecem
 LOCILO_OTROKA = "·"
 
 
+#: Zamik nadaljevalnih vrstic pod točko seznama vprašanj: poravnan z `O:`,
+#: da markdown točke ne prekine (`ADR-049` C).
+ZAMIK_TOCKE = "   "
+
+
+@dataclass(frozen=True)
+class VprasanjeZaPrepis:
+    """Eno veljavno vprašanje z odgovorom, kakor ga vidi sestavljanje (V3-R12).
+
+    Namenoma **ni** `Question`, iz istega razloga kot `SnovZaPrepis`.
+    """
+
+    vprasanje: str
+    odgovor: str
+
+
 @dataclass(frozen=True)
 class SnovZaPrepis:
     """Ena snov, kakor jo vidi sestavljanje besedila.
@@ -39,6 +55,11 @@ class SnovZaPrepis:
     otrok: str | None
     #: Prepis ali `None`, kadar ga ni — v obdelavi, neuspela, neberljiva.
     prepis: str | None
+    #: Povzetek ali `None`, kadar ga ni (V3-R12).
+    povzetek: str | None = None
+    #: Veljavna vprašanja v vrstnem redu izpisa (`ADR-015`, `ADR-049` C).
+    #: Kateri so veljavni in kako so urejeni, odloči klicalec.
+    vprasanja: tuple[VprasanjeZaPrepis, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -82,18 +103,44 @@ def izbrane(
     )
 
 
+def _tocka(predpona: str, besedilo: str) -> list[str]:
+    """Vrstice ene polovice točke; nadaljevalne dobijo zamik `ZAMIK_TOCKE`.
+
+    `splitlines` in ne deljenje po `LF`, da `CRLF` iz modela ne pusti `CR` na
+    koncu vrstice.
+    """
+    prva, *ostale = besedilo.strip().splitlines() or [""]
+    return [f"{predpona}{prva}", *(f"{ZAMIK_TOCKE}{vrstica}" for vrstica in ostale)]
+
+
+def _vprasanja(vprasanja: Sequence[VprasanjeZaPrepis]) -> str:
+    """Oštevilčen seznam `N. V: …` / `   O: …` (`ADR-049` C).
+
+    Številka je zaporedje izpisa in ne `position`, da luknja ne more nastati.
+    Nadaljevalne vrstice večvrstičnega vprašanja ali odgovora so zamaknjene,
+    sicer bi markdown točko prekinil.
+    """
+    vrstice = []
+    for stevilka, vprasanje in enumerate(vprasanja, start=1):
+        vrstice += _tocka(f"{stevilka}. V: ", vprasanje.vprasanje)
+        vrstice += _tocka(f"{ZAMIK_TOCKE}O: ", vprasanje.odgovor)
+    return "\n".join(vrstice)
+
+
 def sestavi(snovi: Sequence[SnovZaPrepis]) -> Prepisi:
-    """Besedilo s prepisi danih snovi, v danem vrstnem redu.
+    """Besedilo s povzetki, prepisi in vprašanji danih snovi, v danem vrstnem redu.
 
-    Vsaka snov prispeva markdown glavo, pod njo prepis. Markdown in ne golo
-    besedilo, ker ChatGPT glave razume kot mejo med kosi snovi, v navadnem
-    urejevalniku pa ostanejo berljive (`ADR-048` D).
+    Vsaka snov prispeva markdown glavo, pod njo do tri dele s podnaslovi
+    `### Povzetek`, `### Prepis` in `### Vprašanja`, vedno v tem redu
+    (`ADR-049` A). Markdown in ne golo besedilo, ker ChatGPT glave razume kot
+    mejo med kosi snovi, v navadnem urejevalniku pa ostanejo berljive
+    (`ADR-048` D).
 
-    Snov brez prepisa prispeva **samo glavo** (`ADR-048` E). To je zavestno
-    drugače kot pri izbirniku kvizov, kjer neizbirna snov ostane brez
-    kljukice: tu je glava sled, da je bila snov tisti dan, in ta sled se ne
-    sme izgubiti. Prepis iz samih presledkov velja za odsotnega — v polju bi
-    bil videti kot izgubljeno besedilo, ne kot prazen prepis.
+    Del, ki ga ni ali je iz samih presledkov, se izpusti skupaj s
+    podnaslovom (`ADR-049` D). Snov brez vseh treh prispeva **samo glavo**
+    (`ADR-048` E): glava je sled, da je bila snov tisti dan, in ta sled se ne
+    sme izgubiti. To je zavestno drugače kot pri izbirniku kvizov, kjer
+    neizbirna snov ostane brez kljukice.
 
     Vrstnega reda ta funkcija ne popravlja: uredi ga `izbrane`. Kdor sestavi
     zaporedje sam, dobi natanko svoje zaporedje.
@@ -104,8 +151,15 @@ def sestavi(snovi: Sequence[SnovZaPrepis]) -> Prepisi:
         if snov.otrok:
             glava = f"{glava} {LOCILO_OTROKA} {snov.otrok}"
 
-        prepis = (snov.prepis or "").strip()
-        kosi.append(f"{glava}\n\n{prepis}" if prepis else glava)
+        deli = [glava]
+        for podnaslov, vsebina in (
+            ("Povzetek", (snov.povzetek or "").strip()),
+            ("Prepis", (snov.prepis or "").strip()),
+            ("Vprašanja", _vprasanja(snov.vprasanja)),
+        ):
+            if vsebina:
+                deli.append(f"### {podnaslov}\n{vsebina}")
+        kosi.append("\n\n".join(deli))
 
     # Prazen izbor da prazno besedilo in ne vrstice s samim `\n`: stran ob
     # praznem izboru polja sploh ne izriše, `znakov` pa mora biti 0 in ne 1.
