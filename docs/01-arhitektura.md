@@ -2032,7 +2032,7 @@ lastnost.
 |---|---|---|
 | `fastapi`, `uvicorn[standard]` | HTTP strežnik | V1-R02 |
 | `python-multipart` | brez njega FastAPI multiparta ne prebere | V1-R02 |
-| `sqlalchemy`, `psycopg[binary]` | dostop do baze; `binary` zato, ker na Windows ni prevajalnika | V1-R02 |
+| `sqlalchemy` (`<2.1`), `psycopg[binary]` | dostop do baze; `binary` zato, ker na Windows ni prevajalnika; SQLAlchemy pripet na 2.0, ker 2.1 podre mypy | V1-R02, V3-R12 |
 | `alembic` | migracije sheme | V1-R02 |
 | `pydantic-settings` | nastavitve iz okolja | V1-R02 |
 | `jinja2` | predloge operaterske strani | V1-R04 |

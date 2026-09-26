@@ -11,7 +11,10 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "python-multipart",
-    "sqlalchemy",
+    # Pripeto na 2.0 (V3-R12): 2.1 poostri tipe (mypy pade) in opusti
+    # `Result.tuples()`. Brez meje bi jo vsak `--build` tiho prinesel na
+    # produkcijo. Prehod na 2.1 je svoja zahteva.
+    "sqlalchemy>=2.0,<2.1",
     "psycopg[binary]",
     "alembic",
     "pydantic-settings",
