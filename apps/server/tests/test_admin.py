@@ -3015,6 +3015,38 @@ class TestPovzetekInVprasanjaVPrepisih:
         assert "Vprašanje 1?" not in polje
         assert "Odgovor 3." not in polje
 
+    def test_vrstni_red_je_po_position_in_ne_po_vstavljanju(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Vstavljeno obratno: brez `ORDER BY position` bi SQLite vrnil vrstni
+        # red vstavljanja in test bi to ujel (odkril pregled v fazi 7).
+        zapisi(motor, slike)
+        obdelaj(motor, koliko_vprasanj=0)
+        with Session(motor) as seja:
+            for position in (3, 1, 2):
+                seja.add(
+                    Question(
+                        family_id=CVEK_ID,
+                        id=f"{UUID_ENA}-p{position}",
+                        material_id=UUID_ENA,
+                        position=position,
+                        question=f"Mesto {position}?",
+                        answer=f"Odgovor {position}.",
+                    )
+                )
+            seja.commit()
+
+        polje = polje_prepisov(prepisi(odjemalec, "MAT", UUID_ENA).text)
+
+        assert polje.endswith(
+            "1. V: Mesto 1?\n"
+            "   O: Odgovor 1.\n"
+            "2. V: Mesto 2?\n"
+            "   O: Odgovor 2.\n"
+            "3. V: Mesto 3?\n"
+            "   O: Odgovor 3.\n"
+        )
+
     def test_vprasanja_neizbrane_snovi_niso_v_besedilu(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
