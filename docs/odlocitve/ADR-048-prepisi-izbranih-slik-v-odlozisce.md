@@ -2,7 +2,10 @@
 
 - **Datum:** 2026-09-21
 - **Nastalo pri:** V3-R11 (debata z lastnikom, pred fazo 1)
-- **Status:** Sprejeto
+- **Status:** Sprejeto; odločitev **D** v delu „pod glavo je prepis" in
+  odločitev **E** v delu „samo glava, kadar ni prepisa" sta razširjeni z
+  `ADR-049`: pod glavo so povzetek, prepis in vprašanja, vsak s podnaslovom.
+  Ostale odločitve veljajo naprej.
 - **Stoji na:** `ADR-024` (JavaScript samo kot nadgradnja, štiri meje),
   `ADR-016` A in G (izbirnik s kljukicami), `ADR-025` (družina je lastnik
   podatkov), `ADR-026` (HTTPS prek Caddyja), `ADR-035` D (CSRF žeton)

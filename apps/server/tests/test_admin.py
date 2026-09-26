@@ -9,6 +9,7 @@ bi ob spremembi prenosa padel iz razloga, ki s to zahtevo nima zveze.
 
 import html
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -16,9 +17,10 @@ from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, event, func, select
 from sqlalchemy.orm import Session
 
+from app.besedilo import ZNAKI, stevilo_z_besedo
 from app.db import MaterialsRepository
 from app.models import (
     STATUS_NAPAKA,
@@ -30,7 +32,7 @@ from app.models import (
     Quiz,
 )
 from app.subjects import PREDMETI
-from tests.conftest import CVEK_ID, OTROK_ID, TUJA_DRUZINA_ID, SejaTesta
+from tests.conftest import CVEK_ID, OTROK_ID, TUJA_DRUZINA_ID, SejaTesta, je_seja
 
 # V3-R10 preverja, da premik potegne za sabo statistiko, izbirnik in sosede.
 # Pomagala za to stanje že obstajajo v testih tistih zahtev; podvojena tu bi
@@ -2857,9 +2859,12 @@ class TestPrepisiIzbranih:
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
         # Neberljiva snov je obdelana, a brez prepisa (`ADR-011`). Kljukica je
-        # navadna in v besedilu ostane glava kot sled (`ADR-048` E).
+        # navadna in v besedilu ostane glava kot sled (`ADR-048` E). Brez
+        # vprašanj, kot jo vrne model (`app/vision.py`: prazno, kadar
+        # `readable` ni `true`) — od V3-R12 bi jih besedilo sicer nosilo
+        # (`ADR-049` D).
         zapisi(motor, slike)
-        obdelaj(motor, readable=False)
+        obdelaj(motor, readable=False, koliko_vprasanj=0)
 
         polje = polje_prepisov(prepisi(odjemalec, "MAT", UUID_ENA).text)
 
@@ -2886,7 +2891,10 @@ class TestPrepisiIzbranih:
         polje = polje_prepisov(besedilo)
 
         assert "2 sliki" in besedilo
-        assert f"{len(polje)} znakov" in besedilo
+        # Končnica po številu (`znak`, `znaka`, `znaki`, `znakov`) in ne na
+        # trdo: od V3-R12 je dolžina drugačna in trda končnica je bila zelena
+        # samo po naključju dolžine.
+        assert stevilo_z_besedo(len(polje), ZNAKI) in besedilo
         # Števca sta podatek o besedilu, ne del besedila (`ADR-048` A).
         assert "2 sliki" not in polje
         assert besedilo.index("2 sliki") < besedilo.index("<textarea")
@@ -2938,6 +2946,163 @@ class TestPrepisiIzbranih:
         odgovor = prepisi(odjemalec, "MAT")
 
         assert 'class="nazaj" href="/admin/subjects/MAT"' in odgovor.text
+
+
+class TestPovzetekInVprasanjaVPrepisih:
+    """Povzetek in veljavna vprašanja v besedilu strani (V3-R12, `ADR-049`)."""
+
+    @staticmethod
+    def _poizvedbe_vprasanj(motor: Engine, klic: Callable[[], object]) -> int:
+        """Koliko stavkov nad tabelo `questions` je opravil dani klic."""
+        stevec = 0
+
+        def zabelezi(
+            _povezava: object, _kazalec: object, stavek: str, *_ostalo: object
+        ) -> None:
+            nonlocal stevec
+            if not je_seja(stavek) and "FROM questions" in stavek:
+                stevec += 1
+
+        event.listen(motor, "before_cursor_execute", zabelezi)
+        try:
+            klic()
+        finally:
+            event.remove(motor, "before_cursor_execute", zabelezi)
+        return stevec
+
+    def test_obdelana_snov_nosi_vse_tri_sestavine(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        obdelaj(motor, koliko_vprasanj=2)
+
+        polje = polje_prepisov(prepisi(odjemalec, "MAT", UUID_ENA).text)
+
+        assert polje == (
+            "## MAT — 4. september 2026, 09:30\n"
+            "\n"
+            "### Povzetek\n"
+            "Zgradba snovi.\n"
+            "\n"
+            "### Prepis\n"
+            "Delci snovi se gibljejo.\n"
+            "\n"
+            "### Vprašanja\n"
+            "1. V: Vprašanje 1?\n"
+            "   O: Odgovor 1.\n"
+            "2. V: Vprašanje 2?\n"
+            "   O: Odgovor 2.\n"
+        )
+
+    def test_upokojena_serija_ne_pride_v_besedilo(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Snov, obdelana dvakrat: v besedilu samo druga serija (`ADR-015`).
+        zapisi(motor, slike)
+        obdelaj(motor, koliko_vprasanj=3)
+        upokoji_vprasanja(motor)
+        dodaj_serijo(motor, koliko=2, oznaka="b")
+
+        polje = polje_prepisov(prepisi(odjemalec, "MAT", UUID_ENA).text)
+
+        assert polje.endswith(
+            "### Vprašanja\n"
+            "1. V: Vprašanje b1?\n"
+            "   O: Odgovor b1.\n"
+            "2. V: Vprašanje b2?\n"
+            "   O: Odgovor b2.\n"
+        )
+        assert "Vprašanje 1?" not in polje
+        assert "Odgovor 3." not in polje
+
+    def test_vrstni_red_je_po_position_in_ne_po_vstavljanju(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # Vstavljeno obratno: brez `ORDER BY position` bi SQLite vrnil vrstni
+        # red vstavljanja in test bi to ujel (odkril pregled v fazi 7).
+        zapisi(motor, slike)
+        obdelaj(motor, koliko_vprasanj=0)
+        with Session(motor) as seja:
+            for position in (3, 1, 2):
+                seja.add(
+                    Question(
+                        family_id=CVEK_ID,
+                        id=f"{UUID_ENA}-p{position}",
+                        material_id=UUID_ENA,
+                        position=position,
+                        question=f"Mesto {position}?",
+                        answer=f"Odgovor {position}.",
+                    )
+                )
+            seja.commit()
+
+        polje = polje_prepisov(prepisi(odjemalec, "MAT", UUID_ENA).text)
+
+        assert polje.endswith(
+            "1. V: Mesto 1?\n"
+            "   O: Odgovor 1.\n"
+            "2. V: Mesto 2?\n"
+            "   O: Odgovor 2.\n"
+            "3. V: Mesto 3?\n"
+            "   O: Odgovor 3.\n"
+        )
+
+    def test_vprasanja_neizbrane_snovi_niso_v_besedilu(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike, UUID_ENA)
+        zapisi(motor, slike, UUID_DVA)
+        obdelaj(motor, UUID_ENA, koliko_vprasanj=1)
+        obdelaj(motor, UUID_DVA, koliko_vprasanj=0)
+        dodaj_serijo(motor, UUID_DVA, koliko=1, oznaka="druga")
+
+        polje = polje_prepisov(prepisi(odjemalec, "MAT", UUID_ENA).text)
+
+        assert "Vprašanje 1?" in polje
+        assert "Vprašanje druga1?" not in polje
+
+    def test_vprasanja_izbranih_z_eno_poizvedbo(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        # „Izberi vse" ne sme pomeniti ene poizvedbe na sliko (`ADR-049` E).
+        # Primerjava ene in treh slik: število poizvedb ne raste z izborom.
+        idji = [UUID_ENA, UUID_DVA, "0b9e8d7c-6f5a-4e3d-9c2b-1a0f9e8d7c6b"]
+        for material_id in idji:
+            zapisi(motor, slike, material_id)
+            obdelaj(motor, material_id, koliko_vprasanj=2)
+
+        ena = self._poizvedbe_vprasanj(motor, lambda: prepisi(odjemalec, "MAT", idji[0]))
+        tri = self._poizvedbe_vprasanj(motor, lambda: prepisi(odjemalec, "MAT", *idji))
+
+        assert ena == tri == 1
+        polje = polje_prepisov(prepisi(odjemalec, "MAT", *idji).text)
+        assert polje.count("### Vprašanja") == 3
+
+    def test_brez_izbora_brez_poizvedbe_po_vprasanjih(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        obdelaj(motor)
+
+        odgovor: list[Any] = []
+        stevilo = self._poizvedbe_vprasanj(
+            motor, lambda: odgovor.append(prepisi(odjemalec, "MAT"))
+        )
+
+        assert stevilo == 0
+        assert "Izberi vsaj eno sliko" in odgovor[0].text
+
+    def test_stevec_znakov_steje_vprasanja(
+        self, odjemalec: TestClient, motor: Engine, slike: Path
+    ) -> None:
+        zapisi(motor, slike)
+        obdelaj(motor, koliko_vprasanj=5)
+
+        besedilo = prepisi(odjemalec, "MAT", UUID_ENA).text
+        polje = polje_prepisov(besedilo)
+
+        assert "Odgovor 5." in polje
+        assert stevilo_z_besedo(len(polje), ZNAKI) in besedilo
 
 
 class TestNaborPredmetaOmejujeIzbor:
@@ -3277,4 +3442,4 @@ class TestPrepisNeRazbijeStrani:
 
         odgovor = prepisi(odjemalec, "MAT", UUID_ENA)
 
-        assert f"{len(polje_prepisov(odgovor.text))} znakov" in odgovor.text
+        assert stevilo_z_besedo(len(polje_prepisov(odgovor.text)), ZNAKI) in odgovor.text

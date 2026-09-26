@@ -1,4 +1,4 @@
-"""Sestavljanje besedila s prepisi izbranih slik (V3-R11).
+"""Sestavljanje besedila s prepisi izbranih slik (V3-R11, V3-R12).
 
 Testi enot nad `app/prepisi.py`: brez baze, brez odjemalca in brez izrisa.
 Prav to je razlog, da modul obstaja — `docs/odlocitve/ADR-048` F zahteva, da
@@ -12,7 +12,7 @@ med družinami v `test_tesnjenje.py`.
 from datetime import UTC, datetime
 
 from app.casi import cas_z_mesecem
-from app.prepisi import Prepisi, SnovZaPrepis, izbrane, sestavi
+from app.prepisi import Prepisi, SnovZaPrepis, VprasanjeZaPrepis, izbrane, sestavi
 
 
 def snov(
@@ -22,15 +22,26 @@ def snov(
     taken_at: str = "2026-09-12T08:32:00+00:00",
     otrok: str | None = None,
     prepis: str | None = "Delci snovi se gibljejo.",
+    povzetek: str | None = None,
+    vprasanja: tuple[tuple[str, str], ...] = (),
 ) -> SnovZaPrepis:
-    """Ena snov za sestavljanje. Privzeti čas je 10:32 po domačem pasu."""
+    """Ena snov za sestavljanje. Privzeti čas je 10:32 po domačem pasu.
+
+    Privzeto brez povzetka in vprašanj, da primeri `V3-R11` ostanejo o
+    prepisu; `V3-R12` ju doda izrecno.
+    """
     return SnovZaPrepis(
         id=material_id,
         koda=koda,
         taken_at=datetime.fromisoformat(taken_at),
         otrok=otrok,
         prepis=prepis,
+        povzetek=povzetek,
+        vprasanja=tuple(VprasanjeZaPrepis(v, o) for v, o in vprasanja),
     )
+
+
+GLAVA = "## MAT — 12. september 2026, 10:32"
 
 
 class TestCasZMesecem:
@@ -84,7 +95,7 @@ class TestGlava:
         izid = sestavi([snov(prepis="Delci snovi se gibljejo.")])
 
         assert izid.besedilo == (
-            "## MAT — 12. september 2026, 10:32\n\nDelci snovi se gibljejo.\n"
+            "## MAT — 12. september 2026, 10:32\n\n### Prepis\nDelci snovi se gibljejo.\n"
         )
 
 
@@ -124,6 +135,7 @@ class TestSnovBrezPrepisa:
             "\n"
             "## MAT — 12. september 2026, 10:32\n"
             "\n"
+            "### Prepis\n"
             "Nekaj.\n"
         )
 
@@ -219,3 +231,142 @@ class TestSestaviVrstnegaRedaNePopravlja:
         izid = sestavi([novejsa, starejsa])
 
         assert izid.besedilo.index("## SLO") < izid.besedilo.index("## MAT")
+
+
+class TestPovzetekInVprasanja:
+    """Povzetek, prepis in vprašanja pod glavo (V3-R12, `ADR-049`)."""
+
+    def test_vse_tri_sestavine_v_tem_redu(self) -> None:
+        izid = sestavi(
+            [
+                snov(
+                    povzetek="Zgradba snovi.",
+                    prepis="Delci snovi se gibljejo.",
+                    vprasanja=(("Kaj je delec?", "Najmanjši del."), ("Ali miruje?", "Ne.")),
+                )
+            ]
+        )
+
+        assert izid.besedilo == (
+            f"{GLAVA}\n"
+            "\n"
+            "### Povzetek\n"
+            "Zgradba snovi.\n"
+            "\n"
+            "### Prepis\n"
+            "Delci snovi se gibljejo.\n"
+            "\n"
+            "### Vprašanja\n"
+            "1. V: Kaj je delec?\n"
+            "   O: Najmanjši del.\n"
+            "2. V: Ali miruje?\n"
+            "   O: Ne.\n"
+        )
+
+    def test_samo_prepis_ima_podnaslov(self) -> None:
+        # Oznaka ne sme biti odvisna od tega, ali je snov imela še kaj drugega.
+        izid = sestavi([snov(prepis="Nekaj.", povzetek=None, vprasanja=())])
+
+        assert izid.besedilo == f"{GLAVA}\n\n### Prepis\nNekaj.\n"
+
+    def test_samo_povzetek(self) -> None:
+        izid = sestavi([snov(prepis=None, povzetek="Zgradba snovi.")])
+
+        assert izid.besedilo == f"{GLAVA}\n\n### Povzetek\nZgradba snovi.\n"
+
+    def test_samo_vprasanja(self) -> None:
+        izid = sestavi([snov(prepis=None, vprasanja=(("V?", "O."),))])
+
+        assert izid.besedilo == f"{GLAVA}\n\n### Vprašanja\n1. V: V?\n   O: O.\n"
+
+    def test_brez_vsega_samo_glava(self) -> None:
+        izid = sestavi([snov(prepis="  ", povzetek="\n\t ", vprasanja=())])
+
+        assert izid.besedilo == f"{GLAVA}\n"
+
+    def test_povzetek_iz_presledkov_se_izpusti_s_podnaslovom(self) -> None:
+        izid = sestavi([snov(prepis="Nekaj.", povzetek="  \n ")])
+
+        assert "### Povzetek" not in izid.besedilo
+        assert izid.besedilo == f"{GLAVA}\n\n### Prepis\nNekaj.\n"
+
+    def test_povzetek_in_prepis_se_obrezeta(self) -> None:
+        izid = sestavi([snov(prepis="\n Nekaj. \n", povzetek="  Zgradba. ")])
+
+        assert izid.besedilo == (
+            f"{GLAVA}\n\n### Povzetek\nZgradba.\n\n### Prepis\nNekaj.\n"
+        )
+
+    def test_stevilcenje_je_zaporedje_izpisa(self) -> None:
+        # Klicalec poda vprašanja že urejena po `position` (npr. 2 in 5);
+        # številka v besedilu je 1, 2, da luknja ne more nastati.
+        izid = sestavi([snov(prepis=None, vprasanja=(("Drugo?", "a"), ("Peto?", "b")))])
+
+        assert "1. V: Drugo?\n" in izid.besedilo
+        assert "2. V: Peto?\n" in izid.besedilo
+        assert "3." not in izid.besedilo
+
+    def test_stevca_stejeta_novo_besedilo(self) -> None:
+        izid = sestavi(
+            [snov(povzetek="Zgradba.", vprasanja=(("V?", "O."),)), snov("a2", prepis=None)]
+        )
+
+        assert izid.slik == 2
+        assert izid.znakov == len(izid.besedilo)
+
+    def test_dve_snovi_locilo_in_vrstni_red(self) -> None:
+        izid = sestavi(
+            [
+                snov("a1", prepis="Prva.", vprasanja=(("V1?", "O1."),)),
+                snov("a2", koda="SLO", prepis="Druga."),
+            ]
+        )
+
+        assert izid.besedilo == (
+            f"{GLAVA}\n"
+            "\n"
+            "### Prepis\n"
+            "Prva.\n"
+            "\n"
+            "### Vprašanja\n"
+            "1. V: V1?\n"
+            "   O: O1.\n"
+            "\n"
+            "## SLO — 12. september 2026, 10:32\n"
+            "\n"
+            "### Prepis\n"
+            "Druga.\n"
+        )
+
+
+class TestVecvrsticnaVprasanja:
+    """Večvrstično vprašanje ali odgovor ostane v isti točki (`ADR-049` C)."""
+
+    def test_vecvrsticen_odgovor_je_zamaknjen(self) -> None:
+        izid = sestavi([snov(prepis=None, vprasanja=(("V?", "a\nb"),))])
+
+        assert izid.besedilo == f"{GLAVA}\n\n### Vprašanja\n1. V: V?\n   O: a\n   b\n"
+
+    def test_vecvrsticno_vprasanje_je_zamaknjeno(self) -> None:
+        izid = sestavi([snov(prepis=None, vprasanja=(("Prva\ndruga?", "O."),))])
+
+        assert izid.besedilo == (
+            f"{GLAVA}\n\n### Vprašanja\n1. V: Prva\n   druga?\n   O: O.\n"
+        )
+
+    def test_crlf_ne_pusti_cr(self) -> None:
+        izid = sestavi([snov(prepis=None, vprasanja=(("V?", "a\r\nb"),))])
+
+        assert "\r" not in izid.besedilo
+        assert "   O: a\n   b\n" in izid.besedilo
+
+    def test_vprasanje_in_odgovor_se_obrezeta(self) -> None:
+        izid = sestavi([snov(prepis=None, vprasanja=(("  V?\n", "\n O. "),))])
+
+        assert izid.besedilo.endswith("1. V: V?\n   O: O.\n")
+
+    def test_prazen_odgovor_ne_podre_tocke(self) -> None:
+        # Model odgovora ne sme vrniti praznega, a baza tega ne prepoveduje.
+        izid = sestavi([snov(prepis=None, vprasanja=(("V?", ""),))])
+
+        assert izid.besedilo.endswith("1. V: V?\n   O: \n")

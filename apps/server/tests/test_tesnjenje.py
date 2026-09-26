@@ -898,6 +898,30 @@ def test_prepis_tuje_druzine_ne_pride_v_besedilo(
     assert a.akt not in odgovor.text
 
 
+def test_vprasanja_tuje_druzine_ne_pridejo_v_besedilo(
+    odjemalec: PrijavljenOdjemalec, druzini: tuple[Druzina, Druzina]
+) -> None:
+    """Kriterij V3-R12: isti izbor kot zgoraj, trditev o vprašanjih.
+
+    Obe družini imata pri aktivni snovi vprašanja. B-jeva pridejo v besedilo
+    (sicer bi bila trditev o A zelena nad praznim delom), A-jeva ne — ne
+    vprašanje ne odgovor. Mejo same poizvedbe, mimo nabora, preverja primer
+    `veljavna_vprasanja_snovi` v `PRIMERI_REPOZITORIJEV` (`ADR-049` E).
+    """
+    a, b = druzini
+
+    odgovor = odjemalec.post(
+        "/admin/transcripts", data={"subject": b.subject, "snov": [b.akt, a.akt]}
+    )
+
+    assert odgovor.status_code == 200
+    assert f"1. V: Vprašanje 1 {b.znak}?" in odgovor.text
+    assert f"O: Odgovor 1 {b.znak}." in odgovor.text
+    assert f"Vprašanje 1 {a.znak}?" not in odgovor.text
+    assert f"Odgovor 1 {a.znak}." not in odgovor.text
+    assert f"Povzetek {a.znak}" not in odgovor.text
+
+
 # --- Lastnik sistema (V3-R05) ---
 
 
@@ -1207,6 +1231,17 @@ PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
     ("MaterialsRepository", "stej_arhivirane"): lambda s, a, b: _m(s, b).stej_arhivirane() == 2,
     ("MaterialsRepository", "stej_po_predmetih"): lambda s, a, b: (
         _m(s, b).stej_po_predmetih() == {b.subject: 3}
+    ),
+    # V3-R12. Tuj identifikator v vhodu; poizvedba nosi mejo sama (`ADR-049`
+    # E). Svoja vprašanja pridejo — sicer bi bila trditev zelena nad praznim.
+    ("MaterialsRepository", "veljavna_vprasanja_snovi"): lambda s, a, b: (
+        {
+            material_id: [v.id for v in vprasanja]
+            for material_id, vprasanja in _m(s, b)
+            .veljavna_vprasanja_snovi([a.akt, b.akt])
+            .items()
+        }
+        == {b.akt: list(b.vprasanja)}
     ),
     ("MaterialsRepository", "vrni_v_vrsto"): lambda s, a, b: (
         _m(s, b).vrni_v_vrsto(a.akt) is False

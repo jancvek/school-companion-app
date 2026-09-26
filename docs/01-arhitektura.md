@@ -98,7 +98,7 @@ logika testljiva brez naprave.
 | `app/dependencies.py` | odvisnosti poti iz `app.state`; družina iz seje — ene same, za obe strani (`daj_druzino`, V3-R04; začasne `daj_druzino_telefona` ni več) |
 | `app/urnik.py` | pravila urnika in manjkov: kateri predmeti so kateri dan, česa tisti dan ni na sliki (V3-R09). Brez FastAPI in brez baze |
 | `app/otroci.py` | izbira otroka v pogledih, ki so ločeni po otroku: privzetek, 404 za tujega, kdaj se izbirnik izriše (V3-R07). Brez FastAPI in brez seje |
-| `app/prepisi.py` | sestavljanje besedila s prepisi izbranih slik: presejanje po naboru, vrstni red, glave (V3-R11). Brez FastAPI in brez baze |
+| `app/prepisi.py` | sestavljanje besedila izbranih slik: presejanje po naboru, vrstni red, glave (V3-R11); povzetek, prepis in vprašanja s podnaslovi (V3-R12). Brez FastAPI in brez baze |
 | `app/subjects.py` | predmeti, slovenske oznake stanj in oznake ocen (`OZNAKE_OCEN`, tu od V2-R04) |
 | `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03); šolsko leto in meseci (V2-R04); današnji dan, meje poljubnega obdobja in ura brez datuma (V2-R07); `cas_z_mesecem` za glave v prepisih (V3-R11) |
 | `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01), 400 (V2-R07) ter 403 (V3-R06); obdelovalec konteksta z glavo, CSRF žetonom (V3-R03) in `google_na_voljo` (V3-R08) |
@@ -732,7 +732,7 @@ izvzame natanko ti dve predlogi; meje obeh je treba preverjati izrecno
 | `/admin` | GET | vseh deset predmetov s števci; predmet iz baze, ki ga na seznamu ni, je viden pod svojo kodo |
 | `/admin/subjects/{koda}` | GET | slike predmeta, najnovejša prva, lena naložitev; kljukice za izbor, `?vse=1` obkljuka vse (V3-R11) |
 | `/admin/transcripts` | GET | 303 na pregled; obstaja zato, da pot ni videti kot 405 (V3-R11) |
-| `/admin/transcripts` | POST | prepisi izbranih slik enega predmeta v enem polju; **ničesar ne shrani** (V3-R11) |
+| `/admin/transcripts` | POST | povzetki, prepisi in vprašanja izbranih slik enega predmeta v enem polju; **ničesar ne shrani** (V3-R11, V3-R12) |
 | `/admin/materials/{id}` | GET | podrobnosti ene slike |
 | `/admin/materials/{id}/image` | GET | datoteka slike |
 | `/admin/archive` | GET | arhivirane snovi, najnovejše arhivirane prve (V1-R07) |
@@ -1485,7 +1485,7 @@ in manjka tudi ne zapre.
   v `v3.md` pa je zapisan absolutno, zato naj razhajanje stoji tu in ne ostane
   implicitno. Popravek, ko bo potreben, je zaklep otroka ali delni indeks.
 
-## Prepisi izbranih slik (V3-R11)
+## Prepisi izbranih slik (V3-R11, V3-R12)
 
 Lastnik prepise lepi v ChatGPT, da iz njih sestavi vaje. Na strani predmeta
 ima zato vsaka slika kljukico, celoten seznam pa je en obrazec
@@ -1522,9 +1522,17 @@ ima zato vsaka slika kljukico, celoten seznam pa je en obrazec
 - **Sestavljanje je čista funkcija** v `app/prepisi.py`: `izbrane` preseje in
   uredi od najstarejše (`taken_at`, ob enakem odloči `id`), `sestavi` vrne
   besedilo in oba števca. Glava je `## <koda> — <čas z imenom meseca>[ ·
-  <otrok>]`; slika brez prepisa prispeva samo glavo in šteje v števec.
-  Modul ne pozna sheme baze — pretvorbo `Material` → `SnovZaPrepis` naredi
-  usmerjevalnik.
+  <otrok>]`, pod njo `### Povzetek`, `### Prepis` in `### Vprašanja` v tem
+  redu (V3-R12, `ADR-049`). Vprašanja so `N. V: …` / `   O: …`, oštevilčena
+  po izpisu; nadaljevalne vrstice dobijo zamik treh presledkov. Prazen del
+  (ali iz samih presledkov) izpade s podnaslovom vred; slika brez vseh treh
+  prispeva samo glavo in šteje v števec. Modul ne pozna sheme baze —
+  pretvorbo `Material` → `SnovZaPrepis` naredi usmerjevalnik.
+- **Vprašanja z eno poizvedbo, samo za izbrane**:
+  `MaterialsRepository.veljavna_vprasanja_snovi(ids)` z družino in
+  `retired_at IS NULL` v sami poizvedbi, urejeno po `material_id, position`;
+  prazen vhod ne sproži poizvedbe. Pot jo kliče po `izbrane`, nikoli ne bere
+  `Material.veljavna_vprasanja` po snoveh (`ADR-049` E).
 - **Števca sta nad poljem in nista del besedila.** Strežnik ne reže in ne
   opozarja na prag: kar količino res omeji, je cilj lepljenja, in ta meja se
   spreminja brez nas (`ADR-048` A).
@@ -2024,7 +2032,7 @@ lastnost.
 |---|---|---|
 | `fastapi`, `uvicorn[standard]` | HTTP strežnik | V1-R02 |
 | `python-multipart` | brez njega FastAPI multiparta ne prebere | V1-R02 |
-| `sqlalchemy`, `psycopg[binary]` | dostop do baze; `binary` zato, ker na Windows ni prevajalnika | V1-R02 |
+| `sqlalchemy` (`<2.1`), `psycopg[binary]` | dostop do baze; `binary` zato, ker na Windows ni prevajalnika; SQLAlchemy pripet na 2.0, ker 2.1 podre mypy | V1-R02, V3-R12 |
 | `alembic` | migracije sheme | V1-R02 |
 | `pydantic-settings` | nastavitve iz okolja | V1-R02 |
 | `jinja2` | predloge operaterske strani | V1-R04 |

@@ -14,6 +14,7 @@ vrne v vrsto; ker to zavrže prejšnji rezultat, je `POST` in ne povezava
 
 import math
 import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -36,8 +37,8 @@ from app.dependencies import (
     daj_repozitorij_clanov,
     daj_repozitorij_kvizov,
 )
-from app.models import STATUS_V_OBDELAVI, Material
-from app.prepisi import SnovZaPrepis, izbrane, sestavi
+from app.models import STATUS_V_OBDELAVI, Material, Question
+from app.prepisi import SnovZaPrepis, VprasanjeZaPrepis, izbrane, sestavi
 from app.routers.kvizi import seznam_kvizov
 from app.settings import Settings
 from app.storage import je_znotraj, mapa_druzine, pobrisi_sliko, velikost_slike
@@ -452,12 +453,15 @@ def _polje_obrazca(obrazec: FormData, ime: str) -> str:
     return vrednost if isinstance(vrednost, str) else ""
 
 
-def _za_prepis(material: Material, imena: dict[str, str]) -> SnovZaPrepis:
-    """`Material` → vhod za sestavljanje besedila (V3-R11).
+def _za_prepis(
+    material: Material, imena: dict[str, str], vprasanja: Sequence[Question] = ()
+) -> SnovZaPrepis:
+    """`Material` → vhod za sestavljanje besedila (V3-R11, V3-R12).
 
     Tu in ne v `app/prepisi.py`: ta pretvorba je edino mesto, kjer se odloči,
     katera polja snovi sploh smejo v besedilo, in modul za sestavljanje zato
-    ostane brez sheme baze.
+    ostane brez sheme baze. Vprašanja poda klicalec, prebrana z eno poizvedbo
+    (`docs/odlocitve/ADR-049` E) — `material.veljavna_vprasanja` se tu ne bere.
     """
     return SnovZaPrepis(
         id=material.id,
@@ -465,6 +469,10 @@ def _za_prepis(material: Material, imena: dict[str, str]) -> SnovZaPrepis:
         taken_at=material.taken_at,
         otrok=imena.get(material.child_id),
         prepis=material.transcript,
+        povzetek=material.summary,
+        vprasanja=tuple(
+            VprasanjeZaPrepis(vprasanje=v.question, odgovor=v.answer) for v in vprasanja
+        ),
     )
 
 
@@ -522,8 +530,14 @@ async def prepisi_izbranih(
     nabor = repozitorij.seznam_po_predmetu(koda) if koda else []
     imena = imena_otrok(clani)
 
-    nabor_za_prepis = [_za_prepis(material, imena) for material in nabor]
-    izid = sestavi(izbrane(nabor_za_prepis, snov))
+    # Najprej izbor nad naborom, šele nato vprašanja — samo za izbrane, ne za
+    # celoten predmet (`ADR-049` E).
+    po_id = {material.id: material for material in nabor}
+    izbor = izbrane([_za_prepis(material, imena) for material in nabor], snov)
+    vprasanja = repozitorij.veljavna_vprasanja_snovi(s.id for s in izbor)
+    izid = sestavi(
+        [_za_prepis(po_id[s.id], imena, vprasanja.get(s.id, ())) for s in izbor]
+    )
 
     return predloge.TemplateResponse(
         request,

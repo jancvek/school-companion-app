@@ -35,6 +35,15 @@ Compose, bi tekla kot svoj ukaz; `uvicorn` bi tekel brez nje, brez napake.
 **Kako:** zastavice ostanejo v isti vrstici kot program. Test v
 `test_postavitev.py` to preverja.
 
+### `docker compose up -d` ne zgradi nove slike
+**Kaj:** po V3-R08 je pol ure tekla stara koda in migracija `0012` ni stekla.
+**Zakaj:** sliko `api` (`build: .`) `up -d` zgradi samo, če je še ni —
+spremenjene kode ne vidi. Vsebnik ustvari na novo le ob spremembi nastavitve
+(pri V3-R08 nove spremenljivke `GOOGLE_*`), in še takrat iz stare slike.
+**Kako:** po vsaki spremembi `apps/server` `docker compose up -d --build`.
+Simptom: `Settings` nima novega polja, gumba na strani ni, `alembic current`
+kaže staro revizijo.
+
 ### Zgostitev gesla v `.env`
 **Kaj:** bcrypt zgostitev vsebuje `$`, ki ga Compose razume kot spremenljivko.
 **Kako:** vrednost v `.env` v enojnih narekovajih. `docker compose config` jo
