@@ -29,7 +29,8 @@ from starlette.responses import Response
 
 from app import sistem
 from app.besedilo import SLIKE, ZNAKI, stevilo_z_besedo
-from app.casi import cas, cas_ali_prazno, v_domacem
+from app.casi import cas, cas_ali_prazno, danes, dnevi_od_do, v_domacem
+from app.danes import je_vikend, sestavi_kartico
 from app.db import ClaniRepository, KviziRepository, MaterialsRepository
 from app.dependencies import (
     daj_nastavitve,
@@ -296,6 +297,20 @@ def pregled(
     steviloma = repozitorij.stej_po_predmetih()
     otroci = clani.otroci()
 
+    # Kartica „danes" (V3-R13). `danes` je ime v tem modulu, da ga test strani
+    # zamenja z `monkeypatch` in ne bere ure stroja. Nabor je isti klic z
+    # istima mejama kot `/admin/days` za ta dan (`ADR-050` A1); med vikendom
+    # poizvedbe ni, ker kartica tedaj vrstic nima.
+    dan = danes()
+    aktivni = [otrok for otrok in otroci if otrok.is_active]
+    slike_dne: dict[str, list[Material]] = {}
+    if not je_vikend(dan):
+        od, do = dnevi_od_do(dan, dan)
+        slike_dne = {
+            otrok.user_id: repozitorij.seznam_po_obdobju(od, do, otrok.user_id)
+            for otrok in aktivni
+        }
+
     vrstice = [
         {"koda": predmet.koda, "oznaka": predmet.oznaka, "koliko": steviloma.get(predmet.koda, 0)}
         for predmet in PREDMETI
@@ -325,7 +340,11 @@ def pregled(
             # družina brez aktivnega otroka vstopov v sestavljalnik sploh ne
             # dobi. Isto pravilo jih tudi zavrne s `409` — gumb, ki ga stran
             # ne izriše, ni varovalka (vzorec `ADR-038`).
-            "ima_otroka": any(otrok.is_active for otrok in otroci),
+            "ima_otroka": bool(aktivni),
+            # `None` pri družini brez aktivnega otroka: kartice tedaj ni.
+            # `vec_otrok` šteje vse otroke, tudi deaktivirane — tako šteje
+            # izbirnik na `/admin/days` (`ADR-039` B).
+            "danes": sestavi_kartico(dan, aktivni, slike_dne, vec_otrok=len(otroci) > 1),
         },
     )
 

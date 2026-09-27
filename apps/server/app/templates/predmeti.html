@@ -3,6 +3,38 @@
 {% block naslov %}Predmeti{% endblock %}
 
 {% block vsebina %}
+  {# Kartica „danes" (V3-R13, `docs/odlocitve/ADR-050`) — **nad** naslovom,
+     ker je to prvo, kar starš ob odprtju admina išče. Nosi kode predmetov,
+     zato test vrstnega reda s sliko od danes gleda samo `<ul class="predmeti">`.
+     Družina brez aktivnega otroka kartice nima. #}
+  {% if danes %}
+    <section class="danes" aria-label="Danes">
+      {% if danes.je_vikend %}
+        <p>Danes je vikend.</p>
+      {% else %}
+        <ul>
+          {% for vrstica in danes.vrstice %}
+            <li>
+              <a href="{{ vrstica.href }}">
+                {# Brez slik je nevtralno in ne opozorilo: zjutraj je to
+                   normalno stanje (`ADR-050` C1). #}
+                {% if vrstica.ima_slike %}
+                  <span class="znak poslikano" aria-hidden="true">✓</span>
+                {% else %}
+                  <span class="znak" aria-hidden="true">○</span>
+                {% endif %}
+                <span>{{ vrstica.ime }} — {{ vrstica.stanje }}</span>
+                {% if vrstica.predmeti_opis %}
+                  <span class="stevec">{{ vrstica.predmeti_opis }}</span>
+                {% endif %}
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    </section>
+  {% endif %}
+
   <h1>Predmeti</h1>
   <p class="pod">
     Skupaj {{ skupaj_opis }} v uporabi.
