@@ -60,6 +60,21 @@
     .predmeti a:hover { background: var(--ploskev); }
     .koda { font-weight: 600; font-variant-numeric: tabular-nums; }
     .stevec { color: var(--zamolklo); font-variant-numeric: tabular-nums; }
+    /* Kartica „danes" nad predmeti (V3-R13). Samo obstoječe barve. */
+    .danes {
+      border: 1px solid var(--rob); border-radius: 6px;
+      background: var(--ploskev); padding: 0.25rem 1rem; margin: 0 0 2rem;
+    }
+    .danes p { margin: 0.75rem 0; }
+    .danes ul { list-style: none; margin: 0; padding: 0; }
+    .danes li + li { border-top: 1px solid var(--rob); }
+    .danes a {
+      display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem 0.75rem;
+      padding: 0.75rem 0; text-decoration: none; color: var(--besedilo);
+    }
+    .danes .znak { color: var(--zamolklo); width: 1em; text-align: center; }
+    .danes .znak.poslikano { color: var(--poudarek); font-weight: 600; }
+    .danes .stevec { margin-left: auto; }
     .mreza {
       display: grid; gap: 1rem;
       grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

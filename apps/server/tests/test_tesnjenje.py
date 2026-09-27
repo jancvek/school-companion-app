@@ -72,6 +72,9 @@ from tests.conftest import (
     ustvari_sejo,
     ustvari_starsa,
 )
+from tests.test_danes import PONEDELJEK
+from tests.test_danes import kartica as kartica_danes
+from tests.test_danes import vrstice as vrstice_danes
 from tests.test_druzine import DRUGA_ID, dodaj_druzino
 from tests.test_kvizi import objavi
 from tests.test_racun import PonarejenGoogle
@@ -872,6 +875,51 @@ def test_druzina_b_na_istih_poteh_vidi_svoje(
     assert b.odprt_kviz in odjemalec.get("/quizzes/pending").text
     assert b.za_brisanje in odjemalec.get("/materials/pending-deletion").text
     assert b.otrok_id in odjemalec.get("/admin/family").text
+
+
+def test_kartica_danes_ne_steje_slik_tuje_druzine(
+    odjemalec: PrijavljenOdjemalec,
+    motor: Engine,
+    slike: Path,
+    druzini: tuple[Druzina, Druzina],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kartica „danes" (V3-R13) ne pokaže otroka in slik tuje družine.
+
+    Kar ta test dokaže, je meja **otrok**: vrstice nastanejo iz
+    `ClaniRepository.otroci` te družine, zato tuj otrok ne dobi vrstice in
+    njegove slike ne pridejo v poizvedbo. Pogoja družine v
+    `seznam_po_obdobju` ta test **ne** varuje — tuje slike izloči že pogoj po
+    otroku, ker je otrok vedno član ene družine. Tega varuje matrika
+    repozitorijev spodaj (`test_repozitorij_ne_vidi_in_ne_spremeni_tuje_druzine`).
+
+    Dan je stalen ponedeljek: slike, ki jih `_zgradi` posname ob uri zagona,
+    tako ne štejejo, in izid ni odvisen od dneva v tednu, ko zbirka teče.
+    """
+    a, b = druzini
+    monkeypatch.setattr("app.routers.admin.danes", lambda: PONEDELJEK)
+    posneto = datetime(2026, 9, 7, 8, tzinfo=UTC)
+    with Session(motor) as seja:
+        for druzina, subject, koliko in ((a, "ZGO", 2), (b, "MAT", 1)):
+            for i in range(koliko):
+                seja.add(
+                    Material(
+                        id=str(uuid4()),
+                        family_id=druzina.family_id,
+                        child_id=druzina.otrok_id,
+                        subject=subject,
+                        taken_at=posneto,
+                        image_path=str(slike / druzina.family_id / f"danes-{i}.jpg"),
+                        status=STATUS_NOV,
+                        received_at=posneto,
+                    )
+                )
+        seja.commit()
+
+    besedilo = odjemalec.get("/admin").text
+
+    assert vrstice_danes(besedilo) == ["✓ Danes že poslikano MAT 1"]
+    assert "ZGO" not in kartica_danes(besedilo)
 
 
 def test_prepis_tuje_druzine_ne_pride_v_besedilo(

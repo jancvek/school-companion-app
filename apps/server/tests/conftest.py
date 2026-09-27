@@ -7,7 +7,7 @@ stavkov, ki bi jih poznal samo Postgres.
 """
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from functools import cache
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -127,6 +127,30 @@ def okolje_brez_nastavitev() -> Iterator[None]:
         for ime in OKOLJSKE_NASTAVITVE:
             okolje.delenv(ime, raising=False)
         yield
+
+
+#: Dan, ki ga domača stran admina v testih šteje za današnjega (V3-R13).
+#:
+#: Sreda brez posnetkov: pomožne funkcije testov slike privzeto posnamejo
+#: 4. 9. 2026, in kartica s kodami predmetov nad seznamom bi tiho spremenila,
+#: kaj merijo testi, ki gledajo celo stran.
+DAN_DOMACE_STRANI = date(2026, 9, 16)
+
+
+@pytest.fixture(autouse=True)
+def stalen_dan_domace_strani(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Domača stran `/admin` v vseh testih teče na stalen delavnik.
+
+    Kartica „danes" (V3-R13) je med tednom in med vikendom drugačna. Brez
+    tega bi zbirka ob delavnikih in ob vikendih preverjala dve različni
+    strani — in napaka, ki se pokaže samo ob delavnikih, je bila v nedeljo
+    zelena (`docs/odlocitve/ADR-051`). Vikend preverjajo testi kartice sami,
+    ki ta dan zamenjajo.
+
+    Samo `admin`: pregled po dnevih ima svoje teste današnjega dne, ki
+    `danes()` berejo namenoma.
+    """
+    monkeypatch.setattr("app.routers.admin.danes", lambda: DAN_DOMACE_STRANI)
 
 
 @pytest.fixture
