@@ -884,7 +884,14 @@ def test_kartica_danes_ne_steje_slik_tuje_druzine(
     druzini: tuple[Druzina, Druzina],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Kartica „danes" (V3-R13) šteje samo slike svoje družine.
+    """Kartica „danes" (V3-R13) ne pokaže otroka in slik tuje družine.
+
+    Kar ta test dokaže, je meja **otrok**: vrstice nastanejo iz
+    `ClaniRepository.otroci` te družine, zato tuj otrok ne dobi vrstice in
+    njegove slike ne pridejo v poizvedbo. Pogoja družine v
+    `seznam_po_obdobju` ta test **ne** varuje — tuje slike izloči že pogoj po
+    otroku, ker je otrok vedno član ene družine. Tega varuje matrika
+    repozitorijev spodaj (`test_repozitorij_ne_vidi_in_ne_spremeni_tuje_druzine`).
 
     Dan je stalen ponedeljek: slike, ki jih `_zgradi` posname ob uri zagona,
     tako ne štejejo, in izid ni odvisen od dneva v tednu, ko zbirka teče.
@@ -911,7 +918,7 @@ def test_kartica_danes_ne_steje_slik_tuje_druzine(
 
     besedilo = odjemalec.get("/admin").text
 
-    assert vrstice_danes(besedilo) == ["✓ Maša — danes že poslikano MAT 1"]
+    assert vrstice_danes(besedilo) == ["✓ Danes že poslikano MAT 1"]
     assert "ZGO" not in kartica_danes(besedilo)
 
 

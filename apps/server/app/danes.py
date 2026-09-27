@@ -41,7 +41,10 @@ SOBOTA = 5
 class VrsticaOtroka:
     """Ena vrstica kartice: en aktiven otrok in njegove današnje slike."""
 
-    ime: str
+    #: Prikazno ime, ali `None` pri družini z enim otrokom. Pravilo „ime samo
+    #: pri več kot enem otroku" (`ADR-039` F3, `ADR-051`) uveljavi tip in ne
+    #: predloga, po vzorcu `IzbiraOtroka.ime_za_prikaz`.
+    ime: str | None
 
     #: Predmeti s slikami in števila, v vrstnem redu `PREDMETI`, nato neznane
     #: kode po abecedi. Prazno, kadar otrok danes še ni ničesar poslikal.
@@ -58,8 +61,14 @@ class VrsticaOtroka:
 
     @property
     def stanje(self) -> str:
-        """Besedilo stanja, brez glagola s spolom (`ADR-050` E1)."""
-        return "danes že poslikano" if self.ima_slike else "danes še ni slik"
+        """Besedilo vrstice, brez glagola s spolom (`ADR-050` E1).
+
+        Ime je vrednost polja pred ločilom in ne del povedi (`ADR-039` F3).
+        """
+        stanje = "danes že poslikano" if self.ima_slike else "danes še ni slik"
+        if self.ime is None:
+            return stanje[0].upper() + stanje[1:]
+        return f"{self.ime} — {stanje}"
 
     @property
     def predmeti_opis(self) -> str:
@@ -120,7 +129,9 @@ def sestavi_kartico(
     """Kartica za dan `dan`; `None`, kadar družina nima aktivnega otroka.
 
     `otroci` so **aktivni** otroci v vrstnem redu `ClaniRepository.otroci`
-    (`ADR-050` B1). `slike` preslika `id` otroka v njegove slike tega dne,
+    (`ADR-050` B1). `vec_otrok` šteje vse otroke družine, tudi deaktivirane,
+    in odloči o `?otrok=` in o imenu v vrstici — oboje po istem pravilu kot
+    izbirnik (`ADR-039` B, F3). `slike` preslika `id` otroka v njegove slike tega dne,
     kakor jih vrne `seznam_po_obdobju`; manjkajoč ključ pomeni „brez slik".
     Med vikendom se `slike` ne bere — vrstic tedaj ni, tudi če so slike.
     """
@@ -132,7 +143,7 @@ def sestavi_kartico(
         je_vikend=False,
         vrstice=tuple(
             VrsticaOtroka(
-                ime=otrok.display_name,
+                ime=otrok.display_name if vec_otrok else None,
                 predmeti=razvrsti_predmete(slike.get(otrok.user_id, ())),
                 href=povezava(dan, otrok, vec_otrok=vec_otrok),
             )

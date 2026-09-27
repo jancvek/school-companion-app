@@ -79,7 +79,7 @@ class TestSestava:
         assert not kartica.je_vikend
         (vrstica,) = kartica.vrstice
         assert not vrstica.ima_slike
-        assert vrstica.stanje == "danes še ni slik"
+        assert vrstica.stanje == "Danes še ni slik"
         assert vrstica.predmeti_opis == ""
 
     def test_s_slikami_po_urniku(self) -> None:
@@ -90,7 +90,7 @@ class TestSestava:
         assert kartica is not None
         (vrstica,) = kartica.vrstice
         assert vrstica.ima_slike
-        assert vrstica.stanje == "danes že poslikano"
+        assert vrstica.stanje == "Danes že poslikano"
         # NAR je na urniku pred MAT, čeprav je bila MAT poslikana prej.
         assert vrstica.predmeti == (("NAR", 1), ("MAT", 2))
         assert vrstica.predmeti_opis == "NAR 1 · MAT 2"
@@ -113,10 +113,22 @@ class TestSestava:
         kartica = sestavi_kartico(PONEDELJEK, [MASA, NEJC], slike, vec_otrok=True)
 
         assert kartica is not None
-        assert [(v.ime, v.predmeti_opis) for v in kartica.vrstice] == [
-            ("Maša", "MAT 1"),
-            ("Nejc", "SLJ 2"),
+        assert [(v.stanje, v.predmeti_opis) for v in kartica.vrstice] == [
+            ("Maša — danes že poslikano", "MAT 1"),
+            ("Nejc — danes že poslikano", "SLJ 2"),
         ]
+
+    def test_ime_samo_pri_vec_otrocih(self) -> None:
+        """`ADR-039` F3 in `ADR-051`: pri enem otroku ime ne loči ničesar."""
+        ena = sestavi_kartico(PONEDELJEK, [MASA], {}, vec_otrok=False)
+        # En aktiven otrok, a družina ima še deaktiviranega: ime se izriše,
+        # ker tako šteje tudi izbirnik (`ADR-039` B).
+        z_deaktiviranim = sestavi_kartico(PONEDELJEK, [MASA], {}, vec_otrok=True)
+
+        assert ena is not None and z_deaktiviranim is not None
+        assert ena.vrstice[0].ime is None
+        assert "Maša" not in ena.vrstice[0].stanje
+        assert z_deaktiviranim.vrstice[0].stanje == "Maša — danes še ni slik"
 
     def test_povezava_z_otrokom_samo_pri_vec_otrocih(self) -> None:
         ena = sestavi_kartico(PONEDELJEK, [MASA], {}, vec_otrok=False)
@@ -169,7 +181,7 @@ class TestStran:
     def test_brez_slik(
         self, odjemalec: TestClient, otrok: str, dan: list[date]
     ) -> None:
-        assert vrstice(odjemalec.get("/admin").text) == ["○ Maša — danes še ni slik"]
+        assert vrstice(odjemalec.get("/admin").text) == ["○ Danes še ni slik"]
 
     def test_s_slikami(
         self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str, dan: list[date]
@@ -179,7 +191,7 @@ class TestStran:
         zapisi(motor, slike, "mat-2", subject="MAT", taken_at=lokalno(PONEDELJEK, 10))
 
         assert vrstice(odjemalec.get("/admin").text) == [
-            "✓ Maša — danes že poslikano NAR 1 · MAT 2"
+            "✓ Danes že poslikano NAR 1 · MAT 2"
         ]
 
     @pytest.mark.parametrize("vikend", [SOBOTA, NEDELJA], ids=["sobota", "nedelja"])
@@ -211,10 +223,10 @@ class TestStran:
         zapisi(motor, slike, "pozno", subject="MAT", taken_at=pozno)
         zapisi(motor, slike, "polnoc", subject="SLJ", taken_at=polnoc)
 
-        assert vrstice(odjemalec.get("/admin").text) == ["✓ Maša — danes že poslikano MAT 1"]
+        assert vrstice(odjemalec.get("/admin").text) == ["✓ Danes že poslikano MAT 1"]
 
         dan[0] = TOREK
-        assert vrstice(odjemalec.get("/admin").text) == ["✓ Maša — danes že poslikano SLJ 1"]
+        assert vrstice(odjemalec.get("/admin").text) == ["✓ Danes že poslikano SLJ 1"]
 
     def test_vcerajsnja_in_arhivirana_ne_stejeta(
         self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str, dan: list[date]
@@ -229,7 +241,7 @@ class TestStran:
             arhivirano=datetime(2026, 9, 7, 12, tzinfo=UTC),
         )
 
-        assert vrstice(odjemalec.get("/admin").text) == ["○ Maša — danes še ni slik"]
+        assert vrstice(odjemalec.get("/admin").text) == ["○ Danes še ni slik"]
 
     def test_dva_otroka(
         self,
@@ -274,6 +286,8 @@ class TestStran:
 
         besedilo = odjemalec.get("/admin").text
 
+        # Ime je vidno: družina ima dva otroka, kot ju šteje izbirnik
+        # (`ADR-039` F3 in B), čeprav je aktiven samo eden.
         assert vrstice(besedilo) == ["○ Maša — danes še ni slik"]
         # Izbirnik na `/admin/days` šteje tudi deaktiviranega, zato brez
         # `?otrok=` povezava ne bi pripeljala do Maše, ampak do privzetka —
