@@ -98,6 +98,7 @@ logika testljiva brez naprave.
 | `app/dependencies.py` | odvisnosti poti iz `app.state`; družina iz seje — ene same, za obe strani (`daj_druzino`, V3-R04; začasne `daj_druzino_telefona` ni več) |
 | `app/urnik.py` | pravila urnika in manjkov: kateri predmeti so kateri dan, česa tisti dan ni na sliki (V3-R09). Brez FastAPI in brez baze |
 | `app/otroci.py` | izbira otroka v pogledih, ki so ločeni po otroku: privzetek, 404 za tujega, kdaj se izbirnik izriše (V3-R07). Brez FastAPI in brez seje |
+| `app/danes.py` | kartica „danes" na `/admin`: vikend, vrstica na aktivnega otroka, predmeti s števili, ime samo pri več otrocih (V3-R13). Nabor da klicatelj s `seznam_po_obdobju` kot `/admin/days`. Brez FastAPI in brez seje |
 | `app/prepisi.py` | sestavljanje besedila izbranih slik: presejanje po naboru, vrstni red, glave (V3-R11); povzetek, prepis in vprašanja s podnaslovi (V3-R12). Brez FastAPI in brez baze |
 | `app/subjects.py` | predmeti, slovenske oznake stanj in oznake ocen (`OZNAKE_OCEN`, tu od V2-R04) |
 | `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03); šolsko leto in meseci (V2-R04); današnji dan, meje poljubnega obdobja in ura brez datuma (V2-R07); `cas_z_mesecem` za glave v prepisih (V3-R11) |
@@ -729,7 +730,7 @@ izvzame natanko ti dve predlogi; meje obeh je treba preverjati izrecno
 
 | Pot | Metoda | Kaj |
 |---|---|---|
-| `/admin` | GET | vseh deset predmetov s števci; predmet iz baze, ki ga na seznamu ni, je viden pod svojo kodo |
+| `/admin` | GET | vseh deset predmetov s števci; predmet iz baze, ki ga na seznamu ni, je viden pod svojo kodo; nad njimi kartica „danes" (V3-R13) |
 | `/admin/subjects/{koda}` | GET | slike predmeta, najnovejša prva, lena naložitev; kljukice za izbor, `?vse=1` obkljuka vse (V3-R11) |
 | `/admin/transcripts` | GET | 303 na pregled; obstaja zato, da pot ni videti kot 405 (V3-R11) |
 | `/admin/transcripts` | POST | povzetki, prepisi in vprašanja izbranih slik enega predmeta v enem polju; **ničesar ne shrani** (V3-R11, V3-R12) |

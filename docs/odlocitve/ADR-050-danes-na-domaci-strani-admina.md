@@ -2,7 +2,9 @@
 
 - **Datum:** 2026-09-27
 - **Nastalo pri:** V3-R13
-- **Status:** Sprejeto
+- **Status:** Sprejeto; odločitev **E1** v delu, ki ime predpisuje vedno,
+  je nadomeščena z `ADR-051`: pri enem otroku vrstica imena nima. Pravilo
+  brez glagola s spolom in ostale odločitve veljajo naprej.
 
 ## Kontekst
 
