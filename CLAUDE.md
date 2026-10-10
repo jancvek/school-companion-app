@@ -49,7 +49,8 @@ Na začetku **vsakega novega dela** — tudi ko poženem `/zahteva` z ID-jem, ki
 
 in končaj obrat. Vprašaj tudi, če se odgovor iz naročila zdi očiten — je ena
 beseda. POC → §1d, zahteva → faza 1. Vprašanje odpade samo pri nadaljevanju
-dela, ki je že začeto na svoji veji (`feat/…`, `fix/…`, `poc/…`).
+dela, ki je že začeto na svoji veji (`feat/…`, `fix/…`, `poc/…`,
+`docs/poc-…`).
 
 ### Faza 1 — Razumevanje 🛑
 
@@ -322,7 +323,7 @@ sem, ne v kriterije ene zahteve.
 
 ## 1c. Kratka pot
 
-Ne gre vsaka sprememba skozi vseh deset faz. **Kratka pot** velja, kadar so
+Ne gre vsaka sprememba skozi vse faze. **Kratka pot** velja, kadar so
 izpolnjeni vsi pogoji iz lestvice v fazi 4 (znotraj obstoječih vzorcev, brez
 nove odvisnosti, brez migracije sheme, brez spremembe javnega vmesnika,
 ≲ 3 datoteke). Če nisi prepričan, kratka pot ne velja.
@@ -347,7 +348,7 @@ trdi robovi. Kratka pot skrajša pisanje, ne pregleda.
 ## 1d. POC pot
 
 POC odgovori na **eno vprašanje**: ali je ideja prava (videz, potek,
-uporabnost) ali ali tehnično sploh gre. Edini trajni izdelek je **sodba in kar
+uporabnost) oziroma ali tehnično sploh gre. Edini trajni izdelek je **sodba in kar
 sva se dogovorila** — koda se zavrže (`ADR-052`).
 
 Oblika se izbere v koraku 1:
@@ -359,20 +360,24 @@ Oblika se izbere v koraku 1:
 
 Koraki:
 
-1. **Vprašanje 🛑.** Naslednji prosti `POC-xx` (`ls docs/poc`, tudi na vejah
-   `poc/…`). Veja `poc/xx-kratek-opis` iz svežega `main`. Na njej
+1. **Vprašanje 🛑.** Naslednji prosti `POC-xx`: najvišja številka iz
+   `ls docs/poc` in `git branch -a --list '*poc*'`, plus ena. Veja `poc/xx-kratek-opis` iz svežega `main`. Na njej
    `docs/poc/POC-xx.md` po `docs/poc/PREDLOGA.md`: vprašanje, oblika, kaj
    šteje kot »ok«, kaj namenoma ne rešujem. Commitaj in počakaj na potrditev.
 2. **Krog.** Zgradi in povej, kako preizkusim. En krog = ena seja. 🛑
 3. **Pregled.** Kar se zmeniva, **takoj** zapiši v *Dogovorjeno* in commitaj —
    ne samo v pogovor. Kar si izvedel iz kode, gre v *Ugotovitve*.
 4. **Sodba 🛑 (moja).** `Sprejeto`, `Zavrženo` ali `Še en krog`. Največ trije
-   krogi; četrti samo, če ga izrecno odobrim in to piše v `POC-xx.md`.
+   krogi — po tretjem je sodba samo `Sprejeto` ali `Zavrženo`; kar ostane
+   odprto, je nov POC z ožjim vprašanjem. Če POC opustim brez sodbe, ga ob
+   naslednji priložnosti zapri kot `Zavrženo` z razlogom »opuščeno«.
 5. **Zapis v `main`.** Iz svežega `main` veja `docs/poc-xx-kratek-opis`; nanjo
    prenesi samo zapis (`git checkout poc/xx-… -- docs/poc/POC-xx.md`) s sodbo.
    Pri `Sprejeto` dodaj še ADR z odločitvijo in novo zahtevo `VN-Rxx` v
    `docs/verzije/vN.md` (status `Nova`, **Podlaga:** ta ADR in `POC-xx`,
-   kriteriji sprejemljivosti iz *Dogovorjeno*). Poročilo 🛑, merge na moj ukaz.
+   kriteriji sprejemljivosti iz *Dogovorjeno*; v katero verzijo gre, me
+   vprašaj). Nato `pwsh -File scripts/verify.ps1` — ograja tudi to vejo
+   mergea samo z zelenim verify na HEAD. Poročilo 🛑, merge na moj ukaz.
    Zapis gre v `main` tudi pri `Zavrženo`, da istega vprašanja ne preverjava
    dvakrat.
 6. **Implementacija** je nova zahteva po polni poti, od faze 0.
@@ -381,11 +386,11 @@ Pravila:
 
 - **Veja `poc/…` se nikoli ne merga**; iz nje se v `main` prenese samo
   `docs/poc/POC-xx.md`. Veja ostane kot referenca, brisanje je moje.
-- **Koda POC-a ni vhod za zahtevo.** V fazah 1–5 je ne bereš in ne kopiraš,
-  niti po delih. Kar je bilo vredno vedeti, mora biti v *Ugotovitvah* — POC se
+- **Koda POC-a ni vhod za zahtevo.** V nobeni fazi zahteve je ne bereš in ne
+  kopiraš, niti po delih. Kar je bilo vredno vedeti, mora biti v *Ugotovitvah* — POC se
   ne zapre, dokler razdelek ni izpolnjen.
-- **Ne velja:** plan, testi, pregledovalec, verify, merilo dokončanosti (§1b),
-  statusi zahteve. Kakovost je »dovolj, da odgovori na vprašanje«: brez novih
+- **Na veji `poc/…` ne velja:** plan, testi, pregledovalec, verify, merilo
+  dokončanosti (§1b), statusi zahteve. Kakovost je »dovolj, da odgovori na vprašanje«: brez novih
   abstrakcij, deljenih modulov in obravnave napak, ki je vprašanje ne rabi.
 - **Velja:** trdi robovi (§2) in še:
   - nikoli proti javnemu strežniku ali pravim podatkom družin — lokalno, z

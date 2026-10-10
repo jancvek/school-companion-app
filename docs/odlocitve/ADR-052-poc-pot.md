@@ -52,12 +52,14 @@ Možnost 4.
 4. **Veja `poc/…` se nikoli ne merga.** Zapis pride v `main` prek ločene veje
    `docs/poc-xx-…` — tudi pri sodbi `Zavrženo`, da se isto vprašanje ne
    preverja dvakrat.
-5. **Koda POC-a se ne prenaša**, tudi ne po delih, in ni vhod za fazo 1–5
+5. **Koda POC-a se ne prenaša**, tudi ne po delih, in ni vhod za nobeno fazo
    zahteve. Brez izjem.
 6. **Sproščeno:** plan, testi, pregledovalec, verify, merilo dokončanosti,
    statusi. **Ostane:** trdi robovi; nič proti javnemu strežniku ali pravim
    podatkom družin; brez migracij nad obstoječimi podatki.
-7. **Časovni okvir:** en krog = ena seja, največ trije krogi, nato sodba.
+7. **Časovni okvir:** en krog = ena seja, največ trije krogi, nato sodba
+   `Sprejeto` ali `Zavrženo`. Kar ostane odprto, je nov POC z ožjim
+   vprašanjem. Opuščen POC se zapre kot `Zavrženo` (»opuščeno«).
 8. **Na telefonu zadošča razvojna gradnja.** ADR-010 lovi napake ob gradnji,
    ki pri POC-u niso vprašanje; APK iz veje je pogoj pri zahtevi (faza 9b).
 9. Pri sodbi `Sprejeto` nastaneta ADR z odločitvijo in nova zahteva `VN-Rxx`
@@ -81,8 +83,9 @@ Možnost 4.
 
 Pred točko 1 dodaj:
 
-> 0. Najprej me vprašaj, ali gre za POC ali za dokončno zahtevo
->    (`CLAUDE.md`, faza 0), in končaj obrat. Pri POC-u sledi §1d.
+> 0. Če za $1 še ni veje, me najprej vprašaj, ali gre za POC ali za
+>    dokončno zahtevo (`CLAUDE.md`, faza 0), in končaj obrat. Pri POC-u
+>    sledi §1d. Če veja že obstaja, je to nadaljevanje in vprašanje odpade.
 
 (Še vedno odprta je tudi sprememba točke 1 iz Dodatka ADR-022.)
 
@@ -95,9 +98,14 @@ odprt:
 # ============================================================
 # 3b. POC veje se ne mergajo (ADR-052)
 # ============================================================
-if ($n -match '(?i)git\s+(merge|cherry-pick)\b.*\bpoc/') {
+# Ujame tudi `git -c … merge` in `git -C … merge`, ne ujame pa bralnih
+# `git merge-base`, `git log main..poc/…` in sporočila `-m "… docs/poc/…"`.
+$pocMerge = '(?i)\bgit\b(?:\s+-[cC]\s+\S+)*\s+(?:merge(?!-)|cherry-pick|pull)\b[^;&|]*?\s(?:origin/|remotes/origin/|refs/heads/)?poc/'
+if ($n -match $pocMerge) {
     Deny 'veja poc/... se ne merga. Iz POC-a gre v main samo docs/poc/POC-xx.md (CLAUDE.md §1d).'
 }
 ```
 
+Preizkušeno na 13 primerih (Python `re`, enak vzorec). Ne ujame
+`git cherry-pick <sha>` — ograja ustavi nesrečo, ne odločenega obhoda.
 Veja `docs/poc-xx-…` (z vezajem) se s tem ne ujame in gre skozi običajni gate.
