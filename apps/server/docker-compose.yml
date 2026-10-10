@@ -59,6 +59,11 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1}
       OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-120}
+      # Sestavljanje testov (V4-R07) ima svoj ključ in svoj model
+      # (`docs/odlocitve/ADR-054`). `:-` iz istega razloga kot zgoraj: brez
+      # ključa strežnik teče, le generiranje pove, da ni nastavljeno.
+      OPENAI_API_KEY_PREIZKUSI: ${OPENAI_API_KEY_PREIZKUSI:-}
+      OPENAI_MODEL_PREIZKUSI: ${OPENAI_MODEL_PREIZKUSI:-gpt-5.6-luna}
       WORKER_INTERVAL_SECONDS: ${WORKER_INTERVAL_SECONDS:-30}
       # Google prijava za starsa (V3-R08). Domena je tu zato, ker iz nje
       # nastane povratni naslov, ta pa mora biti absoluten in enak tistemu

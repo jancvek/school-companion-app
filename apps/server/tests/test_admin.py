@@ -1239,6 +1239,8 @@ class TestPakiranje:
             "racun.html",
             # V3-R11.
             "prepisi.html",
+            # V4-R07.
+            "preizkus.html",
         }
 
 
@@ -1260,7 +1262,9 @@ class TestBrezJavaScripta:
 
     #: Predloge, ki skripto smejo imeti. `snov.html`: povečan prikaz, V2-R08.
     #: `prepisi.html`: gumb „Kopiraj v odložišče", V3-R11 (`ADR-048` C).
-    IZVZETE = ("snov.html", "prepisi.html")
+    #: `preizkus.html`: urejevalnik preizkusa, V4-R07 — skripta je tam pogoj in
+    #: ne nadgradnja (`ADR-054`); njene meje preverja `test_preizkusi.py`.
+    IZVZETE = ("snov.html", "prepisi.html", "preizkus.html")
 
     def test_v_predlogah_ni_javascripta(self) -> None:
         from app.routers.admin import MAPA_PREDLOG

@@ -108,6 +108,10 @@ OKOLJSKE_NASTAVITVE = (
     "OPENAI_API_KEY",
     "OPENAI_MODEL",
     "OPENAI_TIMEOUT_SECONDS",
+    # V4-R07: ključ za preizkuse je iste vrste nevarnost kot `OPENAI_API_KEY`
+    # — podedovan z lastnikovega stroja bi zgradil pravi odjemalec.
+    "OPENAI_API_KEY_PREIZKUSI",
+    "OPENAI_MODEL_PREIZKUSI",
     "WORKER_INTERVAL_SECONDS",
     "DOMENA",
     "GOOGLE_CLIENT_ID",
@@ -186,6 +190,10 @@ def naredi_testne_nastavitve(slike: Path) -> Settings:
         openai_api_key="",
         openai_model="model-ki-se-ne-uporabi",
         openai_timeout_seconds=1.0,
+        # Brez ključa za preizkuse (V4-R07): test, ki klicalca potrebuje, ga
+        # poda `create_app` sam in nikoli ne zgradi pravega odjemalca.
+        openai_api_key_preizkusi="",
+        openai_model_preizkusi="model-ki-se-ne-uporabi",
         worker_interval_seconds=0.01,
         # Privzeta testna namestitev Googla **nima** (V3-R08): tako je videti
         # namestitev, ki ga ni nastavila, in tako se prepriča `TestBrezGoogla`.

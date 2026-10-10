@@ -21,7 +21,7 @@ from app.db import (
     StatistikaRepository,
 )
 from app.settings import Settings
-from app.vision import KlicalecUrnika
+from app.vision import KlicalecPreizkusa, KlicalecUrnika
 
 
 def daj_nastavitve(request: Request) -> Settings:
@@ -209,4 +209,17 @@ def daj_klicalca_urnika(request: Request) -> KlicalecUrnika | None:
     Isto sklepanje kot pri mirujočem workerju (`ADR-009` B2).
     """
     klicalec: KlicalecUrnika | None = request.app.state.klicalec_urnika
+    return klicalec
+
+
+def daj_klicalca_preizkusa(request: Request) -> KlicalecPreizkusa | None:
+    """Klicalec za sestavljanje preizkusa, ali `None`, kadar njegovega ključa ni.
+
+    `None` in ne izjema, iz istega razloga kot pri urniku: brez ključa
+    urejevalnik še vedno dela in pove, da generiranje ni nastavljeno
+    (kriterij `V4-R07`). Ključ je **svoj** (`OPENAI_API_KEY_PREIZKUSI`,
+    `docs/odlocitve/ADR-054`), zato vision obdelava lahko teče brez tega in
+    obratno.
+    """
+    klicalec: KlicalecPreizkusa | None = request.app.state.klicalec_preizkusa
     return klicalec

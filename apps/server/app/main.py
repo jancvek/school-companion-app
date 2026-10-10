@@ -8,11 +8,13 @@ stanja na ravni modula. Uvicorn jo zato zažene z zastavico `--factory`.
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.staticfiles import StaticFiles
 
 from app import google, prijava, strani
 from app.db import naredi_motor, naredi_tovarno_sej
@@ -23,6 +25,7 @@ from app.routers import (
     dnevi,
     kvizi,
     materials,
+    preizkusi,
     racun,
     resevanje,
     sistem,
@@ -33,7 +36,14 @@ from app.routers import (
 from app.schemas import Zivost
 from app.security import SejaMiddleware, ZetonMiddleware
 from app.settings import Settings
-from app.vision import Klicalec, KlicalecUrnika, naredi_klicalca, naredi_klicalca_urnika
+from app.vision import (
+    Klicalec,
+    KlicalecPreizkusa,
+    KlicalecUrnika,
+    naredi_klicalca,
+    naredi_klicalca_preizkusa,
+    naredi_klicalca_urnika,
+)
 from app.worker import Obdelovalec
 
 dnevnik = logging.getLogger(__name__)
@@ -88,6 +98,34 @@ POTI_BREZ_SEJE = frozenset({prijava.POT_PRIJAVE})
 POTI_S_SVOJIM_CSRF = frozenset({urnik.POT_PREDLOGA})
 
 
+#: Izpis dnevnika porabe preizkusov (V4-R07).
+#:
+#: Uvicorn nastavi samo svoje dnevnike; korenski ostane brez izpisa in na ravni
+#: `WARNING`, zato vrstica `INFO` iz `app.*` sicer ne pride nikamor. Kriterij
+#: zahteva, da je poraba vsakega klica **v dnevniku strežnika**, torej mora ta
+#: en dnevnik dobiti svoj izpis. Drugih dnevnikov to ne spremeni.
+_IZPIS_PORABE = logging.StreamHandler()
+_IZPIS_PORABE.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
+
+
+def _vklopi_dnevnik_porabe() -> None:
+    """Dnevniku preizkusov da raven `INFO` in izpis na standardni izhod napak.
+
+    Kliče se ob vsakem `create_app`, zato je ponovljiv: isti izpis se ne doda
+    dvakrat. Širjenje navzgor ostane vklopljeno — pod uvicornom korenski
+    dnevnik izpisa nima in vrstica se ne podvoji, v testih pa jo `caplog`
+    ujame kot vsako drugo.
+    """
+    preizkusi.dnevnik.setLevel(logging.INFO)
+    if _IZPIS_PORABE not in preizkusi.dnevnik.handlers:
+        preizkusi.dnevnik.addHandler(_IZPIS_PORABE)
+
+
+#: Mapa s statičnimi datotekami in pot, pod katero so postrežene (V4-R07).
+MAPA_STATICNIH = Path(__file__).resolve().parent / "static"
+POT_STATICNIH = "/admin/static"
+
+
 @asynccontextmanager
 async def _zivljenjski_cikel(app: FastAPI) -> AsyncIterator[None]:
     """Zažene in ustavi obdelavo v ozadju.
@@ -133,6 +171,7 @@ def create_app(
     klicalec: Klicalec | None = None,
     klicalec_urnika: KlicalecUrnika | None = None,
     odjemalec_googla: OdjemalecGoogla | None = None,
+    klicalec_preizkusa: KlicalecPreizkusa | None = None,
 ) -> FastAPI:
     """Sestavi aplikacijo. Brez argumentov prebere nastavitve iz okolja.
 
@@ -151,6 +190,10 @@ def create_app(
     # mreža je urejljiva tudi brez slike (`ADR-041` E).
     if klicalec_urnika is None and nastavitve.openai_api_key:
         klicalec_urnika = naredi_klicalca_urnika(nastavitve)
+    # Klicalec za sestavljanje preizkusov (V4-R07), s **svojim** ključem
+    # (`ADR-054`). Brez njega ostane `None`; urejevalnik to pove v slovenščini.
+    if klicalec_preizkusa is None and nastavitve.openai_api_key_preizkusi:
+        klicalec_preizkusa = naredi_klicalca_preizkusa(nastavitve)
     # Odjemalec Googla (V3-R08), po istem vzorcu in iz istega razloga: testi
     # dobijo ponaredek in nikoli ne pridejo do omrežja (`ADR-046` F). Brez
     # nastavljenega odjemalca ostane `None` in Googlove poti vrnejo 404.
@@ -173,6 +216,7 @@ def create_app(
     )
     app.state.klicalec = klicalec
     app.state.klicalec_urnika = klicalec_urnika
+    app.state.klicalec_preizkusa = klicalec_preizkusa
     app.state.odjemalec_googla = odjemalec_googla
     app.state.obdelovalec = None
 
@@ -231,6 +275,19 @@ def create_app(
     # iz seje, ki jo je razrešila ista plast kot povsod pod `/admin`, in stran
     # zato ne more pokazati ničesar tujega (`docs/odlocitve/ADR-046` B).
     app.include_router(racun.router)
+    # Sestavljanje preizkusov (V4-R07), pod `/admin/assessments`. Z nobeno
+    # obstoječo potjo se ne prekriva; varuje ga ista plast kot ves `/admin`,
+    # tudi klic iz skripte (`ADR-054`, meja 4).
+    app.include_router(preizkusi.router)
+    _vklopi_dnevnik_porabe()
+
+    # Statične datoteke (V4-R07): KaTeX in marked za urejevalnik preizkusa,
+    # prepisana v repozitorij (`docs/odlocitve/ADR-054`, meja 2). **Pod
+    # `/admin` in ne pod `/static`**: predpono varuje `SejaMiddleware`, zato
+    # so datoteke za sejo kot vse ostalo in `IZVZETE_PREDPONE` ostane
+    # enočlanska. Priklop je za usmerjevalniki, da nobene njihove poti ne
+    # zasenči.
+    app.mount(POT_STATICNIH, StaticFiles(directory=MAPA_STATICNIH), name="static")
 
     # Napake pod `/admin` naj bodo stran, ne JSON. Prestreznik se za vse
     # ostale poti umakne privzetemu — glej `admin.prestrezi_napako`.

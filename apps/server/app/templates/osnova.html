@@ -312,6 +312,10 @@
       a { color: inherit; text-decoration: none; }
     }
   </style>
+  {# Dodatek posamezne strani v glavi (V4-R07): urejevalnik preizkusa tu
+     naloži KaTeX in svoj slog (`docs/odlocitve/ADR-054`). Vse ostale strani
+     ga pustijo praznega. #}
+  {% block glava %}{% endblock %}
 </head>
 <body>
   {# Glava pove, čigavo družino gledaš in kdo si (V3-R03). Brez seje — na
