@@ -8,6 +8,8 @@
   JavaScripta in v `apps/server` ne uvaja gradnje frontenda") in isto vrstico
   med tehničnimi mejami v `ADR-006`
 - **Stoji na:** `ADR-006` (stran je javna znotraj omrežja in nima seje)
+- **Delno spremenjeno z:** `ADR-054` — za `preizkus.html` veljajo meje iz
+  `ADR-054`, za vse ostale strani ta ADR
 
 ## Kontekst
 
