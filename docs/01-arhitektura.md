@@ -85,7 +85,10 @@ logika testljiva brez naprave.
 | `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository`, `StatistikaRepository` (V2-R04, samo bere), `ClaniRepository` (V3-R06) in `ScheduleRepository` (V3-R09) — vsak z obvezno družino (V3-R01) — ter `DruzineRepository` (od V3-R05 tudi pregled čez družine) in `PrijavaRepository` (V3-R03), edina brez družine; edina pot do baze |
 | `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03); `child_id` na snovi, kvizu in poskusu (V3-R07); `schedules` in `schedule_entries` (V3-R09); `credentials.label` (V3-R08) |
 | `app/storage.py` | zapis, meja mape in brisanje slik na disku; mapa družine (V3-R01); podmapa `urniki/` (V3-R09) |
-| `app/vision.py` | **edini modul, ki uvaža `openai`**: prompta, shemi odgovorov, klic. Dva klicalca — snov (V1-R03) in urnik (V3-R09) — nad skupnim `_izvedi_klic` |
+| `app/vision.py` | **edini modul, ki uvaža `openai`**: prompta, shemi odgovorov, klic. Trije klicalci — snov (V1-R03) in urnik (V3-R09) nad skupnim `_izvedi_klic`, preizkus (V4-R07, brez slike, svoj ključ in model) — vsi nad skupnim `_poslji` |
+| `app/preizkus.py` | pravila sestavljanja preizkusa: navodilo modelu po predmetu, sestava vhoda, shema in razčlenitev odgovora (V4-R07). Brez FastAPI, brez baze in brez `openai` |
+| `app/routers/preizkusi.py` | `/admin/assessments`: urejevalnik preizkusa in klic modela (V4-R07) |
+| `app/static/vendor/` | KaTeX 0.16.22 in marked 15.0.12, prepisana v repozitorij z licencama; postrežena pod `/admin/static` (V4-R07, `ADR-054`) |
 | `app/obdelava.py` | kaj se zgodi z enim zapisom: prevzem, klic, zapis izida. Sinhron |
 | `app/worker.py` | časovnik: obhodi v presledkih, zagon in ustavitev. Brez poslovne logike |
 | `app/statistika.py` | pravila štetja statistike: razporeditev, izpeljava pravilnosti, razvrstitev, meseci (V2-R04). Brez FastAPI in brez seje |
@@ -721,19 +724,28 @@ Strežniško izrisan HTML za lastnika sistema (`docs/00-namen.md`, vloga
 „spremlja delovanje"). Brez gradnje frontenda in brez `npm` v `apps/server`.
 Nastala v V1-R04; V1-R03 jo je razširila s prikazom obdelave.
 
-**Skripta je izjema, ne privzetek** (`ADR-024`): od V3-R11 sta izjemi **dve** —
-povečan prikaz snovi (V2-R08, `snov.html`) in gumb „Kopiraj v odložišče" na
-strani s prepisi (V3-R11, `prepisi.html`). Obe sta vgrajeni v svojo predlogo.
-Vse ostale strani so brez skripte in to preverja `TestBrezJavaScripta`, ki
-izvzame natanko ti dve predlogi; meje obeh je treba preverjati izrecno
-(`ADR-048` „Posledice").
+**Skripta je izjema, ne privzetek** (`ADR-024`). Izjeme so **tri**: povečan
+prikaz snovi (V2-R08, `snov.html`) in gumb „Kopiraj v odložišče" na strani s
+prepisi (V3-R11, `prepisi.html`) sta nadgradnji po mejah `ADR-024`;
+urejevalnik preizkusa (V4-R07, `preizkus.html`) brez skripte ne deluje in ima
+svoje meje v `ADR-054`. Vse tri so vgrajene v svojo predlogo. Vse ostale
+strani so brez skripte in to preverja `TestBrezJavaScripta`, ki izvzame
+natanko te tri predloge; meje vsake je treba preverjati izrecno (`ADR-048`
+„Posledice").
+
+Ogrodje `osnova.html` ima blok `glava` za dodatek posamezne strani v
+`<head>`; uporablja ga samo `preizkus.html`.
 
 | Pot | Metoda | Kaj |
 |---|---|---|
 | `/admin` | GET | vseh deset predmetov s števci; predmet iz baze, ki ga na seznamu ni, je viden pod svojo kodo; nad njimi kartica „danes" (V3-R13) |
-| `/admin/subjects/{koda}` | GET | slike predmeta, najnovejša prva, lena naložitev; kljukice za izbor, `?vse=1` obkljuka vse (V3-R11) |
+| `/admin/subjects/{koda}` | GET | slike predmeta, najnovejša prva, lena naložitev; kljukice za izbor, `?vse=1` obkljuka vse (V3-R11); pri `MAT` drugi gumb „Kreiraj test" (V4-R07) |
 | `/admin/transcripts` | GET | 303 na pregled; obstaja zato, da pot ni videti kot 405 (V3-R11) |
 | `/admin/transcripts` | POST | povzetki, prepisi in vprašanja izbranih slik enega predmeta v enem polju; **ničesar ne shrani** (V3-R11, V3-R12) |
+| `/admin/assessments/compose` | GET | 303 na pregled (V4-R07) |
+| `/admin/assessments/compose` | POST | urejevalnik preizkusa za izbor s strani predmeta; **ničesar ne shrani** (V4-R07) |
+| `/admin/assessments/generate` | POST | en klic modela, odgovor JSON; kliče ga skripta urejevalnika (V4-R07) |
+| `/admin/static/…` | GET | statične datoteke (`StaticFiles`), za sejo kot vse pod `/admin` (V4-R07) |
 | `/admin/materials/{id}` | GET | podrobnosti ene slike |
 | `/admin/materials/{id}/image` | GET | datoteka slike |
 | `/admin/archive` | GET | arhivirane snovi, najnovejše arhivirane prve (V1-R07) |
@@ -1553,6 +1565,75 @@ ima zato vsaka slika kljukico, celoten seznam pa je en obrazec
 - **Izbor je en predmet**, ker je `_nabor_predmeta` en predmet. Čez več
   predmetov ali čez arhiv ne gre.
 
+## Sestavljanje preizkusa (V4-R07)
+
+Starš na strani matematike izbere slike in pritisne „Kreiraj test". V kodi
+`preizkus`, v vmesniku „test", poti brez besede `test` (`ADR-053` A).
+Odločitve so v `ADR-053` in `ADR-054`, oblika vhoda in navodilo v `POC-01`
+*Ugotovitve*.
+
+- **Gumb je drugi gumb obrazca izbora** (`formaction`), brez skripte; izriše
+  se samo pri predmetu, ki ima navodilo v `preizkus.NAVODILA` (danes `MAT`).
+- **`POST /admin/assessments/compose`** izriše `preizkus.html`: levo sličice
+  izbranih snovi (klik odpre povečan prikaz), obrazec „Prepisi te snovi",
+  klepet s predlogi in gumb; desno list A4 in pod njim rešitve. V stran gredo
+  samo snovi, ki so preživele presejanje skozi `seznam_po_predmetu`. Prazen
+  izbor in predmet brez navodila dasta opozorilo brez urejevalnika.
+- **`POST /admin/assessments/generate`**: telo je obrazec (`csrf`, `subject`,
+  ponovljen `snov`, `test_md`, `resitve_md`, ponovljen `dosedanje`, `zelja`),
+  zato CSRF preveri `SejaMiddleware` kot povsod. Odgovor je JSON:
+  `{sporocilo, test_md, resitve_md}` ali `{napaka}`.
+
+  | Stanje | Koda |
+  |---|---|
+  | uspeh; tudi prazen `test_md` (model pove, zakaj testa ni) | 200 |
+  | predmet brez navodila, prazna želja, izbor brez veljavne snovi | 400 |
+  | napaka modela (časovna meja, zavrnitev, neuporaben odgovor) | 502 |
+  | ključ ni nastavljen | 503 |
+
+- **Snov sestavi strežnik pri vsakem klicu** iz identifikatorjev, z
+  `admin.prepisi_izbora` — isto funkcijo, ki jo uporablja
+  `POST /admin/transcripts`. Besedila snovi od brskalnika ne sprejme.
+- **Vhod modela** (`preizkus.sestavi_vhod`): navodilo kot sistemsko sporočilo,
+  nato v enem sporočilu snov, pri popravku še dosedanje želje, trenutni test
+  in rešitve, na koncu nova želja. Popravek je klic z nepraznim `test_md`.
+- **Klic** (`vision.naredi_klicalca_preizkusa`): Chat Completions, strukturiran
+  izhod `strict`, `reasoning_effort=medium`, `max_completion_tokens=20000`,
+  časovna meja `OPENAI_TIMEOUT_SECONDS`, brez ponovnih poskusov. Teče v
+  pomožni niti; zahteva nanj čaka.
+- **Ključ in model sta svoja**: `OPENAI_API_KEY_PREIZKUSI`,
+  `OPENAI_MODEL_PREIZKUSI` (privzeto `gpt-5.6-luna`). Brez ključa je
+  `app.state.klicalec_preizkusa` `None`: urejevalnik se izriše, gumb je
+  onemogočen in stran pove, kaj nastaviti.
+- **Dnevnik**: ena vrstica `INFO` na uspešen klic (predmet, model, trajanje,
+  žetoni: vhod, predpomnjeni, izhod, razmišljanje), `WARNING` ob neuspehu.
+  Brez snovi, želja, testa in ključa. Dnevnik `app.routers.preizkusi` ima svoj
+  izpis (`main._vklopi_dnevnik_porabe`), ker uvicorn korenskega ne nastavi.
+- **Stanje dela je samo v brskalniku**: seznam korakov in kazalec.
+  Razveljavi/uveljavi (gumba, Ctrl+Z/Ctrl+Y zunaj polj) premika kazalec; nova
+  želja zavrže korake za njim. Strežnik ne shrani ničesar.
+- **Izris**: `marked` + KaTeX (`auto-render`). Formule se pred `marked`
+  umaknejo iz besedila; `\frac` postane `\dfrac`. `[odgovor]`,
+  `[odgovor-kratek]`, `[odgovor-dolg]` so črte 30, 14 in 52 mm;
+  `prostor: majhen|srednji|velik` je 2, 4 ali 7 črt po 8,5 mm. `&` in `<` se
+  ubežita, povezave in slike iz markdowna se odstranijo.
+- **Tisk**: `@page` A4 z robom 15 mm / 18 mm; natisne se samo list; naloga
+  (`##` do naslednjega `##`) se ne razdeli; rešitve na svoji strani in samo z
+  izbiro. Merilnik deli višino vsebine z 267 mm in riše meje strani.
+
+### Znane omejitve
+
+- **Obnašanja strani testi ne dokažejo** — samo, kaj je v izrisu. Izris,
+  razveljavi/uveljavi in tisk se preverijo v brskalniku (`ADR-054`).
+- **Zaprtje ali osvežitev okna izgubi delo**, brez opozorila; shranjevanje in
+  opozorilo sta `V4-R08`.
+- **Stran ni zaznamek**: nastane samo iz obrazca, `GET` pelje na pregled.
+- **Samo matematika.** Nov predmet je novo navodilo v `preizkus.NAVODILA`.
+- **Merilnik je ocena**: ker se naloge ne delijo, je natisnjenih strani lahko
+  več.
+- **Seja baze ostane odprta med klicem modela** (do časovne meje), kot pri
+  branju urnika.
+
 ## Premik slike v drug predmet (V3-R10)
 
 Obrazec na strani s podrobnostmi snovi (`<select>` z desetimi predmeti v
@@ -2040,6 +2121,18 @@ lastnost.
 | `openai` | klic vision modela; izbran zaradi strukturiranega izhoda po shemi | V1-R03 |
 | razvojno: `ruff`, `mypy`, `pytest`, `httpx` | preverbe; `httpx` rabi `TestClient` | V1-R02 |
 
+### Knjižnici v brskalniku (prepisani v repozitorij)
+
+| Odvisnost | Namen | Kdaj dodana |
+|---|---|---|
+| `marked` 15.0.12 (MIT) | markdown → HTML v urejevalniku preizkusa | V4-R07 |
+| `katex` 0.16.22 z `contrib/auto-render` (MIT) | izris formul; pisave `woff2` | V4-R07 |
+
+Nista odvisnosti gradnje: ni `npm` ne `package.json`. Ležita v
+`apps/server/app/static/vendor/<ime>-<različica>/`, v paket prideta kot
+podatkovne datoteke (`pyproject.toml`). Nadgradnja je ročna zamenjava mape in
+sprememba `ADR-054`.
+
 ### Slike vsebnikov
 
 | Slika | Namen | Kdaj dodana |
@@ -2198,7 +2291,9 @@ Piškotek seje ima zastavico `Secure`; brskalniki jo sprejmejo tudi na
 `OPENAI_API_KEY` je ključ do **tuje** storitve in ostaja. Brez njega
 strežnik **normalno steče** in slike sprejema, ne teče pa obdelava. `OPENAI_MODEL` (privzeto
 `gpt-4.1`), `OPENAI_TIMEOUT_SECONDS` (120) in `WORKER_INTERVAL_SECONDS` (30) so
-neobvezni.
+neobvezni. `OPENAI_API_KEY_PREIZKUSI` in `OPENAI_MODEL_PREIZKUSI` (privzeto
+`gpt-5.6-luna`) sta za sestavljanje testov (V4-R07); brez ključa strežnik
+teče, generiranje pa pove, da ni nastavljeno.
 
 #### Odprto: strežnik po nenadzorovanem ponovnem zagonu
 

@@ -75,6 +75,9 @@
         font: 12pt/1.45 Georgia, "Times New Roman", serif;
       }
       .list h1 { font-size: 16pt; text-align: center; margin: 0 0 5mm; }
+      /* Vrstica z imenom, datumom in točkami: pri 12 pt se tri črte in trije
+         napisi ne izidejo v eno vrsto (preverjeno v brskalniku). */
+      .list h1 + p { font-size: 11pt; }
       .list h2 { font-size: 12pt; margin: 6mm 0 2mm; }
       .list p { margin: 0 0 3mm; }
       .list ul, .list ol { margin: 0 0 3mm; padding-left: 7mm; }
