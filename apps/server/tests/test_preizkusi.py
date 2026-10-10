@@ -206,6 +206,14 @@ class TestRazclenitevOdgovora:
         with pytest.raises(preizkus.NeveljavenOdgovor):
             preizkus.razcleni_odgovor(json.dumps({**VELJAVEN, "se_nekaj": "x"}))
 
+    def test_ime_dodatnega_polja_ne_gre_v_sporocilo(self) -> None:
+        # Ime polja določi model; sporočilo gre v dnevnik in v klepet.
+        with pytest.raises(preizkus.NeveljavenOdgovor) as napaka:
+            preizkus.razcleni_odgovor(json.dumps({**VELJAVEN, "SKRIVNA-VSEBINA": "x"}))
+
+        assert "SKRIVNA-VSEBINA" not in napaka.value.sporocilo
+        assert "extra_forbidden" in napaka.value.sporocilo
+
     def test_odgovor_ki_ni_predmet(self) -> None:
         with pytest.raises(preizkus.NeveljavenOdgovor):
             preizkus.razcleni_odgovor('["seznam"]')
@@ -1113,16 +1121,48 @@ class TestSkriptaUrejevalnika:
             assert prepovedano not in skripta
         assert "JSON.stringify" not in skripta
 
-    def test_skripta_ne_zaupa_besedilu_modela(self, stran: str) -> None:
-        # Surov HTML se ubeži pred `marked`, povezave in slike iz markdowna se
-        # odstranijo. Trditev je o prisotnosti varovalk; da delujejo, pokaže
-        # ročni preizkus.
+    def test_skripta_iz_besedila_modela_ne_sestavlja_niza_html(self, stran: str) -> None:
+        """Besedilo modela ne sme v niz HTML po tem, ko ga je `marked` že obdelal.
+
+        Prva izvedba je formule vračala z zamenjavo v nizu HTML in pri tem
+        ubežala samo `&`, `<` in `>`. Oznaka formule v jeziku ograjene kode je
+        tako pristala v vrednosti atributa in model je lahko vrinil `on…`
+        (našel pregled v fazi 7, potrjeno v brskalniku). Test zato varuje
+        **zgradbo**: kar vrne `marked`, gre naravnost v `<template>`, in to je
+        edini zapis `innerHTML` v skripti — vse ostalo so vozlišča.
+
+        Skripte pytest ne izvede; da čiščenje deluje na konkretnem vrinku, je
+        preverjeno v brskalniku in je del ročnega preizkusa (`ADR-054`).
+        """
         skripta = stran[stran.rindex("<script>") : stran.rindex("</script>")]
 
+        assert skripta.count("innerHTML") == 1
+        assert "predloga.innerHTML = marked.parse(vir," in skripta
+        for prepovedano in ("outerHTML", "insertAdjacentHTML", "document.write", "html.replace"):
+            assert prepovedano not in skripta
+
+    def test_skripta_precisti_izris_po_seznamu_in_brez_atributov(self, stran: str) -> None:
+        skripta = stran[stran.rindex("<script>") : stran.rindex("</script>")]
+
+        # Surov HTML se ubeži, preden ga vidi `marked`.
         assert 'vir.replace(/&/g, "&amp;").replace(/</g, "&lt;")' in skripta
-        assert 'querySelectorAll("a")' in skripta
-        assert 'querySelectorAll("img")' in skripta
+        # Nedovoljena oznaka postane besedilo, dovoljeni se odstranijo atributi.
+        assert "if (!DOVOLJENE[element.tagName])" in skripta
+        assert "element.removeAttribute(element.attributes[0].name)" in skripta
+        seznam = skripta[skripta.index("var DOVOLJENE = {") : skripta.index("};")]
+        for nevarna in ("A:", "IMG:", "SCRIPT:", "IFRAME:", "STYLE:", "SVG:", "INPUT:"):
+            assert nevarna not in seznam
+        # Znaki zasebne rabe iz besedila modela ne morejo postati naše oznake.
+        assert r'.replace(/[-]/g, "")' in skripta
         assert "trust" not in skripta
+
+    def test_korak_nastane_sele_po_uspesnem_izrisu(self, stran: str) -> None:
+        # Izjema v izrisu ne sme pustiti kazalca na testu, ki ga starš ne vidi.
+        skripta = stran[stran.rindex("<script>") : stran.rindex("</script>")]
+
+        poskus = skripta.index("pripravi(podatki.test_md);")
+        assert poskus < skripta.index("koraki.push({")
+        assert skripta.index("povej(SPOROCILO_IZRIS);") < skripta.index("koraki.push({")
 
     def test_tisk_ima_rob_strani_in_naloga_se_ne_razdeli(self, stran: str) -> None:
         assert "@page { size: A4; margin: 15mm 18mm; }" in stran

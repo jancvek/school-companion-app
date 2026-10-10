@@ -187,7 +187,10 @@ def razcleni_odgovor(surovo: str) -> Odgovor:
         odgovor = _Odgovor.model_validate(podatki)
     except ValidationError as napaka:
         prva = napaka.errors()[0]
-        kje = ".".join(str(del_) for del_ in prva["loc"]) or "odgovor"
+        # Ime odvečnega polja določi model, zato v sporočilo ne gre: tam bi
+        # bilo vsebina, ne mesto napake.
+        znano = prva["type"] != "extra_forbidden"
+        kje = (".".join(str(del_) for del_ in prva["loc"]) if znano else "") or "odgovor"
         raise NeveljavenOdgovor(
             f"Odgovor modela ni po pričakovani obliki ({kje}: {prva['type']})."
         ) from napaka

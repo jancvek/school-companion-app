@@ -1615,8 +1615,12 @@ Odločitve so v `ADR-053` in `ADR-054`, oblika vhoda in navodilo v `POC-01`
 - **Izris**: `marked` + KaTeX (`auto-render`). Formule se pred `marked`
   umaknejo iz besedila; `\frac` postane `\dfrac`. `[odgovor]`,
   `[odgovor-kratek]`, `[odgovor-dolg]` so črte 30, 14 in 52 mm;
-  `prostor: majhen|srednji|velik` je 2, 4 ali 7 črt po 8,5 mm. `&` in `<` se
-  ubežita, povezave in slike iz markdowna se odstranijo.
+  `prostor: majhen|srednji|velik` je 2, 4 ali 7 črt po 8,5 mm.
+- **Besedilo modela je nezaupanja vreden vhod**: `&` in `<` se ubežita pred
+  `marked`; njegov izhod gre v `<template>` (edini zapis `innerHTML`), se
+  prečisti po seznamu dovoljenih oznak in **brez atributov**; formule, črte in
+  prostor se vstavijo kot vozlišča. Znaki zasebne rabe iz besedila modela se
+  odstranijo. Korak nastane šele po uspešnem izrisu.
 - **Tisk**: `@page` A4 z robom 15 mm / 18 mm; natisne se samo list; naloga
   (`##` do naslednjega `##`) se ne razdeli; rešitve na svoji strani in samo z
   izbiro. Merilnik deli višino vsebine z 267 mm in riše meje strani.
@@ -1631,6 +1635,8 @@ Odločitve so v `ADR-053` in `ADR-054`, oblika vhoda in navodilo v `POC-01`
 - **Samo matematika.** Nov predmet je novo navodilo v `preizkus.NAVODILA`.
 - **Merilnik je ocena**: ker se naloge ne delijo, je natisnjenih strani lahko
   več.
+- **Znak `$` je vedno ločilo formule**: dva v isti vrstici (npr. ceni v
+  dolarjih) se izrišeta kot formula.
 - **Seja baze ostane odprta med klicem modela** (do časovne meje), kot pri
   branju urnika.
 

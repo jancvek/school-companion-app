@@ -56,8 +56,8 @@ PREDPONA = f"{admin.PREDPONA}/assessments"
 
 router = APIRouter(prefix=PREDPONA)
 
-#: Poti, ki ju izriše predloga: obrazec strani predmeta in skripta urejevalnika.
-POT_SESTAVLJANJA = f"{PREDPONA}/compose"
+#: Naslov, ki ga kliče skripta urejevalnika. Izriše ga strežnik (`data-pot`),
+#: da ga skripta ne sestavlja sama.
 POT_GENERIRANJA = f"{PREDPONA}/generate"
 
 SPOROCILO_SAMO_MATEMATIKA = (
