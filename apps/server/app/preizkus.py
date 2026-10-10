@@ -243,3 +243,59 @@ def sestavi_vhod(
         deli.append(f"ŽELJA STARŠA (sestavi nov test):\n{zelja.strip()}")
 
     return "\n\n".join(deli)
+
+
+# --- Shranjevanje (V4-R08) ---
+
+#: Širina stolpcev `preizkusi.title` in `preizkusi.model`. Preverba je v kodi
+#: in ne prepuščena bazi: SQLite dolžine ne uveljavlja, Postgres pa bi predolg
+#: vnos zavrnil z angleško napako.
+NAJDALJSI_NASLOV = 200
+NAJDALJSI_MODEL = 128
+
+
+def naslov_iz_testa(test_md: str, nadomestni: str) -> str:
+    """Naslov shranjenega preizkusa: prva vrstica `# …` v testu (`ADR-055` B).
+
+    Navodilo modelu naslov zahteva v prvi vrstici; išče se vseeno prva
+    vrstica te oblike kjerkoli, da prazna vrstica pred njo ne odloča. `##` je
+    naloga in ne naslov. Brez naslova velja `nadomestni`.
+    """
+    for vrstica in test_md.splitlines():
+        ociscena = vrstica.strip()
+        if ociscena.startswith("# "):
+            naslov = ociscena[2:].strip()
+            if naslov:
+                return naslov[:NAJDALJSI_NASLOV].rstrip()
+    return nadomestni[:NAJDALJSI_NASLOV]
+
+
+def izberi_naslovljenca(otroci_snovi: Sequence[str], zahtevani: str) -> str | None:
+    """Otrok, h kateremu se preizkus shrani, ali `None`, kadar ni določen.
+
+    Če vsa izbrana snov pripada istemu otroku, je to on — ne glede na to, kaj
+    pošlje brskalnik. Sicer mora brskalnik poslati enega **izmed otrok te
+    snovi**; karkoli drugega (prazno, tuj račun, otrok brez snovi v izboru)
+    je `None` in pot shranjevanje zavrne (kriterij `V4-R08`).
+    """
+    razlicni = set(otroci_snovi)
+    if len(razlicni) == 1:
+        return next(iter(razlicni))
+    return zahtevani if zahtevani in razlicni else None
+
+
+def je_enak_izhodiscu(
+    test_md: str, resitve_md: str, izhodisce_test: str, izhodisce_resitve: str
+) -> bool:
+    """Ali je preizkus na osnovi ostal tak, kot je izhodišče (`ADR-055` F).
+
+    Primerja se brez robnih presledkov in z enotnimi konci vrstic: brskalnik
+    besedilo iz polja vrne z `\n`, v bazi pa je lahko `\r\n`.
+    """
+
+    def enotno(besedilo: str) -> str:
+        return besedilo.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+    return enotno(test_md) == enotno(izhodisce_test) and enotno(resitve_md) == enotno(
+        izhodisce_resitve
+    )

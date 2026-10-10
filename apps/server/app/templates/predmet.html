@@ -5,6 +5,15 @@
 {% block vsebina %}
   <h1>{{ koda }} — {{ oznaka }}</h1>
 
+  {# Shranjeni testi tega predmeta (V4-R08): samo povezava s številom, seznam
+     je na svoji strani (`docs/odlocitve/ADR-055` A). Izriše se tudi pri
+     predmetu brez slik — testi snov preživijo. #}
+  {% if shranjeni_testi %}
+    <p class="drobno">
+      <a href="{{ shranjeni_testi.pot }}">Shranjeni testi ({{ shranjeni_testi.stevilo }})</a>
+    </p>
+  {% endif %}
+
   {% if snovi %}
     <p class="pod">{{ koliko_opis }}, najnovejša prva.</p>
 

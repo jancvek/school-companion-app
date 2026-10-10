@@ -48,6 +48,7 @@ from app.models import (
     Family,
     LoginAttempt,
     Material,
+    Preizkus,
     Question,
     QuestionAttempt,
     Quiz,
@@ -2711,3 +2712,133 @@ class ScheduleRepository(_RepozitorijDruzine):
         self._session.add(urnik)
         self._session.commit()
         return urnik
+
+
+class PreizkusiRepository(_RepozitorijDruzine):
+    """Shranjeni preizkusi ene družine (V4-R08).
+
+    **Zapis nastane enkrat in se ne spremeni**: ta razred nima ne `UPDATE` ne
+    `DELETE` (`ADR-053` F, `ADR-011`). Otrok je argument in ne del
+    konstruktorja, kot povsod od `V3-R07`.
+    """
+
+    def _moje(self) -> ColumnElement[bool]:
+        """Pogoj družine. Nosi ga vsaka poizvedba."""
+        return Preizkus.family_id == self._family_id
+
+    def _je_moj(self, user_id: str, vloga: str) -> bool:
+        """Ali je ta `user_id` oseba **te** družine z dano vlogo.
+
+        Tuji ključ na `users` pove, da oseba obstaja, ne pa, da je naša —
+        isti razlog kot pri `ScheduleRepository._je_moj_otrok` (`ADR-025`).
+        """
+        return (
+            self._session.scalars(
+                select(User.id).where(
+                    User.id == user_id,
+                    User.family_id == self._family_id,
+                    User.role == vloga,
+                )
+            ).first()
+            is not None
+        )
+
+    def najdi(self, preizkus_id: str) -> Preizkus | None:
+        """Preizkus z danim `id` v tej družini, ali `None`.
+
+        Tuj in neobstoječ se ne ločita. Poizvedba in ne `Session.get`, ki bi
+        vrnil tudi zapis tuje družine.
+        """
+        return self._session.scalars(
+            select(Preizkus).where(Preizkus.id == preizkus_id, self._moje())
+        ).one_or_none()
+
+    def seznam(self, predmet: str | None = None) -> list[Preizkus]:
+        """Preizkusi družine, najnovejši prvi; neobvezno samo enega predmeta.
+
+        Drugi ključ `id`, da je vrstni red dveh z istim časom določen.
+        """
+        pogoji = [self._moje()]
+        if predmet is not None:
+            pogoji.append(Preizkus.subject == predmet)
+        return list(
+            self._session.scalars(
+                select(Preizkus)
+                .where(*pogoji)
+                .order_by(Preizkus.saved_at.desc(), Preizkus.id.desc())
+            )
+        )
+
+    def stej_po_predmetih(self) -> dict[str, int]:
+        """Koliko preizkusov ima družina pri katerem predmetu.
+
+        Samo predmeti, ki preizkus imajo: iz tega nastaneta filter na pregledu
+        in število ob povezavi na strani predmeta.
+        """
+        vrstice = self._session.execute(
+            select(Preizkus.subject, func.count()).where(self._moje()).group_by(Preizkus.subject)
+        ).all()
+        return {predmet: stevilo for predmet, stevilo in vrstice}
+
+    def shrani(
+        self,
+        *,
+        preizkus_id: str,
+        child_id: str,
+        saved_by: str,
+        subject: str,
+        title: str,
+        test_md: str,
+        solutions_md: str,
+        source_md: str,
+        model: str,
+        base_id: str | None = None,
+    ) -> Preizkus | None:
+        """Shrani končan preizkus; ponovljen klic z istim `id` vrne obstoječega.
+
+        `None` pomeni, da `id` že obstaja **v drugi družini** — isti izid kot
+        pri `MaterialsRepository.vstavi_ce_ga_ni` (`ADR-029` D); pot iz tega
+        naredi `409`.
+
+        **Ponovljen klic obstoječega zapisa ne spremeni**, tudi če nosi drugo
+        vsebino: identifikator izriše strežnik za eno urejanje, in drugi `POST`
+        z njim je ponovitev prvega, ne popravek (`ADR-055` G).
+
+        Otrok, avtor in izhodišče morajo biti iz te družine; sicer
+        `ValueError`. Pot jih preveri prej in odgovori v slovenščini — tu je
+        to napaka klicatelja, ne vhod uporabnice.
+        """
+        obstojeci = self.najdi(preizkus_id)
+        if obstojeci is not None:
+            return obstojeci
+
+        if not self._je_moj(child_id, VLOGA_OTROK):
+            raise ValueError("Naslovljenec mora biti otrok te družine (ADR-039 A).")
+        if not self._je_moj(saved_by, VLOGA_STARS):
+            raise ValueError("Preizkus shrani starš te družine.")
+        if base_id is not None and self.najdi(base_id) is None:
+            raise ValueError("Izhodišče mora biti preizkus te družine.")
+
+        zapis = Preizkus(
+            id=preizkus_id,
+            family_id=self._family_id,
+            child_id=child_id,
+            subject=subject,
+            title=title,
+            test_md=test_md,
+            solutions_md=solutions_md,
+            source_md=source_md,
+            model=model,
+            saved_at=datetime.now(UTC),
+            saved_by=saved_by,
+            base_id=base_id,
+        )
+        try:
+            self._session.add(zapis)
+            self._session.commit()
+        except IntegrityError:
+            # Primarni ključ je globalen: `id` obstaja drugje, ali pa je
+            # zmagala hkratna zahteva te družine z istim `id`.
+            self._session.rollback()
+            return self.najdi(preizkus_id)
+        return zapis

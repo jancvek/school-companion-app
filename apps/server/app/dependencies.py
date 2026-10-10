@@ -15,6 +15,7 @@ from app.db import (
     DruzineRepository,
     KviziRepository,
     MaterialsRepository,
+    PreizkusiRepository,
     PrijavaRepository,
     ScheduleRepository,
     SejaUporabnika,
@@ -198,6 +199,15 @@ def daj_repozitorij_urnikov(
     tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
     with tovarna() as seja:
         yield ScheduleRepository(seja, family_id)
+
+
+def daj_repozitorij_preizkusov(
+    request: Request, family_id: Annotated[str, Depends(daj_druzino)]
+) -> Iterator[PreizkusiRepository]:
+    """Kot `daj_repozitorij`, a za shranjene preizkuse družine (V4-R08)."""
+    tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
+    with tovarna() as seja:
+        yield PreizkusiRepository(seja, family_id)
 
 
 def daj_klicalca_urnika(request: Request) -> KlicalecUrnika | None:

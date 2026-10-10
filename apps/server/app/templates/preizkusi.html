@@ -1,0 +1,66 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}Shranjeni testi{% endblock %}
+
+{% block vsebina %}
+  <h1>Shranjeni testi</h1>
+  <p class="pod">
+    Končani testi, najnovejši prvi. Shranjen test lahko znova natisneš ali iz
+    njega sestaviš novega; urejati in brisati ga ni mogoče.
+  </p>
+
+  {# Filter po predmetu (kriterij `V4-R08`): povezave in ne obrazec, ker je
+     možnosti toliko, kolikor predmetov ima shranjen test. #}
+  {% if filtri %}
+    <p>
+      Predmet:
+      {% if izbran %}<a href="{{ pot_vseh }}">vsi</a>{% else %}<strong>vsi</strong>{% endif %}
+      {% for filter in filtri %}
+        ·
+        {% if filter.koda == izbran %}
+          <strong>{{ filter.koda }}</strong>
+        {% else %}
+          <a href="{{ filter.pot }}">{{ filter.koda }}</a>
+        {% endif %}
+      {% endfor %}
+    </p>
+  {% endif %}
+
+  {% if vrstice %}
+    <div class="tabela-ovoj">
+    <table class="tabela">
+      <thead>
+        <tr>
+          <th>Shranjeno</th>
+          <th>Predmet</th>
+          <th>Naslov</th>
+          {# Stolpec z imenom samo pri več otrocih (`ADR-051`, `ADR-039` F3). #}
+          {% if ima_imena %}<th>Otrok</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for vrstica in vrstice %}
+          <tr>
+            <td>{{ vrstica.cas }}</td>
+            <td>{{ vrstica.koda }}</td>
+            <td><a href="{{ vrstica.pot }}">{{ vrstica.naslov }}</a></td>
+            {% if ima_imena %}<td>{{ vrstica.otrok or "" }}</td>{% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% elif izbran %}
+    <p class="opozorilo">
+      Pri predmetu {{ izbran }} ni shranjenega testa.
+      <a href="{{ pot_vseh }}">Pokaži vse.</a>
+    </p>
+  {% else %}
+    <p class="opozorilo">
+      Shranjenega testa še ni. Na strani predmeta izberi slike snovi, pritisni
+      „Kreiraj test", in ko je test končan, „Shrani".
+    </p>
+  {% endif %}
+
+  <a class="nazaj" href="/admin">← Nazaj na pregled</a>
+{% endblock %}

@@ -890,3 +890,75 @@ class ScheduleEntry(Base):
     __table_args__ = (
         UniqueConstraint("schedule_id", "weekday", "subject", name="uq_schedule_entries_dan"),
     )
+
+
+class Preizkus(Base):
+    """Shranjen preizkus — v vmesniku „test" (V4-R08, `ADR-053` F).
+
+    **Vrstica obstaja samo za končan preizkus.** Delo v teku živi v brskalniku
+    (`ADR-053` E), zato tu ni stanja, osnutka in ne zgodovine različic. Zapis
+    se po nastanku **ne spremeni nikoli** in se ne briše (`ADR-011`): nov
+    preizkus iz njega je nova vrstica z `base_id`.
+
+    Ime razreda in tabele je slovensko, ker je `test` rezerviran za avtomatske
+    teste (`ADR-053` A); stolpci so angleški kot povsod drugod.
+    """
+
+    __tablename__ = "preizkusi"
+
+    #: UUID, ki ga strežnik izriše v urejevalnik in ga brskalnik pošlje ob
+    #: shranjevanju: ponovljen `POST` zato ne naredi drugega zapisa
+    #: (`ADR-055` G).
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    #: Družina, ki ji zapis pripada (`ADR-025`). Obvezna in brez `ondelete`.
+    family_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("families.id", name="fk_preizkusi_family_id"),
+        nullable=False,
+        index=True,
+    )
+
+    #: Naslovljenec. Obvezen, kot pri kvizu (`ADR-053` G, `ADR-039` A).
+    child_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", name="fk_preizkusi_child_id"),
+        nullable=False,
+        index=True,
+    )
+
+    #: Koda predmeta snovi, iz katere je nastal.
+    subject: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    #: Naslov za pregled; strežnik ga prebere iz prve vrstice testa
+    #: (`ADR-055` B).
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    #: Test in rešitve v markdownu z LaTeX-om, kot ju je vrnil model.
+    test_md: Mapped[str] = mapped_column(Text, nullable=False)
+    solutions_md: Mapped[str] = mapped_column(Text, nullable=False)
+
+    #: Snov: besedilo prepisov, iz katerih je preizkus nastal, zamrznjeno ob
+    #: shranjevanju. Identifikatorjev slik tu ni — slike se arhivirajo in
+    #: brišejo, besedilo ostane (`ADR-055` E).
+    source_md: Mapped[str] = mapped_column(Text, nullable=False)
+
+    #: Ime modela, kot ga je vrnila storitev pri zadnjem koraku. Pošlje ga
+    #: brskalnik in je zato podatek za primerjavo, ne dokaz (`ADR-055` C).
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+
+    #: Kdaj je bil shranjen (strežnikov čas) in kateri starš ga je shranil.
+    saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    saved_by: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", name="fk_preizkusi_saved_by"),
+        nullable=False,
+    )
+
+    #: Shranjen preizkus, ki je bil izhodišče tega; `NULL` pri preizkusu iz
+    #: snovi (`ADR-055` E).
+    base_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("preizkusi.id", name="fk_preizkusi_base_id"),
+        nullable=True,
+    )
