@@ -368,6 +368,26 @@ class TestNaslovljenecObShranjevanju:
         assert odgovor.status_code == 400
         assert vsi(motor) == []
 
+    def test_deaktiviran_otrok_je_dovoljen_naslovljenec(
+        self, odjemalec: PrijavljenOdjemalec, motor: Engine, slike: Path
+    ) -> None:
+        # Test je na papirju in prijave ne potrebuje (`ADR-055` H) — za
+        # razliko od kviza, ki deaktiviranega otroka ne ponudi (`ADR-039` A).
+        ustvari_otroka(
+            motor, user_id=BRAT_ID, identifikator="nejc", prikazno_ime="Nejc", aktiven=False
+        )
+        snov_s_prepisom(motor, slike, UUID_ENA, "Mašina snov.")
+        snov_s_prepisom(motor, slike, UUID_DVA, "Nejčeva snov.", taken_at=DAN_POZNEJE)
+        daj_bratu(motor, UUID_DVA)
+
+        stran = sestavi(odjemalec, "MAT", UUID_ENA, UUID_DVA).text
+        odgovor = shrani(odjemalec, snov=[UUID_ENA, UUID_DVA], otrok=BRAT_ID)
+
+        assert f'<option value="{BRAT_ID}">Nejc</option>' in stran
+        assert odgovor.status_code == 200, odgovor.text
+        (zapis,) = vsi(motor)
+        assert zapis.child_id == BRAT_ID
+
     @pytest.mark.usefixtures("snov_dveh")
     def test_urejevalnik_ponudi_izbirnik_samo_pri_snovi_vec_otrok(
         self, odjemalec: PrijavljenOdjemalec

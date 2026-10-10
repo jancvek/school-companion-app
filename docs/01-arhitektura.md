@@ -736,7 +736,7 @@ skripte in to preverja `TestBrezJavaScripta`, ki izvzame natanko te predloge;
 meje vsake je treba preverjati izrecno (`ADR-048` „Posledice").
 
 Ogrodje `osnova.html` ima blok `glava` za dodatek posamezne strani v
-`<head>`; uporablja ga samo `preizkus.html`.
+`<head>`; uporabljata ga `preizkus.html` in `preizkus-ogled.html`.
 
 | Pot | Metoda | Kaj |
 |---|---|---|

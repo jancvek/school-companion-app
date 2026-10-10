@@ -762,8 +762,13 @@
         document.addEventListener("click", function (dogodek) {
           var cilj = dogodek.target;
           var povezava = cilj && cilj.closest ? cilj.closest("a[href]") : null;
+          // Klik s tipko ali s srednjim gumbom odpre povezavo drugje; okno
+          // z delom ostane, zato vprašanja ni.
+          var drugam =
+            dogodek.button !== 0 || dogodek.ctrlKey || dogodek.metaKey || dogodek.shiftKey;
           if (
             !povezava ||
+            drugam ||
             povezava.target === "_blank" ||
             povezava.classList.contains("slicica") ||
             !neshranjeno()

@@ -64,7 +64,7 @@ from app.routers import admin
 from app.settings import Settings
 from app.storage import je_znotraj, mapa_druzine, velikost_slike
 from app.strani import daj_predloge, ni_najdeno
-from app.subjects import oznaka_predmeta, poisci_predmet
+from app.subjects import poisci_predmet
 from app.vision import KlicalecPreizkusa, NapakaObdelave
 
 #: Dnevnik porabe: ena vrstica na klic modela (kriterij `V4-R07`). Da vrstica
@@ -506,11 +506,7 @@ def pregled(
             "vrstice": [_vrstica(zapis, imena) for zapis in shranjeni.seznam(izbran)],
             "izbran": izbran,
             "filtri": [
-                {
-                    "koda": koda,
-                    "oznaka": oznaka_predmeta(koda),
-                    "pot": f"{PREDPONA}?predmet={quote(koda, safe='')}",
-                }
+                {"koda": koda, "pot": f"{PREDPONA}?predmet={quote(koda, safe='')}"}
                 for koda in sorted(stevila)
             ],
             "pot_vseh": PREDPONA,
