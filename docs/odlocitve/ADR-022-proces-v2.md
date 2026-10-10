@@ -2,7 +2,7 @@
 
 - **Datum:** 2026-09-11
 - **Nastalo pri:** celostni pregled projekta po V2-R04 (zunaj zahteve)
-- **Status:** Predlog — velja, ko ga lastnik potrdi z mergem te veje
+- **Status:** Sprejeto (merge v `main` 2026-09-11, commit 77893c5)
 - **Spreminja:** `CLAUDE.md` (§0, faza 1, faza 4, faza 7, faza 9b, nov §1c), `docs/plan/PREDLOGA.md`; predlaga spremembe `.claude/commands/zahteva.md`
   in `.claude/agents/pregledovalec.md` (glej Dodatek — teh datotek model po
   trdem robu 4 ne spreminja)

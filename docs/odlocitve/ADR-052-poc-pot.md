@@ -2,7 +2,7 @@
 
 - **Datum:** 2026-10-10
 - **Nastalo pri:** pogovor o procesu (zunaj zahteve)
-- **Status:** Predlog — velja, ko ga lastnik potrdi z mergem te veje
+- **Status:** Sprejeto (2026-10-10)
 - **Spreminja:** `CLAUDE.md` (§0, nova faza 0, nov §1d, trdi rob 7), nova
   `docs/poc/PREDLOGA.md`; predlaga spremembe `.claude/commands/zahteva.md` in
   `.claude/hooks/git-guard.ps1` (glej Dodatek — teh datotek model ne spreminja)
