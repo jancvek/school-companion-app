@@ -22,6 +22,14 @@
          delata isto. #}
       <p class="izbor">
         <button class="gumb gumb-obdelava" type="submit">Prepisi izbranih</button>
+        {# Drugi gumb istega obrazca (V4-R07): `formaction` pošlje **isti**
+           izbor na drug naslov, brez skripte — ta stran ostane brez nje
+           (`docs/odlocitve/ADR-054`, meja 3). Samo pri predmetu, za katerega
+           znamo sestaviti test. #}
+        {% if kreiraj_test %}
+          <button class="gumb gumb-obdelava" type="submit"
+                  formaction="/admin/assessments/compose">Kreiraj test</button>
+        {% endif %}
         {# „Izberi vse" je povezava in ne skripta (`ADR-048` G); „Počisti
            izbor" je ista stran brez parametra. Privzeto ni obkljukana
            nobena. #}
@@ -70,6 +78,10 @@
 
       <p class="izbor">
         <button class="gumb gumb-obdelava" type="submit">Prepisi izbranih</button>
+        {% if kreiraj_test %}
+          <button class="gumb gumb-obdelava" type="submit"
+                  formaction="/admin/assessments/compose">Kreiraj test</button>
+        {% endif %}
         <span class="drobno">
           Prepisi označenih slik se izpišejo v enem polju, od najstarejše
           naprej. Nič se ne shrani.

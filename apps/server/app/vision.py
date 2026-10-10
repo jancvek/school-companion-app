@@ -1,4 +1,4 @@
-"""Klic vision modela. **Edini modul, ki uvaža `openai`.**
+"""Klici modela. **Edini modul, ki uvaža `openai`.**
 
 ADR-008 to zahteva izrecno: menjava modela ali ponudnika mora biti sprememba
 ene datoteke in ene spremenljivke okolja, ne predelava. Zato tu ni
@@ -13,11 +13,17 @@ Modul je razrezan na tri dele, ki se dajo preizkusiti ločeno in brez omrežja:
 
 Zunanjemu svetu ta modul ponuja `Klicalec`: `Path → IzidKlica`. Kdo ga je
 naredil, obdelava ne ve — v testih je to preprosta funkcija.
+
+Od V4-R07 je tu tudi klic **brez slike**: `naredi_klicalca_preizkusa`
+(`docs/odlocitve/ADR-054`). Ime modula zato ne pove več vsega; en modul za
+ponudnika pa ostane en modul. Navodilo, vhod in razčlenitev odgovora za
+preizkus so v `app/preizkus.py`, ki `openai` ne pozna.
 """
 
 import base64
 import json
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +38,7 @@ from openai import (
 )
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from app import preizkus
 from app.settings import Settings
 from app.subjects import PREDMETI
 from app.urnik import DNEVI
@@ -501,6 +508,61 @@ class _SurovOdgovor:
     output_tokens: int | None
 
 
+def _poslji(
+    klepet: _OdjemalecKlepeta,
+    *,
+    casovna_meja: float,
+    prompt: str | None,
+    ime_kljuca: str = "OPENAI_API_KEY",
+    **argumenti: Any,
+) -> Any:
+    """Pošlje eno zahtevo; napake storitve pretvori v `NapakaObdelave`.
+
+    Skupno vsem trem klicalcem. Obravnava napak storitve je pri vseh ista;
+    podvojena bi se sčasoma razšla prav v tistem delu, ki se izvede najredkeje.
+
+    `prompt` gre v sled napake. `None` pomeni klic, katerega vhod **ne sme** v
+    sled ne v dnevnik (preizkus, V4-R07: vhod je snov družine). Tak klic ob
+    nepričakovani napaki knjižnice zapiše samo njeno ime, brez izpisa izjeme —
+    ta bi lahko nosila telo zahteve ali odgovora.
+    """
+    try:
+        return klepet.chat.completions.create(**argumenti)
+    except APITimeoutError as napaka:
+        # `prompt` tudi tu: zahteva je bila poslana, model se ni odzval. Sled
+        # brez tega ne bi povedala, kaj je dobil.
+        raise NapakaObdelave(
+            f"Model se ni odzval v {casovna_meja:.0f} sekundah.",
+            prompt=prompt,
+        ) from napaka
+    except APIConnectionError as napaka:
+        raise NapakaObdelave(
+            "Do storitve OpenAI ni bilo mogoče priti. Preveri omrežno povezavo strežnika.",
+            prompt=prompt,
+        ) from napaka
+    except APIStatusError as napaka:
+        raise NapakaObdelave(_opis_statusa(napaka, ime_kljuca), prompt=prompt) from napaka
+    except APIError as napaka:
+        # Vse ostalo, kar zna vreči `openai` — npr.
+        # `APIResponseValidationError`, ki ni podrazred nobene od zgornjih
+        # treh. Brez te veje bi taka napaka ušla do splošnega lovilca v
+        # `app/obdelava.py` in zapis bi končal v `failed` **brez sledi**,
+        # čeprav je bila zahteva poslana in plačana. Prav to je primer,
+        # kjer kriterij „shrani se poslani prompt" največ pomeni.
+        if prompt is None:
+            dnevnik.error(
+                "Klic modela je odpovedal z napako knjižnice openai (%s).",
+                type(napaka).__name__,
+            )
+        else:
+            dnevnik.exception("Klic modela je odpovedal z napako knjižnice openai.")
+        raise NapakaObdelave(
+            f"Klic modela ni uspel ({type(napaka).__name__}). "
+            "Podrobnosti so v dnevniku strežnika.",
+            prompt=prompt,
+        ) from napaka
+
+
 def _izvedi_klic(
     klepet: _OdjemalecKlepeta,
     nastavitve: Settings,
@@ -511,46 +573,20 @@ def _izvedi_klic(
 ) -> _SurovOdgovor:
     """En klic modela nad eno sliko; napake pretvori v `NapakaObdelave`.
 
-    Skupen obema klicalcema — snovi (V1-R03) in urniku (V3-R09). Obravnava
-    napak storitve je pri obeh ista; podvojena bi se sčasoma razsla prav v
-    tistem delu, ki se izvede najredkeje.
+    Skupen klicalcema s sliko — snovi (V1-R03) in urniku (V3-R09). Sam klic
+    storitve je v `_poslji`, ki ga deli še preizkus (V4-R07).
     """
-    try:
-        odgovor = klepet.chat.completions.create(
-            model=nastavitve.openai_model,
-            messages=sestavi_sporocila(pot, prompt),
-            response_format={
-                "type": "json_schema",
-                "json_schema": {"name": ime_sheme, "strict": True, "schema": shema},
-            },
-        )
-    except APITimeoutError as napaka:
-        # `prompt` tudi tu: zahteva je bila poslana, model se ni odzval. Sled
-        # brez tega ne bi povedala, kaj je dobil.
-        raise NapakaObdelave(
-            f"Model se ni odzval v {nastavitve.openai_timeout_seconds:.0f} sekundah.",
-            prompt=prompt,
-        ) from napaka
-    except APIConnectionError as napaka:
-        raise NapakaObdelave(
-            "Do storitve OpenAI ni bilo mogoče priti. Preveri omrežno povezavo strežnika.",
-            prompt=prompt,
-        ) from napaka
-    except APIStatusError as napaka:
-        raise NapakaObdelave(_opis_statusa(napaka), prompt=prompt) from napaka
-    except APIError as napaka:
-        # Vse ostalo, kar zna vreči `openai` — npr.
-        # `APIResponseValidationError`, ki ni podrazred nobene od zgornjih
-        # treh. Brez te veje bi taka napaka ušla do splošnega lovilca v
-        # `app/obdelava.py` in zapis bi končal v `failed` **brez sledi**,
-        # čeprav je bila zahteva poslana in plačana. Prav to je primer,
-        # kjer kriterij „shrani se poslani prompt" največ pomeni.
-        dnevnik.exception("Klic modela je odpovedal z napako knjižnice openai.")
-        raise NapakaObdelave(
-            f"Klic modela ni uspel ({type(napaka).__name__}). "
-            "Podrobnosti so v dnevniku strežnika.",
-            prompt=prompt,
-        ) from napaka
+    odgovor = _poslji(
+        klepet,
+        casovna_meja=nastavitve.openai_timeout_seconds,
+        prompt=prompt,
+        model=nastavitve.openai_model,
+        messages=sestavi_sporocila(pot, prompt),
+        response_format={
+            "type": "json_schema",
+            "json_schema": {"name": ime_sheme, "strict": True, "schema": shema},
+        },
+    )
 
     uporaba = getattr(odgovor, "usage", None)
     vhodni = getattr(uporaba, "prompt_tokens", None)
@@ -651,12 +687,128 @@ def naredi_klicalca_urnika(
     return poklici
 
 
-def _opis_statusa(napaka: APIStatusError) -> str:
-    """Napaka storitve v stavku, ki operaterju pove, kaj naj naredi."""
+#: Koliko truda model vloži v razmišljanje in koliko sme vrniti. Oboje iz
+#: `docs/poc/POC-01.md` *Ugotovitve*: s tem je bil test izmerjen in sprejet.
+#: Meja izhoda vključuje razmišljanje; odgovor, ki jo doseže, je odrezan JSON
+#: in pade pri razčlenitvi — glasno, ne kot polovičen test.
+TRUD_PREIZKUSA = "medium"
+NAJVEC_IZHODA_PREIZKUSA = 20000
+
+#: Ime spremenljivke okolja s ključem za preizkuse, za sporočilo o zavrnitvi.
+KLJUC_PREIZKUSA = "OPENAI_API_KEY_PREIZKUSI"
+
+
+@dataclass(frozen=True)
+class IzidPreizkusa:
+    """Odgovor modela in poraba enega klica (V4-R07).
+
+    Poraba je tu zato, da jo pot zapiše v dnevnik (kriterij `V4-R07`).
+    **Vhoda in surovega odgovora izid ne nosi**: preizkus se v tej zahtevi ne
+    shrani nikamor, sled v dnevniku pa snovi ne sme vsebovati.
+    """
+
+    odgovor: preizkus.Odgovor
+    model: str
+    trajanje: float
+    #: Vhodni žetoni in koliko od njih je storitev vzela iz predpomnilnika.
+    vhodni: int | None
+    predpomnjeni: int | None
+    #: Izhodni žetoni in koliko od njih je bilo razmišljanje.
+    izhodni: int | None
+    razmisljanje: int | None
+
+
+#: Kar pot preizkusa potrebuje od tega modula: navodilo in vhod → izid.
+KlicalecPreizkusa = Callable[[str, str], IzidPreizkusa]
+
+
+def sporocila_preizkusa(navodilo: str, vhod: str) -> list[dict[str, Any]]:
+    """Sporočili enega klica: navodilo kot sistemsko, vse ostalo kot eno.
+
+    Navodilo je stalno in stoji prvo, da ga storitev lahko vzame iz
+    predpomnilnika; vrstni red znotraj vhoda določi `preizkus.sestavi_vhod`.
+    """
+    return [
+        {"role": "system", "content": navodilo},
+        {"role": "user", "content": vhod},
+    ]
+
+
+def naredi_klicalca_preizkusa(
+    nastavitve: Settings, odjemalec: _OdjemalecKlepeta | None = None
+) -> KlicalecPreizkusa:
+    """Sestavi funkcijo `navodilo, vhod → izid` za sestavljanje preizkusa.
+
+    Svoj ključ in svoj model (`docs/odlocitve/ADR-054`), zato svoj odjemalec.
+
+    **Brez ponovnih poskusov** (`max_retries=0`): knjižnica bi ob časovni
+    omejitvi sama poskusila še dvakrat in starš bi čakal trikrat dlje, kot
+    obljubi sporočilo. Želja ob napaki ostane v polju in ponovi jo en klik.
+    """
+    klepet: _OdjemalecKlepeta = odjemalec or OpenAI(
+        api_key=nastavitve.openai_api_key_preizkusi,
+        timeout=nastavitve.openai_timeout_seconds,
+        max_retries=0,
+    )
+
+    def poklici(navodilo: str, vhod: str) -> IzidPreizkusa:
+        zacetek = time.monotonic()
+        surov = _poslji(
+            klepet,
+            casovna_meja=nastavitve.openai_timeout_seconds,
+            prompt=None,
+            ime_kljuca=KLJUC_PREIZKUSA,
+            model=nastavitve.openai_model_preizkusi,
+            messages=sporocila_preizkusa(navodilo, vhod),
+            reasoning_effort=TRUD_PREIZKUSA,
+            max_completion_tokens=NAJVEC_IZHODA_PREIZKUSA,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": preizkus.IME_SHEME,
+                    "strict": True,
+                    "schema": preizkus.SHEMA,
+                },
+            },
+        )
+        trajanje = time.monotonic() - zacetek
+
+        vsebina = surov.choices[0].message.content if surov.choices else None
+        if not vsebina:
+            raise NapakaObdelave("Model je vrnil prazen odgovor.")
+        try:
+            odgovor = preizkus.razcleni_odgovor(vsebina)
+        except preizkus.NeveljavenOdgovor as napaka:
+            raise NapakaObdelave(napaka.sporocilo) from napaka
+
+        uporaba = getattr(surov, "usage", None)
+        return IzidPreizkusa(
+            odgovor=odgovor,
+            model=getattr(surov, "model", None) or nastavitve.openai_model_preizkusi,
+            trajanje=trajanje,
+            vhodni=getattr(uporaba, "prompt_tokens", None),
+            predpomnjeni=getattr(
+                getattr(uporaba, "prompt_tokens_details", None), "cached_tokens", None
+            ),
+            izhodni=getattr(uporaba, "completion_tokens", None),
+            razmisljanje=getattr(
+                getattr(uporaba, "completion_tokens_details", None), "reasoning_tokens", None
+            ),
+        )
+
+    return poklici
+
+
+def _opis_statusa(napaka: APIStatusError, ime_kljuca: str = "OPENAI_API_KEY") -> str:
+    """Napaka storitve v stavku, ki operaterju pove, kaj naj naredi.
+
+    `ime_kljuca` zato, ker ima preizkus svoj ključ (V4-R07): sporočilo, ki bi
+    pokazalo na napačno spremenljivko, bi poslalo popravljat pravo.
+    """
     if napaka.status_code in (401, 403):
         return (
             "Storitev OpenAI je zavrnila ključ (HTTP "
-            f"{napaka.status_code}). Preveri OPENAI_API_KEY v apps/server/.env."
+            f"{napaka.status_code}). Preveri {ime_kljuca} v apps/server/.env."
         )
     if napaka.status_code == 429:
         return (

@@ -38,6 +38,11 @@ packages = ["app", "app.routers"]
 # pade ob prvi zahtevi na `/admin` — odlocitev 9 v `docs/plan/V1-R04.md`.
 [tool.setuptools.package-data]
 app = ["templates/*.html"]
+# Enako velja za `static/` (V4-R07, `docs/odlocitve/ADR-054`): KaTeX in marked
+# za urejevalnik preizkusa. `**` zajame tudi podmapi `fonts/` in `contrib/`.
+# Vzorec je relativen na mapo paketa; ujame se samo v `app`, ker `app.routers`
+# mape `static` nima.
+"*" = ["static/**/*"]
 
 [tool.ruff]
 line-length = 100

@@ -36,8 +36,21 @@ OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4.1
 
 # Časovna omejitev enega klica modela, v sekundah. Obdelava teče zaporedno,
-# zato bi klic brez omejitve ustavil vrsto za vse ostale slike.
+# zato bi klic brez omejitve ustavil vrsto za vse ostale slike. Ista meja
+# velja za sestavljanje testov (spodaj): toliko največ čaka starš.
 OPENAI_TIMEOUT_SECONDS=120
+
+# Ključ za OpenAI, s katerim se sestavljajo testi (V4-R07, „Kreiraj test" na
+# strani matematike). **Ločen od OPENAI_API_KEY**, da se poraba vidi posebej
+# in da se da eno ugasniti brez drugega (`docs/odlocitve/ADR-054`).
+#
+# Brez njega strežnik in urejevalnik delujeta; gumb za generiranje pove, da
+# sestavljanje ni nastavljeno.
+OPENAI_API_KEY_PREIZKUSI=
+
+# Model za sestavljanje testov. Mora biti model z razmišljanjem: klic pošlje
+# `reasoning_effort=medium`. Privzeti je izmerjen v `docs/poc/POC-01.md`.
+OPENAI_MODEL_PREIZKUSI=gpt-5.6-luna
 
 # Razmik med obhodi obdelave, v sekundah.
 WORKER_INTERVAL_SECONDS=30

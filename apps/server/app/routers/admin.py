@@ -14,7 +14,7 @@ vrne v vrsto; ker to zavrže prejšnji rezultat, je `POST` in ne povezava
 
 import math
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -27,7 +27,7 @@ from starlette.datastructures import FormData
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
-from app import sistem
+from app import preizkus, sistem
 from app.besedilo import SLIKE, ZNAKI, stevilo_z_besedo
 from app.casi import cas, cas_ali_prazno, danes, dnevi_od_do, v_domacem
 from app.danes import je_vikend, sestavi_kartico
@@ -39,7 +39,7 @@ from app.dependencies import (
     daj_repozitorij_kvizov,
 )
 from app.models import STATUS_V_OBDELAVI, Material, Question
-from app.prepisi import SnovZaPrepis, VprasanjeZaPrepis, izbrane, sestavi
+from app.prepisi import Prepisi, SnovZaPrepis, VprasanjeZaPrepis, izbrane, sestavi
 from app.routers.kvizi import seznam_kvizov
 from app.settings import Settings
 from app.storage import je_znotraj, mapa_druzine, pobrisi_sliko, velikost_slike
@@ -429,14 +429,21 @@ def predmet(
             # Pot je tu in ne v predlogi, ker mora skozi `quote`: koda s
             # poševnico ali vprašajem bi sicer povezavo razbila (isti razlog
             # kot pri `_po_umiku`).
-            "pot_predmeta": _pot_predmeta(koda),
+            "pot_predmeta": pot_predmeta(koda),
             "vse_obkljukano": vse == "1",
+            # Gumb „Kreiraj test" (V4-R07) samo pri predmetu, ki ima navodilo
+            # za model — danes matematika (`ADR-053` D).
+            "kreiraj_test": preizkus.navodilo_za(koda) is not None,
         },
     )
 
 
-def _pot_predmeta(koda: str) -> str:
-    """Naslov strani predmeta, ubežan za URL."""
+def pot_predmeta(koda: str) -> str:
+    """Naslov strani predmeta, ubežan za URL.
+
+    Javno ime od V4-R07: potrebuje ga tudi urejevalnik preizkusa
+    (`app/routers/preizkusi.py`).
+    """
     return f"{PREDPONA}/subjects/{quote(koda, safe='')}"
 
 
@@ -495,6 +502,33 @@ def _za_prepis(
     )
 
 
+def prepisi_izbora(
+    repozitorij: MaterialsRepository,
+    imena: dict[str, str],
+    nabor: Sequence[Material],
+    izbrani: Iterable[str],
+) -> tuple[Prepisi, list[Material]]:
+    """Besedilo prepisov izbora in izbrane snovi, od najstarejše.
+
+    **Ena pot do besedila** za „Prepisi izbranih" (V3-R11) in za snov, ki jo
+    dobi model pri sestavljanju preizkusa (V4-R07): kriterij zahteva isto
+    funkcijo, in dve ločeno napisani sestavi bi se nekoč razšli
+    (`docs/odlocitve/ADR-048` F, `ADR-053` C).
+
+    `nabor` poda klicalec — seznam predmeta te družine, ki že nosi mejo
+    družine, predmeta in arhiva. Identifikator, ki ga v naboru ni, tiho izpade.
+    """
+    # Najprej izbor nad naborom, šele nato vprašanja — samo za izbrane, ne za
+    # celoten predmet (`ADR-049` E).
+    po_id = {material.id: material for material in nabor}
+    izbor = izbrane([_za_prepis(material, imena) for material in nabor], izbrani)
+    vprasanja = repozitorij.veljavna_vprasanja_snovi(s.id for s in izbor)
+    izid = sestavi(
+        [_za_prepis(po_id[s.id], imena, vprasanja.get(s.id, ())) for s in izbor]
+    )
+    return izid, [po_id[s.id] for s in izbor]
+
+
 @router.get("/transcripts")
 def prepisi_nazaj() -> RedirectResponse:
     """Stran s prepisi nastane samo iz obrazca; `GET` pelje na pregled.
@@ -547,16 +581,7 @@ async def prepisi_izbranih(
     koda = _polje_obrazca(obrazec, "subject").rstrip("/")
     snov = [vrednost for vrednost in obrazec.getlist("snov") if isinstance(vrednost, str)]
     nabor = repozitorij.seznam_po_predmetu(koda) if koda else []
-    imena = imena_otrok(clani)
-
-    # Najprej izbor nad naborom, šele nato vprašanja — samo za izbrane, ne za
-    # celoten predmet (`ADR-049` E).
-    po_id = {material.id: material for material in nabor}
-    izbor = izbrane([_za_prepis(material, imena) for material in nabor], snov)
-    vprasanja = repozitorij.veljavna_vprasanja_snovi(s.id for s in izbor)
-    izid = sestavi(
-        [_za_prepis(po_id[s.id], imena, vprasanja.get(s.id, ())) for s in izbor]
-    )
+    izid, _ = prepisi_izbora(repozitorij, imena_otrok(clani), nabor, snov)
 
     return predloge.TemplateResponse(
         request,
@@ -570,7 +595,7 @@ async def prepisi_izbranih(
             # sporočilo pove, kaj naj uporabnica naredi. Pot nazaj gre na
             # pregled, kadar bi bila stran predmeta 404 — enako kot `_po_umiku`.
             "pot_nazaj": (
-                _pot_predmeta(koda)
+                pot_predmeta(koda)
                 if nabor or poisci_predmet(koda) is not None
                 else PREDPONA
             ),

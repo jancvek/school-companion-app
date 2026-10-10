@@ -77,6 +77,7 @@ from tests.test_danes import kartica as kartica_danes
 from tests.test_danes import vrstice as vrstice_danes
 from tests.test_druzine import DRUGA_ID, dodaj_druzino
 from tests.test_kvizi import objavi
+from tests.test_preizkusi import LazenKlicalec
 from tests.test_racun import PonarejenGoogle
 from tests.test_resevanje import POKAZANO, poskus, poslji
 from tests.test_rezultat import postavke
@@ -396,7 +397,13 @@ def aplikacija(slike: Path, motor: Engine) -> FastAPI:
         }
     )
     return create_app(
-        nastavitve=nastavitve, motor=motor, odjemalec_googla=PonarejenGoogle()
+        nastavitve=nastavitve,
+        motor=motor,
+        odjemalec_googla=PonarejenGoogle(),
+        # Klicalec preizkusa (V4-R07) je ponaredek, ki si zapomni vhod: brez
+        # njega bi generiranje odgovorilo „ni nastavljeno" in primer bi bil
+        # zelen, ne da bi do meje družine sploh prišel.
+        klicalec_preizkusa=LazenKlicalec(),
     )
 
 
@@ -475,6 +482,27 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
         o.post("/admin/transcripts", data={"subject": a.subject, "snov": [a.akt]}),
         OK,
         (a.akt,),
+    ),
+    # V4-R07. Odjemalec je družina B, njen predmet je `MAT` — edini, za
+    # katerega urejevalnik obstaja —, izbor pa je snov družine A. Nabor je
+    # stran predmeta družine B, zato tuj identifikator izpade: urejevalnik se
+    # ne izriše in model se ne pokliče. Močnejši primer — tuj identifikator
+    # med lastnimi — je spodaj v svojem testu.
+    ("GET", "/admin/assessments/compose"): lambda o, a: (
+        o.get("/admin/assessments/compose", follow_redirects=False), PREUSMERITEV, (),
+    ),
+    ("POST", "/admin/assessments/compose"): lambda o, a: (
+        o.post("/admin/assessments/compose", data={"subject": "MAT", "snov": [a.akt]}),
+        OK,
+        (),
+    ),
+    ("POST", "/admin/assessments/generate"): lambda o, a: (
+        o.post(
+            "/admin/assessments/generate",
+            data={"subject": "MAT", "snov": [a.akt], "zelja": "Sestavi test."},
+        ),
+        frozenset({400}),
+        (),
     ),
     ("GET", "/admin/materials/{material_id}"): lambda o, a: (
         o.get(f"/admin/materials/{a.akt}"), NI, (a.akt,),
@@ -944,6 +972,40 @@ def test_prepis_tuje_druzine_ne_pride_v_besedilo(
     assert b.znak in odgovor.text
     assert a.znak not in odgovor.text
     assert a.akt not in odgovor.text
+
+
+def test_snov_tuje_druzine_ne_pride_v_vhod_modela(
+    aplikacija: FastAPI, odjemalec: PrijavljenOdjemalec, druzini: tuple[Druzina, Druzina]
+) -> None:
+    """Kriterij V4-R07: snov druge družine ne pride v vhod modela.
+
+    Isti izbor kot pri prepisih zgoraj: predmet je B-jev, med njenimi
+    identifikatorji potuje identifikator snovi družine A. Model dobi B-jevo
+    snov (sicer bi bila trditev o A zelena nad praznim vhodom) in ničesar od
+    A — ne prepisa, ne povzetka, ne vprašanj. Tudi urejevalnik tujega
+    identifikatorja ne izriše, zato ga skripta ne more poslati naprej.
+    """
+    a, b = druzini
+    klicalec: LazenKlicalec = aplikacija.state.klicalec_preizkusa
+
+    stran = odjemalec.post(
+        "/admin/assessments/compose", data={"subject": b.subject, "snov": [b.akt, a.akt]}
+    )
+    odgovor = odjemalec.post(
+        "/admin/assessments/generate",
+        data={"subject": b.subject, "snov": [b.akt, a.akt], "zelja": "Sestavi test."},
+    )
+
+    assert stran.status_code == 200
+    assert b.akt in stran.text
+    assert a.akt not in stran.text
+    assert odgovor.status_code == 200
+    assert f"Prepis {b.znak}" in klicalec.vhod
+    assert f"Vprašanje 1 {b.znak}?" in klicalec.vhod
+    for sled in a.sledi():
+        assert sled not in klicalec.vhod
+    assert f"Povzetek {a.znak}" not in klicalec.vhod
+    assert f"Odgovor 1 {a.znak}." not in klicalec.vhod
 
 
 def test_vprasanja_tuje_druzine_ne_pridejo_v_besedilo(

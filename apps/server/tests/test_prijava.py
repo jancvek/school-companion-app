@@ -29,7 +29,18 @@ from sqlalchemy.orm import Session
 
 from app import main, prijava
 from app.models import VLOGA_OTROK, LoginAttempt, Material, UserSession
-from app.routers import admin, clani, dnevi, kvizi, racun, sistem, statistika, urnik, vstop
+from app.routers import (
+    admin,
+    clani,
+    dnevi,
+    kvizi,
+    preizkusi,
+    racun,
+    sistem,
+    statistika,
+    urnik,
+    vstop,
+)
 from app.routers.admin import MAPA_PREDLOG
 from app.security import SPOROCILO_BREZ_CSRF, SPOROCILO_NEVELJAVEN_ZETON
 from tests.conftest import (
@@ -163,6 +174,7 @@ class TestDosegljivost:
                 clani,
                 dnevi,
                 kvizi,
+                preizkusi,
                 racun,
                 sistem,
                 statistika,

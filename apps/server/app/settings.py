@@ -54,6 +54,19 @@ class Settings(BaseSettings):
     #: zaporedno, zato bi en tak klic ustavil vrsto za vse ostale slike.
     openai_timeout_seconds: float = 120.0
 
+    #: Ključ za OpenAI, s katerim se sestavljajo preizkusi (V4-R07). **Ločen
+    #: od `openai_api_key`** (`docs/odlocitve/ADR-054`), da se poraba
+    #: sestavljanja testov vidi posebej in da se da eno ugasniti brez drugega.
+    #:
+    #: Prazen privzetek iz istega razloga kot zgoraj: brez njega strežnik in
+    #: urejevalnik delujeta, le generiranje pove, da ni nastavljeno.
+    openai_api_key_preizkusi: str = ""
+
+    #: Ime modela za preizkuse. Nastavitev, ne konstanta (`ADR-008`); privzetek
+    #: je model, izmerjen v `docs/poc/POC-01.md`. Klic pošlje
+    #: `reasoning_effort`, zato mora biti to model z razmišljanjem.
+    openai_model_preizkusi: str = "gpt-5.6-luna"
+
     #: Razmik med obhodi worker zanke, v sekundah (kriterij pravi ~30).
     worker_interval_seconds: float = 30.0
 
