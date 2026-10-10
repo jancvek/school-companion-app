@@ -6,8 +6,8 @@ Mobilna aplikacija za učenca, s katero po šoli fotografira obravnavano učno
 snov. Slike se lokalno shranijo, nato prenesejo na domači strežnik, kjer jih
 vision model prepiše in iz njih sestavi kratek kviz. Učenec na vprašanja
 odgovarja in ocenjuje težavnost, kar z leti tvori osebno bazo znanja iz
-njegovih lastnih zapiskov. Iz iste snovi starš sestavi tudi delovne liste za
-tiskanje (`docs/odlocitve/ADR-031`).
+njegovih lastnih zapiskov. Iz iste snovi starš v klepetu z modelom sestavi tudi
+test za tiskanje (`docs/odlocitve/ADR-053`).
 
 Isti domači strežnik uporablja več družin (`docs/odlocitve/ADR-025`). Vsaka
 družina ima enega ali več staršev in enega ali več otrok ter vidi izključno
@@ -24,7 +24,7 @@ samopreverjanje iz dejanske snovi, ki jo je Maša tisti dan imela pri pouku.
 | Vloga | Kaj počne |
 |---|---|
 | Otrok (učenec, osnovna šola) | Fotografira snov, odgovarja na generirana vprašanja, ocenjuje težavnost. Dela izključno v mobilni aplikaciji |
-| Starš | Spremlja delovanje svoje družine, sestavlja kvize in delovne liste, gleda statistiko, odpira in ureja račune svojih otrok. Dela izključno v spletnem adminu. Ne vidi čez mejo svoje družine |
+| Starš | Spremlja delovanje svoje družine, sestavlja kvize in teste za tisk, gleda statistiko, odpira in ureja račune svojih otrok. Dela izključno v spletnem adminu. Ne vidi čez mejo svoje družine |
 | Lastnik sistema | Vzdržuje domači strežnik, API ključe in varnostne kopije ter odpira nove družine. Ena sama oseba za vso namestitev. Danes je to tudi starš, jutri ni nujno (`docs/odlocitve/ADR-025`) |
 
 ## Ključni pojmi domene
@@ -44,9 +44,7 @@ samopreverjanje iz dejanske snovi, ki jo je Maša tisti dan imela pri pouku.
 | Vprašanja snovi | 5–10 vprašanj in odgovorov, ki jih AI sestavi iz ene snovi (V1-R03) |
 | Kviz | Nabor vprašanj z odgovori iz ene ali več snovi, ki ga lastnik sestavi in objavi na admin strani (V2-R01); Maša ga reši na telefonu in vsako vprašanje oceni (V2-R02). Rešen je, ko ima vsako vprašanje oceno |
 | Težavnost | Ocena, ki jo Maša izbere po razkritju odgovora: *nisem vedela / težko / srednje / lahko*. Prva stopnja pove tudi, da odgovora ni vedela; ostale tri so težavnost. Štiri stopnje in ne tri — glej `docs/odlocitve/ADR-014` |
-| Delovni list | Natisnjen list, ki ga starš sestavi iz otrokove snovi: kratka razlaga, naloge s prostorom za odgovore in rešitve s postopkom na ločenem listu. Otrok ga reši s svinčnikom in v mobilni aplikaciji ne obstaja. V kodi in bazi `delovni_list`, nikoli `test` — glej `docs/odlocitve/ADR-031` |
-| Opomba (k delovnemu listu) | Prosto besedilo, ki ga starš zapiše po pregledu rešenega lista. Edini zapis o tem, kako je šlo, in hkrati vhod v naslednji delovni list pri istem predmetu — glej `docs/odlocitve/ADR-032` |
-| Razred | Razred osnovne šole, ki ga otrok obiskuje. Lastnost otroka, ne družine in ne namestitve; ob nastanku delovnega lista se vanj prepiše — glej `docs/odlocitve/ADR-033` |
+| Preizkus (v vmesniku „Test") | Matematični test s točkami za tisk na A4, ki ga starš iz prepisov izbrane snovi sestavi v klepetu z modelom; rešitve so na svoji strani. Otrok ga reši s svinčnikom in v mobilni aplikaciji ne obstaja. Shrani se šele končan, vedno k enemu otroku. V kodi in bazi `preizkus`, nikoli `test` — glej `docs/odlocitve/ADR-053` |
 
 ## Načela, ki veljajo povsod
 

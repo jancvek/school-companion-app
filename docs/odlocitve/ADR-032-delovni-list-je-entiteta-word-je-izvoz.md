@@ -2,7 +2,8 @@
 
 - **Datum:** 2026-09-15
 - **Nastalo pri:** V4 (pred verzijo)
-- **Status:** Sprejeto
+- **Status:** Nadomeščeno z `ADR-053` (2026-10-10) — delovni listi so
+  zavrženi, V4 je verzija preizkusov
 
 ## Kontekst
 
