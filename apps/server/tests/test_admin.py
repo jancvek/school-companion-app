@@ -1241,6 +1241,12 @@ class TestPakiranje:
             "prepisi.html",
             # V4-R07.
             "preizkus.html",
+            # V4-R08: pregled in ogled shranjenih testov ter delni predlogi,
+            # ki ju vključujeta urejevalnik in ogled (`ADR-055` D).
+            "preizkusi.html",
+            "preizkus-ogled.html",
+            "_preizkus-izris.html",
+            "_preizkus-slog.html",
         }
 
 
@@ -1264,7 +1270,17 @@ class TestBrezJavaScripta:
     #: `prepisi.html`: gumb „Kopiraj v odložišče", V3-R11 (`ADR-048` C).
     #: `preizkus.html`: urejevalnik preizkusa, V4-R07 — skripta je tam pogoj in
     #: ne nadgradnja (`ADR-054`); njene meje preverja `test_preizkusi.py`.
-    IZVZETE = ("snov.html", "prepisi.html", "preizkus.html")
+    #: `preizkus-ogled.html`: ogled shranjenega preizkusa, V4-R08 — izriše ga
+    #: ista skripta kot urejevalnik (`ADR-055` D). `_preizkus-izris.html` je
+    #: ta skripta sama: delna predloga brez oznake za skripto, zato je vzorci
+    #: spodaj ne bi ujeli; izvzeta je **izrecno**, da je vidno, da je koda.
+    IZVZETE = (
+        "snov.html",
+        "prepisi.html",
+        "preizkus.html",
+        "preizkus-ogled.html",
+        "_preizkus-izris.html",
+    )
 
     def test_v_predlogah_ni_javascripta(self) -> None:
         from app.routers.admin import MAPA_PREDLOG

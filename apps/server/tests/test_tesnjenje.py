@@ -42,6 +42,7 @@ from app.db import (
     KviziRepository,
     MaterialsRepository,
     PoskusZaZapis,
+    PreizkusiRepository,
     ScheduleRepository,
     StatistikaRepository,
 )
@@ -111,6 +112,9 @@ class Druzina:
     #: družine se ne sme pokazati nikjer.
     stars_id: str
     otrok_id: str
+    #: Shranjen preizkus družine (V4-R08). Njegov `id` je sled kot vsak drug;
+    #: besedilo testa, rešitev in snovi nosi `znak`.
+    preizkus: str = ""
 
     def sledi_vsebine(self) -> tuple[str, ...]:
         """Nizi **vsebine**: snov, kvizi, vprašanja, postavke, poskusi.
@@ -128,6 +132,7 @@ class Druzina:
             self.obticala,
             self.resen_kviz,
             self.odprt_kviz,
+            self.preizkus,
             *self.vprasanja,
             *self.postavke,
             *self.poskusi,
@@ -242,10 +247,29 @@ def _zgradi(
             seja.scalars(select(QuestionAttempt.id).where(QuestionAttempt.family_id == family_id))
         )
 
+    # Shranjen preizkus (V4-R08), skozi repozitorij te družine. Predmet je
+    # predmet družine: pri A to ni matematika, in prav zato pot za test na
+    # osnovi tujega zapisa ne sme niti do preverbe predmeta.
+    preizkus_id = str(uuid5(NAMESPACE_URL, f"{znak}-preizkus"))
+    with Session(motor) as seja:
+        shranjen = PreizkusiRepository(seja, family_id).shrani(
+            preizkus_id=preizkus_id,
+            child_id=otrok_id,
+            saved_by=stars_id,
+            subject=subject,
+            title=f"Test {znak}",
+            test_md=f"# Test {znak}",
+            solutions_md=f"# Rešitve {znak}",
+            source_md=f"Snov testa {znak}",
+            model="model",
+        )
+        assert shranjen is not None
+
     return Druzina(
         family_id=family_id,
         subject=subject,
         znak=znak,
+        preizkus=preizkus_id,
         posneto=posneto,
         prejeto=prejeto,
         vprasanja=vprasanja,
@@ -503,6 +527,31 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
         ),
         frozenset({400}),
         (),
+    ),
+    # V4-R08. Pregled ne našteje tujega testa; ogled, osnova in shranjevanje
+    # na osnovi tujega zapisa so 404 z istim besedilom kot za neobstoječega.
+    # Močnejša primera — tuj `id` kot identifikator novega zapisa in tuja
+    # osnova pri klicu modela — sta spodaj v svojih testih.
+    ("GET", "/admin/assessments"): lambda o, a: (o.get("/admin/assessments"), OK, ()),
+    ("POST", "/admin/assessments"): lambda o, a: (
+        o.post(
+            "/admin/assessments",
+            data={
+                "id": str(uuid4()),
+                "osnova": a.preizkus,
+                "test_md": "# Nov",
+                "resitve_md": "",
+                "model": "model",
+            },
+        ),
+        NI,
+        (a.preizkus,),
+    ),
+    ("GET", "/admin/assessments/{preizkus_id}"): lambda o, a: (
+        o.get(f"/admin/assessments/{a.preizkus}"), NI, (a.preizkus,),
+    ),
+    ("GET", "/admin/assessments/{preizkus_id}/compose"): lambda o, a: (
+        o.get(f"/admin/assessments/{a.preizkus}/compose"), NI, (a.preizkus,),
     ),
     ("GET", "/admin/materials/{material_id}"): lambda o, a: (
         o.get(f"/admin/materials/{a.akt}"), NI, (a.akt,),
@@ -903,6 +952,11 @@ def test_druzina_b_na_istih_poteh_vidi_svoje(
     assert b.odprt_kviz in odjemalec.get("/quizzes/pending").text
     assert b.za_brisanje in odjemalec.get("/materials/pending-deletion").text
     assert b.otrok_id in odjemalec.get("/admin/family").text
+    assert b.preizkus in odjemalec.get("/admin/assessments").text
+    assert f"Test {b.znak}" in odjemalec.get(f"/admin/assessments/{b.preizkus}").text
+    assert f"Snov testa {b.znak}" in odjemalec.get(
+        f"/admin/assessments/{b.preizkus}/compose"
+    ).text
 
 
 def test_kartica_danes_ne_steje_slik_tuje_druzine(
@@ -1006,6 +1060,76 @@ def test_snov_tuje_druzine_ne_pride_v_vhod_modela(
         assert sled not in klicalec.vhod
     assert f"Povzetek {a.znak}" not in klicalec.vhod
     assert f"Odgovor 1 {a.znak}." not in klicalec.vhod
+
+
+def test_test_tuje_druzine_ni_osnova_za_model(
+    aplikacija: FastAPI, odjemalec: PrijavljenOdjemalec, druzini: tuple[Druzina, Druzina]
+) -> None:
+    """Kriterij V4-R08: test druge družine je 404 tudi kot osnova.
+
+    Zahteva nosi **veljaven lasten izbor** in tujo osnovo. Če bi pot ob
+    neznani osnovi tiho padla na izbor, bi bil odgovor 200; če bi osnovo
+    brala mimo družine, bi model dobil snov družine A.
+    """
+    a, b = druzini
+    klicalec: LazenKlicalec = aplikacija.state.klicalec_preizkusa
+
+    odgovor = odjemalec.post(
+        "/admin/assessments/generate",
+        data={
+            "subject": b.subject,
+            "snov": [b.akt],
+            "osnova": a.preizkus,
+            "zelja": "Sestavi test.",
+        },
+    )
+    svoja = odjemalec.post(
+        "/admin/assessments/generate",
+        data={"osnova": b.preizkus, "zelja": "Sestavi test."},
+    )
+
+    assert odgovor.status_code == 404
+    brez_sledi(odgovor.text, a, (a.preizkus,))
+    # Svoja osnova dela — sicer bi bila trditev zgoraj zelena nad potjo, ki
+    # osnove sploh ne zna.
+    assert svoja.status_code == 200
+    assert f"Snov testa {b.znak}" in klicalec.vhod
+    assert a.znak not in klicalec.vhod
+
+
+def test_identifikator_tujega_testa_ne_prepise_in_ne_izda_zapisa(
+    odjemalec: PrijavljenOdjemalec,
+    motor: Engine,
+    slike: Path,
+    druzini: tuple[Druzina, Druzina],
+) -> None:
+    """`id` novega zapisa, ki obstaja v drugi družini, je 409 (`ADR-055` G).
+
+    Idempotentnost („isti `id` vrne obstoječi zapis") velja **znotraj**
+    družine. Čez mejo ne sme vrniti naslova tujega zapisa in ga ne sme
+    spremeniti; lasten izbor je veljaven, da zavrnitev ni posledica česa
+    drugega.
+    """
+    a, b = druzini
+    prej = posnetek_druzine(motor, slike, a.family_id)
+
+    odgovor = odjemalec.post(
+        "/admin/assessments",
+        data={
+            "id": a.preizkus,
+            "subject": b.subject,
+            "snov": [b.akt],
+            "test_md": "# Vrinjen",
+            "resitve_md": "",
+            "model": "model",
+        },
+    )
+
+    assert odgovor.status_code == 409
+    assert "pot" not in odgovor.json()
+    assert posnetek_druzine(motor, slike, a.family_id) == prej
+    with Session(motor) as seja:
+        assert [p.id for p in PreizkusiRepository(seja, b.family_id).seznam()] == [b.preizkus]
 
 
 def test_vprasanja_tuje_druzine_ne_pridejo_v_besedilo(
@@ -1236,6 +1360,27 @@ def _c(seja: Session, druzina: Druzina) -> ClaniRepository:
     return ClaniRepository(seja, druzina.family_id)
 
 
+def _p(seja: Session, druzina: Druzina) -> PreizkusiRepository:
+    return PreizkusiRepository(seja, druzina.family_id)
+
+
+def _shrani_tuje(seja: Session, b: Druzina, **polja: str) -> object:
+    """`shrani` v imenu B s po enim podatkom družine A."""
+    podatki: dict[str, Any] = {
+        "preizkus_id": str(uuid4()),
+        "child_id": b.otrok_id,
+        "saved_by": b.stars_id,
+        "subject": b.subject,
+        "title": "Vrinjen",
+        "test_md": "# Vrinjen",
+        "solutions_md": "",
+        "source_md": "snov",
+        "model": "model",
+    }
+    podatki.update(polja)
+    return _p(seja, b).shrani(**podatki)
+
+
 def _nalozi[T](seja: Session, model: type[T], identifikator: str) -> T:
     """Vrstica tuje družine, prebrana mimo repozitorija — kot bi jo podtaknil klicatelj."""
     najdeno = seja.get(model, identifikator)
@@ -1276,6 +1421,26 @@ def _poskus(postavka: str) -> PoskusZaZapis:
 Preverba = Callable[[Session, Druzina, Druzina], bool]
 
 PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
+    # PreizkusiRepository (V4-R08). `shrani` ne sme sprejeti tujega otroka,
+    # tujega avtorja ne tuje osnove, in tujega `id` ne sme ne vrniti ne
+    # prepisati (`None` → 409 v poti).
+    ("PreizkusiRepository", "najdi"): lambda s, a, b: (
+        _p(s, b).najdi(a.preizkus) is None and _p(s, b).najdi(b.preizkus) is not None
+    ),
+    ("PreizkusiRepository", "seznam"): lambda s, a, b: (
+        [p.id for p in _p(s, b).seznam()] == [b.preizkus]
+        and _p(s, b).seznam(a.subject) == []
+    ),
+    ("PreizkusiRepository", "stej_po_predmetih"): lambda s, a, b: (
+        _p(s, b).stej_po_predmetih() == {b.subject: 1}
+    ),
+    ("PreizkusiRepository", "shrani"): lambda s, a, b: (
+        _vrze(ValueError, lambda: _shrani_tuje(s, b, child_id=a.otrok_id))
+        and _vrze(ValueError, lambda: _shrani_tuje(s, b, saved_by=a.stars_id))
+        and _vrze(ValueError, lambda: _shrani_tuje(s, b, base_id=a.preizkus))
+        and _shrani_tuje(s, b, preizkus_id=a.preizkus) is None
+        and [p.id for p in _p(s, b).seznam()] == [b.preizkus]
+    ),
     # ScheduleRepository (V3-R09). Urnik je last otroka, zato je tu sled
     # **tuj otrok**: potrditev zanj ne sme zapisati ničesar, branje pa ne sme
     # vrniti ničesar — tudi kadar urnik v resnici obstaja, le v drugi družini.
@@ -1475,6 +1640,7 @@ def test_vsaka_javna_metoda_repozitorija_ima_primer() -> None:
             StatistikaRepository,
             ClaniRepository,
             ScheduleRepository,
+            PreizkusiRepository,
         )
         for ime, clan in inspect.getmembers(razred)
         if not ime.startswith("_") and callable(clan)

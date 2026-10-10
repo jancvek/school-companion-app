@@ -23,7 +23,9 @@ from app.models import (
     STATUS_NOV,
     STATUS_PRIPRAVLJEN,
     STATUS_V_OBDELAVI,
+    VLOGA_STARS,
     Material,
+    Preizkus,
     Question,
     Quiz,
     QuizItem,
@@ -1784,6 +1786,36 @@ class TestBilaVKvizuPoNaslovljencu:
             assert len(kviz.postavke) == 3
 
 
+#: Shranjen preizkus, ki ga pometanje imen spodaj doda družini (V4-R08).
+TEST_ID = "e5f6a7b8-c9d0-4e1f-8a2b-3c4d5e6f7a8b"
+
+
+def shranjen_test(motor: Engine) -> str:
+    """Shranjen preizkus (V4-R08) privzetega otroka, neposredno v bazo."""
+    with Session(motor) as seja:
+        stars = seja.scalars(
+            select(User.id).where(User.family_id == CVEK_ID, User.role == VLOGA_STARS)
+        ).first()
+        assert stars is not None
+        seja.add(
+            Preizkus(
+                id=TEST_ID,
+                family_id=CVEK_ID,
+                child_id=OTROK_ID,
+                subject="MAT",
+                title="Preverjanje znanja",
+                test_md="# Preverjanje znanja",
+                solutions_md="# Rešitve",
+                source_md="## MAT — snov",
+                model="model",
+                saved_at=datetime(2026, 10, 10, 8, 0, tzinfo=UTC),
+                saved_by=stars,
+            )
+        )
+        seja.commit()
+    return TEST_ID
+
+
 class TestImenaPriEnemOtroku:
     """Kriterij `V3-R07`: pri enem otroku se imena ne izriše **nikjer**.
 
@@ -1794,8 +1826,11 @@ class TestImenaPriEnemOtroku:
     z imenom pade tu, ne šele v pregledu.
     """
 
-    def _strani(self, odjemalec: TestClient, quiz_id: str) -> dict[str, str]:
+    def _strani(self, odjemalec: TestClient, motor: Engine, quiz_id: str) -> dict[str, str]:
         """Vse strani `/admin`, ki bi ime lahko izrisale."""
+        # V4-R08: pregled shranjenih testov, ogled in urejevalnik na osnovi
+        # nosijo naslovljenca (`ADR-051`).
+        test_id = shranjen_test(motor)
         strani = {
             pot: odjemalec.get(pot).text
             for pot in (
@@ -1811,6 +1846,9 @@ class TestImenaPriEnemOtroku:
                 f"/admin/materials/{UUID_ENA}",
                 f"/admin/quizzes/{quiz_id}",
                 "/admin/quizzes/new?vstop=nova&subject=MAT",
+                "/admin/assessments",
+                f"/admin/assessments/{test_id}",
+                f"/admin/assessments/{test_id}/compose",
             )
         }
         strani["/admin/quizzes/preview"] = odjemalec.post(
@@ -1833,7 +1871,7 @@ class TestImenaPriEnemOtroku:
 
         with_ime = {
             pot: besedilo
-            for pot, besedilo in self._strani(odjemalec, quiz_id).items()
+            for pot, besedilo in self._strani(odjemalec, motor, quiz_id).items()
             if "Maša" in besedilo
         }
 
@@ -1855,7 +1893,7 @@ class TestImenaPriEnemOtroku:
         predlogi = ("za", "od", "pri", "z", "s", "o", "k", "h", "na", "v")
         napacne = {
             pot: besedilo
-            for pot, besedilo in self._strani(odjemalec, quiz_id).items()
+            for pot, besedilo in self._strani(odjemalec, motor, quiz_id).items()
             if any(
                 f"{predlog} {ime}" in besedilo
                 for predlog in predlogi
@@ -1878,7 +1916,7 @@ class TestImenaPriEnemOtroku:
         """
         snov(motor, slike)
         quiz_id = objavi(odjemalec, motor, [UUID_ENA])
-        strani = self._strani(odjemalec, quiz_id)
+        strani = self._strani(odjemalec, motor, quiz_id)
 
         # Strani z oznako **pri vrstici**: ime mora biti nekje v vsebini.
         brez_oznake = [
@@ -1889,6 +1927,9 @@ class TestImenaPriEnemOtroku:
                 "/admin/subjects/MAT",  # oznaka pri vrstici snovi
                 f"/admin/materials/{UUID_ENA}",
                 "/admin/quizzes/new?vstop=nova&subject=MAT",  # vrstica izbirnika
+                "/admin/assessments",  # vrstica shranjenega testa (V4-R08)
+                f"/admin/assessments/{TEST_ID}",
+                f"/admin/assessments/{TEST_ID}/compose",
             )
             if "Maša" not in strani[pot]
         ]

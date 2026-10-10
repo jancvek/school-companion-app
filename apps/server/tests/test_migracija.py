@@ -1367,3 +1367,63 @@ def test_razveljavitev_google_ohrani_prijavo(baza: str, slike: Path) -> None:
         ]
     finally:
         motor.dispose()
+
+
+# --- Shranjeni preizkusi (V4-R08, `0013_preizkusi`) ---
+
+
+def test_obstojeci_zapisi_prezivijo_preizkuse(baza: str, slike: Path) -> None:
+    """`0013_preizkusi` je gol `CREATE TABLE` in se obstoječih vrstic ne dotakne.
+
+    Preverja prav to, kar migracija **trdi** o sebi (kriterij `V4-R08`:
+    „migracija samo doda tabelo"). Baza je polna že pred njo.
+    """
+    config = alembic_nastavitve(baza)
+    _polna_baza_pred_druzinami(baza, slike)
+    command.upgrade(config, "0012_google_poverilnica")
+
+    motor = create_engine(baza)
+    try:
+        prej = _stej(motor)
+        tabele_prej = set(inspect(motor).get_table_names())
+        assert prej["materials"] >= 1, "test mora teči nad polno bazo"
+
+        command.upgrade(config, "0013_preizkusi")
+
+        assert set(inspect(motor).get_table_names()) - tabele_prej == {"preizkusi"}
+        assert _stej(motor) == prej, "preizkusi ne smejo premakniti nobene obstoječe vrstice"
+    finally:
+        motor.dispose()
+
+
+def test_razveljavitev_preizkusov_ohrani_ostalo(baza: str, slike: Path) -> None:
+    """`downgrade` spusti tabelo in nič drugega.
+
+    Shranjeni preizkusi se pri tem izgubijo dokončno — isti razred kot
+    `0005_kvizi` in `0010_urnik` —, vse ostalo ostane nedotaknjeno.
+    """
+    config = alembic_nastavitve(baza)
+    _polna_baza_pred_druzinami(baza, slike)
+    command.upgrade(config, "head")
+
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            povezava.execute(
+                text(
+                    "INSERT INTO preizkusi "
+                    "(id, family_id, child_id, subject, title, test_md, solutions_md, "
+                    "source_md, model, saved_at, saved_by, base_id) "
+                    "VALUES ('p1', :druzina, :otrok, 'MAT', 'T', '# T', '', 'snov', 'm', "
+                    "'2026-10-10 08:00:00', :otrok, NULL)"
+                ),
+                {"druzina": CVEK_ID, "otrok": MASA_ID},
+            )
+        prej = _stej(motor)
+
+        command.downgrade(config, "0012_google_poverilnica")
+
+        assert "preizkusi" not in set(inspect(motor).get_table_names())
+        assert _stej(motor) == prej, "razveljavitev preizkusov ne sme vzeti ničesar s sabo"
+    finally:
+        motor.dispose()
