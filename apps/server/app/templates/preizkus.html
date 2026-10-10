@@ -1,9 +1,9 @@
 {% extends "osnova.html" %}
 
-{% block naslov %}Kreiraj test — {{ koda }}{% endblock %}
+{% block naslov %}{% if osnova %}Nov test na osnovi{% else %}Kreiraj test{% endif %} — {{ koda }}{% endblock %}
 
 {% block glava %}
-  {% if snovi %}
+  {% if urejevalnik %}
     {# KaTeX z našega strežnika, nikoli s CDN-ja (`docs/odlocitve/ADR-054`,
        meja 2). Različica je v imenu mape. #}
     <link rel="stylesheet" href="/admin/static/vendor/katex-0.16.22/katex.min.css">
@@ -55,90 +55,51 @@
         border: 1px solid var(--rob); border-radius: 6px;
         background: var(--ploskev); color: var(--besedilo); font: inherit;
       }
-      .gumb:disabled, .predlog:disabled { opacity: 0.5; cursor: default; }
-      .gumb:disabled:hover { background: var(--ploskev); color: var(--poudarek); }
-      .vrstica { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
-      .vrstica .gumb { margin-top: 0; }
-      .orodja { margin: 0 0 1rem; }
-      .orodja label { cursor: pointer; }
-      #dolzina { font-variant-numeric: tabular-nums; font-weight: 600; }
-      .desno { overflow-x: auto; }
-
-      /* --- List A4 ---
-         Na zaslonu ima list odmik, ki je enak robu strani ob tisku (15 mm
-         zgoraj in spodaj, 18 mm levo in desno), zato je širina besedila na
-         zaslonu in na papirju ista in se vrstice lomijo enako. */
-      .list {
-        position: relative; box-sizing: border-box;
-        width: 210mm; min-height: 297mm; padding: 15mm 18mm; margin: 0 auto 1.5rem;
-        background: #fff; color: #000; border: 1px solid var(--rob);
-        font: 12pt/1.45 Georgia, "Times New Roman", serif;
+      .snov-besedilo {
+        width: 100%; min-height: 10rem; padding: 0.6rem; resize: vertical;
+        border: 1px solid var(--rob); border-radius: 6px;
+        background: var(--ploskev); color: var(--besedilo);
+        font: 0.85rem/1.4 ui-monospace, Consolas, monospace;
       }
-      .list h1 { font-size: 16pt; text-align: center; margin: 0 0 5mm; }
-      /* Vrstica z imenom, datumom in točkami: pri 12 pt se tri črte in trije
-         napisi ne izidejo v eno vrsto (preverjeno v brskalniku). */
-      .list h1 + p { font-size: 11pt; }
-      .list h2 { font-size: 12pt; margin: 6mm 0 2mm; }
-      .list p { margin: 0 0 3mm; }
-      .list ul, .list ol { margin: 0 0 3mm; padding-left: 7mm; }
-      /* Naloga se ob tisku ne razdeli čez stran (`ADR-053` B). */
-      .list .naloga { break-inside: avoid; page-break-inside: avoid; }
-      /* Črte za odgovore so **robovi** in ne ozadje: brskalnik ozadij
-         privzeto ne tiska (`POC-01` Ugotovitve). */
-      .crta {
-        display: inline-block; width: 30mm; height: 1em;
-        border-bottom: 0.3mm solid #000; vertical-align: baseline;
+      /* Lastno okno pred izgubo neshranjenega dela (V4-R08). */
+      .potrditev {
+        max-width: 26rem; padding: 1.25rem; border: 1px solid var(--rob);
+        border-radius: 8px; background: var(--ploskev); color: var(--besedilo);
       }
-      .crta-kratek { width: 14mm; }
-      .crta-dolg { width: 52mm; }
-      .racun { margin: 0 0 3mm; }
-      .racun div { height: 8.5mm; border-bottom: 0.2mm solid #777; }
-      .list .prazno {
-        margin-top: 40mm; text-align: center; color: var(--zamolklo);
-        font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
-      }
-      .meja-strani {
-        position: absolute; left: 0; right: 0; height: 0;
-        border-top: 1px dashed var(--nevarno);
-      }
-      .meja-strani span {
-        position: absolute; right: 2mm; top: 0; padding: 0 1mm;
-        color: var(--nevarno); background: #fff;
-        font: 11px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
-      }
-      .merilo { position: absolute; visibility: hidden; height: 100mm; width: 0; }
-
-      /* --- Tisk: samo list, brez vmesnika --- */
-      @page { size: A4; margin: 15mm 18mm; }
-      @media print {
-        .urejevalnik { display: block; }
-        .desno { overflow: visible; }
-        .list {
-          width: auto; min-height: 0; padding: 0; margin: 0; border: 0;
-          font-size: 12pt;
-        }
-        .meja-strani, .list .prazno { display: none; }
-        /* Rešitve na svoji strani in samo, če je izbrano. */
-        #list-resitve { break-before: page; page-break-before: always; }
-        body:not(.z-resitvami) #list-resitve { display: none; }
-      }
+      .potrditev::backdrop { background: rgba(0, 0, 0, 0.45); }
+      .potrditev p { margin: 0 0 1rem; }
+      {% include "_preizkus-slog.html" %}
     </style>
   {% endif %}
 {% endblock %}
 
 {% block vsebina %}
-  <h1 class="ne-tiskaj">Kreiraj test — {{ koda }}</h1>
+  <h1 class="ne-tiskaj">{% if osnova %}Nov test na osnovi{% else %}Kreiraj test{% endif %} — {{ koda }}</h1>
 
-  {% if not snovi %}
+  {% if not urejevalnik %}
     {# Prazen izbor ali predmet brez navodila ni napaka strežnika, ampak
        nedokončano dejanje, zato `opozorilo` in ne `napaka`. #}
     <p class="opozorilo">{{ opozorilo }}</p>
     <a class="nazaj" href="{{ pot_nazaj }}">← Nazaj</a>
   {% else %}
-    <p class="pod ne-tiskaj">
-      Test nastane iz prepisov izbranih slik. Delo živi samo v tem oknu: če ga
-      zapreš ali osvežiš, test in pogovor izgineta.
-    </p>
+    {% if osnova %}
+      {# Ime otroka je vrednost polja in se izriše samo pri več otrocih
+         (`ADR-039` F3); vrata so v `admin.imena_otrok`. #}
+      <p class="pod ne-tiskaj">
+        {% if osnova.otrok %}{{ osnova.otrok }} · {% endif %}{{ osnova.naslov }} · shranjeno {{ osnova.cas }}
+      </p>
+      <p class="pod ne-tiskaj">
+        Izhodišče je shranjen test z njegovo snovjo; izvirnik ostane, kakršen
+        je. Delo živi samo v tem oknu, dokler ga ne shraniš: če okno zapreš
+        ali osvežiš, novi test in pogovor izgineta.
+      </p>
+    {% else %}
+      <p class="pod ne-tiskaj">
+        Test nastane iz prepisov izbranih slik. Delo živi samo v tem oknu,
+        dokler ga ne shraniš: če okno zapreš ali osvežiš, test in pogovor
+        izgineta.
+      </p>
+    {% endif %}
 
     {# Stran brez skripte ne deluje — sprejeto z `ADR-054`, meja 3. #}
     <noscript>
@@ -149,9 +110,31 @@
       </p>
     </noscript>
 
-    <div class="urejevalnik" id="urejevalnik" data-pot="{{ pot_generiranja }}">
+    {# Naslova in identifikator novega zapisa izriše strežnik; skripta jih
+       samo prebere (`ADR-054`, meja 4; `ADR-055` G). #}
+    <div class="urejevalnik" id="urejevalnik" data-pot="{{ pot_generiranja }}"
+         data-pot-shrani="{{ pot_shranjevanja }}" data-id="{{ nov_id }}">
       <div class="levo ne-tiskaj">
         <h2>Snov</h2>
+        {% if osnova %}
+          {# Snov testa na osnovi je zamrznjeno besedilo iz zapisa, ne
+             trenutna snov predmeta; sličic zato ni (`ADR-055` E). Obrazec
+             nosi žeton in identifikator izhodišča — skripta ju bere od tu. #}
+          <form id="izbor">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="subject" value="{{ koda }}">
+            <input type="hidden" name="osnova" value="{{ osnova.id }}">
+          </form>
+          <details>
+            <summary>Prepisi, iz katerih je nastal shranjeni test</summary>
+            <textarea class="snov-besedilo" readonly
+                      aria-label="Snov shranjenega testa">{{ osnova.snov }}</textarea>
+          </details>
+          {# Izhodišče za skripto: besedilo v polju, ne v atributu in ne v
+             skripti — brskalnik ga vrne kot besedilo, brez razčlenjevanja. #}
+          <textarea id="osnova-test" hidden>{{ osnova.test_md }}</textarea>
+          <textarea id="osnova-resitve" hidden>{{ osnova.resitve_md }}</textarea>
+        {% else %}
         <ul class="slicice">
           {% for snov in snovi %}
             <li>
@@ -183,6 +166,7 @@
             Prepisi te snovi (v novem zavihku)
           </button>
         </form>
+        {% endif %}
 
         <h2>Pogovor</h2>
         <div class="klepet" id="klepet" aria-live="polite"></div>
@@ -208,7 +192,7 @@
           <span class="drobno" id="cakanje" role="status"></span>
         </div>
 
-        <a class="nazaj" href="{{ pot_nazaj }}">← Nazaj na {{ koda }}</a>
+        <a class="nazaj" href="{{ pot_nazaj }}">← Nazaj na {% if osnova %}shranjeni test{% else %}{{ koda }}{% endif %}</a>
       </div>
 
       <div class="desno">
@@ -218,6 +202,22 @@
           <span id="dolzina"></span>
           <label><input type="checkbox" id="z-resitvami"> Natisni tudi rešitve</label>
           <button class="gumb gumb-obdelava" type="button" id="natisni" disabled>Natisni / PDF</button>
+        </div>
+        {# Shrani = test je končan (`ADR-053` F). Izbirnik otroka samo, kadar
+           je izbrana snov od več otrok (kriterij `V4-R08`). #}
+        <div class="vrstica orodja ne-tiskaj">
+          {% if otroci_snovi %}
+            <label for="otrok">Otrok</label>
+            <select id="otrok">
+              <option value="">— izberi —</option>
+              {% for otrok in otroci_snovi %}
+                <option value="{{ otrok.id }}">{{ otrok.ime }}</option>
+              {% endfor %}
+            </select>
+          {% endif %}
+          <button class="gumb gumb-obdelava" type="button" id="shrani" disabled>Shrani</button>
+          <button class="gumb" type="button" id="zavrzi" disabled>Zavrzi</button>
+          <span class="drobno" id="shranjevanje" role="status"></span>
         </div>
         <p class="drobno ne-tiskaj" style="margin: 0 0 1rem">
           Dolžina je ocena: naloga se ob tisku ne razdeli čez stran, zato je
@@ -238,6 +238,16 @@
         </div>
       </div>
     </div>
+
+    {# Lastno okno pred izgubo neshranjenega dela (kriterij `V4-R08`). Brez
+       skripte se ne odpre nikoli; odpre ga `showModal`. #}
+    <dialog class="potrditev ne-tiskaj" id="potrditev">
+      <p>Test in pogovor bosta izbrisana.</p>
+      <div class="vrstica">
+        <button class="gumb" type="button" id="potrditev-da">Izbriši</button>
+        <button class="gumb gumb-obdelava" type="button" id="potrditev-ne">Ostani pri testu</button>
+      </div>
+    </dialog>
 
     {# Povečan prikaz slike snovi. Slog je isti kot pri podrobnostih snovi
        (`.prekritje` v ogrodju, V2-R08). #}
@@ -266,9 +276,11 @@
       1. Vgrajena v predlogo; brez `npm`, bundlerja in gradnje.
       2. Uporablja samo `marked` in `katex` od zgoraj.
       3. Brez nje stran ne deluje — to pove `<noscript>`.
-      4. Strežnik kliče samo na enem naslovu (`data-pot`, izriše ga strežnik),
-         z obrazcem in CSRF žetonom v polju `csrf`. Nikamor drugam ne pošilja
-         in ničesar ne shrani (ne `localStorage` ne piškotkov).
+      4. Strežnik kliče na dveh naslovih, ki ju izriše strežnik (`data-pot`
+         za model, `data-pot-shrani` za shranjevanje; `ADR-055` G), na enem
+         mestu v skripti, z obrazcem in CSRF žetonom v polju `csrf`. Nikamor
+         drugam ne pošilja; v brskalniku ne shrani ničesar (ne `localStorage`
+         ne piškotkov).
 
       **Stanje dela živi samo tu** (`ADR-053` E): `koraki` so odgovori modela,
       `kazalec` pove, koliko jih velja. Razveljavi/uveljavi premika kazalec;
@@ -304,13 +316,27 @@
         var ciljResitve = document.getElementById("resitve");
         var merilo = document.getElementById("merilo");
         var predlogi = document.querySelectorAll(".predlog");
+        var gumbShrani = document.getElementById("shrani");
+        var gumbZavrzi = document.getElementById("zavrzi");
+        var shranjevanje = document.getElementById("shranjevanje");
+        // Izbirnik otroka obstaja samo, kadar je izbrana snov od več otrok.
+        var izbirnikOtroka = document.getElementById("otrok");
+        var potrditev = document.getElementById("potrditev");
 
         var BREZ_KLJUCA = gumbPoslji.hasAttribute("data-brez-kljuca");
         var PRAZEN_LIST = ciljTest.firstElementChild;
 
-        // Natisljiva višina strani A4: 297 mm manj zgornji in spodnji rob.
-        var VISINA_STRANI_MM = 297 - 2 * 15;
-        var VRSTIC = { majhen: 2, srednji: 4, velik: 7 };
+        // Izhodišče pri testu na osnovi shranjenega: korak nič, pod katerega
+        // se ne da razveljaviti. Sicer ga ni.
+        var poljeOsnove = document.getElementById("osnova-test");
+        var OSNOVA = poljeOsnove
+          ? {
+              test_md: poljeOsnove.value,
+              resitve_md: document.getElementById("osnova-resitve").value
+            }
+          : null;
+
+        {% include "_preizkus-izris.html" %}
 
         var SPOROCILO_SEJA =
           "Seja je potekla ali je stran zastarela. Test, ki ga vidiš, lahko še " +
@@ -324,208 +350,45 @@
         var SPOROCILO_IZRIS =
           "Odgovora modela ni bilo mogoče izrisati. Test je ostal nespremenjen; " +
           "poskusi znova.";
+        var SPOROCILO_SEJA_SHRANI =
+          "Seja je potekla ali je stran zastarela, zato testa ni mogoče shraniti. " +
+          "Natisni ga ali ga shrani kot PDF, da ga ne izgubiš.";
+        var SPOROCILO_OMREZJE_SHRANI =
+          "Strežnik ni dosegljiv; test ni shranjen. Preveri povezavo in znova " +
+          "pritisni „Shrani“.";
+        var SPOROCILO_IZBERI_OTROKA =
+          "Izberi otroka, za katerega je test, in znova pritisni „Shrani“.";
+        var SPOROCILO_IZGUBA = "Test in pogovor bosta izbrisana.";
 
         var koraki = [];
         var kazalec = 0;
         var caka = false;
         var stoparica = null;
+        // Po uspešnem shranjevanju ali potrjenem odhodu opozorila ni več.
+        var zapusca = false;
+        var poPotrditvi = null;
 
-        // --- Izris markdowna s formulami ---
-
-        // Oznake, ki jih `marked` sme pustiti v listu. Vse drugo se zamenja z
-        // golim besedilom, **vsi atributi se odstranijo**: markdown bi sicer
-        // prek jezika ograjene kode, naslova povezave ali `alt` slike v
-        // atribut zapisal besedilo modela.
-        var DOVOLJENE = {
-          H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1, P: 1, BR: 1, HR: 1,
-          STRONG: 1, EM: 1, DEL: 1, UL: 1, OL: 1, LI: 1, BLOCKQUOTE: 1,
-          CODE: 1, PRE: 1, TABLE: 1, THEAD: 1, TBODY: 1, TR: 1, TH: 1, TD: 1
-        };
-
-        // Naše oznake v besedilu: formula, prostor za računanje, črta za
-        // odgovor. So iz znakov zasebne rabe, ki jih markdown ne pozna.
-        var OZNAKA =
-          /(\d+)|(majhen|srednji|velik)|(-kratek|-dolg)?/g;
-
-        var KATEX = {
-          delimiters: [
-            { left: "$$", right: "$$", display: true },
-            { left: "$", right: "$", display: false }
-          ],
-          throwOnError: false
-        };
-
-        // Praznega besedilnega vozlišča ne doda: odstavek s samim prostorom
-        // za računanje mora imeti natanko enega otroka, da ga spodaj
-        // prepoznamo.
-        function dodajBesedilo(cilj, besedilo) {
-          if (besedilo) {
-            cilj.appendChild(document.createTextNode(besedilo));
-          }
+        // Test, ki ga starš ta hip vidi: zadnji veljavni korak, sicer
+        // izhodišče, sicer nič.
+        function veljavni() {
+          return kazalec > 0 ? koraki[kazalec - 1] : OSNOVA;
         }
 
-        function prostor(velikost) {
-          var racun = document.createElement("div");
-          racun.className = "racun";
-          for (var i = 0; i < VRSTIC[velikost]; i += 1) {
-            racun.appendChild(document.createElement("div"));
-          }
-          return racun;
-        }
-
-        // Markdown modela → vozlišča lista. **Niza HTML ne sestavlja**: kar
-        // vrne `marked`, gre naravnost v `<template>`, se prečisti, in šele
-        // nato se oznake zamenjajo z vozlišči — samo v besedilu, nikoli v
-        // atributih. Vrže, če izris ne uspe; klicalec takrat testa ne zamenja.
-        function pripravi(markdown) {
-          var formule = [];
-
-          // Formule gredo iz besedila, preden ga vidi `marked`: ta bi v njih
-          // podčrtaje bral kot poudarek in poševnice kot ubežne znake.
-          // `\frac` postane `\dfrac`, ker je ulomek v vrstici za otroka
-          // premajhen (`POC-01` Ugotovitve).
-          function spravi(tex, samostojna) {
-            formule.push({
-              tex: tex.replace(/\\frac(?![a-zA-Z])/g, "\\dfrac"),
-              samostojna: samostojna
-            });
-            return "" + (formule.length - 1) + "";
-          }
-
-          // Znaki zasebne rabe so naše oznake; če jih pošlje model, gredo ven,
-          // preden nastane prva naša.
-          var vir = markdown.replace(/\r\n?/g, "\n").replace(/[-]/g, "");
-          vir = vir.replace(/\$\$([\s\S]+?)\$\$/g, function (_, tex) {
-            return spravi(tex, true);
-          });
-          vir = vir.replace(/\$((?:\\.|[^$\\\n])+?)\$/g, function (_, tex) {
-            return spravi(tex, false);
-          });
-
-          // Surovega HTML v izrisu ni.
-          vir = vir.replace(/&/g, "&amp;").replace(/</g, "&lt;");
-
-          // Dogovorjene oznake (`POC-01` Ugotovitve). Prostor za računanje je
-          // samostojna vrstica; dobi svoj odstavek, tudi če ga model ni ločil
-          // s prazno vrstico.
-          vir = vir.replace(
-            /^[ \t]*prostor:[ \t]*(majhen|srednji|velik)[ \t]*$/gim,
-            function (_, velikost) {
-              return "\n\n" + velikost.toLowerCase() + "\n\n";
-            }
-          );
-          vir = vir.replace(/\[odgovor(-kratek|-dolg)?\]/g, function (_, vrsta) {
-            return "" + (vrsta || "") + "";
-          });
-
-          var predloga = document.createElement("template");
-          predloga.innerHTML = marked.parse(vir, { gfm: true, breaks: false, async: false });
-          var vsebina = predloga.content;
-
-          Array.prototype.slice.call(vsebina.querySelectorAll("*")).forEach(function (element) {
-            if (!DOVOLJENE[element.tagName]) {
-              element.replaceWith(document.createTextNode(element.textContent));
-              return;
-            }
-            while (element.attributes.length > 0) {
-              element.removeAttribute(element.attributes[0].name);
-            }
-          });
-
-          // Oznake v **besedilnih vozliščih** postanejo vozlišča. Formula je
-          // v svojem elementu, da jo KaTeX izriše samo zase in je ne more
-          // združiti z znakom `$` iz sosednjega besedila.
-          var sprehod = document.createTreeWalker(vsebina, NodeFilter.SHOW_TEXT);
-          var besedila = [];
-          while (sprehod.nextNode()) {
-            besedila.push(sprehod.currentNode);
-          }
-          besedila.forEach(function (vozel) {
-            var besedilo = vozel.nodeValue;
-            var kosi = document.createDocumentFragment();
-            var konecPrejsnje = 0;
-            var ujemanje;
-            OZNAKA.lastIndex = 0;
-            while ((ujemanje = OZNAKA.exec(besedilo)) !== null) {
-              dodajBesedilo(kosi, besedilo.slice(konecPrejsnje, ujemanje.index));
-              konecPrejsnje = OZNAKA.lastIndex;
-              if (ujemanje[1] !== undefined) {
-                var formula = formule[Number(ujemanje[1])];
-                var locilo = formula.samostojna ? "$$" : "$";
-                var okvir = document.createElement("span");
-                okvir.textContent = locilo + formula.tex + locilo;
-                renderMathInElement(okvir, KATEX);
-                kosi.appendChild(okvir);
-              } else if (ujemanje[2] !== undefined) {
-                kosi.appendChild(prostor(ujemanje[2]));
-              } else {
-                var crta = document.createElement("span");
-                crta.className = "crta" + (ujemanje[3] ? " crta" + ujemanje[3] : "");
-                kosi.appendChild(crta);
-              }
-            }
-            if (konecPrejsnje === 0) {
-              return;
-            }
-            dodajBesedilo(kosi, besedilo.slice(konecPrejsnje));
-            vozel.replaceWith(kosi);
-          });
-
-          // Prostor za računanje je blok; odstavek, v katerem je sam, odpade.
-          Array.prototype.slice.call(vsebina.querySelectorAll("p > .racun")).forEach(function (racun) {
-            var odstavek = racun.parentNode;
-            if (odstavek.childNodes.length === 1) {
-              odstavek.replaceWith(racun);
-            }
-          });
-
-          // Naloga je vse od `##` do naslednjega `##`; zavita je v element,
-          // ki se ob tisku ne razdeli čez stran.
-          var list = document.createDocumentFragment();
-          var naloga = null;
-          Array.prototype.slice.call(vsebina.childNodes).forEach(function (vozel) {
-            if (vozel.nodeType === 1 && vozel.tagName === "H2") {
-              naloga = document.createElement("section");
-              naloga.className = "naloga";
-              list.appendChild(naloga);
-            }
-            (naloga || list).appendChild(vozel);
-          });
-          return list;
-        }
-
-        function izrisi(markdown, cilj) {
-          cilj.replaceChildren(pripravi(markdown));
+        // Neshranjeno delo je vsaj en korak, tudi razveljavljen: da se ga
+        // uveljaviti nazaj. Besedilo v polju za željo ne šteje.
+        function neshranjeno() {
+          return koraki.length > 0 && !zapusca;
         }
 
         // --- Dolžina in meje strani ---
 
         function izmeri() {
-          listTest.querySelectorAll(".meja-strani").forEach(function (meja) {
-            meja.remove();
-          });
-          if (kazalec === 0) {
+          if (!veljavni()) {
+            pocistiMeje(listTest);
             dolzina.textContent = "";
             return;
           }
-          var pikNaMm = merilo.offsetHeight / 100;
-          if (!pikNaMm) {
-            return;
-          }
-          var visinaMm = ciljTest.offsetHeight / pikNaMm;
-          var strani = visinaMm / VISINA_STRANI_MM;
-          dolzina.textContent = strani.toFixed(1).replace(".", ",") + " strani A4";
-
-          // Vidna meja strani: črta tam, kjer se konča natisljiva višina.
-          for (var stran = 1; stran < strani; stran += 1) {
-            var meja = document.createElement("div");
-            meja.className = "meja-strani";
-            meja.style.top = "calc(15mm + " + stran * VISINA_STRANI_MM + "mm)";
-            var napis = document.createElement("span");
-            napis.textContent = "konec " + stran + ". strani";
-            meja.appendChild(napis);
-            listTest.appendChild(meja);
-          }
+          izmeriList(listTest, ciljTest, merilo, dolzina);
         }
 
         // --- Stanje in prikaz ---
@@ -562,23 +425,30 @@
         }
 
         function osveziGumbe() {
-          var imaTest = kazalec > 0;
+          var imaTest = veljavni() !== null;
           gumbPoslji.textContent = imaTest ? "Posodobi test" : "Kreiraj test";
           gumbPoslji.disabled = caka || BREZ_KLJUCA;
           polje.disabled = caka || BREZ_KLJUCA;
           gumbRazveljavi.disabled = caka || kazalec === 0;
           gumbUveljavi.disabled = caka || kazalec === koraki.length;
           gumbNatisni.disabled = caka || !imaTest;
+          // Nespremenjeno izhodišče se ne shrani: brisanja ni, zato bi bil to
+          // trajen dvojnik.
+          gumbShrani.disabled = caka || kazalec === 0;
+          gumbZavrzi.disabled = caka || koraki.length === 0;
+          if (izbirnikOtroka) {
+            izbirnikOtroka.disabled = caka;
+          }
           predlogi.forEach(function (predlog) {
             predlog.disabled = caka || BREZ_KLJUCA;
           });
         }
 
         function osvezi() {
-          if (kazalec > 0) {
-            var trenutni = koraki[kazalec - 1];
-            izrisi(trenutni.test_md, ciljTest);
-            izrisi(trenutni.resitve_md, ciljResitve);
+          var prikazan = veljavni();
+          if (prikazan) {
+            izrisi(prikazan.test_md, ciljTest);
+            izrisi(prikazan.resitve_md, ciljResitve);
             listResitve.hidden = false;
           } else {
             ciljTest.replaceChildren(PRAZEN_LIST);
@@ -615,6 +485,35 @@
 
         // --- Klic strežnika ---
 
+        // Edini klic strežnika v skripti. Naslov je vedno eden od dveh, ki ju
+        // je izrisal strežnik; telo je obrazec z žetonom iz obrazca izbora.
+        // Odgovor, ki ni JSON, je stran za prijavo (potekla seja) ali stran z
+        // napako plasti (zastarel žeton, prevelik obrazec).
+        function poklici(pot, telo) {
+          return fetch(pot, {
+            method: "POST",
+            body: telo,
+            credentials: "same-origin",
+            headers: { Accept: "application/json" }
+          }).then(function (odgovor) {
+            var vrsta = odgovor.headers.get("content-type") || "";
+            if (vrsta.indexOf("application/json") !== 0) {
+              throw { niJson: true };
+            }
+            return odgovor.json().then(function (podatki) {
+              return { uspeh: odgovor.ok, podatki: podatki || {} };
+            });
+          });
+        }
+
+        function teloIzbora() {
+          var telo = new URLSearchParams();
+          new FormData(izbor).forEach(function (vrednost, ime) {
+            telo.append(ime, vrednost);
+          });
+          return telo;
+        }
+
         function nastaviCakanje(vklopljeno) {
           caka = vklopljeno;
           if (stoparica !== null) {
@@ -648,36 +547,17 @@
           }
           povej("");
 
-          var trenutni = kazalec > 0 ? koraki[kazalec - 1] : null;
-          var telo = new URLSearchParams();
-          new FormData(izbor).forEach(function (vrednost, ime) {
-            telo.append(ime, vrednost);
-          });
-          telo.append("test_md", trenutni ? trenutni.test_md : "");
-          telo.append("resitve_md", trenutni ? trenutni.resitve_md : "");
+          var prikazan = veljavni();
+          var telo = teloIzbora();
+          telo.append("test_md", prikazan ? prikazan.test_md : "");
+          telo.append("resitve_md", prikazan ? prikazan.resitve_md : "");
           koraki.slice(0, kazalec).forEach(function (korak) {
             telo.append("dosedanje", korak.zelja);
           });
           telo.append("zelja", zelja);
 
           nastaviCakanje(true);
-          fetch(koren.getAttribute("data-pot"), {
-            method: "POST",
-            body: telo,
-            credentials: "same-origin",
-            headers: { Accept: "application/json" }
-          })
-            .then(function (odgovor) {
-              // Odgovor, ki ni JSON, je stran za prijavo (potekla seja) ali
-              // stran z napako plasti (zastarel žeton, prevelik obrazec).
-              var vrsta = odgovor.headers.get("content-type") || "";
-              if (vrsta.indexOf("application/json") !== 0) {
-                throw { niJson: true };
-              }
-              return odgovor.json().then(function (podatki) {
-                return { uspeh: odgovor.ok, podatki: podatki || {} };
-              });
-            })
+          poklici(koren.getAttribute("data-pot"), telo)
             .then(function (izid) {
               var podatki = izid.podatki;
               if (!izid.uspeh || typeof podatki.napaka === "string") {
@@ -706,7 +586,9 @@
                 zelja: zelja,
                 sporocilo: podatki.sporocilo || "",
                 test_md: podatki.test_md,
-                resitve_md: resitve
+                resitve_md: resitve,
+                // Ime modela, ki je odgovoril; gre v zapis ob shranjevanju.
+                model: typeof podatki.model === "string" ? podatki.model : ""
               });
               kazalec = koraki.length;
               polje.value = "";
@@ -718,6 +600,83 @@
               nastaviCakanje(false);
               osvezi();
             });
+        }
+
+        // --- Shrani in zavrzi ---
+
+        function shrani() {
+          // Ista varovalka pred dvojnim klikom kot pri klicu modela. Tudi če
+          // bi drugi klic ušel, strežnik z istim identifikatorjem ne naredi
+          // drugega zapisa.
+          if (caka || kazalec === 0) {
+            return;
+          }
+          if (izbirnikOtroka && !izbirnikOtroka.value) {
+            povej(SPOROCILO_IZBERI_OTROKA);
+            return;
+          }
+          povej("");
+
+          var koncan = koraki[kazalec - 1];
+          var telo = teloIzbora();
+          telo.append("id", koren.getAttribute("data-id"));
+          telo.append("test_md", koncan.test_md);
+          telo.append("resitve_md", koncan.resitve_md);
+          telo.append("model", koncan.model);
+          if (izbirnikOtroka) {
+            telo.append("otrok", izbirnikOtroka.value);
+          }
+
+          caka = true;
+          shranjevanje.textContent = "Shranjujem …";
+          osveziGumbe();
+          poklici(koren.getAttribute("data-pot-shrani"), telo)
+            .then(function (izid) {
+              var podatki = izid.podatki;
+              if (!izid.uspeh || typeof podatki.pot !== "string") {
+                povej(podatki.napaka || SPOROCILO_OMREZJE_SHRANI);
+                return;
+              }
+              // Shranjeno: urejanje je končano, odpre se ogled. Naslov je
+              // vrnil strežnik.
+              zapusca = true;
+              shranjevanje.textContent = "Shranjeno.";
+              window.location.assign(podatki.pot);
+            })
+            .catch(function (napaka) {
+              povej(napaka && napaka.niJson ? SPOROCILO_SEJA_SHRANI : SPOROCILO_OMREZJE_SHRANI);
+            })
+            .then(function () {
+              if (!zapusca) {
+                caka = false;
+                shranjevanje.textContent = "";
+                osveziGumbe();
+              }
+            });
+        }
+
+        // Lastno okno pred izgubo dela. `dejanje` steče samo po potrditvi.
+        function vprasaj(dejanje) {
+          if (typeof potrditev.showModal !== "function") {
+            if (window.confirm(SPOROCILO_IZGUBA)) {
+              dejanje();
+            }
+            return;
+          }
+          poPotrditvi = dejanje;
+          potrditev.showModal();
+        }
+
+        function zavrzi() {
+          if (caka || koraki.length === 0) {
+            return;
+          }
+          vprasaj(function () {
+            koraki.length = 0;
+            kazalec = 0;
+            povej("");
+            osvezi();
+          });
         }
 
         // --- Povečan prikaz slik snovi ---
@@ -767,6 +726,72 @@
         gumbNatisni.addEventListener("click", function () {
           window.print();
         });
+        gumbShrani.addEventListener("click", shrani);
+        gumbZavrzi.addEventListener("click", zavrzi);
+
+        document.getElementById("potrditev-da").addEventListener("click", function () {
+          var dejanje = poPotrditvi;
+          poPotrditvi = null;
+          potrditev.close();
+          if (dejanje) {
+            dejanje();
+          }
+        });
+        document.getElementById("potrditev-ne").addEventListener("click", function () {
+          poPotrditvi = null;
+          potrditev.close();
+        });
+        // Tipka Esc okno zapre sama; dejanje s tem odpade.
+        potrditev.addEventListener("cancel", function () {
+          poPotrditvi = null;
+        });
+
+        // Zapiranje ali osvežitev okna: opozori brskalnik sam, s svojim
+        // besedilom. Brez neshranjenega dela opozorila ni.
+        window.addEventListener("beforeunload", function (dogodek) {
+          if (!neshranjeno()) {
+            return;
+          }
+          dogodek.preventDefault();
+          dogodek.returnValue = "";
+        });
+
+        // Povezave in obrazci, ki zapustijo urejevalnik v istem oknu (nazaj,
+        // glava, odjava), najprej vprašajo. Kar odpre nov zavihek, ne: delo
+        // tu ostane. Sličice snovi imajo svoj klik in strani ne zapustijo.
+        document.addEventListener("click", function (dogodek) {
+          var cilj = dogodek.target;
+          var povezava = cilj && cilj.closest ? cilj.closest("a[href]") : null;
+          // Klik s tipko ali s srednjim gumbom odpre povezavo drugje; okno
+          // z delom ostane, zato vprašanja ni.
+          var drugam =
+            dogodek.button !== 0 || dogodek.ctrlKey || dogodek.metaKey || dogodek.shiftKey;
+          if (
+            !povezava ||
+            drugam ||
+            povezava.target === "_blank" ||
+            povezava.classList.contains("slicica") ||
+            !neshranjeno()
+          ) {
+            return;
+          }
+          dogodek.preventDefault();
+          vprasaj(function () {
+            zapusca = true;
+            window.location.assign(povezava.href);
+          });
+        });
+        document.addEventListener("submit", function (dogodek) {
+          var obrazec = dogodek.target;
+          if (obrazec.target === "_blank" || !neshranjeno()) {
+            return;
+          }
+          dogodek.preventDefault();
+          vprasaj(function () {
+            zapusca = true;
+            obrazec.submit();
+          });
+        });
         zResitvami.addEventListener("change", function () {
           document.body.classList.toggle("z-resitvami", zResitvami.checked);
         });
@@ -779,6 +804,9 @@
         });
 
         document.addEventListener("keydown", function (dogodek) {
+          if (potrditev.open) {
+            return;
+          }
           if (!prekritje.hidden) {
             if (dogodek.key === "Escape") {
               zapriSliko();

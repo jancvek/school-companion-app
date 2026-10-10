@@ -1,0 +1,134 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}{{ naslov }} — test{% endblock %}
+
+{% block glava %}
+  {# KaTeX z našega strežnika, nikoli s CDN-ja (`docs/odlocitve/ADR-054`,
+     meja 2). #}
+  <link rel="stylesheet" href="/admin/static/vendor/katex-0.16.22/katex.min.css">
+  <style>
+    main { max-width: none; }
+    .snov-besedilo {
+      width: 100%; max-width: 210mm; min-height: 16rem; padding: 0.6rem; resize: vertical;
+      border: 1px solid var(--rob); border-radius: 6px;
+      background: var(--ploskev); color: var(--besedilo);
+      font: 0.85rem/1.4 ui-monospace, Consolas, monospace;
+    }
+    {% include "_preizkus-slog.html" %}
+  </style>
+{% endblock %}
+
+{% block vsebina %}
+  <h1 class="ne-tiskaj">{{ naslov }}</h1>
+  {# Ime otroka je vrednost polja in se izriše samo pri več otrocih
+     (`ADR-039` F3, `ADR-051`). #}
+  <p class="pod ne-tiskaj">
+    {% if otrok %}{{ otrok }} · {% endif %}{{ koda }} · shranjeno {{ cas }} · model {{ model }}
+  </p>
+  {% if izhodisce %}
+    <p class="pod ne-tiskaj">
+      Nastal na osnovi shranjenega testa
+      <a href="{{ izhodisce.pot }}">{{ izhodisce.naslov }}</a>.
+    </p>
+  {% endif %}
+
+  {# Stran brez skripte ne izriše lista — izjema od `ADR-024`, razširjena z
+     `ADR-055` D. Brez nje je berljiva samo snov spodaj. #}
+  <noscript>
+    <p class="napaka">
+      Ogled testa potrebuje JavaScript: brez njega se formule in list ne
+      izrišejo. Vklopi ga v brskalniku in stran osveži.
+    </p>
+  </noscript>
+
+  <div class="vrstica orodja ne-tiskaj">
+    <span id="dolzina"></span>
+    <label><input type="checkbox" id="z-resitvami"> Natisni tudi rešitve</label>
+    <button class="gumb gumb-obdelava" type="button" id="natisni">Natisni / PDF</button>
+    <a class="gumb gumb-obdelava" href="{{ pot_osnove }}">Nov test na tej osnovi</a>
+  </div>
+  <p class="drobno ne-tiskaj" style="margin: 0 0 1rem">
+    Shranjenega testa ni mogoče urejati. Dolžina je ocena: naloga se ob tisku
+    ne razdeli čez stran. V oknu za tisk izklopi glavo in nogo.
+  </p>
+  <p class="napaka ne-tiskaj" id="obvestilo" role="alert" hidden></p>
+
+  <div class="desno">
+    <div class="list" id="list-test">
+      <div class="merilo" id="merilo"></div>
+      <div id="test"></div>
+    </div>
+    <div class="list" id="list-resitve">
+      <div id="resitve"></div>
+    </div>
+  </div>
+
+  <details class="ne-tiskaj">
+    <summary>Snov: prepisi, iz katerih je test nastal</summary>
+    <textarea class="snov-besedilo" readonly aria-label="Snov testa">{{ snov }}</textarea>
+  </details>
+
+  {# Vir za skripto: besedilo v polju, ne v atributu in ne v skripti. #}
+  <textarea id="vir-test" hidden>{{ test_md }}</textarea>
+  <textarea id="vir-resitve" hidden>{{ resitve_md }}</textarea>
+
+  <a class="nazaj ne-tiskaj" href="{{ pot_pregleda }}">← Nazaj na shranjene teste</a>
+
+  <script src="/admin/static/vendor/marked-15.0.12/marked.min.js"></script>
+  <script src="/admin/static/vendor/katex-0.16.22/katex.min.js"></script>
+  <script src="/admin/static/vendor/katex-0.16.22/contrib/auto-render.min.js"></script>
+
+  {#
+    Skripta ogleda. Izjema od `ADR-024`, razširjena z `ADR-055` D:
+
+    1. Vgrajena v izris; izris lista je skupen z urejevalnikom
+       (`_preizkus-izris.html`).
+    2. Uporablja samo `marked` in `katex` od zgoraj.
+    3. Brez nje se list ne izriše — to pove `<noscript>`; snov je berljiva.
+    4. **Strežnika ne kliče**, ničesar ne pošilja in ničesar ne shrani.
+
+    Besedilo iz baze je še vedno besedilo modela in gre skozi isto čiščenje
+    kot v urejevalniku.
+  #}
+  <script>
+    (function () {
+      var listTest = document.getElementById("list-test");
+      var ciljTest = document.getElementById("test");
+      var ciljResitve = document.getElementById("resitve");
+      var merilo = document.getElementById("merilo");
+      var dolzina = document.getElementById("dolzina");
+      var zResitvami = document.getElementById("z-resitvami");
+      var obvestilo = document.getElementById("obvestilo");
+
+      {% include "_preizkus-izris.html" %}
+
+      function izmeri() {
+        izmeriList(listTest, ciljTest, merilo, dolzina);
+      }
+
+      try {
+        izrisi(document.getElementById("vir-test").value, ciljTest);
+        izrisi(document.getElementById("vir-resitve").value, ciljResitve);
+      } catch (napakaIzrisa) {
+        obvestilo.textContent =
+          "Testa ni bilo mogoče izrisati. Osveži stran; če se ponovi, je " +
+          "besedilo testa v bazi poškodovano.";
+        obvestilo.hidden = false;
+      }
+
+      document.getElementById("natisni").addEventListener("click", function () {
+        window.print();
+      });
+      zResitvami.addEventListener("change", function () {
+        document.body.classList.toggle("z-resitvami", zResitvami.checked);
+      });
+      window.addEventListener("resize", izmeri);
+
+      izmeri();
+      // Pisave KaTeX spremenijo višino vrstic; meritev se ponovi, ko so na mestu.
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(izmeri);
+      }
+    })();
+  </script>
+{% endblock %}

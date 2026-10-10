@@ -1,0 +1,211 @@
+{# Izris preizkusa: markdown s formulami v vozlišča lista, dolžina in meje
+   strani (V4-R07). Skupen urejevalniku in ogledu shranjenega preizkusa
+   (V4-R08, `docs/odlocitve/ADR-055` D). Vključi se **znotraj** skripte
+   strani, v njeno funkcijo; sam oznake za skripto nima, zato ostane skripta
+   vgrajena v izris in gradnje ni (`ADR-054`, meja 1).
+
+   Strežnika ne kliče in ničesar ne shrani. Besedilo, ki ga izriše, ni
+   zaupanja vreden HTML — ne glede na to, ali pride iz odgovora modela ali iz
+   baze: shranjen preizkus je še vedno besedilo modela. #}
+        // Natisljiva višina strani A4: 297 mm manj zgornji in spodnji rob.
+        var VISINA_STRANI_MM = 297 - 2 * 15;
+        var VRSTIC = { majhen: 2, srednji: 4, velik: 7 };
+
+        // --- Izris markdowna s formulami ---
+
+        // Oznake, ki jih `marked` sme pustiti v listu. Vse drugo se zamenja z
+        // golim besedilom, **vsi atributi se odstranijo**: markdown bi sicer
+        // prek jezika ograjene kode, naslova povezave ali `alt` slike v
+        // atribut zapisal besedilo modela.
+        var DOVOLJENE = {
+          H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1, P: 1, BR: 1, HR: 1,
+          STRONG: 1, EM: 1, DEL: 1, UL: 1, OL: 1, LI: 1, BLOCKQUOTE: 1,
+          CODE: 1, PRE: 1, TABLE: 1, THEAD: 1, TBODY: 1, TR: 1, TH: 1, TD: 1
+        };
+
+        // Naše oznake v besedilu: formula, prostor za računanje, črta za
+        // odgovor. So iz znakov zasebne rabe, ki jih markdown ne pozna.
+        var OZNAKA =
+          /(\d+)|(majhen|srednji|velik)|(-kratek|-dolg)?/g;
+
+        var KATEX = {
+          delimiters: [
+            { left: "$$", right: "$$", display: true },
+            { left: "$", right: "$", display: false }
+          ],
+          throwOnError: false
+        };
+
+        // Praznega besedilnega vozlišča ne doda: odstavek s samim prostorom
+        // za računanje mora imeti natanko enega otroka, da ga spodaj
+        // prepoznamo.
+        function dodajBesedilo(cilj, besedilo) {
+          if (besedilo) {
+            cilj.appendChild(document.createTextNode(besedilo));
+          }
+        }
+
+        function prostor(velikost) {
+          var racun = document.createElement("div");
+          racun.className = "racun";
+          for (var i = 0; i < VRSTIC[velikost]; i += 1) {
+            racun.appendChild(document.createElement("div"));
+          }
+          return racun;
+        }
+
+        // Markdown modela → vozlišča lista. **Niza HTML ne sestavlja**: kar
+        // vrne `marked`, gre naravnost v `<template>`, se prečisti, in šele
+        // nato se oznake zamenjajo z vozlišči — samo v besedilu, nikoli v
+        // atributih. Vrže, če izris ne uspe; klicalec takrat testa ne zamenja.
+        function pripravi(markdown) {
+          var formule = [];
+
+          // Formule gredo iz besedila, preden ga vidi `marked`: ta bi v njih
+          // podčrtaje bral kot poudarek in poševnice kot ubežne znake.
+          // `\frac` postane `\dfrac`, ker je ulomek v vrstici za otroka
+          // premajhen (`POC-01` Ugotovitve).
+          function spravi(tex, samostojna) {
+            formule.push({
+              tex: tex.replace(/\\frac(?![a-zA-Z])/g, "\\dfrac"),
+              samostojna: samostojna
+            });
+            return "" + (formule.length - 1) + "";
+          }
+
+          // Znaki zasebne rabe so naše oznake; če jih pošlje model, gredo ven,
+          // preden nastane prva naša.
+          var vir = markdown.replace(/\r\n?/g, "\n").replace(/[-]/g, "");
+          vir = vir.replace(/\$\$([\s\S]+?)\$\$/g, function (_, tex) {
+            return spravi(tex, true);
+          });
+          vir = vir.replace(/\$((?:\\.|[^$\\\n])+?)\$/g, function (_, tex) {
+            return spravi(tex, false);
+          });
+
+          // Surovega HTML v izrisu ni.
+          vir = vir.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+          // Dogovorjene oznake (`POC-01` Ugotovitve). Prostor za računanje je
+          // samostojna vrstica; dobi svoj odstavek, tudi če ga model ni ločil
+          // s prazno vrstico.
+          vir = vir.replace(
+            /^[ \t]*prostor:[ \t]*(majhen|srednji|velik)[ \t]*$/gim,
+            function (_, velikost) {
+              return "\n\n" + velikost.toLowerCase() + "\n\n";
+            }
+          );
+          vir = vir.replace(/\[odgovor(-kratek|-dolg)?\]/g, function (_, vrsta) {
+            return "" + (vrsta || "") + "";
+          });
+
+          var predloga = document.createElement("template");
+          predloga.innerHTML = marked.parse(vir, { gfm: true, breaks: false, async: false });
+          var vsebina = predloga.content;
+
+          Array.prototype.slice.call(vsebina.querySelectorAll("*")).forEach(function (element) {
+            if (!DOVOLJENE[element.tagName]) {
+              element.replaceWith(document.createTextNode(element.textContent));
+              return;
+            }
+            while (element.attributes.length > 0) {
+              element.removeAttribute(element.attributes[0].name);
+            }
+          });
+
+          // Oznake v **besedilnih vozliščih** postanejo vozlišča. Formula je
+          // v svojem elementu, da jo KaTeX izriše samo zase in je ne more
+          // združiti z znakom `$` iz sosednjega besedila.
+          var sprehod = document.createTreeWalker(vsebina, NodeFilter.SHOW_TEXT);
+          var besedila = [];
+          while (sprehod.nextNode()) {
+            besedila.push(sprehod.currentNode);
+          }
+          besedila.forEach(function (vozel) {
+            var besedilo = vozel.nodeValue;
+            var kosi = document.createDocumentFragment();
+            var konecPrejsnje = 0;
+            var ujemanje;
+            OZNAKA.lastIndex = 0;
+            while ((ujemanje = OZNAKA.exec(besedilo)) !== null) {
+              dodajBesedilo(kosi, besedilo.slice(konecPrejsnje, ujemanje.index));
+              konecPrejsnje = OZNAKA.lastIndex;
+              if (ujemanje[1] !== undefined) {
+                var formula = formule[Number(ujemanje[1])];
+                var locilo = formula.samostojna ? "$$" : "$";
+                var okvir = document.createElement("span");
+                okvir.textContent = locilo + formula.tex + locilo;
+                renderMathInElement(okvir, KATEX);
+                kosi.appendChild(okvir);
+              } else if (ujemanje[2] !== undefined) {
+                kosi.appendChild(prostor(ujemanje[2]));
+              } else {
+                var crta = document.createElement("span");
+                crta.className = "crta" + (ujemanje[3] ? " crta" + ujemanje[3] : "");
+                kosi.appendChild(crta);
+              }
+            }
+            if (konecPrejsnje === 0) {
+              return;
+            }
+            dodajBesedilo(kosi, besedilo.slice(konecPrejsnje));
+            vozel.replaceWith(kosi);
+          });
+
+          // Prostor za računanje je blok; odstavek, v katerem je sam, odpade.
+          Array.prototype.slice.call(vsebina.querySelectorAll("p > .racun")).forEach(function (racun) {
+            var odstavek = racun.parentNode;
+            if (odstavek.childNodes.length === 1) {
+              odstavek.replaceWith(racun);
+            }
+          });
+
+          // Naloga je vse od `##` do naslednjega `##`; zavita je v element,
+          // ki se ob tisku ne razdeli čez stran.
+          var list = document.createDocumentFragment();
+          var naloga = null;
+          Array.prototype.slice.call(vsebina.childNodes).forEach(function (vozel) {
+            if (vozel.nodeType === 1 && vozel.tagName === "H2") {
+              naloga = document.createElement("section");
+              naloga.className = "naloga";
+              list.appendChild(naloga);
+            }
+            (naloga || list).appendChild(vozel);
+          });
+          return list;
+        }
+
+        function izrisi(markdown, cilj) {
+          cilj.replaceChildren(pripravi(markdown));
+        }
+
+        // --- Dolžina in meje strani ---
+
+        function pocistiMeje(list) {
+          list.querySelectorAll(".meja-strani").forEach(function (meja) {
+            meja.remove();
+          });
+        }
+
+        // Izmeri vsebino lista, zapiše dolžino v `napis` in nariše meje strani.
+        function izmeriList(list, vsebina, merilo, napis) {
+          pocistiMeje(list);
+          var pikNaMm = merilo.offsetHeight / 100;
+          if (!pikNaMm) {
+            return;
+          }
+          var visinaMm = vsebina.offsetHeight / pikNaMm;
+          var strani = visinaMm / VISINA_STRANI_MM;
+          napis.textContent = strani.toFixed(1).replace(".", ",") + " strani A4";
+
+          // Vidna meja strani: črta tam, kjer se konča natisljiva višina.
+          for (var stran = 1; stran < strani; stran += 1) {
+            var meja = document.createElement("div");
+            meja.className = "meja-strani";
+            meja.style.top = "calc(15mm + " + stran * VISINA_STRANI_MM + "mm)";
+            var oznaka = document.createElement("span");
+            oznaka.textContent = "konec " + stran + ". strani";
+            meja.appendChild(oznaka);
+            list.appendChild(meja);
+          }
+        }

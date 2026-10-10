@@ -1,0 +1,70 @@
+{# Slog lista A4 in tiska za preizkus (V4-R07), skupen urejevalniku in
+   ogledu shranjenega preizkusa (V4-R08, `docs/odlocitve/ADR-055` D).
+   Vključi se **znotraj** oznake za slog; sam je nima. #}
+      .gumb:disabled, .predlog:disabled { opacity: 0.5; cursor: default; }
+      .gumb:disabled:hover { background: var(--ploskev); color: var(--poudarek); }
+      .vrstica { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+      .vrstica .gumb { margin-top: 0; }
+      .orodja { margin: 0 0 1rem; }
+      .orodja label { cursor: pointer; }
+      #dolzina { font-variant-numeric: tabular-nums; font-weight: 600; }
+      .desno { overflow-x: auto; }
+
+      /* --- List A4 ---
+         Na zaslonu ima list odmik, ki je enak robu strani ob tisku (15 mm
+         zgoraj in spodaj, 18 mm levo in desno), zato je širina besedila na
+         zaslonu in na papirju ista in se vrstice lomijo enako. */
+      .list {
+        position: relative; box-sizing: border-box;
+        width: 210mm; min-height: 297mm; padding: 15mm 18mm; margin: 0 auto 1.5rem;
+        background: #fff; color: #000; border: 1px solid var(--rob);
+        font: 12pt/1.45 Georgia, "Times New Roman", serif;
+      }
+      .list h1 { font-size: 16pt; text-align: center; margin: 0 0 5mm; }
+      /* Vrstica z imenom, datumom in točkami: pri 12 pt se tri črte in trije
+         napisi ne izidejo v eno vrsto (preverjeno v brskalniku). */
+      .list h1 + p { font-size: 11pt; }
+      .list h2 { font-size: 12pt; margin: 6mm 0 2mm; }
+      .list p { margin: 0 0 3mm; }
+      .list ul, .list ol { margin: 0 0 3mm; padding-left: 7mm; }
+      /* Naloga se ob tisku ne razdeli čez stran (`ADR-053` B). */
+      .list .naloga { break-inside: avoid; page-break-inside: avoid; }
+      /* Črte za odgovore so **robovi** in ne ozadje: brskalnik ozadij
+         privzeto ne tiska (`POC-01` Ugotovitve). */
+      .crta {
+        display: inline-block; width: 30mm; height: 1em;
+        border-bottom: 0.3mm solid #000; vertical-align: baseline;
+      }
+      .crta-kratek { width: 14mm; }
+      .crta-dolg { width: 52mm; }
+      .racun { margin: 0 0 3mm; }
+      .racun div { height: 8.5mm; border-bottom: 0.2mm solid #777; }
+      .list .prazno {
+        margin-top: 40mm; text-align: center; color: var(--zamolklo);
+        font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      .meja-strani {
+        position: absolute; left: 0; right: 0; height: 0;
+        border-top: 1px dashed var(--nevarno);
+      }
+      .meja-strani span {
+        position: absolute; right: 2mm; top: 0; padding: 0 1mm;
+        color: var(--nevarno); background: #fff;
+        font: 11px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      .merilo { position: absolute; visibility: hidden; height: 100mm; width: 0; }
+
+      /* --- Tisk: samo list, brez vmesnika --- */
+      @page { size: A4; margin: 15mm 18mm; }
+      @media print {
+        .urejevalnik { display: block; }
+        .desno { overflow: visible; }
+        .list {
+          width: auto; min-height: 0; padding: 0; margin: 0; border: 0;
+          font-size: 12pt;
+        }
+        .meja-strani, .list .prazno { display: none; }
+        /* Rešitve na svoji strani in samo, če je izbrano. */
+        #list-resitve { break-before: page; page-break-before: always; }
+        body:not(.z-resitvami) #list-resitve { display: none; }
+      }

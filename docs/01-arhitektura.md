@@ -82,12 +82,12 @@ logika testljiva brez naprave.
 | `app/routers/sistem.py` | stran lastnika sistema pod `/admin/system`: družine, odpiranje nove, stanje družine in dejanja nad starši (V3-R05) |
 | `app/routers/racun.py` | nastavitve prijavljenega starša pod `/admin/racun`: načini prijave, povezava in odstranitev Googla (V3-R08) |
 | `app/google.py` | Google prijava: poti, naslovi, vezivo stanja, razsodbe in **edini modul, ki govori z Googlom** (V3-R08). Brez FastAPI in brez baze |
-| `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository`, `StatistikaRepository` (V2-R04, samo bere), `ClaniRepository` (V3-R06) in `ScheduleRepository` (V3-R09) — vsak z obvezno družino (V3-R01) — ter `DruzineRepository` (od V3-R05 tudi pregled čez družine) in `PrijavaRepository` (V3-R03), edina brez družine; edina pot do baze |
-| `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03); `child_id` na snovi, kvizu in poskusu (V3-R07); `schedules` in `schedule_entries` (V3-R09); `credentials.label` (V3-R08) |
+| `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository`, `StatistikaRepository` (V2-R04, samo bere), `ClaniRepository` (V3-R06), `ScheduleRepository` (V3-R09) in `PreizkusiRepository` (V4-R08) — vsak z obvezno družino (V3-R01) — ter `DruzineRepository` (od V3-R05 tudi pregled čez družine) in `PrijavaRepository` (V3-R03), edina brez družine; edina pot do baze |
+| `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03); `child_id` na snovi, kvizu in poskusu (V3-R07); `schedules` in `schedule_entries` (V3-R09); `credentials.label` (V3-R08); `preizkusi` (V4-R08) |
 | `app/storage.py` | zapis, meja mape in brisanje slik na disku; mapa družine (V3-R01); podmapa `urniki/` (V3-R09) |
 | `app/vision.py` | **edini modul, ki uvaža `openai`**: prompta, shemi odgovorov, klic. Trije klicalci — snov (V1-R03) in urnik (V3-R09) nad skupnim `_izvedi_klic`, preizkus (V4-R07, brez slike, svoj ključ in model) — vsi nad skupnim `_poslji` |
-| `app/preizkus.py` | pravila sestavljanja preizkusa: navodilo modelu po predmetu, sestava vhoda, shema in razčlenitev odgovora (V4-R07). Brez FastAPI, brez baze in brez `openai` |
-| `app/routers/preizkusi.py` | `/admin/assessments`: urejevalnik preizkusa in klic modela (V4-R07) |
+| `app/preizkus.py` | pravila sestavljanja preizkusa: navodilo modelu po predmetu, sestava vhoda, shema in razčlenitev odgovora (V4-R07); naslov, naslovljenec in primerjava z izhodiščem ob shranjevanju (V4-R08). Brez FastAPI, brez baze in brez `openai` |
+| `app/routers/preizkusi.py` | `/admin/assessments`: urejevalnik preizkusa in klic modela (V4-R07); shranjevanje, pregled, ogled in preizkus na osnovi shranjenega (V4-R08) |
 | `app/static/vendor/` | KaTeX 0.16.22 in marked 15.0.12, prepisana v repozitorij z licencama; postrežena pod `/admin/static` (V4-R07, `ADR-054`) |
 | `app/obdelava.py` | kaj se zgodi z enim zapisom: prevzem, klic, zapis izida. Sinhron |
 | `app/worker.py` | časovnik: obhodi v presledkih, zagon in ustavitev. Brez poslovne logike |
@@ -724,27 +724,33 @@ Strežniško izrisan HTML za lastnika sistema (`docs/00-namen.md`, vloga
 „spremlja delovanje"). Brez gradnje frontenda in brez `npm` v `apps/server`.
 Nastala v V1-R04; V1-R03 jo je razširila s prikazom obdelave.
 
-**Skripta je izjema, ne privzetek** (`ADR-024`). Izjeme so **tri**: povečan
+**Skripta je izjema, ne privzetek** (`ADR-024`). Izjeme so **štiri**: povečan
 prikaz snovi (V2-R08, `snov.html`) in gumb „Kopiraj v odložišče" na strani s
 prepisi (V3-R11, `prepisi.html`) sta nadgradnji po mejah `ADR-024`;
-urejevalnik preizkusa (V4-R07, `preizkus.html`) brez skripte ne deluje in ima
-svoje meje v `ADR-054`. Vse tri so vgrajene v svojo predlogo. Vse ostale
-strani so brez skripte in to preverja `TestBrezJavaScripta`, ki izvzame
-natanko te tri predloge; meje vsake je treba preverjati izrecno (`ADR-048`
-„Posledice").
+urejevalnik preizkusa (V4-R07, `preizkus.html`) in ogled shranjenega
+preizkusa (V4-R08, `preizkus-ogled.html`) brez skripte ne delujeta in imata
+svoje meje v `ADR-054` in `ADR-055`. Izris lista je skupen obema in živi v
+delni predlogi `_preizkus-izris.html`, ki se vključi **znotraj** skripte
+strani (slog lista enako v `_preizkus-slog.html`). Vse ostale strani so brez
+skripte in to preverja `TestBrezJavaScripta`, ki izvzame natanko te predloge;
+meje vsake je treba preverjati izrecno (`ADR-048` „Posledice").
 
 Ogrodje `osnova.html` ima blok `glava` za dodatek posamezne strani v
-`<head>`; uporablja ga samo `preizkus.html`.
+`<head>`; uporabljata ga `preizkus.html` in `preizkus-ogled.html`.
 
 | Pot | Metoda | Kaj |
 |---|---|---|
 | `/admin` | GET | vseh deset predmetov s števci; predmet iz baze, ki ga na seznamu ni, je viden pod svojo kodo; nad njimi kartica „danes" (V3-R13) |
-| `/admin/subjects/{koda}` | GET | slike predmeta, najnovejša prva, lena naložitev; kljukice za izbor, `?vse=1` obkljuka vse (V3-R11); pri `MAT` drugi gumb „Kreiraj test" (V4-R07) |
+| `/admin/subjects/{koda}` | GET | slike predmeta, najnovejša prva, lena naložitev; kljukice za izbor, `?vse=1` obkljuka vse (V3-R11); pri `MAT` drugi gumb „Kreiraj test" (V4-R07) in povezava „Shranjeni testi (N)" (V4-R08) |
 | `/admin/transcripts` | GET | 303 na pregled; obstaja zato, da pot ni videti kot 405 (V3-R11) |
 | `/admin/transcripts` | POST | povzetki, prepisi in vprašanja izbranih slik enega predmeta v enem polju; **ničesar ne shrani** (V3-R11, V3-R12) |
 | `/admin/assessments/compose` | GET | 303 na pregled (V4-R07) |
 | `/admin/assessments/compose` | POST | urejevalnik preizkusa za izbor s strani predmeta; **ničesar ne shrani** (V4-R07) |
-| `/admin/assessments/generate` | POST | en klic modela, odgovor JSON; kliče ga skripta urejevalnika (V4-R07) |
+| `/admin/assessments/generate` | POST | en klic modela, odgovor JSON; kliče ga skripta urejevalnika (V4-R07); polje `osnova` pomeni preizkus na osnovi shranjenega (V4-R08) |
+| `/admin/assessments` | GET | pregled shranjenih preizkusov, najnovejši prvi; `?predmet=<koda>` (V4-R08) |
+| `/admin/assessments` | POST | shrani končan preizkus, odgovor JSON; kliče ga skripta urejevalnika (V4-R08) |
+| `/admin/assessments/{id}` | GET | ogled shranjenega preizkusa: list, rešitve, snov, tisk (V4-R08) |
+| `/admin/assessments/{id}/compose` | GET | urejevalnik z izhodiščem v shranjenem preizkusu; **ničesar ne shrani** (V4-R08) |
 | `/admin/static/…` | GET | statične datoteke (`StaticFiles`), za sejo kot vse pod `/admin` (V4-R07) |
 | `/admin/materials/{id}` | GET | podrobnosti ene slike |
 | `/admin/materials/{id}/image` | GET | datoteka slike |
@@ -1582,12 +1588,14 @@ Odločitve so v `ADR-053` in `ADR-054`, oblika vhoda in navodilo v `POC-01`
 - **`POST /admin/assessments/generate`**: telo je obrazec (`csrf`, `subject`,
   ponovljen `snov`, `test_md`, `resitve_md`, ponovljen `dosedanje`, `zelja`),
   zato CSRF preveri `SejaMiddleware` kot povsod. Odgovor je JSON:
-  `{sporocilo, test_md, resitve_md}` ali `{napaka}`.
+  `{sporocilo, test_md, resitve_md, model}` ali `{napaka}`. `model` je ime,
+  kot ga je vrnila storitev (V4-R08, `ADR-055` C).
 
   | Stanje | Koda |
   |---|---|
   | uspeh; tudi prazen `test_md` (model pove, zakaj testa ni) | 200 |
   | predmet brez navodila, prazna želja, izbor brez veljavne snovi | 400 |
+  | tuja ali neobstoječa `osnova` (V4-R08) | 404 |
   | napaka modela (časovna meja, zavrnitev, neuporaben odgovor) | 502 |
   | ključ ni nastavljen | 503 |
 
@@ -1611,7 +1619,7 @@ Odločitve so v `ADR-053` in `ADR-054`, oblika vhoda in navodilo v `POC-01`
   izpis (`main._vklopi_dnevnik_porabe`), ker uvicorn korenskega ne nastavi.
 - **Stanje dela je samo v brskalniku**: seznam korakov in kazalec.
   Razveljavi/uveljavi (gumba, Ctrl+Z/Ctrl+Y zunaj polj) premika kazalec; nova
-  želja zavrže korake za njim. Strežnik ne shrani ničesar.
+  želja zavrže korake za njim. Zapis nastane šele ob „Shrani" (spodaj).
 - **Izris**: `marked` + KaTeX (`auto-render`). Formule se pred `marked`
   umaknejo iz besedila; `\frac` postane `\dfrac`. `[odgovor]`,
   `[odgovor-kratek]`, `[odgovor-dolg]` so črte 30, 14 in 52 mm;
@@ -1629,9 +1637,10 @@ Odločitve so v `ADR-053` in `ADR-054`, oblika vhoda in navodilo v `POC-01`
 
 - **Obnašanja strani testi ne dokažejo** — samo, kaj je v izrisu. Izris,
   razveljavi/uveljavi in tisk se preverijo v brskalniku (`ADR-054`).
-- **Zaprtje ali osvežitev okna izgubi delo**, brez opozorila; shranjevanje in
-  opozorilo sta `V4-R08`.
-- **Stran ni zaznamek**: nastane samo iz obrazca, `GET` pelje na pregled.
+- **Zaprtje ali osvežitev okna izgubi neshranjeno delo**; pred tem opozori
+  brskalnik (V4-R08).
+- **Urejevalnik iz izbora ni zaznamek**: nastane samo iz obrazca, `GET` pelje
+  na pregled. Urejevalnik na osnovi shranjenega in ogled sta navadna `GET`.
 - **Samo matematika.** Nov predmet je novo navodilo v `preizkus.NAVODILA`.
 - **Merilnik je ocena**: ker se naloge ne delijo, je natisnjenih strani lahko
   več.
@@ -1639,6 +1648,69 @@ Odločitve so v `ADR-053` in `ADR-054`, oblika vhoda in navodilo v `POC-01`
   dolarjih) se izrišeta kot formula.
 - **Seja baze ostane odprta med klicem modela** (do časovne meje), kot pri
   branju urnika.
+
+## Shranjeni preizkusi (V4-R08)
+
+Zapis obstaja **samo za končan preizkus** (`ADR-053` F): nastane ob „Shrani",
+ne ureja se in ne briše. Izvedbene odločitve so v `ADR-055`.
+
+Tabela `preizkusi` (migracija `0013_preizkusi`, gol `CREATE TABLE`; `downgrade`
+jo spusti in dokončno izgubi vse shranjene preizkuse):
+
+| Stolpec | Tip | Opomba |
+|---|---|---|
+| `id` | `VARCHAR(36) PRIMARY KEY` | UUID, ki ga strežnik izriše v urejevalnik; nosilec idempotentnosti shranjevanja |
+| `family_id` | `VARCHAR(36) NOT NULL` | FK na `families`, indeks |
+| `child_id` | `VARCHAR(36) NOT NULL` | naslovljenec; FK na `users`, indeks |
+| `subject` | `VARCHAR(16) NOT NULL` | koda predmeta |
+| `title` | `VARCHAR(200) NOT NULL` | prva vrstica `# …` testa, sicer `Test — <koda> — <datum>` |
+| `test_md`, `solutions_md` | `TEXT NOT NULL` | markdown z LaTeX-om, kot ga je vrnil model |
+| `source_md` | `TEXT NOT NULL` | zamrznjeno besedilo prepisov; ID-jev slik ni |
+| `model` | `VARCHAR(128) NOT NULL` | ime modela zadnjega koraka; pošlje ga brskalnik |
+| `saved_at`, `saved_by` | `TIMESTAMPTZ`, FK na `users` | strežnikov čas in starš iz seje |
+| `base_id` | `VARCHAR(36)` | FK na `preizkusi`; preizkus, ki je bil izhodišče, ali `NULL` |
+
+- **`PreizkusiRepository`** nima ne `UPDATE` ne `DELETE`. `shrani` preveri, da
+  so otrok, avtor in izhodišče iz te družine.
+- **`POST /admin/assessments`** dobi od brskalnika test, rešitve, model in
+  identifikatorje — **nikoli** besedila snovi ali naslova. Snov sestavi
+  strežnik z `admin.prepisi_izbora`; pri preizkusu na osnovi jo skupaj s
+  predmetom in naslovljencem prepiše iz izhodišča.
+
+  | Stanje | Koda |
+  |---|---|
+  | shranjeno; tudi ponovljen klic z istim `id` (vrne isti naslov) | 200 |
+  | prazen test ali model, `id` ni UUID, snovi ni več, naslovljenec ni določen, enak izhodišču | 400 |
+  | tuja ali neobstoječa osnova | 404 |
+  | `id` obstaja v drugi družini | 409 |
+
+- **Naslovljenec**: če je izbrana snov od enega otroka, je to on, ne glede na
+  to, kaj pošlje brskalnik. Sicer mora brskalnik poslati enega izmed otrok te
+  snovi; urejevalnik izbirnik izriše samo takrat. Deaktiviran otrok je
+  dovoljen.
+- **Preizkus na osnovi shranjenega** (`GET /admin/assessments/{id}/compose`):
+  izhodišče je korak nič, pod katerega se ne da razveljaviti; veriga želja se
+  začne prazna. Klic modela in shranjevanje nosita `osnova=<id>` namesto
+  identifikatorjev slik. Shrani je onemogočen, dokler ni novega koraka;
+  strežnik preizkus, enak izhodišču, zavrne.
+- **Opozorila pred izgubo dela**: neshranjeno delo je vsaj en korak, tudi
+  razveljavljen. Zapiranje in osvežitev ujame `beforeunload`; povezave in
+  obrazci v istem oknu (nazaj, glava, odjava) ter „Zavrzi" odprejo `<dialog>`.
+- **Ogled** izriše ista skripta izrisa kot urejevalnik; strežnika ne kliče.
+  Besedilo iz baze gre skozi isto čiščenje kot odgovor modela.
+- **Pregled** kaže preizkuse vseh otrok družine; ime otroka samo pri več
+  otrocih (`ADR-051`). Filter ponudi predmete, ki preizkus imajo; neznana koda
+  da prazen seznam.
+
+### Znane omejitve
+
+- **Obnašanja shranjevanja, opozoril in ogleda testi ne dokažejo** — samo, kaj
+  je v izrisu in kaj strežnik zapiše. Preverijo se v brskalniku.
+- **Po poteku seje preizkusa ni mogoče shraniti iz odprtega okna**: CSRF žeton
+  pripada seji, nova prijava ga zamenja. Stran pove, naj se test natisne.
+- **Sličic snovi pri ogledu in pri preizkusu na osnovi ni**; snov je besedilo.
+- **Brisanja, arhiva in preimenovanja ni**; pregled nima ostranjevanja.
+- **Model je trditev brskalnika.** Iz njega ne izhaja nobena pravica.
 
 ## Premik slike v drug predmet (V3-R10)
 

@@ -31,12 +31,18 @@ from app import preizkus, sistem
 from app.besedilo import SLIKE, ZNAKI, stevilo_z_besedo
 from app.casi import cas, cas_ali_prazno, danes, dnevi_od_do, v_domacem
 from app.danes import je_vikend, sestavi_kartico
-from app.db import ClaniRepository, KviziRepository, MaterialsRepository
+from app.db import (
+    ClaniRepository,
+    KviziRepository,
+    MaterialsRepository,
+    PreizkusiRepository,
+)
 from app.dependencies import (
     daj_nastavitve,
     daj_repozitorij,
     daj_repozitorij_clanov,
     daj_repozitorij_kvizov,
+    daj_repozitorij_preizkusov,
 )
 from app.models import STATUS_V_OBDELAVI, Material, Question
 from app.prepisi import Prepisi, SnovZaPrepis, VprasanjeZaPrepis, izbrane, sestavi
@@ -390,6 +396,7 @@ def predmet(
     clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
+    shranjeni: Annotated[PreizkusiRepository, Depends(daj_repozitorij_preizkusov)],
     vse: str | None = None,
 ) -> Response:
     """Slike enega predmeta, najnovejša prva.
@@ -418,6 +425,8 @@ def predmet(
     imena = imena_otrok(clani)
     mapa_slik = mapa_druzine(nastavitve.images_dir, repozitorij.family_id)
 
+    kreiraj_test = preizkus.navodilo_za(koda) is not None
+
     return predloge.TemplateResponse(
         request,
         "predmet.html",
@@ -433,7 +442,17 @@ def predmet(
             "vse_obkljukano": vse == "1",
             # Gumb „Kreiraj test" (V4-R07) samo pri predmetu, ki ima navodilo
             # za model — danes matematika (`ADR-053` D).
-            "kreiraj_test": preizkus.navodilo_za(koda) is not None,
+            "kreiraj_test": kreiraj_test,
+            # Povezava na shranjene teste tega predmeta, s številom (V4-R08,
+            # `ADR-055` A). Samo tam, kjer test sploh lahko nastane.
+            "shranjeni_testi": (
+                {
+                    "pot": f"{PREDPONA}/assessments?predmet={quote(koda, safe='')}",
+                    "stevilo": shranjeni.stej_po_predmetih().get(koda, 0),
+                }
+                if kreiraj_test
+                else None
+            ),
         },
     )
 

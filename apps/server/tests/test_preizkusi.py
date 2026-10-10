@@ -731,7 +731,9 @@ class TestGeneriranje:
 
         assert odgovor.status_code == 200
         assert odgovor.headers["content-type"].startswith("application/json")
-        assert odgovor.json() == VELJAVEN
+        # Od V4-R08 odgovor nosi še ime modela, kot ga je vrnila storitev
+        # (`ADR-055` C); skripta ga pošlje nazaj ob shranjevanju.
+        assert odgovor.json() == {**VELJAVEN, "model": "model-iz-odgovora"}
 
     def test_nov_test_dobi_navodilo_za_matematiko_snov_in_zeljo(
         self, odjemalec: PrijavljenOdjemalec, motor: Engine, slike: Path, klicalec: LazenKlicalec
@@ -922,6 +924,7 @@ class TestPrazenTest:
             "sporocilo": "Snovi ni dovolj za test.",
             "test_md": "",
             "resitve_md": "",
+            "model": "model-iz-odgovora",
         }
 
 
@@ -1112,10 +1115,25 @@ class TestSkriptaUrejevalnika:
         assert "potrebuje JavaScript" in sporocilo
 
     def test_skripta_klice_streznik_na_enem_mestu_in_z_obrazcem(self, stran: str) -> None:
+        """En `fetch`, naslovi samo iz atributov, ki jih izriše strežnik.
+
+        Do V4-R08 je bil naslov en sam in trditev je bila dobesedni klic nanj.
+        Shranjevanje je drugi naslov (`ADR-055` G); varovana lastnost je
+        ostala ista: skripta naslova ne sestavi in ne vzame od drugod.
+        """
         skripta = stran[stran.rindex("<script>") : stran.rindex("</script>")]
 
         assert skripta.count("fetch(") == 1
-        assert 'fetch(koren.getAttribute("data-pot")' in skripta
+        assert "return fetch(pot, {" in skripta
+        # Pomožno funkcijo kličeta natanko dve mesti, vsako z naslovom iz
+        # atributa na korenu urejevalnika.
+        assert re.findall(r"poklici\(([^,]+),", skripta) == [
+            "pot",
+            'koren.getAttribute("data-pot")',
+            'koren.getAttribute("data-pot-shrani")',
+        ]
+        assert 'data-pot="/admin/assessments/generate"' in stran
+        assert 'data-pot-shrani="/admin/assessments"' in stran
         assert "new URLSearchParams()" in skripta
         for prepovedano in ("XMLHttpRequest", "sendBeacon", "localStorage", "sessionStorage"):
             assert prepovedano not in skripta
