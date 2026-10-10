@@ -14,6 +14,7 @@ dokumentu, vprašaj — ne ugibaj.
 | `docs/verzije/vN.md` | Zahteve za verzijo N, z ID-ji `VN-Rxx`. |
 | `docs/plan/VN-Rxx.md` | Plan za posamezno zahtevo. Nastane v fazi 4, commita se. |
 | `docs/odlocitve/ADR-xxx.md` | Zapis vsake pomembnejše odločitve iz debate. |
+| `docs/poc/POC-xx.md` | Zapis POC-a: vprašanje, dogovorjeno, ugotovitve, sodba. Edini del POC-a, ki pride v `main` (§1d). |
 | `docs/02-izkusnje.md` | Pasti, ki so nas že stale časa (orodja, gradnja, okolje). Bere se ob potrebi, ne ob vsaki zahtevi. |
 
 **`01-arhitektura.md` pove samo, kako je zdaj** — stack, moduli, shema, pogodbe,
@@ -37,6 +38,19 @@ z zadnjim testom, `Zaključeno` z dokumentacijo.
 
 Faza z oznako 🛑 se konča tako, da napišeš izhod in **končaš svoj obrat**.
 Ne nadaljuješ sam.
+
+### Faza 0 — POC ali zahteva? 🛑
+
+Na začetku **vsakega novega dela** — tudi ko poženem `/zahteva` z ID-jem, ki
+že obstaja v `docs/verzije/` — me najprej vprašaj:
+
+> Gre za **POC** (preverjam idejo, koda se zavrže) ali za **dokončno
+> zahtevo** (polna pot od faze 1)?
+
+in končaj obrat. Vprašaj tudi, če se odgovor iz naročila zdi očiten — je ena
+beseda. POC → §1d, zahteva → faza 1. Vprašanje odpade samo pri nadaljevanju
+dela, ki je že začeto na svoji veji (`feat/…`, `fix/…`, `poc/…`,
+`docs/poc-…`).
 
 ### Faza 1 — Razumevanje 🛑
 
@@ -309,7 +323,7 @@ sem, ne v kriterije ene zahteve.
 
 ## 1c. Kratka pot
 
-Ne gre vsaka sprememba skozi vseh deset faz. **Kratka pot** velja, kadar so
+Ne gre vsaka sprememba skozi vse faze. **Kratka pot** velja, kadar so
 izpolnjeni vsi pogoji iz lestvice v fazi 4 (znotraj obstoječih vzorcev, brez
 nove odvisnosti, brez migracije sheme, brez spremembe javnega vmesnika,
 ≲ 3 datoteke). Če nisi prepričan, kratka pot ne velja.
@@ -331,6 +345,63 @@ trdi robovi. Kratka pot skrajša pisanje, ne pregleda.
 
 ---
 
+## 1d. POC pot
+
+POC odgovori na **eno vprašanje**: ali je ideja prava (videz, potek,
+uporabnost) oziroma ali tehnično sploh gre. Edini trajni izdelek je **sodba in kar
+sva se dogovorila** — koda se zavrže (`ADR-052`).
+
+Oblika se izbere v koraku 1:
+
+- **Idejni/UX** — kako bi izgledalo in teklo. Po možnosti več različic istega
+  zaslona s stikalom med njimi, da jih primerjaš drugo ob drugi.
+- **Tehnični (spike)** — ali gre (model, knjižnica, zmogljivost). Najmanjši
+  program, ki odgovori na vprašanje; vmesnik samo, če je vmesnik vprašanje.
+
+Koraki:
+
+1. **Vprašanje 🛑.** Naslednji prosti `POC-xx`: najvišja številka iz
+   `ls docs/poc` in `git branch -a --list '*poc*'`, plus ena. Veja `poc/xx-kratek-opis` iz svežega `main`. Na njej
+   `docs/poc/POC-xx.md` po `docs/poc/PREDLOGA.md`: vprašanje, oblika, kaj
+   šteje kot »ok«, kaj namenoma ne rešujem. Commitaj in počakaj na potrditev.
+2. **Krog.** Zgradi in povej, kako preizkusim. En krog = ena seja. 🛑
+3. **Pregled.** Kar se zmeniva, **takoj** zapiši v *Dogovorjeno* in commitaj —
+   ne samo v pogovor. Kar si izvedel iz kode, gre v *Ugotovitve*.
+4. **Sodba 🛑 (moja).** `Sprejeto`, `Zavrženo` ali `Še en krog`. Največ trije
+   krogi — po tretjem je sodba samo `Sprejeto` ali `Zavrženo`; kar ostane
+   odprto, je nov POC z ožjim vprašanjem. Če POC opustim brez sodbe, ga ob
+   naslednji priložnosti zapri kot `Zavrženo` z razlogom »opuščeno«.
+5. **Zapis v `main`.** Iz svežega `main` veja `docs/poc-xx-kratek-opis`; nanjo
+   prenesi samo zapis (`git checkout poc/xx-… -- docs/poc/POC-xx.md`) s sodbo.
+   Pri `Sprejeto` dodaj še ADR z odločitvijo in novo zahtevo `VN-Rxx` v
+   `docs/verzije/vN.md` (status `Nova`, **Podlaga:** ta ADR in `POC-xx`,
+   kriteriji sprejemljivosti iz *Dogovorjeno*; v katero verzijo gre, me
+   vprašaj). Nato `pwsh -File scripts/verify.ps1` — ograja tudi to vejo
+   mergea samo z zelenim verify na HEAD. Poročilo 🛑, merge na moj ukaz.
+   Zapis gre v `main` tudi pri `Zavrženo`, da istega vprašanja ne preverjava
+   dvakrat.
+6. **Implementacija** je nova zahteva po polni poti, od faze 0.
+
+Pravila:
+
+- **Veja `poc/…` se nikoli ne merga**; iz nje se v `main` prenese samo
+  `docs/poc/POC-xx.md`. Veja ostane kot referenca, brisanje je moje.
+- **Koda POC-a ni vhod za zahtevo.** V nobeni fazi zahteve je ne bereš in ne
+  kopiraš, niti po delih. Kar je bilo vredno vedeti, mora biti v *Ugotovitvah* — POC se
+  ne zapre, dokler razdelek ni izpolnjen.
+- **Na veji `poc/…` ne velja:** plan, testi, pregledovalec, verify, merilo
+  dokončanosti (§1b), statusi zahteve. Kakovost je »dovolj, da odgovori na vprašanje«: brez novih
+  abstrakcij, deljenih modulov in obravnave napak, ki je vprašanje ne rabi.
+- **Velja:** trdi robovi (§2) in še:
+  - nikoli proti javnemu strežniku ali pravim podatkom družin — lokalno, z
+    ločeno bazo;
+  - brez migracij sheme nad obstoječimi podatki;
+  - na telefonu zadošča razvojna gradnja; APK iz veje je pogoj šele pri
+    zahtevi (faza 9b).
+- Commit sporočila `POC-xx: <kaj>`.
+
+---
+
 ## 2. Trdi robovi
 
 1. Nobenega merga, pusha ali taga brez mojega izrecnega ukaza v tej seji.
@@ -343,6 +414,8 @@ trdi robovi. Kratka pot skrajša pisanje, ne pregleda.
    tvoje. Če je katera od njih narobe, mi to povej; ne popravi je sam.
 5. Nobene nove zunanje odvisnosti brez vprašanja.
 6. Nobenih skrivnosti v repozitoriju. `.env` je v `.gitignore`.
+7. Veja `poc/…` se nikoli ne merga v `main` (§1d). Če ti to naročim, me
+   opozori nanj.
 
 ## 3. Zamik med planom in kodo
 
