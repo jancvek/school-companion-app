@@ -5,6 +5,7 @@ Kaj statistika šteje, varuje `test_statistika.py`; prijavo, seje in CSRF
 """
 
 import re
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,7 @@ from tests.conftest import (
     vsebina_strani,
 )
 from tests.test_kvizi import UUID_ENA, objavi, snov
-from tests.test_resevanje import poskus, poslji
+from tests.test_resevanje import OCENJENO, POKAZANO, RAZKRITO, poskus, poslji
 from tests.test_rezultat import postavke
 
 BARVE = (
@@ -50,7 +51,21 @@ def z_ocenami(odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTe
     prvi = objavi(odjemalec, motor, [UUID_ENA], koliko=2)
     poslji(odjemalec, [poskus(p, rating="tezko") for p in postavke(motor, prvi)], telefon)
     drugi = objavi(odjemalec, motor, [UUID_ENA], koliko=1, vstop="rocna")
-    poslji(odjemalec, [poskus(p, rating="lahko") for p in postavke(motor, drugi)], telefon)
+    # Drugi kviz je rešen **dan pozneje**: zaporedje ocen je urejeno po času
+    # odgovora, in dva odgovora z istim časom nimata določenega vrstnega reda.
+    kasneje = {
+        polje: (trenutek + timedelta(days=1)).isoformat()
+        for polje, trenutek in (
+            ("shown_at", POKAZANO),
+            ("revealed_at", RAZKRITO),
+            ("answered_at", OCENJENO),
+        )
+    }
+    poslji(
+        odjemalec,
+        [poskus(p, rating="lahko", **kasneje) for p in postavke(motor, drugi)],
+        telefon,
+    )
 
 
 class TestStatistika:

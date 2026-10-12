@@ -224,3 +224,42 @@ Posnetek 04 ima pod sliko gumb „Povečaj". Ta je druga povezava
 `a[data-povecava]` na isti izvirnik, zato skripta klik prestreže na **vseh**
 takih povezavah (`querySelectorAll` namesto `querySelector`). To je edina
 sprememba skripte; njene meje ostanejo.
+
+## Odstopanja od posnetkov in zapisa POC-02 (12. 10. 2026)
+
+Posnetki v `docs/poc/POC-02/` so del dogovora (`ADR-056` A), a so risani z
+izmišljenimi podatki in brez pravil, ki jih ta projekt že ima. Kjer sta si
+posnetek in starejše pravilo nasprotovala, je obveljalo pravilo; vsako
+odstopanje je tu, da ga lastnik ob sprejemu potrdi ali zavrne.
+
+| Kje | Posnetek / zapis | Izvedba | Zakaj |
+|---|---|---|---|
+| Predmet, rdeč dan | „Po urniku je bila matematika, slik ni." | „Po urniku je bil ta predmet, slik ni." | Glagol bi se moral ujemati s spolom imena predmeta. |
+| Predmet in izbor snovi, vrstica izbora | „3 izbranih" | „Izbrano: 3" | Število izpiše CSS števec, ki ne sklanja (E1). |
+| Predmet | „Pokaži starejše tedne" | gumba ni | `ADR-060` E. |
+| Predmet, prazen dan | tri stanja | štiri: še „brez razloga" | `ADR-060` C. |
+| Slika, pod naslovom | „Matematika, posnel Jaka" | „MAT — Matematika · Jaka" | Glagol s spolom; ime je vrednost za ločilom (`ADR-039` F3). |
+| Slika, upokojena vprašanja | „2 vprašanji … sta upokojeni" | „Upokojena vprašanja: 2" | Oblika z dvopičjem je pravilna pri vsakem številu. |
+| Slika, povečava | CSS `:target` | skripta V2-R08 | I1. |
+| Družina, oznake | „aktiven", „deaktiviran" | „aktiven račun", „deaktiviran račun" | Samostalniška oblika ne določa spola osebe (V3-R06). |
+| Družina, podnaslov | „2 otroka in 3 starši, od tega 1 deaktiviran." | „Skupaj 5 članov." | Trije sklanjani števniki in pridevnik s spolom. |
+| Potrditev deaktivacije | „Deaktivirati Timov račun?" | ime nad vprašanjem „Deaktivirati račun?" | Svojilni pridevnik iz poljubnega imena (`ADR-039` F3). |
+| Urnik brez urnika | „Jaka še nima urnika." | „Urnika še ni." | Brez imena v povedi; čigav je, pove zavihek. |
+| Izbor snovi, naslov | „Nov kviz iz matematike" | obstoječi naslovi vstopov („Nova snov" …) | Rodilnik imena predmeta. |
+| Izbor snovi, že uporabljena | „že v kvizu »Naravna števila«" | „že v kvizu" | Imena kviza izbirnik ne bere; nova poizvedba ni bila dogovorjena. |
+| Predogled, gumb | „Objavi kviz", „Sestavi kviz" | „Objavi", „Sestavi" | Gumbi so glagoli (`ADR-039`, popravki po drugem pregledu). |
+| Kviz, podnaslov | čip in ločena polja | „Maša · MAT · 3 vprašanja · objavljen …" | Vrstica `<p class="pod">` je mesto, kjer `TestImenaPriEnemOtroku` preverja ime. |
+| Prepisi | „gumba Kopiraj ni" | gumb in skripta V3-R11 ostaneta | Gumb obstaja od V3-R11 (`ADR-048` C); odstranitev bi bila izguba vedenja, ne videz. |
+
+### Novi parametri obstoječih poti
+
+`ADR-056` I pravi, da poti ostanejo. Poleg dveh novih poti (`GET
+/admin/quizzes`, `GET /admin/schedule/image/{slika_id}`) so štiri obstoječe
+`GET` poti dobile **neobvezen** parameter, vse po vzorcu `?vse=1` (`ADR-048`
+G) — povezava na isto stran namesto skripte:
+
+- `/admin/subjects/{koda}`: `?teden=<ponedeljek>`, `?dan=<dan>` (izbor);
+- `/admin/quizzes/new`: `?izbor=vse|nic`;
+- `/admin/family`: `?dodaj=otrok|stars` (odprt obrazec).
+
+Vrednost, ki je stran sama ne izriše, se prezre.

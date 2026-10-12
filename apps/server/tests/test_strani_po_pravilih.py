@@ -255,3 +255,28 @@ class TestOstaleStrani:
         assert '<ol class="drobtine">' in zaslon
         assert '<button class="gumb polni" type="submit">Pokaži za tisk</button>' in zaslon
         assert '<input type="hidden" name="izbor" value="1">' in zaslon
+
+
+class TestPotiOstanejo:
+    """`ADR-056` I: poti in metode ostanejo; novi sta natanko dve poti `GET`."""
+
+    #: Število parov (metoda, pot) v `openapi()` pred V5-R01. Zapisano na
+    #: roko: nova pot mora ta test podreti, da se nekdo vpraša, ali je bila
+    #: dogovorjena (`ADR-060` G in „Novi parametri obstoječih poti").
+    PRED_V5_R01 = 73
+
+    NOVI = frozenset(
+        {("GET", "/admin/quizzes"), ("GET", "/admin/schedule/image/{slika_id}")}
+    )
+
+    def test_dodani_sta_natanko_dve_poti_get(self, aplikacija: FastAPI) -> None:
+        pari = {
+            (metoda.upper(), pot)
+            for pot, metode in aplikacija.openapi()["paths"].items()
+            for metoda in metode
+        }
+
+        assert pari >= self.NOVI
+        assert len(pari) == self.PRED_V5_R01 + len(self.NOVI)
+        # Slika urnika se samo bere.
+        assert ("POST", "/admin/schedule/image/{slika_id}") not in pari

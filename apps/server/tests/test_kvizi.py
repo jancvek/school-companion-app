@@ -1857,6 +1857,9 @@ class TestImenaPriEnemOtroku:
                 f"/admin/materials/{UUID_ENA}",
                 f"/admin/quizzes/{quiz_id}",
                 "/admin/quizzes/new?vstop=nova&subject=MAT",
+                # V5-R01: stran z vsemi kvizi; stolpec z otrokom in zavihki
+                # otrok samo pri več kot enem otroku.
+                "/admin/quizzes",
                 "/admin/assessments",
                 f"/admin/assessments/{test_id}",
                 f"/admin/assessments/{test_id}/compose",
