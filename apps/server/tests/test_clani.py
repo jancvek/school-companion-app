@@ -596,6 +596,30 @@ class TestPonastavitevGesla:
         assert odgovor.status_code == 403
         assert clani.SPOROCILO_STARS_BREZ_GESLA in odgovor.text
 
+    def test_pisanje_ki_ni_spremenilo_nicesar_dobi_razlago(
+        self,
+        odjemalec: PrijavljenOdjemalec,
+        stars: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Veja, ki jo je do V6-R02 dosegel test zgoraj: zapis ne spremeni ničesar.
+
+        Odkar starša brez geselne poverilnice ustavi pravilo, jo doseže samo še
+        tekma (poverilnica izgine med preverbo in zapisom). Zato jo test izzove
+        na repozitoriju: izid pisanja, ki ga usmerjevalnik ne bi pogledal, bi
+        bil tiha preusmeritev na seznam, kot da je geslo zamenjano.
+        """
+        monkeypatch.setattr(ClaniRepository, "ponastavi_geslo", lambda *_a, **_k: False)
+
+        odgovor = odjemalec.post(
+            pot_clana(stars, "password"),
+            data={"geslo": "novo-geslo-tukaj", "geslo_znova": "novo-geslo-tukaj"},
+            follow_redirects=False,
+        )
+
+        assert odgovor.status_code == 409
+        assert clani.SPOROCILO_NI_SPREMENJENO in odgovor.text
+
     def test_lastniku_sistema_drug_stars_gesla_ne_ponastavi(
         self, odjemalec: PrijavljenOdjemalec, motor: Engine, lastnik: str
     ) -> None:
