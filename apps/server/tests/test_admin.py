@@ -2295,6 +2295,7 @@ class TestPremikVDrugPredmet:
         # Od V5-R01 je koda čip in ime stoji ob njem, brez pomišljaja.
         assert re.search(r">SLJ</span>\s*Slovenščina", besedilo)
         assert "MAT — Matematika" not in besedilo
+        assert not re.search(r">MAT</span>\s*Matematika", besedilo)
 
     def test_izbirnik_kvizov_ponudi_sliko_pod_novim_predmetom(
         self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str

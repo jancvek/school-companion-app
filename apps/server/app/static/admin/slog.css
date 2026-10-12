@@ -929,6 +929,7 @@ p.napaka:not(.obvestilo) { border-color: color-mix(in srgb, var(--nevarno) 35%, 
    vse, kar bi sicer doseglo naslove, povezave in prelom besed na listu. */
 .list { overflow-wrap: normal; font-variant-numeric: normal; }
 .list h1, .list h2, .list h3, .list h4 { line-height: inherit; }
+.list h1 { font-weight: revert; }
 .list h3, .list h4 { font-size: revert; font-weight: revert; margin: revert; }
 .list a { color: revert; }
 .list img { max-width: none; }

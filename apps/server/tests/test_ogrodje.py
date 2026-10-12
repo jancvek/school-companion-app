@@ -504,6 +504,9 @@ class TestSlog:
                 if ".napaka" in del_izbirnika:
                     assert del_izbirnika.strip().startswith("p.napaka"), izbirnik
         assert re.search(rf"\.{razred}\.napaka \{{", slog)
+        # Tudi golo pravilo `.napaka` bi zadelo oboje.
+        vsi_deli = [d.strip() for i in izbirniki for d in i.split(",")]
+        assert ".napaka" not in vsi_deli
 
     def test_list_a4_ostane_papir_tudi_na_zaslonu(self) -> None:
         # Po višini lista merilnik računa strani (`ADR-054`); splošna pravila
@@ -515,6 +518,7 @@ class TestSlog:
         naslovi = ".list h3, .list h4 { font-size: revert; font-weight: revert; margin: revert; }"
         assert naslovi in slog
         assert ".list a { color: revert; }" in slog
+        assert ".list h1 { font-weight: revert; }" in slog
 
     def test_prijava_ne_stoji_na_has(self) -> None:
         # Postavitev prijavne strani nosi razred telesa; `:has()` sme biti samo

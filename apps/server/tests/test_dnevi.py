@@ -468,6 +468,8 @@ class TestVrstniRed:
         # Koda je vidna, ni pa podvojena: `oznaka_predmeta` za neznano kodo
         # vrne kodo samo, in naslov „XYZ — XYZ" bi bil videti kot okvara.
         assert "XYZ — XYZ" not in besedilo
+        # Od V5-R01 bi bila podvojitev koda v čipu in še enkrat ob njem.
+        assert not re.search(r">XYZ</span>\s*XYZ", besedilo)
         # Od V5-R01 je koda čip in ime stoji ob njem, brez pomišljaja.
         assert re.search(r">MAT</span>\s*Matematika", besedilo)
 
