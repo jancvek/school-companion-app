@@ -269,6 +269,19 @@ class TestPotiOstanejo:
         {("GET", "/admin/quizzes"), ("GET", "/admin/schedule/image/{slika_id}")}
     )
 
+    #: Pari, ki jih je dodala `V6-R01` (`docs/odlocitve/ADR-061` D), s soglasjem
+    #: lastnika. Popis ostane zapisan na roko: vsaka pot, ki je ni ne tu ne
+    #: zgoraj, test še naprej podre.
+    V6_R01 = frozenset(
+        {
+            ("POST", "/auth/link"),
+            ("GET", "/admin/family/members/{user_id}/link"),
+            ("POST", "/admin/family/members/{user_id}/link"),
+            ("GET", "/admin/family/members/{user_id}/revoke"),
+            ("POST", "/admin/family/members/{user_id}/revoke"),
+        }
+    )
+
     def test_dodani_sta_natanko_dve_poti_get(self, aplikacija: FastAPI) -> None:
         pari = {
             (metoda.upper(), pot)
@@ -277,6 +290,7 @@ class TestPotiOstanejo:
         }
 
         assert pari >= self.NOVI
-        assert len(pari) == self.PRED_V5_R01 + len(self.NOVI)
+        assert pari >= self.V6_R01
+        assert len(pari) == self.PRED_V5_R01 + len(self.NOVI) + len(self.V6_R01)
         # Slika urnika se samo bere.
         assert ("POST", "/admin/schedule/image/{slika_id}") not in pari

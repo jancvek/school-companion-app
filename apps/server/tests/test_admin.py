@@ -1273,6 +1273,10 @@ class TestPakiranje:
             "kvizi.html",
             "_kvizi-tabela.html",
             "_kviz-nov.html",
+            # V6-R01: stran s QR kodo za povezavo telefona in vmesna stran
+            # pred preklicem otrokovih prijav (`ADR-061` D).
+            "clani-povezava.html",
+            "clani-preklic.html",
         }
 
 
