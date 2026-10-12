@@ -192,8 +192,8 @@ razloga. „Še pride" bi v obeh primerih obljubil sliko, ki je urnik ne
 predvideva. Za dan, ko predmet **je** na urniku, velja C nespremenjeno —
 tudi današnji dan je ves dan „še pride".
 
-To je odstopanje od zapisanega vrstnega reda in ga lastnik potrdi ali zavrne
-ob sprejemu; obrat je ena vrstica v `urnik.prazen_dan_predmeta`.
+To je odstopanje od vrstnega reda, zapisanega v C. **Lastnik ga je
+12. 10. 2026 potrdil:** velja red iz tega razdelka.
 
 ### E1 — en gumb v vrstici izbora namesto dveh
 
@@ -211,6 +211,23 @@ je pravilna pri vsakem številu (`docs/01-arhitektura.md`, „Slovenske oblike
 Besedilo rdečega dne je „Po urniku je bil ta predmet, slik ni." in ne „…je
 bila matematika…": glagol se mora ujemati s spolom imena predmeta, ki ga ta
 projekt ne sklanja.
+
+### H1 — štirje prej zeleni testi zunaj soglasja H
+
+Pregled je našel štiri prej zelene teste, pri katerih se je spremenila
+**trditev** in ne samo zgradba, zato jih H ne pokriva. Lastnik jih je
+12. 10. 2026 izrecno potrdil:
+
+| Test | Prej | Zdaj | Zakaj |
+|---|---|---|---|
+| `test_gumb_stoji_nad_seznamom_in_pod_njim` (V3-R11; preimenovan) | „Prepisi izbranih" dvakrat | enkrat, v prilepljeni vrstici izbora | E1 |
+| `TestGumbNaStraniPredmeta` (V4-R07) | „Kreiraj test" dvakrat | enkrat, v isti vrstici | E1 |
+| `test_najnovejsa_slika_je_prva` | sliki v istem tednu | sliki v različnih tednih | stran je razvrščena po tednih (E) |
+| `TestPovecava`, trditev o vrstnem redu na strani predmeta | ob enakem času je novejši `id` prvi | ob enakem času je starejši `id` prvi | znotraj dneva tečejo slike od najstarejše naprej (E); listanje ostane v svoji smeri in nobene slike ne preskoči |
+
+S tem je kriterij `V3-R11` „gumb nad seznamom in pod njim" razveljavljen v
+delu o **dveh** gumbih; njegov namen (dosegljiv brez drsenja) nosi vrstica
+izbora.
 
 ### I1 — povečava ostane skripta V2-R08, brez `:target`
 
