@@ -12,6 +12,7 @@ je vnos od zunaj in mora prenesti karkoli.
 
 import pytest
 
+from app import main
 from app.security import je_izvzeta, zeton_iz_glave
 
 
@@ -62,6 +63,29 @@ def test_ne_ascii_zeton_ne_vrze_izjeme(glava: str) -> None:
 
 def test_odvecni_presledki_okoli_zetona_ne_stejejo() -> None:
     assert zeton_iz_glave("Bearer   abc123   ") == "abc123"
+
+
+def test_izvzete_so_natanko_te_poti_in_ena_predpona() -> None:
+    """Popis poti, ki jih `ZetonMiddleware` ne varuje (`ADR-036` F, `ADR-061` D).
+
+    Zapisan na roko: vsaka pot na tem seznamu je pot brez žetona, zato mora
+    nova — ali predpona namesto točne poti — ta test podreti, da se nekdo
+    vpraša, ali je bila dogovorjena. `/auth/link` je tu od `V6-R01`: na njej
+    telefon žeton seje šele dobi.
+    """
+    assert frozenset(
+        {
+            "/health",
+            "/auth/login",
+            "/auth/link",
+            "/auth/google/login",
+            "/auth/google/callback",
+        }
+    ) == main.IZVZETE_POTI
+    assert frozenset({"/admin"}) == main.IZVZETE_PREDPONE
+    # Odjava telefona in poti s podatki niso in ne smejo biti izvzete.
+    for pot in ("/auth/logout", "/auth", "/auth/link/", "/materials", "/quizzes/pending"):
+        assert not je_izvzeta(pot, main.IZVZETE_POTI, main.IZVZETE_PREDPONE), pot
 
 
 @pytest.mark.parametrize(

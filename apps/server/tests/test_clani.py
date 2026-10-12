@@ -383,11 +383,68 @@ class TestDodajanjeStarsa:
         assert clani.SPOROCILO_NI_ENASLOV in odgovor.text
         assert uporabnik(motor, enaslov) is None
 
-    def test_starsevo_geslo_je_daljse_od_otrokovega(
+    def test_neujemanje_gesel_ne_ustvari_nicesar(
         self, odjemalec: PrijavljenOdjemalec, motor: Engine
     ) -> None:
-        """Enajst znakov je dovolj za otroka in premalo za starša (`ADR-036` E)."""
-        kratko = "enajst-zna"
+        """Do `V6-R01` je to dokazoval obrazec za otroka; geslo ima odslej samo starš."""
+        odgovor = odjemalec.post(
+            f"{POT}/parents", data={**NOV_STARS, "geslo_znova": "nekaj-cisto-drugega"}
+        )
+
+        assert odgovor.status_code == 400
+        assert clani.SPOROCILO_GESLI_SE_NE_UJEMATA in odgovor.text
+        assert uporabnik(motor, "ana@primer.test") is None
+
+    def test_zaseden_enaslov_ne_ustvari_nicesar(
+        self, odjemalec: PrijavljenOdjemalec, motor: Engine
+    ) -> None:
+        odgovor = odjemalec.post(
+            f"{POT}/parents", data={**NOV_STARS, "enaslov": STARS_IDENTIFIKATOR}
+        )
+
+        assert odgovor.status_code == 400
+        assert clani.SPOROCILO_IDENTIFIKATOR_ZASEDEN in odgovor.text
+        with Session(motor) as seja:
+            assert len(list(seja.scalars(select(User.id)))) == 1
+
+    def test_zasedenost_ne_ubeze_z_velikimi_crkami(
+        self, odjemalec: PrijavljenOdjemalec, motor: Engine
+    ) -> None:
+        """Normalizacija teče **pred** vstavljanjem, sicer bi nastal dvojnik (`ADR-038` E)."""
+        odgovor = odjemalec.post(
+            f"{POT}/parents", data={**NOV_STARS, "enaslov": f"  {STARS_IDENTIFIKATOR.upper()} "}
+        )
+
+        assert odgovor.status_code == 400
+        assert clani.SPOROCILO_IDENTIFIKATOR_ZASEDEN in odgovor.text
+        with Session(motor) as seja:
+            assert len(list(seja.scalars(select(User.id)))) == 1
+
+    def test_enaslov_se_normalizira(
+        self, odjemalec: PrijavljenOdjemalec, motor: Engine
+    ) -> None:
+        """`ADR-038` E: brez tega bi `Ana@…` in `ana@…` bila dva računa."""
+        odjemalec.post(f"{POT}/parents", data={**NOV_STARS, "enaslov": "  Ana@Primer.TEST "})
+
+        assert uporabnik(motor, "ana@primer.test") is not None
+
+    def test_vnos_se_vrne_geslo_pa_nikoli(self, odjemalec: PrijavljenOdjemalec) -> None:
+        """Kriterij `ADR-038` F: geslo ne sme pristati v HTML."""
+        odgovor = odjemalec.post(
+            f"{POT}/parents", data={**NOV_STARS, "geslo_znova": "nekaj-cisto-drugega"}
+        )
+
+        assert 'value="Ana"' in odgovor.text
+        assert 'value="ana@primer.test"' in odgovor.text
+        assert NOV_STARS["geslo"] not in odgovor.text
+        assert "nekaj-cisto-drugega" not in odgovor.text
+
+    def test_enajst_znakov_je_za_starsa_premalo(
+        self, odjemalec: PrijavljenOdjemalec, motor: Engine
+    ) -> None:
+        """Meja je 12 (`prijava.NAJKRAJSE_GESLO`); enajst znakov je prvi, ki ne gre."""
+        kratko = "enajst-znak"
+        assert len(kratko) == 11
 
         odgovor = odjemalec.post(
             f"{POT}/parents", data={**NOV_STARS, "geslo": kratko, "geslo_znova": kratko}

@@ -30,9 +30,15 @@ const SPOROCILO_NEPRICAKOVANO = 'Povezava ni uspela. Poskusi znova.';
  * Omrežja se zaslon ne dotakne sam — unovčenje je v `src/sync/prijava.ts`.
  */
 export default function PoveziScreen() {
+  const { z } = useLocalSearchParams<{ z?: string }>();
+  // Nova povezava v že odprt zaslon je nov začetek: s ključem se zaslon vpne
+  // znova in začetno stanje (povezujem, napaka) se izpelje iz novega žetona.
+  return <Povezi key={typeof z === 'string' ? z : ''} z={z} />;
+}
+
+function Povezi({ z }: { z?: string }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { z } = useLocalSearchParams<{ z?: string }>();
   const { povezi } = usePrijava();
   const { nastavljen } = useSync();
   const [permission, requestPermission] = useCameraPermissions();
@@ -44,6 +50,10 @@ export default function PoveziScreen() {
   const [napaka, setNapaka] = useState<string | null>(() =>
     typeof z === 'string' && z.length > 0 && !jeZeton(z) ? SPOROCILO_NI_NASA_KODA : null,
   );
+
+  // Ali zadnji poskus izhaja iz odprte povezave. Dokler je tako, „Poskusi
+  // znova" pošlje isti žeton; ko otrok izbere kamero, velja prebrana koda.
+  const [izPovezaveVelja, setIzPovezaveVelja] = useState(() => jeZeton(z));
 
   // Zaporo drži referenca: bralnik isto kodo javi večkrat na sekundo in stanje
   // bi se posodobilo šele ob naslednjem izrisu.
@@ -121,6 +131,19 @@ export default function PoveziScreen() {
   const poskusiZnova = useCallback(() => {
     // Ista koda sme znova do strežnika: nedosegljiv strežnik je ni porabil.
     obdelano.current = null;
+    // Žeton iz odprte povezave se pošlje znova. Družina z enim telefonom kode
+    // ne more prebrati s kamero — gumb „Odpri na tem telefonu" je njena edina
+    // pot, in „Poskusi znova" mora zanjo pomeniti prav to.
+    if (izPovezaveVelja && nastavljen && jeZeton(z) && !zaklep.current) {
+      unovci(z);
+      return;
+    }
+    setNapaka(null);
+  }, [izPovezaveVelja, nastavljen, unovci, z]);
+
+  const preberiSKamero = useCallback(() => {
+    obdelano.current = null;
+    setIzPovezaveVelja(false);
     setNapaka(null);
   }, []);
 
@@ -171,6 +194,21 @@ export default function PoveziScreen() {
         >
           <Text style={styles.gumbNapis}>Poskusi znova</Text>
         </Pressable>
+        {/* Po neuspeli odprti povezavi je druga pot nova koda pred kamero. */}
+        {izPovezaveVelja && permission?.granted ? (
+          <Pressable
+            accessibilityRole="button"
+            testID="gumb-kamera"
+            style={({ pressed }) => [
+              styles.gumb,
+              styles.gumbDrugotni,
+              pressed && styles.gumbPritisnjen,
+            ]}
+            onPress={preberiSKamero}
+          >
+            <Text style={styles.gumbNapis}>Preberi novo kodo s kamero</Text>
+          </Pressable>
+        ) : null}
       </View>
     ) : (
       <Text testID="navodilo" style={styles.pojasnilo}>
@@ -182,11 +220,8 @@ export default function PoveziScreen() {
   if (!permission.granted) {
     return (
       <View testID="povezi-vsebina" style={[styles.sredina, odmikSpodaj]}>
-        {napaka !== null ? (
-          <Text testID="napaka-povezave" style={styles.napaka}>
-            {napaka}
-          </Text>
-        ) : null}
+        {/* Sporočilo z gumbom tudi tu: odprta povezava kamere ne potrebuje. */}
+        {napaka !== null ? sporocilo : null}
         <Text testID="brez-kamere" style={styles.naslov}>
           Potrebujem dovoljenje za kamero
         </Text>
@@ -272,6 +307,11 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing * 1.25,
     borderRadius: theme.radius,
     backgroundColor: theme.accent,
+  },
+  gumbDrugotni: {
+    backgroundColor: theme.background,
+    borderWidth: 1,
+    borderColor: theme.border,
   },
   gumbPritisnjen: {
     opacity: 0.7,

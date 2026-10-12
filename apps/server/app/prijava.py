@@ -107,7 +107,9 @@ SPOROCILO_NEUSPELA_PRIJAVA = (
 )
 
 #: Izjema od enotnega sporočila (`ADR-035` F): otrok mora razumeti, zakaj ne gre.
-SPOROCILO_OTROK = "Ta račun je otrokov in se prijavi v mobilni aplikaciji, ne na tej strani."
+SPOROCILO_OTROK = (
+    "Ta račun je otrokov. Otrok uporablja mobilno aplikacijo; telefon mu poveže starš."
+)
 
 #: Eno besedilo za **vsak** neveljaven povezovalni žeton: potekel, porabljen,
 #: neznan, žeton deaktiviranega otroka in žeton ugasnjene družine

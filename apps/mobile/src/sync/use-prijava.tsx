@@ -32,6 +32,7 @@ import { jeOdjavaNedokoncana, koncajOdjavo, zacniOdjavo } from '../db/naprava';
 import { asMaterialsDatabase } from '../db/open';
 import { useSQLiteContext } from 'expo-sqlite';
 import {
+  NapakaPrijave,
   odjaviSe,
   poveziSe,
   pozabiSejo,
@@ -108,6 +109,11 @@ export type PrijavaVrednost = {
   /** Odjavi se. Lokalnih slik in poskusov se ne dotakne (`ADR-036` G). */
   odjavi(): Promise<void>;
 };
+
+/** Kar otrok vidi, kadar varna shramba telefona seje ne sprejme (V6-R01). */
+export const SPOROCILO_SEJE_NI_MOGOCE_SHRANITI =
+  'Telefon prijave ni mogel shraniti, zato ni povezan. Prosi starša za novo kodo in ' +
+  'poskusi znova; posnetki na telefonu ostanejo.';
 
 const PrijavaContext = createContext<PrijavaVrednost | null>(null);
 
@@ -215,7 +221,16 @@ export function PrijavaProvider({
       const nova = await poveziSe(nastavitve, zeton);
       // Nova seja staro prepiše pod istim ključem v enem zapisu, zato stari
       // žeton na disku ne ostane in oznake iz `ADR-037` ta pot ne postavlja.
-      await shraniSejo(nova, shramba);
+      try {
+        await shraniSejo(nova, shramba);
+      } catch {
+        // Koda je porabljena, seje pa telefon ne more obdržati. Brez tega bi
+        // otrok videl „poskusi znova", ista koda pa bi bila nato neveljavna.
+        // Sejo, ki je ne bo imel nihče, na strežniku pospravimo (najboljši
+        // poskus), prejšnja — če je bila — ostane nedotaknjena.
+        void odjaviSe(nastavitve, nova);
+        throw new NapakaPrijave(SPOROCILO_SEJE_NI_MOGOCE_SHRANITI);
+      }
       // Posvojitev je del povezave in ne prenosa: zapisi, ki so nastali, ko ni
       // bil povezan nihče, bi sicer v vrsti obtičali za vedno (`ADR-036` B).
       // Isto stori obnovitev seje z diska; pravilo je „vsaka razrešena seja

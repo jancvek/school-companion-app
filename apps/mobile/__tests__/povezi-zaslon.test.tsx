@@ -5,7 +5,7 @@ import PoveziScreen, { SPOROCILO_NI_NASA_KODA } from '../app/povezi';
 import { insertMaterial, listPending, type MaterialsDatabase } from '@/db/materials';
 import { migriraj } from '@/db/migrations';
 import { jeOdjavaNedokoncana, zacniOdjavo } from '@/db/naprava';
-import { PrijavaProvider } from '@/sync/use-prijava';
+import { PrijavaProvider, SPOROCILO_SEJE_NI_MOGOCE_SHRANITI } from '@/sync/use-prijava';
 import { SyncProvider } from '@/sync/use-sync';
 import type { Material } from '@/types';
 import { theme } from '@/ui/theme';
@@ -213,12 +213,62 @@ describe('zaslon za povezavo telefona', () => {
     await izrisi(shramba, ZETON);
     await screen.findByTestId('napaka-povezave');
 
-    await fireEvent.press(screen.getByTestId('gumb-znova'));
+    await fireEvent.press(screen.getByTestId('gumb-kamera'));
     await preberi(`school-companion://povezi?z=${'n'.repeat(43)}`);
     await povezano();
 
     expect(JSON.parse(zahtevePovezave()[1][1].body)).toEqual({ token: 'n'.repeat(43) });
     expect(shramba.vsebina()).toContain(NOVA.zeton);
+  });
+
+  it('odprta povezava brez omrežja: „Poskusi znova" pošlje isti žeton', async () => {
+    // Družina z enim telefonom kode ne more prebrati s kamero; gumb „Odpri na
+    // tem telefonu" je njena edina pot. Brez dovoljenja za kamero je ta test
+    // še strožji: bralnika ni, ponovitev mora delati vseeno.
+    kamera.stanje.permission = dovoljenje({ granted: false });
+    odgovor.mockRejectedValueOnce(new Error('Network request failed'));
+    const shramba = ustvariShrambo();
+    await izrisi(shramba, ZETON);
+    expect((await screen.findByTestId('napaka-povezave')).props.children).toMatch(
+      /poskusi znova/i,
+    );
+
+    await fireEvent.press(screen.getByTestId('gumb-znova'));
+    await povezano();
+
+    expect(zahtevePovezave()).toHaveLength(2);
+    expect(JSON.parse(zahtevePovezave()[1][1].body)).toEqual({ token: ZETON });
+    expect(shramba.vsebina()).toContain(NOVA.zeton);
+  });
+
+  it('nova povezava v že odprt zaslon se unovči kot prva', async () => {
+    // Starš ustvari novo kodo in še enkrat pritisne „Odpri na tem telefonu",
+    // zaslon pa je od prej odprt z napako. Nova povezava je nov začetek.
+    odgovor.mockResolvedValueOnce(zavrnitev(401, 'Koda ne velja več. Prosi starša za novo.'));
+    const shramba = ustvariShrambo();
+    const izid = await izrisi(shramba, ZETON);
+    await screen.findByTestId('napaka-povezave');
+
+    usmerjevalnik.stanje.params = { z: 'n'.repeat(43) };
+    await izid.rerender(drevo(shramba));
+    await povezano();
+
+    expect(JSON.parse(zahtevePovezave()[1][1].body)).toEqual({ token: 'n'.repeat(43) });
+    expect(screen.queryByTestId('napaka-povezave')).toBeNull();
+    expect(shramba.vsebina()).toContain(NOVA.zeton);
+  });
+
+  it('nova povezava, ki ni žeton, v že odprtem zaslonu dobi sporočilo', async () => {
+    const izid = await izrisi(ustvariShrambo());
+    expect(screen.queryByTestId('napaka-povezave')).toBeNull();
+
+    usmerjevalnik.stanje.params = { z: 'to ni žeton' };
+    await izid.rerender(drevo(ustvariShrambo()));
+
+    expect((await screen.findByTestId('napaka-povezave')).props.children).toBe(
+      SPOROCILO_NI_NASA_KODA,
+    );
+    expect(odgovor).not.toHaveBeenCalled();
   });
 
   // --- Kamera --------------------------------------------------------------
@@ -508,6 +558,33 @@ describe('zaslon za povezavo telefona', () => {
     expect(await jeOdjavaNedokoncana(db)).toBe(false);
     // Ostanek ni seja, zato strežniku ni kaj odjaviti.
     expect(odgovor.mock.calls.every(([url]) => !String(url).endsWith('/auth/logout'))).toBe(true);
+  });
+
+  it('če telefon seje ne more shraniti, to pove in ne trdi, da koda še velja', async () => {
+    // Koda je na strežniku že porabljena. „Poskusi znova" bi otroka poslal v
+    // „Koda ne velja več"; sporočilo zato pove, da potrebuje novo kodo, seja,
+    // ki je nima noben telefon, pa se na strežniku pospravi.
+    const shramba = ustvariShrambo();
+    const neZapise: TestnaShramba = {
+      ...shramba,
+      setItemAsync: async () => {
+        throw new Error('Keystore ni dosegljiv');
+      },
+    };
+
+    await izrisi(neZapise, ZETON);
+
+    const besedilo = (await screen.findByTestId('napaka-povezave')).props.children as string;
+    expect(besedilo).toBe(SPOROCILO_SEJE_NI_MOGOCE_SHRANITI);
+    expect(besedilo).toMatch(/novo kodo/i);
+    expect(besedilo).not.toMatch(/Keystore/);
+    expect(shramba.vsebina()).toBeUndefined();
+    expect(usmerjevalnik.stanje.router.back).not.toHaveBeenCalled();
+    await waitFor(() => {
+      const odjave = odgovor.mock.calls.filter(([url]) => String(url).endsWith('/auth/logout'));
+      expect(odjave).toHaveLength(1);
+      expect(odjave[0][1].headers['Authorization']).toBe(`Bearer ${NOVA.zeton}`);
+    });
   });
 
   it('povezava uspe, tudi če posvojitev pade', async () => {
