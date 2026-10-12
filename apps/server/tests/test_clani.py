@@ -593,6 +593,24 @@ class TestPoveziTelefon:
         assert povezava.qr_svg(naslov) in odgovor.text
         assert povezava.qr_svg(naslov + "x") not in odgovor.text
 
+    @pytest.mark.parametrize("dejanje", ["link", "revoke"])
+    def test_krozec_nosi_otrokovo_zacetnico_ne_starseve(
+        self, odjemalec: PrijavljenOdjemalec, motor: Engine, dejanje: str
+    ) -> None:
+        """Obdelovalec konteksta ključe poti prepiše (`docs/02-izkusnje.md`).
+
+        Ključ `zacetnica` je njegov — začetnica prijavljenega starša za meni —,
+        zato je kartica sprva kazala „D" ob otroku. Najdeno ob ogledu strani.
+        """
+        nika = ustvari_otroka(motor, identifikator="nika", prikazno_ime="Nika")
+        pot = pot_clana(nika, dejanje)
+
+        besedilo = vsebina_strani(
+            (odjemalec.post(pot) if dejanje == "link" else odjemalec.get(pot)).text
+        )
+
+        assert '<span class="krozec velik" aria-hidden="true">N</span>' in besedilo
+
     def test_povezava_nosi_samo_zeton(self, odjemalec: PrijavljenOdjemalec, otrok: str) -> None:
         """`ADR-061` C: naslova strežnika v povezavi ni."""
         naslov = povezava_s_strani(odjemalec.post(pot_clana(otrok, "link")).text)

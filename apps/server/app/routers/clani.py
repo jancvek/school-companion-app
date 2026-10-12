@@ -407,7 +407,7 @@ def povezi_telefon(
         "clani-povezava.html",
         {
             "clan_ime": clan.display_name,
-            "zacetnica": meni.zacetnica(clan.display_name),
+            "clan_zacetnica": meni.zacetnica(clan.display_name),
             "povezava": naslov,
             "qr": povezava.qr_svg(naslov),
             "minut": int(prijava.TRAJANJE_POVEZAVE.total_seconds() // 60),
@@ -438,7 +438,7 @@ def potrdi_preklic_prijav(
         "clani-preklic.html",
         {
             "clan_ime": clan.display_name,
-            "zacetnica": meni.zacetnica(clan.display_name),
+            "clan_zacetnica": meni.zacetnica(clan.display_name),
             "pot_dejanja": f"{PREDPONA}/members/{clan.user_id}/revoke",
             "pot_nazaj": PREDPONA,
         },
