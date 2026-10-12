@@ -26,7 +26,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
 from app.besedilo import SLIKE, stevilo_z_besedo
-from app.casi import cas, danes, datum_dneva, dnevi_od_do, ura, v_domacem
+from app.casi import cas, dan_z_imenom, danes, datum_dneva, dnevi_od_do, ura, v_domacem
 from app.db import ClaniRepository, MaterialsRepository, ScheduleRepository
 from app.dependencies import (
     daj_nastavitve,
@@ -40,7 +40,7 @@ from app.otroci import IzbiraOtroka, izberi_otroka
 from app.settings import Settings
 from app.storage import je_znotraj, mapa_druzine, velikost_slike
 from app.strani import daj_predloge, neveljavna_zahteva, ni_najdeno
-from app.subjects import PREDMETI, oznaka_predmeta
+from app.subjects import PREDMETI, barva_predmeta, oznaka_predmeta
 from app.urnik import Urnik, manjkajoci_predmeti
 
 #: Predpona te strani. Pod `/admin`, torej brez ključa (`ADR-006`).
@@ -187,8 +187,12 @@ def razvrsti_po_dnevih(
     snovi: list[Material],
     mapa_slik: Path,
     urnik: Urnik | None = None,
+    danasnji: date | None = None,
 ) -> list[dict[str, Any]]:
     """Slike, razvrščene po dnevu in znotraj dneva po predmetu.
+
+    `danasnji` označi kartico današnjega dne (V5-R01); brez njega ni označena
+    nobena.
 
     Čista funkcija: brez seje, brez zahteve, testljiva brez izrisa. Grupiranje
     je v Pythonu in ne v SQL, ker izraz za lokalni koledarski dan v SQL ni
@@ -237,22 +241,31 @@ def razvrsti_po_dnevih(
                 # Koda ostane vidna, kot zahteva odločitev 3 v
                 # `docs/plan/V1-R04.md` — podvojena pač ni.
                 "oznaka": oznaka_predmeta(koda) if oznaka_predmeta(koda) != koda else None,
+                "barva": barva_predmeta(koda),
                 "koliko_opis": stevilo_z_besedo(len(skupine[koda]), SLIKE),
                 "slike": [_pogled_slike(snov, mapa_slik) for snov in skupine[koda]],
             }
             for koda in vrstni_red
         ]
         koliko = sum(len(skupine[koda]) for koda in vrstni_red)
+        # Prazna čopica pomeni „nič ne manjka" **in** „dan je prazen" **in**
+        # „urnika ni"; predloga med njimi ne loči, ker vsi trije pomenijo
+        # isto: vrstice z manjki ni (`ADR-028` E2).
+        manjki = manjkajoci_predmeti(urnik, dan.weekday(), skupine.keys())
+        naslov = dan_z_imenom(dan)
         izpis.append(
             {
-                "datum": datum_dneva(dan),
+                # Naslov kartice dneva (V5-R01): „Četrtek, 8. oktober".
+                "naslov": naslov[0].upper() + naslov[1:],
+                "je_danes": dan == danasnji,
                 "iso": dan.isoformat(),
                 "koliko_opis": stevilo_z_besedo(koliko, SLIKE),
                 "predmeti": predmeti,
-                # Prazna čopica pomeni „nič ne manjka" **in** „dan je prazen"
-                # **in** „urnika ni"; predloga med njimi ne loči, ker vsi trije
-                # pomenijo isto: vrstice z manjki ni (`ADR-028` E2).
-                "manjki": manjkajoci_predmeti(urnik, dan.weekday(), skupine.keys()),
+                "manjki": manjki,
+                # Isti manjki z barvo predmeta, za črtkane čipe.
+                "manjki_cipi": [
+                    {"koda": koda, "barva": barva_predmeta(koda)} for koda in manjki
+                ],
             }
         )
 
@@ -311,24 +324,59 @@ def pregled_po_dnevih(
         urniki.urnik(izbira.izbrani.user_id) if izbira.izbrani is not None else None
     )
 
+    vceraj = zdaj - timedelta(days=1)
+    otrok_dodatni = _parameter_otroka(izbira, prvi=False)
+    # Trenutno obdobje za naslov; zavihki otrok ga nosijo naprej, ker sta
+    # obdobje in otrok neodvisni izbiri in mora vsaka drugo preživeti
+    # (`ADR-039` B).
+    obdobje_v_naslovu = (
+        "obdobje=teden" if izbrano.je_teden else f"dan={izbrano.zadnji.isoformat()}"
+    )
+
     return predloge.TemplateResponse(
         request,
         "dnevi.html",
         {
+            # Zavihki obdobja (V5-R01). Tretji se je do V5-R01 imenoval „Ta
+            # teden"; pomen je isti — zadnjih sedem dni, ki se končajo z
+            # današnjim, ne koledarski teden (`ADR-023`).
+            "zavihki_obdobja": [
+                {
+                    "oznaka": "Danes",
+                    "href": f"{PREDPONA}{_parameter_otroka(izbira, prvi=True)}",
+                    "izbran": not izbrano.je_teden and izbrano.zadnji == zdaj,
+                },
+                {
+                    "oznaka": "Včeraj",
+                    "href": f"{PREDPONA}?dan={vceraj.isoformat()}{otrok_dodatni}",
+                    "izbran": not izbrano.je_teden and izbrano.zadnji == vceraj,
+                },
+                {
+                    "oznaka": f"Zadnjih {DNI_V_TEDNU} dni",
+                    "href": f"{PREDPONA}?obdobje=teden{otrok_dodatni}",
+                    "izbran": izbrano.je_teden,
+                },
+            ],
+            # Zavihki otrok so povezave in ne obrazec z gumbom; pri enem
+            # otroku jih ni (`ADR-039` B).
+            "zavihki_otrok": [
+                {
+                    "oznaka": kdo.display_name,
+                    "href": (
+                        f"{PREDPONA}?{obdobje_v_naslovu}"
+                        f"&{PARAMETER_OTROKA}={quote(kdo.user_id, safe='')}"
+                    ),
+                    "izbran": izbira.izbrani is not None
+                    and kdo.user_id == izbira.izbrani.user_id,
+                }
+                for kdo in izbira.vsi
+            ]
+            if izbira.je_izbirnik
+            else [],
             "obdobje_opis": izbrano.opis,
             # Izbirnika, ki nima česa izbirati, ni (`ADR-039` B).
             "je_izbirnik_otrok": izbira.je_izbirnik,
-            # Gotova niza za povezave: predloga ne sestavlja naslovov. Brez
-            # njiju bi vsak gumb za obdobje tiho vrnil privzetega otroka —
-            # dve izbiri, od katerih vsaka pobriše drugo.
-            "otrok_prvi": _parameter_otroka(izbira, prvi=True),
-            "otrok_dodatni": _parameter_otroka(izbira, prvi=False),
-            "otroci": [
-                {"id": kdo.user_id, "ime": kdo.display_name} for kdo in izbira.vsi
-            ],
             "izbrani_otrok": izbira.izbrani.user_id if izbira.izbrani is not None else None,
-            "je_teden": izbrano.je_teden,
-            "dni_v_tednu": DNI_V_TEDNU,
             "skupaj_opis": stevilo_z_besedo(len(snovi), SLIKE),
             # Gotov niz in ne trenutek: predloga ne računa in ne oblikuje.
             # `None` pomeni, da strežnik ni prejel še nobene slike — to ni
@@ -336,12 +384,12 @@ def pregled_po_dnevih(
             "prejeto_opis": cas(prejeto) if prejeto is not None else None,
             # Vrednost za `<input type="date">`; ta pozna samo obliko ISO.
             "izbrani_dan": izbrano.zadnji.isoformat(),
-            "vceraj": (zdaj - timedelta(days=1)).isoformat(),
             "dnevi": razvrsti_po_dnevih(
                 izbrano.dnevi,
                 snovi,
                 mapa_druzine(nastavitve.images_dir, repozitorij.family_id),
                 urnik,
+                zdaj,
             ),
         },
     )

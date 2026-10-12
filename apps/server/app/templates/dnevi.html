@@ -1,116 +1,128 @@
 {% extends "osnova.html" %}
 
-{% block naslov %}Pregled po dnevih{% endblock %}
+{% block naslov %}Po dnevih{% endblock %}
 
 {% block vsebina %}
-  <h1>Pregled po dnevih</h1>
-  <p class="pod">
-    {{ obdobje_opis }} &middot; {{ skupaj_opis }}.
-    {# „Nazadnje prejeto" stoji tu in ne spodaj: prazen dan ne sme biti
-       zamenjan za neopravljeno delo, kadar telefon še ni prenesel. Šteje
-       vsako prejeto sliko, tudi arhivirano (`docs/odlocitve/ADR-023`). #}
-    {% if prejeto_opis %}
-      Strežnik je nazadnje prejel sliko {{ prejeto_opis }}.
-    {% else %}
-      Strežnik še ni prejel nobene slike.
-    {% endif %}
-  </p>
+  <div class="glava-strani">
+    <div>
+      <h1>Po dnevih</h1>
+      <p class="pod">
+        Kaj je bilo poslikano, po dnevih in predmetih.
+        {# „Nazadnje prejeto" stoji tu in ne spodaj: prazen dan ne sme biti
+           zamenjan za neopravljeno delo, kadar telefon še ni prenesel. Šteje
+           vsako prejeto sliko, tudi arhivirano (`docs/odlocitve/ADR-023`). #}
+        {% if prejeto_opis %}
+          Strežnik je nazadnje prejel sliko <strong>{{ prejeto_opis }}</strong>.
+        {% else %}
+          Strežnik še ni prejel nobene slike.
+        {% endif %}
+      </p>
+    </div>
 
-  {# Gumbi so navadne povezave in izbirnik dneva je obrazec `GET`: stran
-     ničesar ne spremeni, zato mora biti dosegljiva z osvežitvijo in iz
+    {# Izbira otroka kot zavihka: povezavi, ki nosita izbrano obdobje naprej —
+       obdobje in otrok sta dve neodvisni izbiri, in vsaka mora drugo
+       preživeti (`docs/odlocitve/ADR-039` B). Pri enem otroku se ne izriše. #}
+    {% if zavihki_otrok %}
+      <ul class="zavihki" aria-label="Otrok">
+        {% for zavihek in zavihki_otrok %}
+          <li>
+            <a href="{{ zavihek.href }}"{% if zavihek.izbran %} aria-current="true"{% endif %}>{{ zavihek.oznaka }}</a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+
+  {# Zavihki obdobja so navadne povezave in izbirnik dneva je obrazec `GET`:
+     stran ničesar ne spremeni, zato mora biti dosegljiva z osvežitvijo in iz
      zgodovine brskalnika. Skrito polje `obdobje=dan` poskrbi, da iz vmesnika
      nikoli ne nastane kombinacija „teden in poljuben dan", ki je 400. #}
-  {# Izbira otroka je svoj obrazec `GET` in ne povezave: obdobje in otrok
-     sta dve neodvisni izbiri, in vsaka mora drugo preživeti
-     (`docs/odlocitve/ADR-039` B). Pri enem otroku se ne izriše. #}
-  {% if je_izbirnik_otrok %}
-    <form method="get" action="/admin/days" class="vstopi izbira-otroka">
-      <input type="hidden" name="obdobje" value="{{ 'teden' if je_teden else 'dan' }}">
-      {% if not je_teden %}<input type="hidden" name="dan" value="{{ izbrani_dan }}">{% endif %}
-      <label>
-        Otrok:
-        <select name="otrok">
-          {% for otrok in otroci %}
-            <option value="{{ otrok.id }}"
-                    {% if otrok.id == izbrani_otrok %}selected{% endif %}>{{ otrok.ime }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <button class="gumb gumb-obdelava" type="submit">Pokaži</button>
-    </form>
-  {% endif %}
-
-  <div class="vstopi">
-    <a class="gumb gumb-obdelava" href="/admin/days{{ otrok_prvi }}">Danes</a>
-    <a class="gumb gumb-obdelava"
-       href="/admin/days?dan={{ vceraj }}{{ otrok_dodatni }}">Včeraj</a>
-    <a class="gumb gumb-obdelava"
-       href="/admin/days?obdobje=teden{{ otrok_dodatni }}">Ta teden</a>
-    <form method="get" action="/admin/days" class="vstopi">
+  <div class="orodna-vrstica na-levo">
+    <ul class="zavihki" aria-label="Obdobje">
+      {% for zavihek in zavihki_obdobja %}
+        <li>
+          <a href="{{ zavihek.href }}"{% if zavihek.izbran %} aria-current="true"{% endif %}>{{ zavihek.oznaka }}</a>
+        </li>
+      {% endfor %}
+    </ul>
+    <form method="get" action="/admin/days" class="vrstica-gumbov">
       <input type="hidden" name="obdobje" value="dan">
       {% if je_izbirnik_otrok %}
         <input type="hidden" name="otrok" value="{{ izbrani_otrok }}">
       {% endif %}
-      <label>
-        Dan:
-        <input type="date" name="dan" value="{{ izbrani_dan }}" class="ime">
-      </label>
-      <button class="gumb gumb-obdelava" type="submit">Pokaži</button>
+      <label class="skrito" for="izbrani-dan">Dan:</label>
+      <input type="date" name="dan" id="izbrani-dan" value="{{ izbrani_dan }}">
+      <button class="gumb obrobljen" type="submit">Pokaži dan</button>
     </form>
   </div>
-  <p class="drobno">
-    „Ta teden" pomeni zadnjih {{ dni_v_tednu }} dni, ki se končajo z današnjim.
-    Prikazane so samo slike, ki niso v arhivu.
+  <p class="drobno pod-orodji">
+    {{ obdobje_opis }} &middot; {{ skupaj_opis }} &middot; arhivirane niso prikazane
   </p>
 
   {% for dan in dnevi %}
-    <section class="skupina">
-      <h2>{{ dan.datum }}</h2>
-      {% if dan.predmeti %}
-        <p class="drobno">{{ dan.koliko_opis }}</p>
-        {# Manjki (V3-R09): predmeti z urnika tega dne brez ene same
-           nearhivirane slike. Izpišejo se samo pri **delno** poslikanem dnevu
-           — pri praznem bi bil vsak praznik in vsak dan počitnic vrstica s
-           petimi manjki in stran bi se nehala brati (`ADR-028` E2). Predmet,
-           ki je poslikan, a ga na urniku ni, se ne javlja: urnik je
-           pričakovanje, ne pravilo. #}
-        {% if dan.manjki %}
-          <p class="manjki">Manjka: {{ dan.manjki | join(", ") }}.</p>
-        {% endif %}
-        {% for predmet in dan.predmeti %}
-          {# Predmet brez slik tega dne se ne izpiše: pri tednu bi bilo to
-             sedemdeset večinoma praznih vrstic. Kaj tisti dan manjka, ve
-             lastnik sam (`ADR-023`). #}
-          <h3>
-            {{ predmet.koda }}{% if predmet.oznaka %} — {{ predmet.oznaka }}{% endif %}
-            <span>{{ predmet.koliko_opis }}</span>
-          </h3>
-          <ul class="mreza">
-            {% for slika in predmet.slike %}
-              <li>
-                <a href="/admin/materials/{{ slika.id }}">
-                  {% if slika.ima_sliko %}
-                    {# `loading="lazy"` je edino, kar teden drži znosen:
-                       sličic ni in tu se ne uvajajo, pomanjšava je v CSS. #}
-                    <img src="/admin/materials/{{ slika.id }}/image" alt="" loading="lazy">
-                  {% else %}
-                    <span class="brez-slike">slike na disku ni</span>
-                  {% endif %}
-                  {# Ob sliki samo ura: datum nosi naslov skupine, stanje
-                     obdelave pa stran s podrobnostmi, kamor klik pelje. #}
-                  <span class="opis"><span class="cas">{{ slika.ura }}</span></span>
-                </a>
-              </li>
-            {% endfor %}
-          </ul>
-        {% endfor %}
-      {% else %}
-        {# Prazen dan se izpiše in ne izpade: prav odsotnost slik je odgovor
-           na vprašanje, ali je bila snov tisti dan poslikana. #}
-        <p class="drobno">Tega dne ni nobene slike.</p>
-      {% endif %}
-    </section>
-  {% endfor %}
+    {% if dan.predmeti %}
+      <section class="kartica brez-roba dan-kartica{% if dan.je_danes %} danasnja{% endif %}">
+        <header class="dan-kartica-glava">
+          <h2>{{ dan.naslov }}</h2>
+          {% if dan.je_danes %}<span class="oznaka ok">danes</span>{% endif %}
+          <span class="zamolklo">{{ dan.koliko_opis }}</span>
+          {# Manjki (V3-R09): predmeti z urnika tega dne brez ene same
+             nearhivirane slike. Izpišejo se samo pri **delno** poslikanem
+             dnevu — pri praznem bi bil vsak praznik in vsak dan počitnic
+             vrstica s petimi manjki in stran bi se nehala brati (`ADR-028`
+             E2). Predmet, ki je poslikan, a ga na urniku ni, se ne javlja:
+             urnik je pričakovanje, ne pravilo. #}
+          {% if dan.manjki %}
+            <p class="manjki">
+              {# Bralnik zaslona dobi poved; čipi so njen videz. #}
+              <span class="skrito">Manjka: {{ dan.manjki | join(", ") }}.</span>
+              <span aria-hidden="true">Manjka</span>
+              {% for manjko in dan.manjki_cipi %}
+                <span class="cip crtkan" aria-hidden="true" style="--barva: {{ manjko.barva }}">{{ manjko.koda }}</span>
+              {% endfor %}
+            </p>
+          {% endif %}
+        </header>
 
-  <a class="nazaj" href="/admin">← Nazaj na predmete</a>
+        <div class="dan-predmeti">
+          {% for predmet in dan.predmeti %}
+            {# Predmet brez slik tega dne se ne izpiše: pri tednu bi bilo to
+               sedemdeset večinoma praznih vrstic (`ADR-023`). #}
+            <div class="dan-predmet">
+              <h3>
+                <span class="cip" style="--barva: {{ predmet.barva }}">{{ predmet.koda }}</span>
+                {% if predmet.oznaka %}{{ predmet.oznaka }}{% endif %}
+                <span class="zamolklo">{{ predmet.koliko_opis }}</span>
+              </h3>
+              <ul class="slike-dneva v-vrsti">
+                {% for slika in predmet.slike %}
+                  <li>
+                    <a href="/admin/materials/{{ slika.id }}">
+                      {% if slika.ima_sliko %}
+                        {# `loading="lazy"` je edino, kar teden drži znosen:
+                           sličic ni in tu se ne uvajajo, pomanjšava je v CSS. #}
+                        <img src="/admin/materials/{{ slika.id }}/image" alt="" loading="lazy">
+                      {% else %}
+                        <span class="brez-slike">slike na disku ni</span>
+                      {% endif %}
+                      {# Ob sliki samo ura: datum nosi naslov kartice, stanje
+                         obdelave pa stran s podrobnostmi, kamor klik pelje. #}
+                      <span class="opis"><span class="cas">{{ slika.ura }}</span></span>
+                    </a>
+                  </li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endfor %}
+        </div>
+      </section>
+    {% else %}
+      {# Prazen dan se izpiše in ne izpade: prav odsotnost slik je odgovor na
+         vprašanje, ali je bila snov tisti dan poslikana. #}
+      <section class="dan-prazen{% if dan.je_danes %} danasnja{% endif %}">
+        <h2>{{ dan.naslov }}</h2>
+        <p>Tega dne ni nobene slike.</p>
+      </section>
+    {% endif %}
+  {% endfor %}
 {% endblock %}

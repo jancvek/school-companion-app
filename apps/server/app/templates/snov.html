@@ -3,13 +3,53 @@
 {% block naslov %}{{ snov.koda }} — {{ snov.cas }}{% endblock %}
 
 {% block vsebina %}
-  <h1>{{ snov.koda }} — {{ snov.oznaka }}</h1>
-  <p class="pod">
-    {{ snov.cas }}{% if snov.otrok %} · {{ snov.otrok }}{% endif %}{% if snov.arhiviran %} — <strong>v arhivu</strong>{% endif %}
-  </p>
+  <div class="glava-strani">
+    <ol class="drobtine">
+      <li><a href="/admin">Predmeti</a></li>
+      <li><a href="/admin/subjects/{{ snov.koda|urlencode }}">{{ snov.oznaka }}</a></li>
+      <li aria-current="page">{{ teden }}</li>
+    </ol>
+
+    {# Listanje po slikah predmeta na strani sami in ne le v povečavi (V5-R01).
+       Isti nabor in vrstni red kot puščici povečanega prikaza: novejša levo,
+       starejša desno. Na robu je gumb besedilo in ne povezava; arhivirana
+       snov listanja nima, ker je v naboru predmeta ni. #}
+    {% if listanje %}
+      <nav class="listanje" aria-label="Listanje po slikah predmeta">
+        {% if listanje.novejsa %}
+          <a class="gumb obrobljen majhen" href="{{ listanje.novejsa }}"><span aria-hidden="true">←</span> Novejša</a>
+        {% else %}
+          <span class="gumb obrobljen majhen onemogocen" aria-disabled="true"><span aria-hidden="true">←</span> Novejša</span>
+        {% endif %}
+        <span class="zamolklo">{{ listanje.mesto }} od {{ listanje.vseh }}</span>
+        {% if listanje.starejsa %}
+          <a class="gumb obrobljen majhen" href="{{ listanje.starejsa }}">Starejša <span aria-hidden="true">→</span></a>
+        {% else %}
+          <span class="gumb obrobljen majhen onemogocen" aria-disabled="true">Starejša <span aria-hidden="true">→</span></span>
+        {% endif %}
+      </nav>
+    {% endif %}
+  </div>
+
+  <div class="glava-strani">
+    <div class="naslov-s-platnico">
+      <span class="platnica majhna" style="--barva: {{ barva }}" aria-hidden="true">{{ snov.koda }}</span>
+      <div>
+        <h1>{{ naslov_strani }}</h1>
+        {# Ime otroka je vrednost za ločilom, nikoli del povedi, in samo pri
+           več kot enem otroku (`docs/odlocitve/ADR-039` F3). #}
+        <p class="pod">{{ snov.koda }} — {{ snov.oznaka }}{% if snov.otrok %} · {{ snov.otrok }}{% endif %}</p>
+      </div>
+    </div>
+    <p class="oznake">
+      <span class="oznaka {{ razred_stanja }}"><span class="prva-velika">{{ snov.stanje }}</span></span>
+      {% if snov.arhiviran %}<span class="oznaka"><strong>v arhivu</strong></span>{% endif %}
+    </p>
+  </div>
 
   <div class="snov">
-    <div>
+    {# Levo slika, ki ob drsenju ostane na zaslonu; desno učna vsebina. #}
+    <div class="snov-slika">
       {% if povecava %}
         {# Povezava na izvirnik že v izrisu: brez skripte klik odpre datoteko,
            s skripto ga prestreže povečan prikaz (`docs/odlocitve/ADR-024`,
@@ -17,264 +57,328 @@
         <a class="povecaj" href="/admin/materials/{{ snov.id }}/image" data-povecava>
           <img src="/admin/materials/{{ snov.id }}/image" alt="Posneta snov">
         </a>
+        <p class="vrstica-gumbov">
+          {# Isto kot klik na sliko; brez skripte odpre izvirnik. #}
+          <a class="gumb obrobljen majhen" href="/admin/materials/{{ snov.id }}/image" data-povecava>Povečaj</a>
+          <a class="gumb obrobljen majhen" href="/admin/materials/{{ snov.id }}/image"
+             download="{{ povecava.ime_prenosa }}">Prenesi izvirnik</a>
+        </p>
       {% else %}
-        <p class="opozorilo">
-          Zapis v bazi obstaja, slike na disku pa ni.
-          {% if snov.arhiviran %}
-            V arhivu je to pogosto namerno — datoteko počisti gumb
-            „Počisti sliko z diska".
-          {% else %}
-            Datoteka je bila verjetno odstranjena mimo te strani.
-          {% endif %}
+        <p class="obvestilo tiho">
+          <span>
+            Zapis v bazi obstaja, slike na disku pa ni.
+            {% if snov.arhiviran %}
+              V arhivu je to pogosto namerno — datoteko počisti gumb
+              „Počisti sliko z diska".
+            {% else %}
+              Datoteka je bila verjetno odstranjena mimo te strani.
+            {% endif %}
+          </span>
         </p>
       {% endif %}
-    </div>
 
-    <div>
-      <dl>
-        <dt>Stanje obdelave</dt>
-        <dd>{{ snov.stanje }}</dd>
-
+      <dl class="vrstice">
         <dt>Čas posnetka</dt>
         <dd>{{ snov.cas }}</dd>
-
         <dt>Čas prejema na strežniku</dt>
         <dd>{{ snov.prejeto }}</dd>
-
         <dt>Velikost datoteke</dt>
         <dd>{{ snov.velikost_opis }}</dd>
-
-        <dt>Pot do datoteke</dt>
-        <dd>{{ snov.pot }}</dd>
-
-        <dt>Identifikator</dt>
-        <dd>{{ snov.id }}</dd>
-
-        {# Ime modela in tokeni stojijo ob ostalih metapodatkih in ne v sledi
-           spodaj: to je podatek, ki ga operater primerja med slikami, ne
-           gradivo za razhroščevanje. Cene ne računamo — cenik v nastavitvah
-           bi se staral neopazno (`docs/plan/V1-R03.md`). #}
-        {% if snov.model %}
-          <dt>Model</dt>
-          <dd>{{ snov.model }}</dd>
-
-          <dt>Porabljeni tokeni</dt>
-          <dd>{{ snov.vhodni_tokeni }} vhodnih, {{ snov.izhodni_tokeni }} izhodnih</dd>
-        {% endif %}
       </dl>
+    </div>
 
-      {# Premik v drug predmet (V3-R10). Navaden obrazec s `<select>` in brez
-         skripte: `ADR-024` dovoljuje samo tisto skripto, ki jo zahteva
-         izrecno uvede, in edina na tej strani je povečan prikaz (V2-R08).
-
-         `POST`, ker spremeni stanje — snov in vsa njena vprašanja, veljavna
-         in upokojena (`ADR-040` B1). Potrditvene strani ni, ker je premik
-         povraten.
-
-         Arhivirane snovi in snovi v obdelavi obrazec nima: tam ne bi naredil
-         ničesar (`ADR-040` C1, `ADR-011`). Isti pogoj nosi tudi pot. #}
-      {% if snov.premik_mozen %}
-        {# Odprta značka obrazca je v eni sami vrstici in skrito polje s CSRF
-           žetonom takoj za njo: varovalo `TestCsrfPodAdminom` bere vrstico,
-           ki sledi začetku obrazca, in prelomljena značka bi ga ušla. #}
-        <form class="vstopi" method="post" action="/admin/materials/{{ snov.id }}/subject">
-          <input type="hidden" name="csrf" value="{{ csrf }}">
-          <label>
-            Predmet:
-            <select name="subject">
-              {# Snov s kodo zunaj desetih nima trenutne možnosti, zato dobi
-                 vodilno brez vrednosti. Brez nje bi brskalnik izbral prvo
-                 (`NAR`) in klik na „Premakni" bi snov tiho vložil pod
-                 Naravoslovje. Prazna vrednost je 400, ne tih premik. #}
-              {% if not snov.koda_znana %}
-                <option value="" selected>{{ snov.koda }} — ni na seznamu; izberi predmet</option>
-              {% endif %}
-              {% for predmet in predmeti %}
-                <option value="{{ predmet.koda }}"{% if predmet.koda == snov.koda %} selected{% endif %}>{{ predmet.koda }} — {{ predmet.oznaka }}</option>
-              {% endfor %}
-            </select>
-          </label>
-          <button class="gumb gumb-obdelava" type="submit">Premakni</button>
-        </form>
-        <p class="drobno">
-          Slika se preseli na seznam izbranega predmeta, z njo pa vsa njena
-          vprašanja — tudi upokojena. Statistika teh vprašanj odslej šteje pod
-          novi predmet. Že objavljeni kvizi se ne spremenijo. Zgodovina na
-          telefonu ostane taka, kot jo je posnel otrok.
-        </p>
-      {% endif %}
-
-      {# Gumb je `POST` in ne povezava: ponovna obdelava zavrže prejšnji
-         rezultat in stane nov klic (`docs/odlocitve/ADR-009`). Med obdelavo
-         ga ni — takrat ne bi naredil ničesar. #}
-      {% if snov.ponovna_obdelava_mozna %}
-        <form method="post" action="/admin/materials/{{ snov.id }}/reprocess">
-          <input type="hidden" name="csrf" value="{{ csrf }}">
-          <button class="gumb gumb-obdelava" type="submit">Pošlji v obdelavo</button>
-        </form>
-        {# Vprašanja so od V2-R05 izvzeta iz naštevanja zavrženega — gumb jih
-           upokoji in ne pobriše (`docs/odlocitve/ADR-015`). Stavek, ki bi tu
-           še vedno obljubljal brisanje, bi si nasprotoval z razdelkom o
-           upokojenih vprašanjih nižje na tej isti strani. #}
-        <p class="drobno">
-          Zavrže dosedanji prepis in povzetek ter sproži nov klic modela.
-          Dosedanja vprašanja se ne izbrišejo, ampak upokojijo: ostanejo v
-          bazi, med vprašanja te snovi pa se ne štejejo več.
-        </p>
-      {% elif snov.arhiviran %}
-        {# `ponovna_obdelava_mozna` je `false` iz dveh različnih razlogov.
-           Brez te veje bi arhivirana snov trdila, da je pravkar v obdelavi,
-           in operaterju naročila, naj osvežuje stran, ki se ne bo
-           spremenila nikoli. #}
-        <p class="drobno">
-          Arhivirana snov se ne obdeluje več.
-        </p>
-      {% else %}
-        <p class="drobno">
-          Zapis je pravkar v obdelavi. Osveži stran čez nekaj trenutkov.
-        </p>
-      {% endif %}
-
-      {% if not snov.arhiviran %}
-        {# Do V1-R07 je tu stalo brisanje. Arhiviranje ga nadomesti:
-           telefon sliko zbriše pri sebi, znanje iz nje pa ostane
-           (`docs/odlocitve/ADR-011`). #}
-        <a class="gumb" href="/admin/materials/{{ snov.id }}/archive">Arhiviraj sliko</a>
-        <p class="drobno">
-          Slika izgine iz pregleda in jo telefon zbriše pri sebi. Prepis,
-          povzetek in vprašanja ostanejo.
-        </p>
-      {% else %}
-        <p class="opozorilo">
-          Arhivirano {{ snov.arhivirano_ob }}.
-          {% if snov.potrjeno %}
-            Telefon je brisanje potrdil {{ snov.potrjeno_ob }}.
-          {% else %}
-            Telefon brisanja še ni potrdil.
-          {% endif %}
-        </p>
-
-        {% if snov.velikost is not none %}
-          <form method="post" action="/admin/materials/{{ snov.id }}/purge-image">
-            <input type="hidden" name="csrf" value="{{ csrf }}">
-            <button class="gumb" type="submit">Počisti sliko z diska</button>
-          </form>
-          <p class="drobno">
-            Pobriše samo datoteko. Zapis, prepis in vprašanja ostanejo.
+    <div class="snov-vsebina">
+      {# Obvestilo o stanju: vedno pove, kaj narediti. #}
+      {% if snov.arhiviran %}
+        <div class="obvestilo tiho">
+          <p>
+            <strong>Arhivirano {{ snov.arhivirano_ob }}.</strong>
+            {% if snov.potrjeno %}
+              Telefon je brisanje potrdil {{ snov.potrjeno_ob }}.
+            {% else %}
+              Telefon brisanja še ni potrdil.
+            {% endif %}
+            Prepis, povzetek in vprašanja ostanejo.
           </p>
+        </div>
+      {% endif %}
+
+      {% if snov.status == "failed" %}
+        <section class="obvestilo napaka">
+          <div>
+            <h2>Obdelava ni uspela</h2>
+            <p class="napaka-besedilo">{{ snov.napaka }}</p>
+            {% if snov.ponovna_obdelava_mozna %}
+              <p>Pošlji sliko v obdelavo znova; če se ponovi, preveri tehnične podatke spodaj.</p>
+            {% endif %}
+          </div>
+        </section>
+      {% elif snov.status == "ready" and snov.berljivo is false %}
+        <section class="obvestilo caka">
+          <div>
+            <h2>Slika ni berljiva</h2>
+            <p>
+              Model s te slike ni znal brati učne snovi, zato prepisa in vprašanj ni.
+              Slika je verjetno zamegljena, prazna ali posneta pod prevelikim kotom.
+            </p>
+          </div>
+        </section>
+      {% elif snov.status == "ready" %}
+        <section class="kartica">
+          <h2>Povzetek</h2>
+          <p>{{ snov.povzetek }}</p>
+        </section>
+
+        <section class="kartica">
+          <div class="kartica-glava">
+            <h2>Vprašanja</h2>
+            <span class="zamolklo">{{ stevilo_vprasanj_opis }}</span>
+          </div>
+          <ol class="vprasanja">
+            {% for vprasanje in snov.vprasanja %}
+              <li>
+                <p class="vprasanje">{{ vprasanje.vprasanje }}</p>
+                <p class="odgovor">{{ vprasanje.odgovor }}</p>
+              </li>
+            {% endfor %}
+          </ol>
+        </section>
+
+        <section class="kartica">
+          <div class="kartica-glava">
+            <h2>Prepis</h2>
+            <span class="zamolklo">kot je zapisano v zvezku</span>
+          </div>
+          {# `pre` in ne `p`: prepis nosi prelome vrstic s slike in prav ti so
+             del tega, kar je bilo na strani. #}
+          <pre class="besedilo">{{ snov.prepis }}</pre>
+        </section>
+      {% elif not snov.arhiviran and not snov.ponovna_obdelava_mozna %}
+        <section class="obvestilo caka">
+          <div>
+            <h2>Slika je v obdelavi</h2>
+            <p>
+              Prepis, povzetek in vprašanja se pokažejo, ko model konča.
+              Zapis je pravkar v obdelavi. Osveži stran čez nekaj trenutkov.
+            </p>
+          </div>
+        </section>
+      {% elif not snov.arhiviran %}
+        <section class="obvestilo caka">
+          <div>
+            <h2>Slika čaka na obdelavo</h2>
+            <p>Prepis, povzetek in vprašanja se pokažejo, ko model konča. Osveži stran čez nekaj trenutkov.</p>
+          </div>
+        </section>
+      {% endif %}
+
+      {# **Zunaj vej po statusu**, ne znotraj `ready`. Snov, ki je bila poslana
+         v ponovno obdelavo, je `new` in nima nobenega veljavnega vprašanja;
+         prav takrat mora biti vidno, da prejšnja vprašanja obstajajo. #}
+      {% if snov.stevilo_upokojenih %}
+        <section class="obvestilo tiho">
+          <div>
+            <h2>Upokojena vprašanja: {{ snov.stevilo_upokojenih }}</h2>
+            <p class="drobno">
+              Toliko vprašanj je nastalo ob prejšnjih obdelavah te snovi. Ostanejo v
+              bazi in obdržijo svojo identiteto, med vprašanja te snovi pa se ne
+              štejejo več.
+            </p>
+          </div>
+        </section>
+      {% endif %}
+
+      <section class="kartica upravljanje">
+        <h2>Upravljanje</h2>
+
+        {# Premik v drug predmet (V3-R10). Navaden obrazec s `<select>` in brez
+           skripte: `ADR-024` dovoljuje samo tisto skripto, ki jo zahteva
+           izrecno uvede, in edina na tej strani je povečan prikaz (V2-R08).
+
+           `POST`, ker spremeni stanje — snov in vsa njena vprašanja, veljavna
+           in upokojena (`ADR-040` B1). Potrditvene strani ni, ker je premik
+           povraten.
+
+           Arhivirane snovi in snovi v obdelavi obrazec nima: tam ne bi naredil
+           ničesar (`ADR-040` C1, `ADR-011`). Isti pogoj nosi tudi pot. #}
+        {% if snov.premik_mozen %}
+          <div class="dejanje">
+            <div>
+              <h3>Premakni v drug predmet</h3>
+              <p class="drobno">
+                Slika se preseli na seznam izbranega predmeta, z njo pa vsa njena
+                vprašanja — tudi upokojena. Statistika teh vprašanj odslej šteje pod
+                novi predmet. Že objavljeni kvizi se ne spremenijo. Zgodovina na
+                telefonu ostane taka, kot jo je posnel otrok.
+              </p>
+            </div>
+            {# Odprta značka obrazca je v eni sami vrstici in skrito polje s
+               CSRF žetonom takoj za njo: varovalo `TestCsrfPodAdminom` bere
+               vrstico, ki sledi začetku obrazca, in prelomljena značka bi ga
+               ušla. #}
+            <form class="vrstica-gumbov" method="post" action="/admin/materials/{{ snov.id }}/subject">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <label class="skrito" for="premik-predmet">Predmet:</label>
+              <select id="premik-predmet" name="subject">
+                {# Snov s kodo zunaj desetih nima trenutne možnosti, zato dobi
+                   vodilno brez vrednosti. Brez nje bi brskalnik izbral prvo
+                   (`NAR`) in klik na „Premakni" bi snov tiho vložil pod
+                   Naravoslovje. Prazna vrednost je 400, ne tih premik. #}
+                {% if not snov.koda_znana %}
+                  <option value="" selected>{{ snov.koda }} — ni na seznamu; izberi predmet</option>
+                {% endif %}
+                {% for predmet in predmeti %}
+                  <option value="{{ predmet.koda }}"{% if predmet.koda == snov.koda %} selected{% endif %}>{{ predmet.koda }} — {{ predmet.oznaka }}</option>
+                {% endfor %}
+              </select>
+              <button class="gumb obrobljen majhen" type="submit">Premakni</button>
+            </form>
+          </div>
         {% endif %}
 
-        {# Dokončno brisanje se pokaže šele po potrditvi s telefona. Gumb,
-           ki ga stran ne izriše, ni varovalka — zato isto pravilo velja
-           tudi v poti in v repozitoriju. #}
-        {% if snov.potrjeno %}
-          <a class="gumb" href="/admin/materials/{{ snov.id }}/delete">Izbriši dokončno</a>
+        {# Gumb je `POST` in ne povezava: ponovna obdelava zavrže prejšnji
+           rezultat in stane nov klic (`docs/odlocitve/ADR-009`). Med obdelavo
+           ga ni — takrat ne bi naredil ničesar. #}
+        {% if snov.ponovna_obdelava_mozna %}
+          <div class="dejanje">
+            <div>
+              <h3>Obdelaj znova</h3>
+              {# Vprašanja so od V2-R05 izvzeta iz naštevanja zavrženega — gumb
+                 jih upokoji in ne pobriše (`docs/odlocitve/ADR-015`). #}
+              <p class="drobno">
+                Zavrže dosedanji prepis in povzetek ter sproži nov klic modela.
+                Dosedanja vprašanja se ne izbrišejo, ampak upokojijo: ostanejo v
+                bazi, med vprašanja te snovi pa se ne štejejo več.
+              </p>
+            </div>
+            <form method="post" action="/admin/materials/{{ snov.id }}/reprocess">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="gumb obrobljen majhen" type="submit">Pošlji v obdelavo</button>
+            </form>
+          </div>
+        {% elif snov.arhiviran %}
+          {# `ponovna_obdelava_mozna` je `false` iz dveh različnih razlogov.
+             Brez te veje bi arhivirana snov trdila, da je pravkar v obdelavi,
+             in operaterju naročila, naj osvežuje stran, ki se ne bo
+             spremenila nikoli. #}
+          <div class="dejanje">
+            <p class="drobno">Arhivirana snov se ne obdeluje več.</p>
+          </div>
+        {% endif %}
+
+        {% if not snov.arhiviran %}
+          {# Do V1-R07 je tu stalo brisanje. Arhiviranje ga nadomesti:
+             telefon sliko zbriše pri sebi, znanje iz nje pa ostane
+             (`docs/odlocitve/ADR-011`). #}
+          <div class="dejanje">
+            <div>
+              <h3>Arhiviraj</h3>
+              <p class="drobno">
+                Slika izgine iz pregleda in jo telefon zbriše pri sebi. Prepis,
+                povzetek in vprašanja ostanejo.
+              </p>
+            </div>
+            <a class="gumb majhen nevaren" href="/admin/materials/{{ snov.id }}/archive">Arhiviraj sliko</a>
+          </div>
         {% else %}
-          <p class="drobno">
-            Dokončno brisanje bo mogoče, ko telefon potrdi, da te slike pri
-            njem ni več.
-          </p>
+          {% if snov.velikost is not none %}
+            <div class="dejanje">
+              <div>
+                <h3>Počisti sliko</h3>
+                <p class="drobno">Pobriše samo datoteko. Zapis, prepis in vprašanja ostanejo.</p>
+              </div>
+              <form method="post" action="/admin/materials/{{ snov.id }}/purge-image">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <button class="gumb majhen nevaren" type="submit">Počisti sliko z diska</button>
+              </form>
+            </div>
+          {% endif %}
+
+          {# Dokončno brisanje se pokaže šele po potrditvi s telefona. Gumb,
+             ki ga stran ne izriše, ni varovalka — zato isto pravilo velja
+             tudi v poti in v repozitoriju. #}
+          <div class="dejanje">
+            {% if snov.potrjeno %}
+              <div>
+                <h3>Izbriši</h3>
+                <p class="drobno">Telefon je potrdil, da slike pri njem ni več. Tega ni mogoče razveljaviti.</p>
+              </div>
+              <a class="gumb majhen nepovraten" href="/admin/materials/{{ snov.id }}/delete">Izbriši dokončno</a>
+            {% else %}
+              <p class="drobno">
+                Dokončno brisanje bo mogoče, ko telefon potrdi, da te slike pri
+                njem ni več.
+              </p>
+            {% endif %}
+          </div>
         {% endif %}
-      {% endif %}
-      <br>
-      <a class="nazaj" href="/admin/subjects/{{ snov.koda|urlencode }}">← Nazaj na {{ snov.koda }}</a>
+      </section>
+
+      {# Zloženo privzeto: to je gradivo za razhroščevanje, ne za vsakdanji
+         pregled. `details` je HTML in ne skripta — edina skripta na tej strani
+         je povečan prikaz slike, in ta je nadgradnja (`ADR-024`). #}
+      <details class="kartica tehnicno">
+        <summary>Tehnični podatki</summary>
+        <dl>
+          <dt>Stanje obdelave</dt>
+          <dd>{{ snov.stanje }}</dd>
+
+          <dt>Pot do datoteke</dt>
+          <dd>{{ snov.pot }}</dd>
+
+          <dt>Identifikator</dt>
+          <dd>{{ snov.id }}</dd>
+
+          {# Cene ne računamo — cenik v nastavitvah bi se staral neopazno
+             (`docs/plan/V1-R03.md`). #}
+          {% if snov.model %}
+            <dt>Model</dt>
+            <dd>{{ snov.model }}</dd>
+
+            <dt>Porabljeni tokeni</dt>
+            <dd>{{ snov.vhodni_tokeni }} vhodnih, {{ snov.izhodni_tokeni }} izhodnih</dd>
+          {% endif %}
+        </dl>
+
+        {% if snov.ima_sled %}
+          <h3>Kaj je bilo poslano in kaj vrnjeno</h3>
+
+          {% if snov.prompt %}
+            <details>
+              <summary>Poslani prompt</summary>
+              <pre class="besedilo">{{ snov.prompt }}</pre>
+            </details>
+          {% endif %}
+
+          {% if snov.surov_odgovor %}
+            <details>
+              <summary>Surov odgovor modela</summary>
+              <pre class="besedilo">{{ snov.surov_odgovor }}</pre>
+            </details>
+          {% endif %}
+
+          {% if not snov.model %}
+            <p class="drobno">
+              Imena modela ni — do klica ni prišlo ali pa je odpovedal, preden je
+              storitev odgovorila.
+            </p>
+          {% endif %}
+        {% endif %}
+      </details>
     </div>
   </div>
 
-  {% if snov.status == "failed" %}
-    <section class="izid">
-      <h2>Obdelava ni uspela</h2>
-      <p class="napaka">{{ snov.napaka }}</p>
-    </section>
-  {% elif snov.status == "ready" and snov.berljivo is false %}
-    <section class="izid">
-      <h2>Slika ni berljiva</h2>
-      <p class="opozorilo">
-        Model s te slike ni znal brati učne snovi, zato prepisa in vprašanj ni.
-        Slika je verjetno zamegljena, prazna ali posneta pod prevelikim kotom.
-      </p>
-    </section>
-  {% elif snov.status == "ready" %}
-    <section class="izid">
-      <h2>Povzetek</h2>
-      <p>{{ snov.povzetek }}</p>
-
-      <h2>Vprašanja</h2>
-      <ol class="vprasanja">
-        {% for vprasanje in snov.vprasanja %}
-          <li>
-            <p class="vprasanje">{{ vprasanje.vprasanje }}</p>
-            <p class="odgovor">{{ vprasanje.odgovor }}</p>
-          </li>
-        {% endfor %}
-      </ol>
-
-      <h2>Prepis</h2>
-      {# `pre` in ne `p`: prepis nosi prelome vrstic s slike in prav ti so
-         del tega, kar je bilo na strani. #}
-      <pre class="besedilo">{{ snov.prepis }}</pre>
-    </section>
-  {% endif %}
-
-  {# **Zunaj vej po statusu**, ne znotraj `ready`. Snov, ki je bila poslana v
-     ponovno obdelavo, je `new` in nima nobenega veljavnega vprašanja; prav
-     takrat mora biti vidno, da prejšnja vprašanja obstajajo. Znotraj veje
-     `ready` bi bil ta razdelek natanko tam, kjer ga nihče ne potrebuje. #}
-  {% if snov.stevilo_upokojenih %}
-    <section class="izid">
-      <h2>Upokojena vprašanja: {{ snov.stevilo_upokojenih }}</h2>
-      {# Brez obljub o kvizu in ocenah: `V2-R01` in `V2-R02` sta še `Nova`,
-         besedilo pa opisuje, kako je zdaj. #}
-      <p class="drobno">
-        Toliko vprašanj je nastalo ob prejšnjih obdelavah te snovi. Ostanejo v
-        bazi in obdržijo svojo identiteto, med vprašanja te snovi pa se ne
-        štejejo več.
-      </p>
-    </section>
-  {% endif %}
-
-  {% if snov.ima_sled %}
-    {# Zloženo privzeto: to je gradivo za razhroščevanje, ne za vsakdanji
-       pregled. `details` je HTML in ne skripta — edina skripta na tej strani
-       je povečan prikaz slike, in ta je nadgradnja (`ADR-024`). #}
-    <section class="izid">
-      <h2>Kaj je bilo poslano in kaj vrnjeno</h2>
-
-      {% if snov.prompt %}
-        <details>
-          <summary>Poslani prompt</summary>
-          <pre class="besedilo">{{ snov.prompt }}</pre>
-        </details>
-      {% endif %}
-
-      {% if snov.surov_odgovor %}
-        <details>
-          <summary>Surov odgovor modela</summary>
-          <pre class="besedilo">{{ snov.surov_odgovor }}</pre>
-        </details>
-      {% endif %}
-
-      {% if not snov.model %}
-        <p class="drobno">
-          Imena modela ni — do klica ni prišlo ali pa je odpovedal, preden je
-          storitev odgovorila.
-        </p>
-      {% endif %}
-    </section>
-  {% endif %}
-
   {% if povecava %}
-    {# Povečan prikaz (V2-R08). Zunaj `.snov`, da ga pravilo `max-height: 78vh`
-       ne doseže. V izrisu je skrit; brez skripte ga nihče ne vidi in stran je
-       taka kot pred V2-R08.
+    {# Povečan prikaz (V2-R08). Zunaj `.snov`, da ga omejitev višine slike ne
+       doseže. V izrisu je skrit; brez skripte ga nihče ne vidi.
 
        Vse povezave v njem izriše strežnik — sosede, prenos, ime datoteke.
        Skripta jih samo sproži in nobene poti ne sestavi (`ADR-024`, meja 4).
        Puščici peljeta na podrobnosti soseda in ne zamenjata slike tu, da se
        prenese samo slika, ki jo operater res gleda.
 
-       Smer je smer mreže na strani predmeta: levo novejša, desno starejša.
-       Neaktivna puščica ni povezava, da ne more nikamor peljati. #}
+       Smer je smer listanja: levo novejša, desno starejša. Neaktivna puščica
+       ni povezava, da ne more nikamor peljati. #}
     <div class="prekritje" id="prekritje" hidden>
       <div class="prekritje-vrstica">
         <a class="prekritje-gumb" href="/admin/materials/{{ snov.id }}/image"
@@ -310,11 +414,17 @@
     {# Vgrajena in brez zunanje knjižnice (`ADR-024`, meji 1 in 2). Ničesar ne
        pošilja. Edino, kar spremeni v naslovu, je odstranitev sidra ob
        zaprtju, da osvežitev strani prikaza ne odpre znova — to po odločitvi
-       lastnika ni sestavljanje poti (`docs/verzije/v2.md`, V2-R08). #}
+       lastnika ni sestavljanje poti (`docs/verzije/v2.md`, V2-R08).
+
+       Od V5-R01 prikaz odpreta **dve** povezavi — slika in gumb „Povečaj" pod
+       njo (`docs/odlocitve/ADR-060`, dopolnitev) —, zato skripta klik
+       prestreže na vseh `a[data-povecava]`. Ostalo je nespremenjeno. #}
     <script>
       (function () {
         var prekritje = document.getElementById("prekritje");
-        var povezava = document.querySelector("a[data-povecava]");
+        var povezave = document.querySelectorAll("a[data-povecava]");
+        // Kamor se ob zaprtju vrne fokus: povezava, ki je prikaz odprla.
+        var povezava = povezave[0];
         var zapri = document.getElementById("prekritje-zapri");
         var prejsnja = document.getElementById("prekritje-prejsnja");
         var naslednja = document.getElementById("prekritje-naslednja");
@@ -335,9 +445,12 @@
           povezava.focus();
         }
 
-        povezava.addEventListener("click", function (dogodek) {
-          dogodek.preventDefault();
-          odpri();
+        povezave.forEach(function (ena) {
+          ena.addEventListener("click", function (dogodek) {
+            dogodek.preventDefault();
+            povezava = ena;
+            odpri();
+          });
         });
 
         zapri.addEventListener("click", zapriPrikaz);

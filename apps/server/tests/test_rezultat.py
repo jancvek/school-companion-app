@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.casi import trajanje
 from app.models import Material, Question, QuestionAttempt, Quiz, QuizItem
-from tests.conftest import CVEK_ID, SejaTesta, je_seja
+from tests.conftest import CVEK_ID, SejaTesta, je_seja, slog_papirja, vsebina_strani
 from tests.test_kvizi import UUID_DVA, UUID_ENA, objavi, snov, upokoji
 from tests.test_resevanje import poskus, poslji
 
@@ -138,7 +138,9 @@ class TestNeresenKviz:
         """Stran nerešenega kviza se ne spremeni (odločitev 3 v planu)."""
         snov(motor, slike, UUID_ENA, vprasanj=1)
         quiz_id = objavi(odjemalec, motor, [UUID_ENA], koliko=1)
-        prej = stran(odjemalec, quiz_id)
+        # Vsebina strani brez menija: arhiviranje spodaj premakne števca
+        # „Predmeti" in „Arhiv" v meniju (V5-R01), kar ni sprememba te strani.
+        prej = vsebina_strani(stran(odjemalec, quiz_id))
 
         with Session(motor) as seja:
             seja.execute(
@@ -149,7 +151,7 @@ class TestNeresenKviz:
             seja.commit()
         upokoji(motor, UUID_ENA)
 
-        assert stran(odjemalec, quiz_id) == prej
+        assert vsebina_strani(stran(odjemalec, quiz_id)) == prej
 
     def test_tisk_neresenega_je_409(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -668,7 +670,9 @@ class TestTisk:
         quiz_id = resen_kviz(odjemalec, motor, slike, self.OCENE, telefon)
 
         besedilo = tisk(odjemalec, quiz_id)
-        slog = besedilo[besedilo.index("@media print") :]
+        # Pravila za papir so od V5-R01 v datoteki sloga, ki jo stran naloži.
+        assert 'href="/admin/static/admin/slog.css"' in besedilo
+        slog = slog_papirja()
 
         assert "header, .ne-tiskaj { display: none; }" in slog
         assert re.search(r"\.kljuc \{[^}]*break-before: page", slog)
@@ -811,7 +815,10 @@ class TestPoizvedbe:
         # **Pet je postalo šest in to je zavesten prepis:** lastnost, ki jo ta
         # test varuje, je „stalno število ne glede na dolžino kviza". Dvajset
         # postavk je tu prav zato, da bi N+1 padel.
-        assert koliko <= 6, f"rezultat je opravil {koliko} poizvedb"
+        #
+        # **Šest je postalo sedem** z V5-R01 (`ADR-060` F, soglasje lastnika):
+        # sedma je meni s števci, ki je na vsaki strani.
+        assert koliko <= 7, f"rezultat je opravil {koliko} poizvedb"
 
     def test_nereseni_kviz_ne_placa_poizvedb_rezultata(
         self, odjemalec: TestClient, motor: Engine, slike: Path, telefon: SejaTesta

@@ -3,6 +3,11 @@
 {% block naslov %}Predogled kviza{% endblock %}
 
 {% block vsebina %}
+  <ol class="drobtine">
+    <li><a href="/admin/quizzes">Kvizi</a></li>
+    <li aria-current="page">Nov kviz</li>
+  </ol>
+
   <h1>Predogled kviza</h1>
   <p class="pod">
     {# Ime je vrednost polja in ne del povedi — za predlogom bi slovenščina
@@ -16,12 +21,19 @@
     <strong>Ta stran ničesar ne shrani.</strong>
   </p>
 
+  <ol class="koraki" aria-label="Koraki">
+    <li class="opravljen"><span class="korak-st" aria-hidden="true">✓</span> Izberi snov</li>
+    <li aria-current="step"><span class="korak-st">2</span> Preglej in objavi</li>
+  </ol>
+
   {% if predolg %}
     {# Opozorilo in ne zapora: kviz sme biti dolg, operater mora le vedeti,
        da bo. Meja je kriterij V2-R01, ne okus. #}
-    <p class="opozorilo">
-      Kviz ima več kot {{ meja }} vprašanj. Toliko jih je za eno reševanje
-      verjetno preveč — razmisli, ali ne bi kakšne snovi raje odkljukal.
+    <p class="obvestilo caka">
+      <span>
+        Kviz ima več kot {{ meja }} vprašanj. Toliko jih je za eno reševanje
+        verjetno preveč — razmisli, ali ne bi kakšne snovi raje odkljukal.
+      </span>
     </p>
   {% endif %}
 
@@ -35,72 +47,81 @@
        slovenščini zahteva rodilnik in bi se moral pregibati še po številu
        („1 snovi ni bilo mogoče" proti „3 snovi ni bilo mogoče"). Oznaka s
        številom je pravilna pri vsakem številu. #}
-    <p class="opozorilo">
-      Izpuščeno: {{ izpusceno_opis }}. Te snovi še niso obdelane, obdelava pri
-      njih ni uspela, slika ni berljiva ali pa nimajo veljavnih vprašanj.
+    <p class="obvestilo caka">
+      <span>
+        <strong>Izpuščeno: {{ izpusceno_opis }}.</strong> Te snovi še niso obdelane, obdelava pri
+        njih ni uspela, slika ni berljiva ali pa nimajo veljavnih vprašanj.
+      </span>
     </p>
   {% endif %}
 
-  {% for skupina in skupine %}
-    <section class="izid">
-      <h2>
-        {{ skupina.koda }} — {{ skupina.cas }}
-        <a class="drobno" href="/admin/materials/{{ skupina.id }}">odpri snov</a>
-      </h2>
-      <ol class="vprasanja">
-        {% for vprasanje in skupina.vprasanja %}
-          <li>
-            <p class="vprasanje">{{ vprasanje.vprasanje }}</p>
-            {# Odgovori so tu namenoma: predogled je zadnja priložnost videti,
-               kaj boš objavil, in vprašanje brez odgovora se ne da preveriti. #}
-            <p class="odgovor">{{ vprasanje.odgovor }}</p>
-          </li>
+  <div class="predogled">
+    <div>
+      {% for skupina in skupine %}
+        <section class="kartica brez-roba snov-kviza">
+          <header class="snov-kviza-glava">
+            <span class="cip" style="--barva: {{ skupina.barva }}">{{ skupina.koda }}</span>
+            <h2><span class="skrito">{{ skupina.koda }} — {{ skupina.cas }}</span><span aria-hidden="true">{{ skupina.dan_in_ura }}</span></h2>
+            <span class="zamolklo">{{ skupina.vprasanj_opis }}</span>
+            <a class="izberi" href="/admin/materials/{{ skupina.id }}">odpri snov</a>
+          </header>
+          <ol class="vprasanja">
+            {% for vprasanje in skupina.vprasanja %}
+              {# `value` nosi številko v kvizu: šteje se zvezno čez vse snovi,
+                 kot bo vprašanja videl otrok. #}
+              <li value="{{ vprasanje.stevilka }}">
+                <p class="vprasanje">{{ vprasanje.vprasanje }}</p>
+                {# Odgovori so tu namenoma: predogled je zadnja priložnost
+                   videti, kaj boš objavil, in vprašanje brez odgovora se ne
+                   da preveriti. #}
+                <p class="odgovor">{{ vprasanje.odgovor }}</p>
+              </li>
+            {% endfor %}
+          </ol>
+        </section>
+      {% endfor %}
+    </div>
+
+    <section class="kartica objava">
+      <h2>Objava</h2>
+
+      {# Dva ločena obrazca in ne eden z dvema gumboma: pot je različna in
+         vsak nosi svoja skrita polja. Objava nosi identifikatorje vprašanj —
+         objavi se natanko to, kar je levo; vrnitev nosi izbor snovi, da je
+         ob vrnitvi izbor tak, kot je bil. #}
+      <form method="post" action="/admin/quizzes">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="vstop" value="{{ vstop }}">
+        {% if subject %}<input type="hidden" name="subject" value="{{ subject }}">{% endif %}
+        <input type="hidden" name="otrok" value="{{ naslovljenec }}">
+        {% for id in vprasanja_idji %}
+          <input type="hidden" name="vprasanje" value="{{ id }}">
         {% endfor %}
-      </ol>
+
+        <div class="polje">
+          <label for="ime-kviza">Ime kviza:</label>
+          <input type="text" id="ime-kviza" name="ime" value="{{ predlagano_ime }}" class="ime">
+        </div>
+        <button class="gumb polni sirok" type="submit">Objavi</button>
+        <p class="drobno">
+          Kviz in vse njegove postavke ({{ skupaj }}) nastanejo naenkrat. Postavke se
+          zamrznejo: poznejša ponovna obdelava ali brisanje snovi jih ne
+          spremeni.
+        </p>
+        <p class="drobno">Otrok ga dobi na telefon ob naslednji osvežitvi.</p>
+      </form>
+
+      <form method="post" action="/admin/quizzes/new">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="vstop" value="{{ vstop }}">
+        {% if subject %}<input type="hidden" name="subject" value="{{ subject }}">{% endif %}
+        <input type="hidden" name="stevilo" value="{{ stevilo }}">
+        <input type="hidden" name="otrok" value="{{ naslovljenec }}">
+        {% for id in izbrane %}
+          <input type="hidden" name="snov" value="{{ id }}">
+        {% endfor %}
+        <button class="gumb obrobljen sirok" type="submit">← Nazaj na izbor</button>
+      </form>
     </section>
-  {% endfor %}
-
-  <section class="izid">
-    <h2>Objava</h2>
-
-    {# Dva ločena obrazca in ne eden z dvema gumboma: pot je različna in vsak
-       nosi svoja skrita polja. Objava nosi identifikatorje vprašanj — objavi
-       se natanko to, kar je zgoraj; vrnitev nosi izbor snovi, da je ob vrnitvi
-       izbor tak, kot je bil. #}
-    <form method="post" action="/admin/quizzes">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <input type="hidden" name="vstop" value="{{ vstop }}">
-      {% if subject %}<input type="hidden" name="subject" value="{{ subject }}">{% endif %}
-      <input type="hidden" name="otrok" value="{{ naslovljenec }}">
-      {% for id in vprasanja_idji %}
-        <input type="hidden" name="vprasanje" value="{{ id }}">
-      {% endfor %}
-
-      <p>
-        <label>
-          Ime kviza:
-          <input type="text" name="ime" value="{{ predlagano_ime }}" class="ime">
-        </label>
-      </p>
-
-      <button class="gumb gumb-obdelava" type="submit">Objavi</button>
-      <p class="drobno">
-        Kviz in vse njegove postavke ({{ skupaj }}) nastanejo naenkrat. Postavke se
-        zamrznejo: poznejša ponovna obdelava ali brisanje snovi jih ne
-        spremeni.
-      </p>
-    </form>
-
-    <form method="post" action="/admin/quizzes/new">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <input type="hidden" name="vstop" value="{{ vstop }}">
-      {% if subject %}<input type="hidden" name="subject" value="{{ subject }}">{% endif %}
-      <input type="hidden" name="stevilo" value="{{ stevilo }}">
-      <input type="hidden" name="otrok" value="{{ naslovljenec }}">
-      {% for id in izbrane %}
-        <input type="hidden" name="snov" value="{{ id }}">
-      {% endfor %}
-      <button class="gumb-povezava" type="submit">← Nazaj na izbor</button>
-    </form>
-  </section>
+  </div>
 {% endblock %}

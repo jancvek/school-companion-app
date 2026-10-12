@@ -29,6 +29,7 @@ manjka" ni treba uveljavljati — uveljavlja ga odsotnost vrstice.
 import asyncio
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
 from uuid import UUID, uuid4
@@ -36,10 +37,10 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, Request
 from fastapi.templating import Jinja2Templates
 from starlette.datastructures import UploadFile
-from starlette.responses import RedirectResponse, Response
+from starlette.responses import FileResponse, RedirectResponse, Response
 
 from app import prijava
-from app.casi import IMENA_DNI
+from app.casi import IMENA_DNI, danes, datum
 from app.db import ClaniRepository, ScheduleRepository, SejaUporabnika
 from app.dependencies import (
     daj_klicalca_urnika,
@@ -57,8 +58,8 @@ from app.security import SPOROCILO_BREZ_CSRF
 from app.settings import Settings
 from app.storage import BereBajte, mapa_urnikov, pobrisi_sliko, shrani_sliko_urnika
 from app.strani import daj_predloge, neveljavna_zahteva, ni_izvedeno, ni_najdeno
-from app.subjects import PREDMETI
-from app.urnik import DNEVI, Urnik, Vnos
+from app.subjects import PREDMETI, barva_predmeta, oznaka_predmeta
+from app.urnik import DNEVI, Urnik, Vnos, razlike
 from app.vision import KlicalecUrnika, NapakaObdelave, PredlogUrnika
 
 dnevnik = logging.getLogger(__name__)
@@ -206,6 +207,10 @@ class Celica:
     #: Izbrana vrednost: ena od `CELICE`.
     vrednost: str
 
+    #: Ali se celica razlikuje od veljavnega urnika (V5-R01). Samo pri
+    #: predlogu s slike; glej `urnik.razlike`.
+    spremenjena: bool = False
+
 
 @dataclass(frozen=True)
 class Vrstica:
@@ -214,6 +219,9 @@ class Vrstica:
     koda: str
     oznaka: str
     celice: tuple[Celica, ...]
+
+    #: Barva predmeta za čip in obarvane celice (`ADR-056` E).
+    barva: str = ""
 
 
 def ime_polja(dan: int, koda: str) -> str:
@@ -225,7 +233,9 @@ def ime_polja(dan: int, koda: str) -> str:
     return f"c{dan}_{koda}"
 
 
-def mreza(urnik: Urnik | None) -> list[Vrstica]:
+def mreza(
+    urnik: Urnik | None, spremenjene: frozenset[tuple[int, str]] = frozenset()
+) -> list[Vrstica]:
     """Mreža desetih predmetov čez pet dni, z izbranimi vrednostmi.
 
     **Cela mreža in ne le zasedene celice**: potrditev je celotna zamenjava in
@@ -246,10 +256,12 @@ def mreza(urnik: Urnik | None) -> list[Vrstica]:
         Vrstica(
             koda=predmet.koda,
             oznaka=predmet.oznaka,
+            barva=predmet.barva,
             celice=tuple(
                 Celica(
                     polje=ime_polja(dan, predmet.koda),
                     vrednost=izbrano.get((dan, predmet.koda), CELICA_NI),
+                    spremenjena=(dan, predmet.koda) in spremenjene,
                 )
                 for dan in DNEVI
             ),
@@ -258,7 +270,16 @@ def mreza(urnik: Urnik | None) -> list[Vrstica]:
     ]
 
 
-def mreza_iz_predloga(predlog: PredlogUrnika) -> list[Vrstica]:
+def urnik_iz_predloga(predlog: PredlogUrnika) -> Urnik:
+    """Predlog modela kot `Urnik`: samo celice, ki jih je znal uvrstiti."""
+    return Urnik.iz_vnosov(
+        Vnos(dan=celica.dan, predmet=celica.koda)
+        for celica in predlog.celice
+        if celica.koda is not None
+    )
+
+
+def mreza_iz_predloga(predlog: PredlogUrnika, veljaven: Urnik | None = None) -> list[Vrstica]:
     """Mreža, napolnjena s tem, kar je model prebral.
 
     Nepreslikane celice v mrežo **ne** pridejo — v njej zanje ni stolpca, ker
@@ -269,13 +290,37 @@ def mreza_iz_predloga(predlog: PredlogUrnika) -> list[Vrstica]:
     tem, ali iz predmeta slika sploh nastane, in tega s slike urnika ni mogoče
     prebrati (`ADR-028` F2).
     """
-    return mreza(
-        Urnik.iz_vnosov(
-            Vnos(dan=celica.dan, predmet=celica.koda)
-            for celica in predlog.celice
-            if celica.koda is not None
-        )
-    )
+    prebran = urnik_iz_predloga(predlog)
+    # Celice, ki se razlikujejo od potrjenega urnika, so označene (V5-R01).
+    return mreza(prebran, razlike(prebran, veljaven))
+
+
+def teden_na_pogled(urnik: Urnik | None, danasnji: int) -> list[dict[str, Any]]:
+    """Potrjen urnik kot pet stolpcev s predmeti, za branje in ne za urejanje.
+
+    Predmeti so v vrstnem redu `PREDMETI`, kot v `Urnik.vnosi`. „Se ne slika"
+    ostane viden, le drugače: na urniku je, manjka pa ne javlja.
+    `danasnji` je `date.weekday()` današnjega dne; ob vikendu ni označen noben.
+    """
+    if urnik is None:
+        return []
+    return [
+        {
+            "ime": IMENA_DNI[dan][0].upper() + IMENA_DNI[dan][1:],
+            "je_danes": dan == danasnji,
+            "predmeti": [
+                {
+                    "koda": vnos.predmet,
+                    "oznaka": oznaka_predmeta(vnos.predmet),
+                    "barva": barva_predmeta(vnos.predmet),
+                    "se_ne_slika": vnos.se_ne_slika,
+                }
+                for vnos in urnik.vnosi
+                if vnos.dan == dan
+            ],
+        }
+        for dan in DNEVI
+    ]
 
 
 def preberi_mrezo(obrazec: Any) -> list[Vnos]:
@@ -342,9 +387,37 @@ def _kontekst(
     sporocilo: str | None = None,
     napaka: str | None = None,
     nepreslikane: tuple[tuple[str, str], ...] = (),
+    veljaven: Urnik | None = None,
+    potrjen_od: str | None = None,
+    slika_potrjenega: str | None = None,
 ) -> dict[str, Any]:
     """Kontekst predloge. Predloga ne računa in ne sestavlja naslovov."""
+    je_predlog = slika_id is not None
+    # Sliko pokaže kartica „Prebrana slika": pri predlogu pravkar naloženo,
+    # sicer tisto, iz katere je nastal potrjeni urnik (`ADR-060` G).
+    slika_za_prikaz = slika_id if je_predlog else slika_potrjenega
     return {
+        # Trije pogledi iste strani (V5-R01): potrjen urnik, predlog s slike,
+        # ki še ni shranjen, in otrok brez urnika.
+        "je_predlog": je_predlog,
+        "potrjen_od": potrjen_od,
+        "teden": [] if je_predlog else teden_na_pogled(veljaven, danes().weekday()),
+        "je_sprememb": any(celica.spremenjena for vrstica in vrstice for celica in vrstica.celice),
+        "slika_href": f"{PREDPONA}/image/{slika_za_prikaz}" if slika_za_prikaz else None,
+        # Mreža je zložena samo, kadar je kaj prebrati nad njo: potrjen urnik
+        # brez sporočila. Sicer je odprta — tam je delo.
+        "mreza_odprta": je_predlog or not ima_urnik or bool(napaka or sporocilo),
+        # Zavihki otrok so povezave na isto stran (brez gumba „Pokaži").
+        "zavihki_otrok": [
+            {
+                "oznaka": kdo.display_name,
+                "href": f"{PREDPONA}?{PARAMETER_OTROKA}={quote(kdo.user_id, safe='')}",
+                "izbran": izbira.izbrani is not None and kdo.user_id == izbira.izbrani.user_id,
+            }
+            for kdo in izbira.vsi
+        ]
+        if izbira.je_izbirnik
+        else [],
         "dnevi": [{"stevilka": dan, "ime": IMENA_DNI[dan]} for dan in DNEVI],
         "vrstice": vrstice,
         "ima_urnik": ima_urnik,
@@ -357,9 +430,6 @@ def _kontekst(
         "sporocilo": sporocilo,
         "napaka": napaka,
         "nepreslikane": nepreslikane,
-        "je_izbirnik_otrok": izbira.je_izbirnik,
-        "otrok_prvi": _parameter_otroka(izbira),
-        "otroci": [{"id": kdo.user_id, "ime": kdo.display_name} for kdo in izbira.vsi],
         "izbrani_otrok": izbira.izbrani.user_id if izbira.izbrani is not None else None,
         "najvecja_slika_mb": NAJVECJA_SLIKA // (1024 * 1024),
         # Brez kljuca za OpenAI obrazca za nalaganje ni; mreza pa ostane
@@ -386,13 +456,15 @@ def stran_urnika(
     urniki: Annotated[ScheduleRepository, Depends(daj_repozitorij_urnikov)],
     clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     klicalec: Annotated[KlicalecUrnika | None, Depends(daj_klicalca_urnika)],
+    nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
     otrok: str | None = None,
 ) -> Response:
-    """Mreža s trenutno veljavnim urnikom izbranega otroka."""
+    """Teden na pogled in mreža s trenutno veljavnim urnikom izbranega otroka."""
     izbira = _izberi(clani, otrok)
     if izbira is None:
         return ni_najdeno(predloge, request, SPOROCILO_NEZNAN_OTROK)
 
+    zapis = urniki.veljaven(izbira.izbrani.user_id) if izbira.izbrani is not None else None
     veljaven = (
         urniki.urnik(izbira.izbrani.user_id) if izbira.izbrani is not None else None
     )
@@ -401,6 +473,9 @@ def stran_urnika(
         mreza(veljaven),
         ima_urnik=veljaven is not None,
         ima_klicalca=klicalec is not None,
+        veljaven=veljaven,
+        potrjen_od=datum(zapis.confirmed_at) if zapis is not None else None,
+        slika_potrjenega=_id_slike(nastavitve, urniki.family_id, zapis),
     )
     if izbira.izbrani is None:
         kontekst["napaka"] = SPOROCILO_BREZ_OTROKA
@@ -473,6 +548,7 @@ async def predlagaj_urnik(
                 ima_urnik=veljaven is not None,
                 ima_klicalca=klicalec is not None,
                 napaka=napaka,
+                veljaven=veljaven,
             ),
         )
 
@@ -512,7 +588,7 @@ async def predlagaj_urnik(
 
     kontekst = _kontekst(
         izbira,
-        mreza_iz_predloga(predlog),
+        mreza_iz_predloga(predlog, veljaven),
         ima_urnik=veljaven is not None,
         ima_klicalca=True,
         slika_id=slika_id,
@@ -567,6 +643,50 @@ async def potrdi_urnik(
     # 303 in ne izris: po `POST` mora osvežitev strani pomeniti branje in ne
     # ponovne potrditve.
     return RedirectResponse(f"{PREDPONA}{_parameter_otroka(izbira)}", status_code=303)
+
+
+#: Prvi bajti datoteke PNG. Slika urnika se shrani pod pripono `.jpg` ne glede
+#: na vrsto (`storage.shrani_sliko_urnika`), zato vrsto pove vsebina.
+_PODPIS_PNG = b"\x89PNG\r\n\x1a\n"
+
+SPOROCILO_NI_SLIKE_URNIKA = "Slike urnika s tem naslovom ni."
+
+
+def _id_slike(nastavitve: Settings, family_id: str, zapis: Any) -> str | None:
+    """`id` slike potrjenega urnika, če slika je in je še na disku.
+
+    Urnik, ki ga je starš natipkal, slike nima (`ADR-041` E). Identifikator je
+    ime datoteke brez pripone; skozi `_pot_slike` gre zato, da velja ista
+    preverba kanoničnega UUID in iste meje mape kot pri potrditvi.
+    """
+    if zapis is None or not zapis.image_path:
+        return None
+    slika_id = Path(zapis.image_path).stem
+    pot = _pot_slike(nastavitve, family_id, slika_id)
+    return slika_id if pot is not None and Path(pot).is_file() else None
+
+
+@router.get("/image/{slika_id}")
+def slika_urnika(
+    request: Request,
+    slika_id: str,
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    urniki: Annotated[ScheduleRepository, Depends(daj_repozitorij_urnikov)],
+    nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
+) -> Response:
+    """Naložena slika urnika, za kartico „Prebrana slika" (V5-R01, `ADR-060` G).
+
+    Pot do datoteke sestavi strežnik iz kanoničnega UUID in **mape družine iz
+    seje**: slika tuje družine in slika, ki je ni, sta isti `404` — obstoj
+    tuje slike ni podatek. Bere se z diska in ne iz baze, ker slika predloga,
+    ki še ni potrjen, vrstice nima (`ADR-042`).
+    """
+    pot = _pot_slike(nastavitve, urniki.family_id, slika_id)
+    if pot is None or not Path(pot).is_file():
+        return ni_najdeno(predloge, request, SPOROCILO_NI_SLIKE_URNIKA)
+    with Path(pot).open("rb") as datoteka:
+        je_png = datoteka.read(len(_PODPIS_PNG)) == _PODPIS_PNG
+    return FileResponse(pot, media_type="image/png" if je_png else "image/jpeg")
 
 
 def _polje(obrazec: Any, ime: str) -> str | None:

@@ -41,12 +41,14 @@ from app.db import (
     IzidObdelave,
     KviziRepository,
     MaterialsRepository,
+    MeniRepository,
     PoskusZaZapis,
     PreizkusiRepository,
     ScheduleRepository,
     StatistikaRepository,
 )
 from app.main import create_app
+from app.meni import Stevci
 from app.models import (
     NACIN_SAMOOCENA,
     STATUS_NOV,
@@ -611,6 +613,9 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
         OK,
         (a.akt,),
     ),
+    # V5-R01: vsi kvizi družine. Tuj otrok v filtru je 404 z istim besedilom
+    # kot neobstoječ (`ADR-039` B) in je v svojem testu; tu seznam sam.
+    ("GET", "/admin/quizzes"): lambda o, a: (o.get("/admin/quizzes"), OK, ()),
     ("POST", "/admin/quizzes"): lambda o, a: (
         o.post(
             "/admin/quizzes",
@@ -821,6 +826,12 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
     ("GET", "/admin/schedule"): lambda o, a: (
         o.get(f"/admin/schedule?otrok={a.otrok_id}"), NI, (a.otrok_id,),
     ),
+    # V5-R01: slika urnika. Pot sestavi strežnik iz mape **svoje** družine,
+    # zato tuj identifikator ne more zadeti tuje datoteke. Primer z resnično
+    # tujo datoteko na disku je v `test_urnik_videz.py`.
+    ("GET", "/admin/schedule/image/{slika_id}"): lambda o, a: (
+        o.get(f"/admin/schedule/image/{a.akt}"), NI, (a.akt,),
+    ),
     ("POST", "/admin/schedule"): lambda o, a: (
         o.post(
             "/admin/schedule",
@@ -1000,7 +1011,7 @@ def test_kartica_danes_ne_steje_slik_tuje_druzine(
 
     besedilo = odjemalec.get("/admin").text
 
-    assert vrstice_danes(besedilo) == ["✓ Danes že poslikano MAT 1"]
+    assert vrstice_danes(besedilo) == ["✓ poslikano MAT 1"]
     assert "ZGO" not in kartica_danes(besedilo)
 
 
@@ -1420,7 +1431,26 @@ def _poskus(postavka: str) -> PoskusZaZapis:
 #: njem natanko stvari B — ne le, da ni A.
 Preverba = Callable[[Session, Druzina, Druzina], bool]
 
+#: Obdobje, ki zajame vse, kar testi zgradijo.
+OD_NEKDAJ = datetime(2000, 1, 1, tzinfo=UTC)
+DO_NEKOC = datetime(2100, 1, 1, tzinfo=UTC)
+
 PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
+    # V5-R01: dnevi slikanja za prazne dni na strani predmeta. Nabor so vsi
+    # predmeti in vsi otroci **te** družine; tuj otrok v njem bi na tuji
+    # strani predmeta prižgal ali ugasnil rdeč dan.
+    ("MaterialsRepository", "trenutki_slikanja"): lambda s, a, b: (
+        {otrok for otrok, _ in _m(s, b).trenutki_slikanja(OD_NEKDAJ, DO_NEKOC)} == {b.otrok_id}
+        and len(_m(s, b).trenutki_slikanja(OD_NEKDAJ, DO_NEKOC)) == 3
+    ),
+    # MeniRepository (V5-R01). Števci so na **vsaki** strani, zato bi uhajanje
+    # tu pomenilo tuje število na vsaki strani. Obe družini sta zgrajeni enako
+    # (tri slike v uporabi, en odprt kviz, en test, dve arhivirani), zato bi
+    # stavek brez pogoja družine vrnil dvojne vrednosti.
+    ("MeniRepository", "stevci"): lambda s, a, b: (
+        MeniRepository(s, b.family_id).stevci()
+        == Stevci(slik=3, cakajocih_kvizov=1, testov=1, arhiviranih=2)
+    ),
     # PreizkusiRepository (V4-R08). `shrani` ne sme sprejeti tujega otroka,
     # tujega avtorja ne tuje osnove, in tujega `id` ne sme ne vrniti ne
     # prepisati (`None` → 409 v poti).
@@ -1496,6 +1526,13 @@ PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
     ),
     ("MaterialsRepository", "seznam_za_brisanje"): lambda s, a, b: (
         _m(s, b).seznam_za_brisanje() == [b.za_brisanje]
+    ),
+    # V5-R01: mesto slike v predmetu („3 od 24"). Tuja snov v naboru te
+    # družine ne stoji nikjer — niti kot „1 od 1".
+    ("MaterialsRepository", "polozaj_v_predmetu"): lambda s, a, b: (
+        _m(s, b).polozaj_v_predmetu(_nalozi(s, Material, a.akt)) is None
+        and (svoj := _m(s, b).polozaj_v_predmetu(_nalozi(s, Material, b.akt))) is not None
+        and svoj.vseh == 3
     ),
     ("MaterialsRepository", "sosedi_v_predmetu"): lambda s, a, b: (
         _m(s, b).sosedi_v_predmetu(_nalozi(s, Material, a.akt)) == (None, None)
@@ -1641,6 +1678,7 @@ def test_vsaka_javna_metoda_repozitorija_ima_primer() -> None:
             ClaniRepository,
             ScheduleRepository,
             PreizkusiRepository,
+            MeniRepository,
         )
         for ime, clan in inspect.getmembers(razred)
         if not ime.startswith("_") and callable(clan)

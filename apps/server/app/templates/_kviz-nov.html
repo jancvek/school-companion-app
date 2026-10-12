@@ -1,0 +1,40 @@
+{# Obrazec „Nov kviz" (V2-R01), skupen Predmetom in strani Kvizi (V5-R01).
+
+   Trije vstopi v **isti** izbirnik (`docs/odlocitve/ADR-016` A). Predmetna
+   dva sta gumba istega obrazca, ker si delita izbiro predmeta; dnevni je
+   navadna povezava, ker predmeta ne izbira (`ADR-017` A) — ta stoji v glavi
+   kartice, zunaj te predloge.
+
+   Obrazec je `GET`: nič ne spremeni, zato mora biti izbirnik dosegljiv tudi z
+   osvežitvijo in iz zgodovine brskalnika.
+
+   Kviz je vedno namenjen enemu otroku (`ADR-039` A), zato družina brez
+   aktivnega otroka vstopov ne dobi. Pove, kaj naj starš naredi — ne le, česa
+   ne gre. Poti isto pravilo zavrne s `409`. #}
+{% if ima_otroka %}
+  <form method="get" action="/admin/quizzes/new" class="nov-kviz">
+    <div class="polje">
+      <label for="nov-kviz-predmet">Predmet</label>
+      <select id="nov-kviz-predmet" name="subject">
+        {% for predmet in predmeti_za_kviz %}
+          <option value="{{ predmet.koda }}">{{ predmet.koda }} — {{ predmet.oznaka }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="gumb polni" type="submit" name="vstop" value="nova">Kviz iz nove snovi</button>
+    <button class="gumb obrobljen" type="submit" name="vstop" value="rocna">Izberi snov ročno</button>
+  </form>
+  <p class="drobno">
+    Nova snov je vse, kar pri predmetu še ni bilo v kvizu, in je že obkljukana.
+    Pri ročni izbiri ni obkljukano nič. „Kaj smo se danes učili" gre čez vse
+    predmete in obkljuka današnjo snov.
+  </p>
+{% else %}
+  <p class="obvestilo caka">
+    <span>
+      Kviz je vedno namenjen enemu otroku, tvoja družina pa nima nobenega
+      aktivnega otroka. Najprej dodaj otroka v razdelku
+      <a href="/admin/family">Družina</a>.
+    </span>
+  </p>
+{% endif %}

@@ -2,38 +2,46 @@
 
 {% block naslov %}Arhivirati sliko?{% endblock %}
 
+{# Kartica potrditve (V5-R01, `docs/poc/POC-02.md`, *Strani po pravilih*): kaj
+   zgoraj, naslov kot vprašanje, posledice v seznamu, gumb. Arhiviranje ni
+   nepovratno uničenje — slika na strežniku ostane —, zato gumb ni polno rdeč. #}
 {% block vsebina %}
-  <h1>Arhivirati to sliko?</h1>
-  <p class="pod">{{ snov.koda }} — {{ snov.oznaka }}, {{ snov.cas }}</p>
-
-  <div class="snov">
-    <div>
+  <section class="kartica kartica-potrditve">
+    <div class="clan-glava">
       {% if snov.velikost is not none %}
-        <img src="/admin/materials/{{ snov.id }}/image" alt="Posneta snov">
-      {% else %}
-        <p class="opozorilo">Slike na disku ni; arhiviran bo zapis brez nje.</p>
+        <img class="potrditev-slika" src="/admin/materials/{{ snov.id }}/image" alt="Posneta snov">
       {% endif %}
+      <div>
+        <p class="potrditev-kdo"><strong>{{ snov.koda }} — {{ snov.oznaka }}</strong></p>
+        <p class="zamolklo">{{ snov.cas }}</p>
+      </div>
     </div>
 
-    <div>
-      <p class="opozorilo">
+    <h1>Arhivirati to sliko?</h1>
+    {% if snov.velikost is none %}
+      <p class="obvestilo tiho"><span>Slike na disku ni; arhiviran bo zapis brez nje.</span></p>
+    {% endif %}
+    <ul class="posledice">
+      <li class="takoj">
         Slika izgine iz pregleda predmetov in jo bo telefon ob naslednjem
-        preverjanju zbrisal tudi pri sebi. <strong>Na strežniku ostane</strong>
+        preverjanju zbrisal tudi pri sebi.
+      </li>
+      <li class="ostane">
+        <strong>Na strežniku ostane</strong>
         — s prepisom, povzetkom in vprašanji — in jo najdeš v arhivu.
-      </p>
-      <p class="drobno">
+      </li>
+      <li class="tece">
         Vrnitve iz arhiva ni. Ko telefon brisanje potrdi, je mogoče zapis tudi
         dokončno izbrisati.
-      </p>
+      </li>
+    </ul>
 
-      {# Arhiviranje je `POST` in nikoli navadna povezava: brskalniki povezave
-         prednalagajo, in ta korak se ne da razveljaviti (ADR-006). #}
-      <form method="post" action="/admin/materials/{{ snov.id }}/archive">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <button class="gumb" type="submit">Da, arhiviraj</button>
-      </form>
-
-      <a class="nazaj" href="/admin/materials/{{ snov.id }}">← Ne, vrni se</a>
-    </div>
-  </div>
+    {# Arhiviranje je `POST` in nikoli navadna povezava: brskalniki povezave
+       prednalagajo, in ta korak se ne da razveljaviti (ADR-006). #}
+    <form method="post" action="/admin/materials/{{ snov.id }}/archive" class="vrstica-gumbov">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="gumb polni" type="submit">Da, arhiviraj</button>
+      <a class="gumb obrobljen" href="/admin/materials/{{ snov.id }}">Prekliči</a>
+    </form>
+  </section>
 {% endblock %}

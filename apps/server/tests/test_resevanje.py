@@ -435,10 +435,13 @@ class TestPreverbaVhoda:
 
 
 def stanje_na_pregledu(odjemalec: TestClient) -> str:
-    """Besedilo stanja edinega kviza na `/admin`, brez presledkov na robu."""
+    """Besedilo stanja edinega kviza na `/admin`, brez presledkov na robu.
+
+    Od V5-R01 je stanje svoja celica tabele z oznako (`_kvizi-tabela.html`).
+    """
     besedilo = odjemalec.get("/admin").text
-    [stanje] = re.findall(r'<span class="stanje">(.*?)</span>', besedilo, re.DOTALL)
-    return " ".join(stanje.split())
+    [stanje] = re.findall(r'<td class="kviz-stanje">(.*?)</td>', besedilo, re.DOTALL)
+    return " ".join(re.sub(r"<[^>]+>", " ", stanje).split())
 
 
 class TestAdmin:
@@ -452,8 +455,9 @@ class TestAdmin:
 
         assert "rešen" in stanje
         assert "objavljen" not in stanje
-        # Datum rešitve, ne le beseda.
-        assert re.search(r"rešen \d{1,2}\. \d{1,2}\. \d{4}", stanje)
+        # Datum rešitve, ne le beseda. Od V5-R01 brez leta, po `POC-02`
+        # („rešen 7. 10."): leto nosi stolpec z datumom nastanka.
+        assert re.fullmatch(r"rešen \d{1,2}\. \d{1,2}\.", stanje)
 
     def test_neresen_kviz_ostane_objavljen(self, odjemalec: TestClient, motor: Engine) -> None:
         kviz(motor)

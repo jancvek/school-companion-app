@@ -3,29 +3,40 @@
 {% block naslov %}Predmeti{% endblock %}
 
 {% block vsebina %}
-  {# Kartica „danes" (V3-R13, `docs/odlocitve/ADR-050`) — **nad** naslovom,
+  {# Kartica „danes" (V3-R13, `docs/odlocitve/ADR-050`) — **nad** predmeti,
      ker je to prvo, kar starš ob odprtju admina išče. Nosi kode predmetov,
-     zato test vrstnega reda s sliko od danes gleda samo `<ul class="predmeti">`.
-     Družina brez aktivnega otroka kartice nima. #}
+     zato test vrstnega reda gleda samo polico. Družina brez aktivnega otroka
+     kartice nima. #}
   {% if danes %}
     <section class="danes" aria-label="Danes">
+      <div class="kartica-glava">
+        <h2 class="naslov-kartice">Danes</h2>
+        <span class="zamolklo">{{ danes_datum }}</span>
+      </div>
       {% if danes.je_vikend %}
-        <p>Danes je vikend.</p>
+        <p>Vikend je. Nove slike pričakujemo v ponedeljek.</p>
       {% else %}
-        <ul>
+        <ul class="danes-vrstice">
           {% for vrstica in danes.vrstice %}
             <li>
-              <a href="{{ vrstica.href }}">
-                {# Brez slik je nevtralno in ne opozorilo: zjutraj je to
-                   normalno stanje (`ADR-050` C1). #}
+              {# Cela vrstica je povezava na pregled tega dne. Brez slik je
+                 nevtralno in ne opozorilo: zjutraj je to normalno stanje
+                 (`ADR-050` C1). Ime je vrednost polja pred stanjem, nikoli
+                 del povedi (`ADR-039` F3). #}
+              <a href="{{ vrstica.href }}"
+                 aria-label="{{ vrstica.stanje }}{% if vrstica.predmeti_opis %}: {{ vrstica.predmeti_opis }}{% endif %}">
+                {% if vrstica.ime %}<span class="danes-ime">{{ vrstica.ime }}</span>{% endif %}
                 {% if vrstica.ima_slike %}
-                  <span class="znak poslikano" aria-hidden="true">✓</span>
+                  <span class="oznaka ok"><span aria-hidden="true">✓</span> poslikano</span>
                 {% else %}
-                  <span class="znak" aria-hidden="true">○</span>
+                  <span class="oznaka"><span aria-hidden="true">○</span> še ni slik</span>
                 {% endif %}
-                <span>{{ vrstica.stanje }}</span>
-                {% if vrstica.predmeti_opis %}
-                  <span class="stevec">{{ vrstica.predmeti_opis }}</span>
+                {% if vrstica.predmeti %}
+                  <span class="cipi">
+                    {% for koda, koliko in vrstica.predmeti %}
+                      <span class="cip" style="--barva: {{ barve.get(koda, barva_neznanega) }}">{{ koda }} {{ koliko }}</span>
+                    {% endfor %}
+                  </span>
                 {% endif %}
               </a>
             </li>
@@ -35,170 +46,56 @@
     </section>
   {% endif %}
 
-  <h1>Predmeti</h1>
-  <p class="pod">
-    Skupaj {{ skupaj_opis }} v uporabi.
-    {# Arhiv je štet posebej in ne v skupnem številu: arhivirana slika je
-       umaknjena iz uporabe in bi seštevek delala neprimerljiv čez čas. #}
-    {% if arhiviranih %}
-      <a href="/admin/archive">V arhivu {{ arhiviranih }}.</a>
-    {% endif %}
-  </p>
+  <div class="razdelek-glava">
+    <h1>Predmeti</h1>
+    <p class="zamolklo">
+      {{ skupaj_opis }} v uporabi
+      {# Arhiv je štet posebej in ne v skupnem številu: arhivirana slika je
+         umaknjena iz uporabe in bi seštevek delala neprimerljiv čez čas. #}
+      {% if arhiviranih %}
+        <a class="z-odmikom" href="/admin/archive">{{ arhiviranih }} v arhivu</a>
+      {% endif %}
+    </p>
+  </div>
 
   <ul class="predmeti">
-    {# Predmeti brez slik ostanejo vidni — sicer bi seznam iz dneva v dan
-       spreminjal dolžino in ne bi bilo videti, česa ni. Povezavo imajo tudi
+    {# Predmeti brez slik ostanejo na polici — sicer bi polica iz dneva v dan
+       spreminjala dolžino in ne bi bilo videti, česa ni. Povezavo imajo tudi
        oni: brez nje bi bila stran „za ta predmet še ni nobene slike"
-       dosegljiva samo z ročno vtipkanim naslovom. Da je predmet prazen, pove
-       zamolklejši zapis in števec. #}
+       dosegljiva samo z ročno vtipkanim naslovom. #}
     {% for vrstica in predmeti %}
       <li>
-        <a href="/admin/subjects/{{ vrstica.koda|urlencode }}"
-           class="{{ '' if vrstica.koliko else 'prazen' }}">
-          <span><span class="koda">{{ vrstica.koda }}</span> — {{ vrstica.oznaka }}</span>
-          <span class="stevec">{{ vrstica.koliko }}</span>
+        <a class="zvezek{{ '' if vrstica.koliko else ' prazen' }}"
+           href="/admin/subjects/{{ vrstica.koda|urlencode }}"
+           style="--barva: {{ vrstica.barva }}">
+          <span class="zvezek-koda">{{ vrstica.koda }}</span>
+          <span class="zvezek-nalepka">{{ vrstica.oznaka }}</span>
+          <span class="zvezek-stevilo">{{ vrstica.koliko_opis }}</span>
         </a>
       </li>
     {% endfor %}
   </ul>
 
-  {# **Pod** seznamom predmetov in ne nad njim. Ime kviza vsebuje kodo predmeta
-     („MAT — 9. 9. 2026"), zgoraj pa bi ta koda postala prva pojavitev na
-     strani in podrla test, ki po vrstnem redu pojavitev dokazuje, da so
-     predmeti našteti po urniku in ne po abecedi. #}
-  <section class="izid">
+  <div class="razdelek-glava">
     <h2>Kvizi</h2>
-
-    {# Trije vstopi v **isti** izbirnik (`docs/odlocitve/ADR-016` A). Predmetna
-       dva sta gumba istega obrazca, ker si delita izbiro predmeta; dnevni je
-       navadna povezava, ker predmeta ne izbira (`ADR-017` A).
-
-       Obrazec je `GET`: nič ne spremeni, zato mora biti izbirnik dosegljiv
-       tudi z osvežitvijo in iz zgodovine brskalnika. #}
-    {# Kviz je vedno namenjen enemu otroku (`docs/odlocitve/ADR-039` A), zato
-       družina brez aktivnega otroka vstopov ne dobi. Pove, kaj naj starš
-       naredi — ne le, česa ne gre. Poti isto pravilo zavrne s `409`. #}
     {% if ima_otroka %}
-      <form method="get" action="/admin/quizzes/new" class="vstopi">
-        <label>
-          Predmet:
-          <select name="subject">
-            {% for vrstica in predmeti %}
-              <option value="{{ vrstica.koda }}">{{ vrstica.koda }} — {{ vrstica.oznaka }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <button class="gumb gumb-obdelava" type="submit" name="vstop" value="nova">
-          Nova snov
-        </button>
-        <button class="gumb gumb-obdelava" type="submit" name="vstop" value="rocna">
-          Ročna izbira
-        </button>
-      </form>
-      <p class="drobno">
-        „Nova snov" obkljuka vso snov predmeta, ki še ni bila v kvizu.
-        „Ročna izbira" pokaže isto, a ne obkljuka nič.
-        <a href="/admin/quizzes/new?vstop=danes">Kaj smo se danes učili</a> gre
-        čez vse predmete in obkljuka današnjo snov.
-      </p>
-    {% else %}
-      <p class="opozorilo">
-        Kviz je vedno namenjen enemu otroku, tvoja družina pa nima nobenega
-        aktivnega otroka. Najprej dodaj otroka v razdelku
-        <a href="/admin/family">Družina</a>.
-      </p>
+      <a href="/admin/quizzes/new?vstop=danes">Kaj smo se danes učili</a>
     {% endif %}
+  </div>
 
+  <section class="kartica brez-roba">
+    <div class="kartica-telo">
+      {% include "_kviz-nov.html" %}
+    </div>
+
+    {# Zadnji štirje; vsi so na svoji strani (`ADR-056` G). #}
     {% if kvizi %}
-      <ul class="predmeti">
-        {% for kviz in kvizi %}
-          <li>
-            <a href="/admin/quizzes/{{ kviz.id }}">
-              <span>
-                <span class="koda">{{ kviz.ime }}</span>
-                {# Predmet in datum sta kriterij in ne okras: ime je
-                   prepisljivo, zato ju ob prepisanem imenu ne nosi nic. #}
-                <span class="stanje">
-                  {{ kviz.koda }} &middot;
-                  {%- if kviz.otrok %} {{ kviz.otrok }} &middot;{% endif %}
-                  {{ kviz.nastal_datum }} &middot;
-                  {# Preklic ima prednost pred rešenostjo (`ADR-019` C). #}
-                  {% if kviz.preklican %}preklican{% elif kviz.resen %}rešen {{ kviz.resen_datum }}{% else %}objavljen{% endif %}
-                </span>
-              </span>
-              <span class="stevec">{{ kviz.vprasanj }}</span>
-            </a>
-          </li>
-        {% endfor %}
-      </ul>
+      {% with skupine = [{"oznaka": none, "kvizi": kvizi}], glava_datuma = "Nastal" %}
+        {% include "_kvizi-tabela.html" %}
+      {% endwith %}
+      <p class="kartica-noga"><a href="/admin/quizzes">Vsi kvizi</a></p>
     {% else %}
-      {# Brez kod predmetov v tem besedilu — glej opombo nad razdelkom. #}
-      <p class="drobno">Objavljenega kviza še ni.</p>
+      <p class="kartica-noga zamolklo">Objavljenega kviza še ni.</p>
     {% endif %}
-  </section>
-
-  {# Shranjeni testi za tisk (V4-R08). Pod kvizi in brez kod predmetov, kot
-     sosednji razdelki. #}
-  <section class="izid">
-    <h2>Testi</h2>
-    <p>
-      <a href="/admin/assessments">Shranjeni testi</a> — končani testi za tisk;
-      znova jih natisni ali iz njih sestavi nove. Nov test začneš na strani
-      predmeta z gumbom „Kreiraj test".
-    </p>
-  </section>
-
-  {# Pod kvizi iz istega razloga kot kvizi pod predmeti — in besedilo brez kod
-     predmetov (V2-R07). #}
-  <section class="izid">
-    <h2>Pregled po dnevih</h2>
-    <p>
-      <a href="/admin/days">Slike po dnevih in predmetih</a> — kaj je bilo
-      poslikano danes, včeraj ali v zadnjem tednu, urejeno po predmetu.
-    </p>
-  </section>
-
-  {# Pod pregledom po dnevih, ker urnik je to, po čemer pregled sodi manjke
-     (V3-R09). Brez kod predmetov, kot sosednji razdelki. #}
-  <section class="izid">
-    <h2>Urnik</h2>
-    <p>
-      <a href="/admin/schedule">Urnik otroka</a> — poslikaj ga ali vnesi in
-      potrdi; po njem pregled po dnevih pove, česa tisti dan ni poslikanega.
-    </p>
-  </section>
-
-  {# Pod kvizi iz istega razloga kot kvizi pod predmeti — in besedilo brez kod
-     predmetov (V3-R06). #}
-  <section class="izid">
-    <h2>Družina</h2>
-    <p>
-      <a href="/admin/family">Člani družine</a> — odpri račun otroku ali
-      drugemu staršu, ponastavi geslo, deaktiviraj račun.
-    </p>
-  </section>
-
-  {# Samo za lastnika sistema (V3-R05). Pogojni izris ni varovalo — to je
-     `zahtevaj_lastnika_sistema` na usmerjevalniku —, ampak vljudnost: povezava
-     na stran, ki je zate 404, je povabilo v prazno. Zastavica pride iz seje,
-     torej iz istega vira kot zavrnitev (`docs/odlocitve/ADR-044` G). #}
-  {% if prijava and prijava.is_system_owner %}
-    <section class="izid">
-      <h2>Sistem</h2>
-      <p>
-        <a href="/admin/system">Družine</a> — odpri novo družino in njenega
-        prvega starša, ponastavi mu geslo, deaktiviraj starša ali celo družino.
-      </p>
-    </section>
-  {% endif %}
-
-  {# Pod kvizi iz istega razloga kot kvizi pod predmeti — in besedilo brez kod
-     predmetov (V2-R04). #}
-  <section class="izid">
-    <h2>Statistika</h2>
-    <p>
-      <a href="/admin/statistics">Statistika čez kvize</a> — katera vprašanja so
-      težka vztrajno, čez več kvizov, in kako se to spreminja skozi šolsko leto.
-    </p>
   </section>
 {% endblock %}

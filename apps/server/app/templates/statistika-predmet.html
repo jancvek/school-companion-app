@@ -3,10 +3,12 @@
 
 {% block naslov %}Statistika — {{ koda }}{% endblock %}
 
+{# Eno vprašanje kot kartica: odgovor, izvor, kolikokrat je bilo postavljeno,
+   in zaporedje ocen po času. #}
 {% macro vprasanja(seznam) %}
-  <ol class="vprasanja">
+  <ol class="vprasanja-statistike">
     {% for v in seznam %}
-      <li>
+      <li class="kartica">
         <p class="vprasanje">{{ v.vprasanje }}</p>
         <p class="odgovor">{{ v.odgovor }}</p>
         <p class="drobno">
@@ -25,7 +27,7 @@
            vprašanja naučila — razvrstitev po deležu tega ne pokaže. #}
         <p class="drobno zaporedje">
           {% for vnos in v.zaporedje %}
-            <span>
+            <span class="ocena-v-zaporedju">
               {{ vnos.datum }} <strong>{{ vnos.oznaka }}</strong>
               (<a href="/admin/quizzes/{{ vnos.quiz_id }}">{{ vnos.kviz_ime }}</a>{% if vnos.preklican %}, preklican kviz{% endif %})
             </span>{% if not loop.last %} → {% endif %}
@@ -37,112 +39,141 @@
 {% endmacro %}
 
 {% block vsebina %}
-  <h1>{{ koda }} — {{ oznaka }}</h1>
-  <p class="pod">
-    {%- if otrok_ime %}{{ otrok_ime }} · {% endif -%}
-    {{ okno }} · {{ skupaj.poskusov_opis }}
-  </p>
+  <ol class="drobtine">
+    <li><a href="{{ nazaj }}">Statistika</a></li>
+    <li aria-current="page">{{ oznaka }}</li>
+  </ol>
 
-  {{ deli.izbira_otrok(otroci) }}
-  {{ deli.izbira_let(leta, neprebrano) }}
-  {{ deli.samoocena() }}
+  <div class="glava-strani">
+    <div class="naslov-s-platnico">
+      <span class="platnica majhna" style="--barva: {{ barva }}" aria-hidden="true">{{ koda }}</span>
+      <div>
+        <h1>{{ koda }} — {{ oznaka }}</h1>
+        <p class="pod">
+          {%- if otrok_ime %}{{ otrok_ime }} · {% endif -%}
+          {{ okno }} · {{ skupaj.poskusov_opis }}
+        </p>
+      </div>
+    </div>
+    {{ deli.izbira_otrok(otroci) }}
+  </div>
+
+  <div class="orodna-vrstica">
+    {{ deli.izbira_let(leta, neprebrano) }}
+    {{ deli.legenda(skupaj) }}
+  </div>
+  {{ deli.neprebrano_obdobje(neprebrano) }}
   {{ deli.opombe(opombe) }}
 
   {% if not skupaj.poskusov %}
-    <p class="opozorilo">V tem obdobju pri tem predmetu ni nobene ocene.</p>
+    <p class="obvestilo tiho"><span>V tem obdobju pri tem predmetu ni nobene ocene.</span></p>
+    {{ deli.samoocena() }}
   {% else %}
-    <p>
-      {{ deli.pas(skupaj) }}
-      {{ deli.ocene(skupaj) }} · pravilnih {{ skupaj.pravilnih }} · težkih {{ skupaj.tezkih }}
-    </p>
+    {{ deli.skupaj_kartica(skupaj, True) }}
 
-    <section class="izid">
-      <h2>{{ "Po mesecih" if po_mesecih else "Po šolskih letih" }}</h2>
-      {# Prazni meseci ostanejo vidni z ničlo — stran mora pokazati, česa ni. #}
-      <div class="tabela-ovoj">
-        <table class="tabela">
-          <thead>
-            <tr>
-              <th>{{ "Mesec" if po_mesecih else "Šolsko leto" }}</th>
-              <th>Poskusov</th>
-              <th>Razporeditev</th>
-              <th>Pravilnih</th>
-              <th>Težkih</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for vrstica in casovnica %}
-              <tr class="{{ '' if vrstica.poskusov else 'prazen' }}">
-                <td>{{ vrstica.oznaka }}</td>
-                <td>{{ vrstica.poskusov_opis }}</td>
-                <td>
-                  {{ deli.pas(vrstica) }}
-                  <span class="drobno">{{ deli.ocene(vrstica) }}</span>
-                </td>
-                <td>{{ vrstica.pravilnih }}</td>
-                <td>{{ vrstica.tezkih }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-
-      <h2>Snovi</h2>
-      <div class="tabela-ovoj">
-        <table class="tabela">
-          <thead>
-            <tr>
-              <th>Snov</th>
-              <th>Vprašanj</th>
-              <th>Poskusov</th>
-              <th>Razporeditev</th>
-              <th>Pravilnih</th>
-              <th>Težkih</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for snov in snovi %}
-              <tr>
-                <td>
-                  {% if snov.id %}
-                    <a href="/admin/materials/{{ snov.id }}">{{ snov.izvor }}</a>
-                  {% else %}
-                    {{ snov.izvor }}
-                  {% endif %}
-                  {% for oznaka in snov.oznake %} · {{ oznaka }}{% endfor %}
-                </td>
-                <td>{{ snov.vprasanj_opis }}</td>
-                <td>{{ snov.poskusov_opis }}</td>
-                <td>
-                  {{ deli.pas(snov) }}
-                  <span class="drobno">{{ deli.ocene(snov) }}</span>
-                </td>
-                <td>{{ snov.pravilnih }}</td>
-                <td>{{ snov.tezkih }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-
-      {# Dva razdelka (`ADR-021` C): en sam poskus je že rezultat kviza in še
-         ni „vztrajno", zato je pod večkrat postavljenimi. #}
+    {# Dva razdelka (`ADR-021` C): en sam poskus je že rezultat kviza in še
+       ni „vztrajno". Večkrat postavljena so od V5-R01 **prva**, ker so
+       bistvo te strani (`POC-02`); enkrat postavljena so zložena na dnu. #}
+    <section>
       <h2 id="veckrat">Postavljena večkrat · {{ veckrat_opis }}</h2>
       {% if veckrat %}
         {{ vprasanja(veckrat) }}
       {% else %}
-        <p class="drobno">
-          Nobeno vprašanje v tem obdobju ni bilo postavljeno več kot enkrat.
-          Isto vprašanje pride znova, kadar snov z „Ročno izbiro“ vzameš v nov kviz.
+        <p class="obvestilo tiho">
+          <span>
+            Nobeno vprašanje v tem obdobju ni bilo postavljeno več kot enkrat.
+            Isto vprašanje pride znova, kadar snov z „Ročno izbiro“ vzameš v nov kviz.
+          </span>
         </p>
       {% endif %}
+    </section>
 
-      <h2 id="enkrat">Postavljena enkrat · {{ enkrat_opis }}</h2>
+    <section>
+      <h2>{{ "Po mesecih" if po_mesecih else "Po šolskih letih" }}</h2>
+      {# Prazni meseci ostanejo vidni z ničlo — stran mora pokazati, česa ni. #}
+      <div class="kartica brez-roba">
+        <div class="tabela-ovoj">
+          <table class="tabela statistika-tabela">
+            <thead>
+              <tr>
+                <th scope="col">{{ "Mesec" if po_mesecih else "Šolsko leto" }}</th>
+                <th scope="col">Poskusov</th>
+                <th scope="col">Razporeditev</th>
+                <th scope="col" class="st">Pravilnih</th>
+                <th scope="col" class="st">Težkih</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for vrstica in casovnica %}
+                <tr class="{{ '' if vrstica.poskusov else 'prazen' }}">
+                  <td>{{ vrstica.oznaka }}</td>
+                  <td>{{ vrstica.poskusov_opis }}</td>
+                  <td class="siroka">
+                    {{ deli.pas(vrstica) }}
+                    <span class="drobno">{{ deli.ocene(vrstica) }}</span>
+                  </td>
+                  <td class="st">{{ vrstica.pravilnih }}</td>
+                  <td class="st">{{ vrstica.tezkih }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Snovi</h2>
+      <div class="kartica brez-roba">
+        <div class="tabela-ovoj">
+          <table class="tabela statistika-tabela">
+            <thead>
+              <tr>
+                <th scope="col">Snov</th>
+                <th scope="col">Vprašanj</th>
+                <th scope="col">Poskusov</th>
+                <th scope="col">Razporeditev</th>
+                <th scope="col" class="st">Pravilnih</th>
+                <th scope="col" class="st">Težkih</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for snov in snovi %}
+                <tr>
+                  <td>
+                    {% if snov.id %}
+                      <a href="/admin/materials/{{ snov.id }}">{{ snov.izvor }}</a>
+                    {% else %}
+                      {{ snov.izvor }}
+                    {% endif %}
+                    {% for oznaka in snov.oznake %} · {{ oznaka }}{% endfor %}
+                  </td>
+                  <td>{{ snov.vprasanj_opis }}</td>
+                  <td>{{ snov.poskusov_opis }}</td>
+                  <td class="siroka">
+                    {{ deli.pas(snov) }}
+                    <span class="drobno">{{ deli.ocene(snov) }}</span>
+                  </td>
+                  <td class="st">{{ snov.pravilnih }}</td>
+                  <td class="st">{{ snov.tezkih }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    {# En sam poskus še ni „vztrajno": zloženo, s številom in razlogom. #}
+    <details class="kartica" id="enkrat">
+      <summary>Postavljena enkrat · {{ enkrat_opis }}</summary>
+      <p class="drobno">
+        Ena ocena je rezultat enega kviza in o vztrajni težavi še ne pove
+        ničesar; zato so ta vprašanja zložena.
+      </p>
       {% if enkrat %}
         {{ vprasanja(enkrat) }}
       {% endif %}
-    </section>
+    </details>
   {% endif %}
-
-  <a class="nazaj" href="{{ nazaj }}">← Vsi predmeti</a>
 {% endblock %}

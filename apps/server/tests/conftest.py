@@ -473,3 +473,60 @@ def odjemalec(aplikacija: FastAPI, motor: Engine, stars: str) -> Iterator[Prijav
         yield odjemalec
 
 
+
+
+def slog_admina() -> str:
+    """Besedilo sloga spletnega pregleda (V5-R01).
+
+    Do V5-R01 je bil slog vgrajen v `osnova.html` in testi so pravila brali iz
+    izrisane strani. Odkar je ločena datoteka (`docs/odlocitve/ADR-060` A), jih
+    berejo od tu — trditev je ista, vir pa datoteka, ki jo stran naloži.
+    """
+    from app.main import MAPA_STATICNIH
+
+    return (MAPA_STATICNIH / "admin" / "slog.css").read_text(encoding="utf-8")
+
+
+def _blok_sloga(slog: str, zacetek: str) -> str:
+    """Notranjost bloka, ki se začne z vrstico `zacetek`, brez ovoja."""
+    od = slog.index("\n" + zacetek) + 1
+    odprt = slog.index("{", od)
+    globina = 0
+    for mesto in range(odprt, len(slog)):
+        globina += {"{": 1, "}": -1}.get(slog[mesto], 0)
+        if globina == 0:
+            return slog[odprt + 1 : mesto]
+    raise AssertionError(zacetek)
+
+
+def slog_zaslona() -> str:
+    """Pravila novega videza: notranjost bloka `@media screen` v slogu.
+
+    Trditev »pravilo obstaja« o novem videzu se bere od tu in ne iz cele
+    datoteke: blok za papir nosi ves slog izpred V5-R01 in bi ji pritrdil s
+    pravilom, ki na zaslonu ne velja.
+    """
+    return _blok_sloga(slog_admina(), "@media screen {")
+
+
+def slog_papirja() -> str:
+    """Pravila za papir: notranjost zunanjega bloka `@media print` v slogu."""
+    return _blok_sloga(slog_admina(), "@media print {")
+
+
+def vsebina_strani(besedilo: str) -> str:
+    """Del izrisa med `<main>` in `</main>`: stran brez stalnega menija.
+
+    Meni je od V5-R01 na vsaki strani in nosi povezave na vse razdelke ter
+    števce, ki se spreminjajo neodvisno od strani. Test, ki trdi nekaj o
+    **strani** („te povezave tu ni", „stran se ni spremenila"), gleda zato
+    samo njeno vsebino.
+    """
+    zacetek = besedilo.index("<main>")
+    return besedilo[zacetek : besedilo.index("</main>", zacetek)]
+
+
+def meni_strani(besedilo: str) -> str:
+    """Stalni meni iz izrisa: od `<nav` do `</nav>`."""
+    zacetek = besedilo.index("<nav")
+    return besedilo[zacetek : besedilo.index("</nav>", zacetek)]

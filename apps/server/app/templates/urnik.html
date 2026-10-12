@@ -3,154 +3,228 @@
 {% block naslov %}Urnik{% endblock %}
 
 {% block vsebina %}
-  <h1>Urnik</h1>
-  <p class="pod">
-    Urnik pove, kateri predmeti so kateri dan — brez ur in brez zaporedja.
-    Po njem pregled po dnevih izpiše, česa tisti dan ni poslikanega.
-  </p>
-
-  {# Izbira otroka je svoj obrazec `GET`, kot na pregledu po dnevih: urnik je
-     last otroka in vsak ga ima svojega. Pri enem otroku se ne izriše
-     (`docs/odlocitve/ADR-039` B). #}
-  {% if je_izbirnik_otrok %}
-    <form method="get" action="/admin/schedule" class="vstopi">
-      <label>
-        Otrok:
-        <select name="otrok">
-          {% for otrok in otroci %}
-            <option value="{{ otrok.id }}"
-                    {% if otrok.id == izbrani_otrok %}selected{% endif %}>{{ otrok.ime }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <button class="gumb gumb-obdelava" type="submit">Pokaži</button>
-    </form>
-  {% endif %}
-
-  {% if napaka %}
-    <p class="napaka">{{ napaka }}</p>
-  {% endif %}
-  {% if sporocilo %}
-    <p class="opozorilo">{{ sporocilo }}</p>
-  {% endif %}
-
-  {# Celice, ki jih ni bilo mogoče preslikati na predmet. Izpišejo se in ne
-     izpadejo molče: napačno prebran urnik bi lagal vsak teden, dokler ga
-     nihče ne popravi (kriterij V3-R09). V mreži zanje ni stolpca — ta pozna
-     samo deset kod —, zato so tu, nad njo. #}
-  {% if nepreslikane %}
-    <div class="izid">
-      <h2>Tega nisem znal uvrstiti</h2>
-      <p class="drobno">
-        To je s slike prebrano, a se ne ujema z nobenim predmetom. Če kaj od
-        tega sodi na urnik, označi pravi predmet v mreži spodaj.
+  <div class="glava-strani">
+    <div>
+      <h1>Urnik</h1>
+      <p class="pod">
+        Urnik pove, kateri predmeti so kateri dan — brez ur in brez zaporedja.
+        Po njem pregled po dnevih izpiše, česa tisti dan ni poslikanega.
       </p>
-      <ul>
-        {% for dan, besedilo in nepreslikane %}
-          <li>{{ dan }}: „{{ besedilo }}“</li>
+    </div>
+
+    {# Izbira otroka kot zavihka: povezavi na isto stran, brez gumba. Urnik
+       je last otroka in vsak ga ima svojega. Pri enem otroku se ne izriše
+       (`docs/odlocitve/ADR-039` B). #}
+    {% if zavihki_otrok %}
+      <ul class="zavihki" aria-label="Otrok">
+        {% for zavihek in zavihki_otrok %}
+          <li>
+            <a href="{{ zavihek.href }}"{% if zavihek.izbran %} aria-current="true"{% endif %}>{{ zavihek.oznaka }}</a>
+          </li>
         {% endfor %}
       </ul>
-    </div>
+    {% endif %}
+  </div>
+
+  {% if napaka %}
+    <p class="obvestilo napaka"><span>{{ napaka }}</span></p>
   {% endif %}
 
   {% if izbrani_otrok %}
-    {# Nalaganje slike. `enctype` je `multipart/form-data`, edini, ki nese
-       datoteko — zato CSRF žeton na tej poti preveri pot sama in ne vmesna
-       plast (`docs/odlocitve/ADR-043`). Žeton je v obrazcu enako kot povsod. #}
-    <section class="izid">
-      <h2>Preberi urnik s slike</h2>
-      <p class="drobno">
-        Naloži fotografijo ali posnetek zaslona urnika (JPEG ali PNG, do
-        {{ najvecja_slika_mb }} MB). Prebrano se vpiše v mrežo spodaj —
-        <strong>shrani se šele, ko mrežo potrdiš.</strong>
-      </p>
-      {% if ima_klicalca %}
-        {# Žeton stoji v prvi vrstici obrazca, kot v vseh drugih predlogah:
-           `TestCsrfPodAdminom` bere prav vrstico pod začetkom obrazca, in
-           žeton nižje bi varovalu ušel. Zato je tudi `enctype` v isti vrstici. #}
-        <form method="post" action="/admin/schedule/proposal" enctype="multipart/form-data" class="vstopi">
-          <input type="hidden" name="csrf" value="{{ csrf }}">
-          <input type="hidden" name="otrok" value="{{ izbrani_otrok }}">
-          <input type="file" name="slika" accept="image/jpeg,image/png" required>
-          <button class="gumb gumb-obdelava" type="submit">Preberi</button>
-        </form>
-        <p class="drobno">
-          Branje traja nekaj časa — stran počaka, dokler urnik ni prebran.
+    {# Vrstica stanja: eno od treh, vedno pove, kaj narediti. Brez imena
+       otroka v povedi (`ADR-039` F3) — čigav je urnik, pove izbrani zavihek. #}
+    {% if je_predlog %}
+      <div class="obvestilo caka">
+        <p>
+          <strong>Urnik s slike je prebran, a še ni shranjen.</strong>
+          {{ sporocilo }}
+          {% if je_sprememb %}Celice, ki se razlikujejo od potrjenega urnika, so označene s piko.{% endif %}
         </p>
-      {% endif %}
-    </section>
+      </div>
+    {% elif ima_urnik %}
+      <div class="obvestilo">
+        <p>
+          <strong>Urnik je potrjen</strong> od {{ potrjen_od }}. Pregled po dnevih po njem javlja manjke.
+        </p>
+      </div>
+    {% else %}
+      <div class="obvestilo tiho">
+        <p>
+          <strong>Urnika še ni.</strong>
+          Ta otrok potrjenega urnika še nima, zato pregled po dnevih zanj
+          manjkov ne izpisuje. Vnesi ga v mrežo spodaj ali ga preberi s slike.
+        </p>
+      </div>
+    {% endif %}
 
-    <section class="izid">
-      <h2>Mreža</h2>
-      <p class="drobno">
-        Mreža je <strong>cel</strong> urnik: kar tu ni označeno, na urniku ne
-        obstaja. „Se ne slika" je za predmete, ki so na urniku, a iz njih
-        slike praviloma ne nastanejo — ti manjka ne javljajo nikoli.
-      </p>
-
-      <form method="post" action="/admin/schedule">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <input type="hidden" name="otrok" value="{{ izbrani_otrok }}">
-        {# Slika pripada temu predlogu. Nosi se `id` in nikoli pot: pot je
-           stvar strežnika (`docs/odlocitve/ADR-042`). Brez nje je urnik
-           natipkan in `image_path` ostane prazen. #}
-        {% if slika_id %}
-          <input type="hidden" name="slika_id" value="{{ slika_id }}">
-        {% endif %}
-
-        <div class="tabela-ovoj">
-          <table class="tabela">
-            <thead>
-              <tr>
-                <th>Predmet</th>
-                {% for dan in dnevi %}
-                  <th>{{ dan.ime }}</th>
+    {# Teden na pogled: potrjen urnik za branje. Urejanje je v mreži spodaj. #}
+    {% if teden %}
+      <section class="teden urnik-teden" aria-label="Potrjen urnik">
+        <div class="teden-dnevi">
+          {% for dan in teden %}
+            <div class="dan{% if dan.je_danes %} danes-dan{% endif %}">
+              <h2 class="dan-glava">
+                {{ dan.ime }}
+                {% if dan.je_danes %}<span class="oznaka polna">danes</span>{% endif %}
+              </h2>
+              <ul class="urnik-predmeti">
+                {% for predmet in dan.predmeti %}
+                  <li class="{% if predmet.se_ne_slika %}se-ne-slika{% endif %}" style="--barva: {{ predmet.barva }}">
+                    <span class="cip{% if predmet.se_ne_slika %} crtkan{% endif %}">{{ predmet.koda }}</span>
+                    <span>
+                      {{ predmet.oznaka }}
+                      {% if predmet.se_ne_slika %}<span class="drobno">se ne slika</span>{% endif %}
+                    </span>
+                  </li>
                 {% endfor %}
-              </tr>
-            </thead>
-            <tbody>
-              {# Vseh deset predmetov, v vrstnem redu urnika in ne po abecedi,
-                 kot povsod na `/admin`. #}
-              {% for vrstica in vrstice %}
-                <tr>
-                  <td>{{ vrstica.koda }} — {{ vrstica.oznaka }}</td>
-                  {% for celica in vrstica.celice %}
-                    <td>
-                      {# Tri stanja v enem izbirniku in ne dve potrditveni
-                         polji: „ni na urniku", „se slika" in „se ne slika" so
-                         izključujoči, dve polji pa bi dopustili četrto,
-                         nesmiselno kombinacijo. #}
-                      <select name="{{ celica.polje }}"
-                              aria-label="{{ vrstica.koda }}, {{ dnevi[loop.index0].ime }}">
-                        <option value="{{ celica_ni }}"
-                                {% if celica.vrednost == celica_ni %}selected{% endif %}>—</option>
-                        <option value="{{ celica_slika }}"
-                                {% if celica.vrednost == celica_slika %}selected{% endif %}>je</option>
-                        <option value="{{ celica_brez_slike }}"
-                                {% if celica.vrednost == celica_brez_slike %}selected{% endif %}>se ne slika</option>
-                      </select>
-                    </td>
+              </ul>
+            </div>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    <details class="kartica urnik-uredi" id="uredi"{% if mreza_odprta %} open{% endif %}>
+      <summary>Uredi urnik <span class="zamolklo">— ročno ali s slike</span></summary>
+
+      <div class="urnik-postavitev">
+        <div>
+          <p class="drobno">
+            Mreža je <strong>cel</strong> urnik: kar tu ni označeno, na urniku ne
+            obstaja. „Se ne slika" je za predmete, ki so na urniku, a iz njih
+            slike praviloma ne nastanejo — ti manjka ne javljajo nikoli.
+          </p>
+
+          <form method="post" action="/admin/schedule">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="otrok" value="{{ izbrani_otrok }}">
+            {# Slika pripada temu predlogu. Nosi se `id` in nikoli pot: pot je
+               stvar strežnika (`docs/odlocitve/ADR-042`). Brez nje je urnik
+               natipkan in `image_path` ostane prazen. #}
+            {% if slika_id %}
+              <input type="hidden" name="slika_id" value="{{ slika_id }}">
+            {% endif %}
+
+            <div class="tabela-ovoj">
+              <table class="mreza-urnika">
+                <thead>
+                  <tr>
+                    <th scope="col">Predmet</th>
+                    {% for dan in dnevi %}
+                      <th scope="col">{{ dan.ime }}</th>
+                    {% endfor %}
+                  </tr>
+                </thead>
+                <tbody>
+                  {# Vseh deset predmetov, v vrstnem redu urnika in ne po
+                     abecedi, kot povsod na `/admin`. #}
+                  {% for vrstica in vrstice %}
+                    <tr style="--barva: {{ vrstica.barva }}">
+                      <th scope="row"><span class="cip">{{ vrstica.koda }}</span> <span class="ime-predmeta">{{ vrstica.oznaka }}</span></th>
+                      {% for celica in vrstica.celice %}
+                        <td{% if celica.spremenjena %} class="spremenjena"{% endif %}>
+                          {# Tri stanja v enem izbirniku in ne dve potrditveni
+                             polji: „ni na urniku", „se slika" in „se ne slika"
+                             so izključujoči, dve polji pa bi dopustili četrto,
+                             nesmiselno kombinacijo. Barvo celice da slog po
+                             izbrani možnosti, brez skripte (`ADR-056` F). #}
+                          <select name="{{ celica.polje }}"
+                                  aria-label="{{ vrstica.koda }}, {{ dnevi[loop.index0].ime }}{% if celica.spremenjena %}, spremenjeno{% endif %}">
+                            <option value="{{ celica_ni }}"
+                                    {% if celica.vrednost == celica_ni %}selected{% endif %}>—</option>
+                            <option value="{{ celica_slika }}"
+                                    {% if celica.vrednost == celica_slika %}selected{% endif %}>je</option>
+                            <option value="{{ celica_brez_slike }}"
+                                    {% if celica.vrednost == celica_brez_slike %}selected{% endif %}>se ne slika</option>
+                          </select>
+                        </td>
+                      {% endfor %}
+                    </tr>
                   {% endfor %}
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="vrstica-gumbov">
+              <button class="gumb polni" type="submit">Potrdi urnik</button>
+              <span class="drobno">
+                {% if ima_urnik %}
+                  Ta otrok ima potrjen urnik. Potrditev ga nadomesti; prejšnji ostane
+                  zapisan, a se nikjer več ne upošteva.
+                {% else %}
+                  Potrjen urnik velja takoj; pozneje ga lahko nadomestiš z novim.
+                {% endif %}
+              </span>
+            </div>
+          </form>
         </div>
 
-        <button class="gumb gumb-obdelava" type="submit">Potrdi urnik</button>
-      </form>
+        <div class="urnik-ob-strani">
+          {# Celice, ki jih ni bilo mogoče preslikati na predmet. Izpišejo se
+             in ne izpadejo molče: napačno prebran urnik bi lagal vsak teden,
+             dokler ga nihče ne popravi (kriterij V3-R09). V mreži zanje ni
+             stolpca — ta pozna samo deset kod. #}
+          {% if nepreslikane %}
+            <section class="kartica mala opozorilna">
+              <h2>Tega nisem znal uvrstiti</h2>
+              <p class="drobno">
+                To je s slike prebrano, a se ne ujema z nobenim predmetom. Če kaj od
+                tega sodi na urnik, označi pravi predmet v mreži.
+              </p>
+              <ul>
+                {% for dan, besedilo in nepreslikane %}
+                  <li>{{ dan }}: „{{ besedilo }}“</li>
+                {% endfor %}
+              </ul>
+            </section>
+          {% endif %}
 
-      <p class="drobno">
-        {% if ima_urnik %}
-          Ta otrok ima potrjen urnik. Potrditev ga nadomesti; prejšnji ostane
-          zapisan, a se nikjer več ne upošteva.
-        {% else %}
-          Ta otrok potrjenega urnika še nima, zato pregled po dnevih zanj
-          manjkov ne izpisuje.
-        {% endif %}
-      </p>
-    </section>
+          {% if slika_href %}
+            <section class="kartica mala">
+              <h2>Prebrana slika</h2>
+              <p class="drobno">
+                {% if je_predlog %}Primerjaj z mrežo, preden potrdiš.{% else %}Iz te slike je nastal potrjeni urnik.{% endif %}
+              </p>
+              <a href="{{ slika_href }}"><img src="{{ slika_href }}" alt="Naložena slika urnika" loading="lazy"></a>
+            </section>
+          {% endif %}
+
+          <section class="kartica mala">
+            <h2>Preberi urnik s slike</h2>
+            <p class="drobno">
+              Naloži fotografijo ali posnetek zaslona urnika (JPEG ali PNG, do
+              {{ najvecja_slika_mb }} MB). Prebrano se vpiše v mrežo —
+              <strong>shrani se šele, ko mrežo potrdiš.</strong>
+            </p>
+            {% if ima_klicalca %}
+              {# Nalaganje slike. `enctype` je `multipart/form-data`, edini,
+                 ki nese datoteko — zato CSRF žeton na tej poti preveri pot
+                 sama in ne vmesna plast (`docs/odlocitve/ADR-043`). Žeton
+                 stoji v prvi vrstici obrazca, kot v vseh drugih predlogah:
+                 `TestCsrfPodAdminom` bere prav vrstico pod začetkom obrazca.
+                 Zato je tudi `enctype` v isti vrstici. #}
+              <form method="post" action="/admin/schedule/proposal" enctype="multipart/form-data">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <input type="hidden" name="otrok" value="{{ izbrani_otrok }}">
+                <input type="file" name="slika" accept="image/jpeg,image/png" required>
+                <button class="gumb obrobljen majhen" type="submit">Preberi</button>
+              </form>
+              <p class="drobno">
+                Branje traja nekaj časa — stran počaka, dokler urnik ni prebran.
+              </p>
+            {% endif %}
+          </section>
+
+          <section class="kartica mala">
+            <h2>Celice</h2>
+            <ul class="legenda-celic">
+              <li><span class="vzorec">—</span> ni na urniku</li>
+              <li><span class="vzorec polna">je</span> je na urniku in se slika</li>
+              <li><span class="vzorec crtkana"></span> je na urniku, a se ne slika (ne javlja manjka)</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </details>
   {% endif %}
-
-  <a class="nazaj" href="/admin">← Nazaj na predmete</a>
 {% endblock %}

@@ -11,9 +11,13 @@ nobenega od njiju. Imena so zato javna in brez podčrtaja.
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import Response
 
+from app import meni
+from app.db import MeniRepository, SejaUporabnika
 from app.settings import Settings
+from app.subjects import PREDMETI
 
 
 def daj_predloge(request: Request) -> Jinja2Templates:
@@ -48,10 +52,39 @@ def kontekst_prijave(request: Request) -> dict[str, object]:
     """
     nastavitve: Settings = request.app.state.nastavitve
     skupno: dict[str, object] = {"google_na_voljo": nastavitve.google_je_nastavljen}
-    seja = getattr(request.state, "prijava", None)
+    seja: SejaUporabnika | None = getattr(request.state, "prijava", None)
     if seja is None:
-        return {**skupno, "prijava": None}
-    return {**skupno, "prijava": seja, "csrf": seja.csrf_token}
+        # Hrbti zvezkov na prijavni strani (V5-R01): koda in barva vsakega
+        # predmeta. Podatek predmeta, ne družine — brez seje ga smemo dati.
+        hrbti = [{"koda": predmet.koda, "barva": predmet.barva} for predmet in PREDMETI]
+        return {**skupno, "prijava": None, "hrbti": hrbti}
+    return {
+        **skupno,
+        "prijava": seja,
+        "csrf": seja.csrf_token,
+        "meni": _meni(request, seja),
+        "ime_druzine": meni.ime_druzine(seja.family_name),
+        "zacetnica": meni.zacetnica(seja.display_name),
+    }
+
+
+def _meni(request: Request, seja: SejaUporabnika) -> meni.Meni:
+    """Stalni meni s števci za stran, ki se izrisuje (V5-R01).
+
+    Števci so svoja, kratka seja baze in ne odvisnost poti: meni je na vsaki
+    strani, tudi na strani z napako, ki je ne izriše noben endpoint. En sam
+    stavek s štirimi štetji (`MeniRepository`), nič drugega.
+
+    Pod `/admin/system` se **ne šteje nič** (`docs/odlocitve/ADR-060` F): te
+    strani ne smejo prebrati vsebine nobene družine, niti lastnikove.
+    """
+    pot = request.url.path
+    stevci: meni.Stevci | None = None
+    if not meni.je_brez_stevcev(pot):
+        tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
+        with tovarna() as seja_baze:
+            stevci = MeniRepository(seja_baze, seja.family_id).stevci()
+    return meni.sestavi_meni(pot, lastnik_sistema=seja.is_system_owner, stevci=stevci)
 
 
 def ni_najdeno(predloge: Jinja2Templates, request: Request, sporocilo: str) -> Response:

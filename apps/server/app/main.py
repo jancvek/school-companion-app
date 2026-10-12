@@ -6,6 +6,7 @@ stanja na ravni modula. Uvicorn jo zato zažene z zastavico `--factory`.
 """
 
 import logging
+import mimetypes
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -97,6 +98,36 @@ POTI_BREZ_SEJE = frozenset({prijava.POT_PRIJAVE})
 #: `ADR-043` — da se `multipart` nauči plast sama.
 POTI_S_SVOJIM_CSRF = frozenset({urnik.POT_PREDLOGA})
 
+#: Mapa s statičnimi datotekami in pot, pod katero so postrežene (V4-R07).
+MAPA_STATICNIH = Path(__file__).resolve().parent / "static"
+POT_STATICNIH = "/admin/static"
+
+#: Python 3.12 pripone `.woff2` ne pozna, tanka slika vsebnika pa nima
+#: `/etc/mime.types`; brez tega bi `StaticFiles` pisavo postregel kot
+#: `text/plain`. Vpis je ponovljiv in velja enako na vsakem stroju.
+mimetypes.add_type("font/woff2", ".woff2")
+
+#: Slog admina in mapa pisave pod `POT_STATICNIH` (V5-R01).
+POT_SLOGA = f"{POT_STATICNIH}/admin/slog.css"
+POT_PISAVE = f"{POT_STATICNIH}/pisave/atkinson-hyperlegible-next"
+
+#: Statične datoteke, ki so dosegljive **brez seje** (`docs/odlocitve/ADR-060` A).
+#:
+#: Prijavna stran seje nima, slog in pisavo pa potrebuje. Nabor so **točne
+#: poti**, ne predpona in ne vzorec, in v njem ni ničesar, kar bi nosilo
+#: podatek družine. Vse ostalo pod `/admin/static` ostane za sejo
+#: (`ADR-054`, meja 2). Nabor varuje test: nova datoteka naj vanj ne zaide
+#: tiho — isti vzorec kot `POTI_S_SVOJIM_CSRF`.
+JAVNE_DATOTEKE = frozenset(
+    {
+        POT_SLOGA,
+        f"{POT_PISAVE}/AtkinsonHyperlegibleNext-Regular.woff2",
+        f"{POT_PISAVE}/AtkinsonHyperlegibleNext-Medium.woff2",
+        f"{POT_PISAVE}/AtkinsonHyperlegibleNext-Bold.woff2",
+        f"{POT_PISAVE}/AtkinsonHyperlegibleNext-ExtraBold.woff2",
+    }
+)
+
 
 #: Izpis dnevnika porabe preizkusov (V4-R07).
 #:
@@ -119,11 +150,6 @@ def _vklopi_dnevnik_porabe() -> None:
     preizkusi.dnevnik.setLevel(logging.INFO)
     if _IZPIS_PORABE not in preizkusi.dnevnik.handlers:
         preizkusi.dnevnik.addHandler(_IZPIS_PORABE)
-
-
-#: Mapa s statičnimi datotekami in pot, pod katero so postrežene (V4-R07).
-MAPA_STATICNIH = Path(__file__).resolve().parent / "static"
-POT_STATICNIH = "/admin/static"
 
 
 @asynccontextmanager
@@ -229,6 +255,7 @@ def create_app(
         SejaMiddleware,
         izvzete_poti=POTI_BREZ_SEJE,
         poti_s_svojim_csrf=POTI_S_SVOJIM_CSRF,
+        javne_datoteke=JAVNE_DATOTEKE,
     )
     app.add_middleware(
         ZetonMiddleware,
@@ -285,7 +312,8 @@ def create_app(
     # prepisana v repozitorij (`docs/odlocitve/ADR-054`, meja 2). **Pod
     # `/admin` in ne pod `/static`**: predpono varuje `SejaMiddleware`, zato
     # so datoteke za sejo kot vse ostalo in `IZVZETE_PREDPONE` ostane
-    # enočlanska. Priklop je za usmerjevalniki, da nobene njihove poti ne
+    # enočlanska. Brez seje je dosegljivih samo pet datotek iz
+    # `JAVNE_DATOTEKE` (V5-R01). Priklop je za usmerjevalniki, da nobene njihove poti ne
     # zasenči.
     app.mount(POT_STATICNIH, StaticFiles(directory=MAPA_STATICNIH), name="static")
 

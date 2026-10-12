@@ -20,6 +20,7 @@ docstringa je trdila nasprotno. Napačna trditev je hujša od manjkajočega
 testa — naslednjemu bralcu pove, da je mesto pokrito.
 """
 
+import re
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
@@ -33,7 +34,7 @@ from app.db import MaterialsRepository, ScheduleRepository
 from app.models import STATUS_NOV, Material
 from app.routers.dnevi import DNI_V_TEDNU, Obdobje, preberi_obdobje
 from app.urnik import Vnos
-from tests.conftest import CVEK_ID, OTROK_ID
+from tests.conftest import CVEK_ID, OTROK_ID, meni_strani
 
 
 @pytest.fixture(autouse=True)
@@ -58,14 +59,43 @@ PREJETO = datetime(2026, 9, 4, 8, 0, tzinfo=UTC)
 PREJETO_OPIS = "4. 9. 2026 ob 10:00"
 
 
+#: Imena dni in mesecev, kot jih stran izpiše v naslovu dneva. Prepisana sem
+#: in ne uvožena iz `app.casi` — glej `oznaka_dneva`.
+_DNEVI = ("Ponedeljek", "Torek", "Sreda", "Četrtek", "Petek", "Sobota", "Nedelja")
+_MESECI = (
+    "januar",
+    "februar",
+    "marec",
+    "april",
+    "maj",
+    "junij",
+    "julij",
+    "avgust",
+    "september",
+    "oktober",
+    "november",
+    "december",
+)
+
+
 def oznaka_dneva(dan: date) -> str:
-    """Dan, kot ga stran izpiše v naslovu skupine.
+    """Dan, kot ga stran izpiše v vrstici z obdobjem (`9. 9. 2026`).
 
     Oblika je tu zapisana na roko in ne vzeta iz `app.casi`: test, ki bi
     pričakovanje izračunal z isto funkcijo kot izvedba, bi bil zelen tudi ob
     napačni obliki.
     """
     return f"{dan.day}. {dan.month}. {dan.year}"
+
+
+def naslov_dneva(dan: date) -> str:
+    """Naslov kartice dneva, kot ga stran izriše od V5-R01.
+
+    Z imenom dneva in meseca in brez leta („Četrtek, 8. oktober", `POC-02`);
+    leto nosi vrstica z obdobjem nad karticami. Zapisano na roko iz istega
+    razloga kot `oznaka_dneva`.
+    """
+    return f"<h2>{_DNEVI[dan.weekday()]}, {dan.day}. {_MESECI[dan.month - 1]}</h2>"
 
 
 def sidro(material_id: str) -> str:
@@ -438,7 +468,10 @@ class TestVrstniRed:
         # Koda je vidna, ni pa podvojena: `oznaka_predmeta` za neznano kodo
         # vrne kodo samo, in naslov „XYZ — XYZ" bi bil videti kot okvara.
         assert "XYZ — XYZ" not in besedilo
-        assert "MAT — Matematika" in besedilo
+        # Od V5-R01 bi bila podvojitev koda v čipu in še enkrat ob njem.
+        assert not re.search(r">XYZ</span>\s*XYZ", besedilo)
+        # Od V5-R01 je koda čip in ime stoji ob njem, brez pomišljaja.
+        assert re.search(r">MAT</span>\s*Matematika", besedilo)
 
     def test_neznane_kode_so_med_sabo_po_abecedi(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -524,9 +557,12 @@ class TestGumbi:
 
         # Kriterij imenuje vse tri; brez teh trditev je katerega koli mogoče
         # izbrisati, ne da bi zbirka to opazila.
-        assert 'href="/admin/days">Danes' in besedilo
-        assert f'href="/admin/days?dan={vceraj.isoformat()}"' in besedilo
-        assert 'href="/admin/days?obdobje=teden"' in besedilo
+        # Od V5-R01 so to zavihki; izbrani nosi `aria-current`. Tretji se
+        # imenuje „Zadnjih 7 dni" in ne več „Ta teden" (isti pomen, `ADR-023`).
+        assert re.search(r'href="/admin/days"[^>]*>Danes<', besedilo)
+        assert re.search(rf'href="/admin/days\?dan={vceraj.isoformat()}"[^>]*>Včeraj<', besedilo)
+        assert re.search(r'href="/admin/days\?obdobje=teden"[^>]*>Zadnjih 7 dni<', besedilo)
+        assert "Ta teden" not in besedilo
 
     def test_teden_zajame_sedem_dni_in_ne_osem(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -569,7 +605,7 @@ class TestGumbi:
         # Vseh sedem dni ima svoj naslov, tudi tisti brez slik: manjkajoč dan
         # je prav podatek, ki ga lastnik išče (`ADR-023`).
         for zamik in range(DNI_V_TEDNU):
-            assert oznaka_dneva(zdaj - timedelta(days=zamik)) in besedilo
+            assert naslov_dneva(zdaj - timedelta(days=zamik)) in besedilo
         assert besedilo.count("Tega dne ni nobene slike.") == DNI_V_TEDNU - 1
 
 
@@ -583,7 +619,10 @@ class TestGlava:
 
         besedilo = odjemalec.get(POT, params={"dan": "2026-09-08"}).text
 
-        assert f"Strežnik je nazadnje prejel sliko {PREJETO_OPIS}" in besedilo
+        # Čas je od V5-R01 krepko (`POC-02`, stran Po dnevih).
+        assert (
+            f"Strežnik je nazadnje prejel sliko <strong>{PREJETO_OPIS}</strong>." in besedilo
+        )
 
     def test_steje_tudi_arhivirane(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -602,7 +641,9 @@ class TestGlava:
 
         besedilo = odjemalec.get(POT, params={"dan": "2026-09-08"}).text
 
-        assert "Strežnik je nazadnje prejel sliko 10. 9. 2026 ob 17:30" in besedilo
+        assert (
+            "Strežnik je nazadnje prejel sliko <strong>10. 9. 2026 ob 17:30</strong>." in besedilo
+        )
         assert PREJETO_OPIS not in besedilo
 
     def test_prazna_baza_pove_da_se_ni_prejel_nicesar(self, odjemalec: TestClient) -> None:
@@ -689,17 +730,15 @@ class TestDosegljivostInMeje:
     ) -> None:
         besedilo = odjemalec.get("/admin").text
 
-        # Sidro je povezava in ne naslov razdelka: „Pregled po dnevih" stoji
-        # tudi v komentarju sloga v `osnova.html`, torej pred telesom strani.
-        zacetek = besedilo.index('href="/admin/days"')
-        razdelek = besedilo[zacetek : besedilo.index("</section>", zacetek)]
+        # Od V5-R01 povezava ni več razdelek pod seznamom predmetov, ampak
+        # postavka stalnega menija (`ADR-056` G) — in ta stoji **pred**
+        # predmeti. Trditev ostane: povezava je na domači strani in s seboj
+        # ne prinese kode predmeta, ki bi bila prva pojavitev na strani.
+        meni = meni_strani(besedilo)
 
-        # Razdelek stoji pod seznamom predmetov in brez kod: koda pred
-        # seznamom bi podrla test, ki po vrstnem redu pojavitev dokazuje, da so
-        # predmeti našteti po urniku in ne po abecedi.
-        assert besedilo.index("NAR") < zacetek
+        assert 'href="/admin/days"' in meni
         for koda in ("NAR", "MAT", "TJA", "GEO"):
-            assert koda not in razdelek
+            assert koda not in meni
 
     def test_stran_ne_uporablja_skripte(self, odjemalec: TestClient) -> None:
         odgovor = odjemalec.get(POT)

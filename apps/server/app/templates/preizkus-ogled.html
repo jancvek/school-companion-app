@@ -19,6 +19,10 @@
 {% endblock %}
 
 {% block vsebina %}
+  <ol class="drobtine ne-tiskaj">
+    <li><a href="{{ pot_pregleda }}">Testi</a></li>
+    <li aria-current="page">{{ naslov }}</li>
+  </ol>
   <h1 class="ne-tiskaj">{{ naslov }}</h1>
   {# Ime otroka je vrednost polja in se izriše samo pri več otrocih
      (`ADR-039` F3, `ADR-051`). #}

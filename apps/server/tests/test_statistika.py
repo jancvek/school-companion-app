@@ -632,7 +632,7 @@ class TestOkno:
         [postavka] = postavke(motor, quiz_id)
         vstavi_poskus(motor, postavka, mode="abc", kdaj=KDAJ.replace(year=TEKOCE - 3))
 
-        izbira = razdelek(pregled(odjemalec), 'class="izbira-let"', "</p>")
+        izbira = razdelek(pregled(odjemalec), 'aria-label="Obdobje"', "</ul>")
 
         assert f"?leto={TEKOCE - 3}" not in izbira
 
@@ -679,7 +679,7 @@ class TestOkno:
             kdaj=KDAJ.replace(year=TEKOCE - 2),
         )
 
-        izbira = razdelek(pregled(odjemalec), 'class="izbira-let"', "</p>")
+        izbira = razdelek(pregled(odjemalec), 'aria-label="Obdobje"', "</ul>")
 
         assert oznaka_solskega_leta(TEKOCE) in izbira
         assert f"?leto={TEKOCE - 2}" in izbira
@@ -914,14 +914,14 @@ class TestIzbiraOtroka:
 
     def test_pri_enem_otroku_izbirnika_ni(self, odjemalec: TestClient) -> None:
         """Kriterij `V3-R07`: vmesnik družine z enim otrokom se ne spremeni."""
-        assert "Otrok:" not in pregled(odjemalec)
-        assert "Otrok:" not in predmet(odjemalec)
+        assert 'aria-label="Otrok"' not in pregled(odjemalec)
+        assert 'aria-label="Otrok"' not in predmet(odjemalec)
 
     def test_pri_dveh_otrocih_je_izbirnik_na_obeh_straneh(
         self, odjemalec: TestClient, brat: str
     ) -> None:
-        assert "Otrok:" in pregled(odjemalec)
-        assert "Otrok:" in predmet(odjemalec)
+        assert 'aria-label="Otrok"' in pregled(odjemalec)
+        assert 'aria-label="Otrok"' in predmet(odjemalec)
 
     def test_steje_samo_poskuse_izbranega_otroka(
         self,

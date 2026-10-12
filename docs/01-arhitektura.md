@@ -103,9 +103,13 @@ logika testljiva brez naprave.
 | `app/otroci.py` | izbira otroka v pogledih, ki so ločeni po otroku: privzetek, 404 za tujega, kdaj se izbirnik izriše (V3-R07). Brez FastAPI in brez seje |
 | `app/danes.py` | kartica „danes" na `/admin`: vikend, vrstica na aktivnega otroka, predmeti s števili, ime samo pri več otrocih (V3-R13). Nabor da klicatelj s `seznam_po_obdobju` kot `/admin/days`. Brez FastAPI in brez seje |
 | `app/prepisi.py` | sestavljanje besedila izbranih slik: presejanje po naboru, vrstni red, glave (V3-R11); povzetek, prepis in vprašanja s podnaslovi (V3-R12). Brez FastAPI in brez baze |
-| `app/subjects.py` | predmeti, slovenske oznake stanj in oznake ocen (`OZNAKE_OCEN`, tu od V2-R04) |
+| `app/subjects.py` | predmeti z oznako in **barvo** (V5-R01, `ADR-056` E), slovenske oznake stanj in oznake ocen (`OZNAKE_OCEN`, tu od V2-R04) |
+| `app/meni.py` | stalni meni: postavke, izbrana postavka, števci, kdaj števcev ni (V5-R01). Brez FastAPI in brez baze |
+| `app/tedni.py` | razvrstitev dni v koledarske tedne in oznake tednov za stran predmeta (V5-R01). Brez FastAPI in brez baze |
+| `app/static/admin/slog.css` | edini slog pregleda, v dveh delih: zaslon in papir (V5-R01, `ADR-060` A, J1) |
+| `app/static/pisave/` | Atkinson Hyperlegible Next, štirje rezi `woff2` z licenco OFL (V5-R01, `ADR-060` B) |
 | `app/casi.py` | domači časovni pas, ure za prikaz, meji koledarskega dne (V2-R01); `utc` za čase v odgovorih telefonu (V2-R02); `trajanje` za čas odgovora na rezultatu (V2-R03); šolsko leto in meseci (V2-R04); današnji dan, meje poljubnega obdobja in ura brez datuma (V2-R07); `cas_z_mesecem` za glave v prepisih (V3-R11) |
-| `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01), 400 (V2-R07) ter 403 (V3-R06); obdelovalec konteksta z glavo, CSRF žetonom (V3-R03) in `google_na_voljo` (V3-R08) |
+| `app/strani.py` | izrisovalnik predlog in strani 404/409 (V2-R01), 400 (V2-R07) ter 403 (V3-R06); obdelovalec konteksta z menijem in števci (V5-R01), CSRF žetonom (V3-R03) in `google_na_voljo` (V3-R08) |
 | `app/besedilo.py` | slovenske oblike števil (dvojina); `ZNAKI` od V3-R11 |
 | `Caddyfile` | Caddy pred `api`: domena, TLS-ALPN, ikona zavihka (V3-R02); `basic_auth` je padel z V3-R03 |
 | `varnostna-kopija/` | `kopija.ps1` in `obnova.ps1` (V3-R02) |
@@ -736,12 +740,49 @@ skripte in to preverja `TestBrezJavaScripta`, ki izvzame natanko te predloge;
 meje vsake je treba preverjati izrecno (`ADR-048` „Posledice").
 
 Ogrodje `osnova.html` ima blok `glava` za dodatek posamezne strani v
-`<head>`; uporabljata ga `preizkus.html` in `preizkus-ogled.html`.
+`<head>`; uporabljata ga `preizkus.html` in `preizkus-ogled.html`. Blok
+`razred_telesa` doda razred na `<body>`; uporablja ga prijavna stran.
+
+### Videz in ogrodje (V5-R01)
+
+Odločitve so v `ADR-056` (videz) in `ADR-060` (izvedba, odstopanja od
+posnetkov `docs/poc/POC-02/`).
+
+- **Slog je ena datoteka**, `app/static/admin/slog.css`; ogrodje nima
+  `<style>` ne skripte. Ima dva dela in nič tretjega razen `@font-face`:
+  `@media screen` nosi ves nov videz (svetla in temna tema po
+  `prefers-color-scheme`, prelom za telefon pri 860 px), `@media print` pa
+  **dobesedno** slog izpred V5-R01. Papir varuje zamrznjena kopija
+  `tests/podatki/slog_pred_v5_r01.css`. List A4 preizkusa je papir že na
+  zaslonu, zato ga del za zaslon izrecno izvzame iz splošnih pravil
+  (`.list …`). Predloga, ki bi na papirju potrebovala nov razred, ga v delu
+  za papir nima.
+- **Pisava** je z lastnega strežnika; nobena stran ne naloži ničesar od
+  zunaj. `main.py` tip `font/woff2` vpiše sam.
+- **Pet datotek je dosegljivih brez seje** (`JAVNE_DATOTEKE` v `main.py`:
+  slog in štirje rezi pisave), ker jih potrebuje že prijavna stran. Izvzete
+  so kot **točne poti** in samo za `GET`/`HEAD`; vse ostalo pod
+  `/admin/static` ostane za sejo.
+- **Meni** je na vsaki strani s sejo (`app/meni.py`): Predmeti, Po dnevih,
+  Kvizi, Statistika, Testi, Arhiv; pod ločilom Urnik, Družina in — samo
+  lastniku sistema — Sistem. Števci (slike v obdelavi in napake, čakajoči
+  kvizi, arhiv) so **ena poizvedba na stran** (`MeniRepository.stevci`);
+  pod `/admin/system` jih ni in meni baze ne bere. Števec nič se ne izriše.
+- **Barva predmeta** je polje v `subjects.py` in pride v predlogo kot
+  vrednost `--barva`; v bazi je ni. Neznan predmet dobi `BARVA_NEZNANEGA`.
+- **Stran predmeta** je po koledarskih tednih, najnovejši prvi, znotraj
+  tedna dnevi od ponedeljka in slike od najstarejše; tedni brez slik se
+  preskočijo, vikend ima stolpec le s slikami. Prazen dan pove razlog po
+  pravilu `urnik.prazen_dan_predmeta`: ni urnika → ni na urniku → še pride →
+  manjka (`ADR-060` C, C1). Izbor za prepise in test je ena prilepljena
+  vrstica z enim gumbom vsake vrste (`ADR-060` E1).
+- `:has()` je samo nadgradnja: brez njega stran deluje, vrstica izbora je
+  vidna ves čas.
 
 | Pot | Metoda | Kaj |
 |---|---|---|
 | `/admin` | GET | vseh deset predmetov s števci; predmet iz baze, ki ga na seznamu ni, je viden pod svojo kodo; nad njimi kartica „danes" (V3-R13) |
-| `/admin/subjects/{koda}` | GET | slike predmeta, najnovejša prva, lena naložitev; kljukice za izbor, `?vse=1` obkljuka vse (V3-R11); pri `MAT` drugi gumb „Kreiraj test" (V4-R07) in povezava „Shranjeni testi (N)" (V4-R08) |
+| `/admin/subjects/{koda}` | GET | slike predmeta po tednih, najnovejši teden prvi, lena naložitev (V5-R01); kljukice za izbor, `?vse=1` obkljuka vse (V3-R11), `?teden=<ponedeljek>` in `?dan=<dan>` obkljukata teden oziroma dan (V5-R01); pri `MAT` drugi gumb „Kreiraj test" (V4-R07) in povezava „Shranjeni testi (N)" (V4-R08) |
 | `/admin/transcripts` | GET | 303 na pregled; obstaja zato, da pot ni videti kot 405 (V3-R11) |
 | `/admin/transcripts` | POST | povzetki, prepisi in vprašanja izbranih slik enega predmeta v enem polju; **ničesar ne shrani** (V3-R11, V3-R12) |
 | `/admin/assessments/compose` | GET | 303 na pregled (V4-R07) |
@@ -751,7 +792,7 @@ Ogrodje `osnova.html` ima blok `glava` za dodatek posamezne strani v
 | `/admin/assessments` | POST | shrani končan preizkus, odgovor JSON; kliče ga skripta urejevalnika (V4-R08) |
 | `/admin/assessments/{id}` | GET | ogled shranjenega preizkusa: list, rešitve, snov, tisk (V4-R08) |
 | `/admin/assessments/{id}/compose` | GET | urejevalnik z izhodiščem v shranjenem preizkusu; **ničesar ne shrani** (V4-R08) |
-| `/admin/static/…` | GET | statične datoteke (`StaticFiles`), za sejo kot vse pod `/admin` (V4-R07) |
+| `/admin/static/…` | GET | statične datoteke (`StaticFiles`), za sejo kot vse pod `/admin` (V4-R07) — razen sloga in štirih rezov pisave, ki so dosegljivi brez seje (V5-R01) |
 | `/admin/materials/{id}` | GET | podrobnosti ene slike |
 | `/admin/materials/{id}/image` | GET | datoteka slike |
 | `/admin/archive` | GET | arhivirane snovi, najnovejše arhivirane prve (V1-R07) |
@@ -762,7 +803,8 @@ Ogrodje `osnova.html` ima blok `glava` za dodatek posamezne strani v
 | `/admin/materials/{id}/delete` | POST | dokončno izbriše in preusmeri (303) |
 | `/admin/materials/{id}/reprocess` | POST | vrne v vrsto, vprašanja upokoji, preusmeri (303) |
 | `/admin/materials/{id}/subject` | POST | premakne snov in **vsa** njena vprašanja v drug predmet, preusmeri (303) (V3-R10) |
-| `/admin/quizzes/new` | GET | izbirnik slik za enega od treh vstopov (V2-R01) |
+| `/admin/quizzes` | GET | vsi kvizi družine po mesecih; `?stanje=cakajo\|reseni\|preklicani`, `?otrok=<id>`; obrazec „Nov kviz" (V5-R01). Na `/admin` so samo zadnji štirje |
+| `/admin/quizzes/new` | GET | izbirnik slik za enega od treh vstopov (V2-R01); `?izbor=vse\|nic` (V5-R01) |
 | `/admin/quizzes/new` | POST | isti izbirnik ob vrnitvi iz predogleda, z ohranjenim izborom (V2-R01) |
 | `/admin/quizzes/preview` | POST | predogled izbranih vprašanj; **ničesar ne shrani** (V2-R01) |
 | `/admin/quizzes` | POST | objavi kviz in vse postavke v eni transakciji, preusmeri (303) (V2-R01) |
@@ -773,9 +815,10 @@ Ogrodje `osnova.html` ima blok `glava` za dodatek posamezne strani v
 | `/admin/statistics/subjects/{koda}` | GET | statistika predmeta: po mesecih, snovi, vprašanja od najtežjega (V2-R04); `?otrok=` (V3-R07) |
 | `/admin/days` | GET | slike **enega otroka** po dnevu in predmetu; `?dan=YYYY-MM-DD`, `?obdobje=dan\|teden` (V2-R07), `?otrok=<id>` (V3-R07) |
 | `/admin/schedule` | GET | mreža urnika izbranega otroka; `?otrok=<id>` (V3-R09) |
+| `/admin/schedule/image/{slika_id}` | GET | slika urnika, veljavnega ali predlaganega; samo iz mape družine (V5-R01, `ADR-060` G) |
 | `/admin/schedule/proposal` | POST | naloži sliko urnika, pokliče model, izriše **predlagano** mrežo; nič ne zapiše v bazo (V3-R09) |
 | `/admin/schedule` | POST | potrdi mrežo; prejšnji urnik upokoji (V3-R09) |
-| `/admin/family` | GET | člani družine z vlogo in stanjem, obrazca za dodajanje (V3-R06) |
+| `/admin/family` | GET | člani družine z vlogo in stanjem; `?dodaj=otrok\|stars` odpre obrazec za dodajanje (V3-R06, V5-R01) |
 | `/admin/family/children` | POST | doda otroka: prikazno ime, uporabniško ime, začetno geslo (V3-R06) |
 | `/admin/family/parents` | POST | doda starša: prikazno ime, e-naslov, začetno geslo (V3-R06) |
 | `/admin/family/members/{id}/password` | GET | vmesna stran s poljema za novo geslo (V3-R06) |
@@ -1825,13 +1868,8 @@ tiho vrnil v privzetek. Test to dokazuje tako, da obrazec prebere **iz
 izrisa** in ga pošlje, ne z ročno sestavljenim naslovom. Nerešen kviz je 409.
 
 Gumba „Natisni" ni — brez JavaScripta ga ni. Stran naroči Ctrl+P. Slog za tisk
-je `@media print` v `osnova.html`: skrije glavo in vse z razredom
-`ne-tiskaj` (obrazec, navodilo, povezavo nazaj).
-
-**Slog v `osnova.html` je del vsake izrisane strani**, tudi njegovi komentarji.
-Testi, ki trdijo, da neke besede na strani ni, jo vidijo tudi v `<style>`:
-komentar z besedo „izbora" je med izvedbo podrl nepovezan test predogleda.
-Komentarji v slogu osnove naj zato ne uporabljajo besed iz vmesnika.
+je del za papir v `slog.css` (glej „Videz in ogrodje"): skrije vse z razredom
+`ne-tiskaj` (meni, obrazec, navodilo, drobtine).
 
 ### Znane omejitve
 
@@ -2205,6 +2243,7 @@ lastnost.
 |---|---|---|
 | `marked` 15.0.12 (MIT) | markdown → HTML v urejevalniku preizkusa | V4-R07 |
 | `katex` 0.16.22 z `contrib/auto-render` (MIT) | izris formul; pisave `woff2` | V4-R07 |
+| Atkinson Hyperlegible Next (OFL 1.1), rezi 400, 500, 700, 800 | pisava pregleda; `app/static/pisave/` | V5-R01 |
 
 Nista odvisnosti gradnje: ni `npm` ne `package.json`. Ležita v
 `apps/server/app/static/vendor/<ime>-<različica>/`, v paket prideta kot

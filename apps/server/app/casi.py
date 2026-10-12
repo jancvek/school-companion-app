@@ -81,6 +81,46 @@ def datum(trenutek: datetime) -> str:
     return datum_dneva(v_domacem(trenutek).date())
 
 
+def kratek_datum(trenutek: datetime) -> str:
+    """Dan in mesec brez leta (`8. 10.`), v domačem pasu.
+
+    Za mesta, kjer leto že pove okolica: seznam kvizov pod glavo meseca in
+    oznaka „rešen 7. 10." (V5-R01).
+    """
+    lokalni = v_domacem(trenutek)
+    return f"{lokalni.day}. {lokalni.month}."
+
+
+def cas_z_imenom_dneva(trenutek: datetime) -> str:
+    """Trenutek kot naslov strani slike (`Četrtek, 8. oktober ob 10:41`).
+
+    Brez leta: stran nosi poln datum v podatkih ob sliki. Prva črka je velika,
+    ker niz stoji kot naslov.
+    """
+    lokalni = v_domacem(trenutek)
+    dan = dan_z_imenom(lokalni.date())
+    return f"{dan[0].upper()}{dan[1:]} ob {lokalni:%H:%M}"
+
+
+def dan_in_ura(trenutek: datetime) -> str:
+    """Trenutek za vrstico seznama (`Četrtek, 8. 10. ob 10:41`).
+
+    Kratek datum in ime dneva: v seznamu po tednih (V5-R01) je dan tisto, po
+    čemer starš sliko prepozna, leto pa nosi okolica.
+    """
+    lokalni = v_domacem(trenutek)
+    ime = IMENA_DNI[lokalni.weekday()]
+    return f"{ime[0].upper()}{ime[1:]}, {lokalni.day}. {lokalni.month}. ob {lokalni:%H:%M}"
+
+
+def dan_z_imenom(dan: date) -> str:
+    """Koledarski dan z imenom dneva in meseca (`četrtek, 8. oktober`).
+
+    Za kartico „Danes" (V5-R01). Oboje v imenovalniku, kot v `cas_z_mesecem`.
+    """
+    return f"{IMENA_DNI[dan.weekday()]}, {dan.day}. {MESECI[dan.month - 1]}"
+
+
 def cas(trenutek: datetime) -> str:
     """Trenutek iz baze v berljiv lokalni zapis, z uro."""
     lokalni = v_domacem(trenutek)

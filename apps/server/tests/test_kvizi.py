@@ -431,7 +431,8 @@ class TestNeizbirnaSnov:
         assert f'src="/admin/materials/{UUID_ENA}/image"' in besedilo
         assert 'loading="lazy"' in besedilo
         assert "MAT" in besedilo
-        assert "4. 9. 2026 ob" in besedilo
+        # Od V5-R01 dan z imenom in brez leta: teden nosi naslov skupine.
+        assert "Petek, 4. 9. ob" in besedilo
         assert "5\n                    vprašanj" in besedilo or "5 vprašanj" in besedilo
 
 
@@ -1148,7 +1149,11 @@ class TestPoizvedbe:
         # na dolžino seznama", in ta drži naprej — otroci so ena poizvedba na
         # stran, ne ena na vrstico. Dvanajst snovi je tu prav zato, da bi N+1
         # padel.
-        assert koliko == 4
+        #
+        # **Štiri je postalo pet** z V5-R01 (`ADR-060` F, soglasje lastnika):
+        # peta je meni s števci, ki je na vsaki strani — ena poizvedba na
+        # stran, ne ena na vrstico. Lastnost ostane ista.
+        assert koliko == 5
 
     def test_stran_kviza_ne_bere_vprasanja_na_postavko(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -1274,8 +1279,9 @@ class TestPopravkiPoPregledu:
 
         besedilo = izbirnik(odjemalec, vstop="danes", subject=None)
 
-        assert '<span class="cas">MAT ' in besedilo
-        assert '<span class="cas">GEO ' in besedilo
+        # Od V5-R01 je koda čip na začetku vrstice.
+        assert re.search(r'<span class="cas"><span class="cip"[^>]*>MAT</span> ', besedilo)
+        assert re.search(r'<span class="cas"><span class="cip"[^>]*>GEO</span> ', besedilo)
 
     def test_podvojeno_vprasanje_zavrne_objavo(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -1587,9 +1593,14 @@ class TestNaslovljenec:
 
         besedilo = izbirnik(odjemalec)
 
-        assert '<select name="otrok">' in besedilo
-        assert "Maša" in besedilo
-        assert "Nejc" in besedilo
+        # Od V5-R01 zavihka „Kviz za" (povezavi `GET`) namesto `<select>` z
+        # gumbom; izbrani otrok je označen.
+        zacetek = besedilo.index('<ul class="zavihki" aria-label="Kviz za">')
+        zavihki = besedilo[zacetek : besedilo.index("</ul>", zacetek)]
+        assert re.findall(r'otrok=([^"&]+)"( aria-current="true")?>([^<]+)<', zavihki) == [
+            (OTROK_ID, ' aria-current="true"', "Maša"),
+            (brat, "", "Nejc"),
+        ]
 
     def test_izbran_otrok_postane_naslovljenec(
         self, odjemalec: TestClient, motor: Engine, slike: Path, brat: str
@@ -1846,6 +1857,9 @@ class TestImenaPriEnemOtroku:
                 f"/admin/materials/{UUID_ENA}",
                 f"/admin/quizzes/{quiz_id}",
                 "/admin/quizzes/new?vstop=nova&subject=MAT",
+                # V5-R01: stran z vsemi kvizi; stolpec z otrokom in zavihki
+                # otrok samo pri več kot enem otroku.
+                "/admin/quizzes",
                 "/admin/assessments",
                 f"/admin/assessments/{test_id}",
                 f"/admin/assessments/{test_id}/compose",

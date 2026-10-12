@@ -20,8 +20,9 @@ Vse odločitve so v `docs/odlocitve/ADR-028`, izvedbene v `ADR-041`:
   je pričakovanje, ne pravilo.
 """
 
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
+from datetime import date
 
 from app.subjects import PREDMETI
 
@@ -110,6 +111,29 @@ def _kljuc_vnosa(vnos: Vnos) -> tuple[int, int, str]:
     return (vnos.dan, _MESTO.get(vnos.predmet, _ZADNJI), vnos.predmet)
 
 
+def razlike(predlog: Urnik, veljaven: Urnik | None) -> frozenset[tuple[int, str]]:
+    """Celice (dan, predmet), v katerih se predlog razlikuje od veljavnega urnika.
+
+    Za mrežo s predlogom s slike (V5-R01): starš vidi, kaj bi potrditev
+    spremenila, namesto da primerja petdeset celic na pamet. Razlika je vsaka
+    sprememba **stanja celice** — predmet se pojavi, izgine ali zamenja „se
+    slika" z „se ne slika".
+
+    Brez veljavnega urnika razlik ni: vse je novo in pika na vsaki celici ne
+    bi povedala ničesar.
+    """
+    if veljaven is None:
+        return frozenset()
+
+    def stanja(urnik: Urnik) -> dict[tuple[int, str], bool]:
+        return {(vnos.dan, vnos.predmet): vnos.se_ne_slika for vnos in urnik.vnosi}
+
+    nova, stara = stanja(predlog), stanja(veljaven)
+    return frozenset(
+        kljuc for kljuc in nova.keys() | stara.keys() if nova.get(kljuc) != stara.get(kljuc)
+    )
+
+
 def manjkajoci_predmeti(
     urnik: Urnik | None, dan: int, poslikani: Collection[str]
 ) -> tuple[str, ...]:
@@ -137,3 +161,68 @@ def manjkajoci_predmeti(
 
     imamo = set(poslikani)
     return tuple(koda for koda in urnik.predmeti_dneva(dan) if koda not in imamo)
+
+
+#: Štiri stanja dneva brez slik na strani predmeta (V5-R01, `ADR-060` C).
+PRAZEN_NI_NA_URNIKU = "ni-na-urniku"
+PRAZEN_SE_PRIDE = "se-pride"
+PRAZEN_MANJKA = "manjka"
+PRAZEN_BREZ_RAZLOGA = "brez-razloga"
+
+
+@dataclass(frozen=True)
+class PrazenDan:
+    """Zakaj dan na strani predmeta nima nobene slike."""
+
+    stanje: str
+
+    #: Otroci, ki jim slika manjka; neprazno samo pri `PRAZEN_MANJKA`. V
+    #: vrstnem redu, v katerem so bili podani urniki.
+    komu_manjka: tuple[str, ...] = ()
+
+
+def prazen_dan_predmeta(
+    predmet: str,
+    dan: date,
+    danes: date,
+    urniki: Mapping[str, Urnik],
+    poslikali: Collection[str],
+) -> PrazenDan:
+    """Stanje delavnika, ko za `predmet` ni nobene nearhivirane slike.
+
+    Stran predmeta **ni po otroku** (`ADR-039` F), zato pravilo gleda urnike
+    vseh otrok družine. `urniki` preslika `id` otroka v njegov veljavni urnik
+    (otrok brez urnika v njem ni), `poslikali` so otroci, ki so tisti lokalni
+    dan poslikali **karkoli** — katerikoli predmet, nearhivirano.
+
+    Po vrsti:
+
+    1. **Nihče nima urnika** → brez razloga. O dnevu ne vemo ničesar.
+    2. **Predmeta ta dan nima na urniku noben otrok**, ali ga imajo vsi kot
+       „se ne slika" → ni na urniku.
+    3. **Dan je današnji ali prihodnji** → še pride. Današnji dan je ves dan
+       „še pride": pouk opoldne še traja. `/admin/days` to obravnava drugače
+       in se s tem ne spremeni.
+    4. **Vsaj en otrok, ki ima predmet na urniku, je ta dan poslikal kaj
+       drugega** → manjka, za te otroke. To je `ADR-028` E2: manjko se javi
+       samo pri delno poslikanem dnevu.
+    5. Sicer brez razloga: otrok ta dan ni poslikal ničesar — praznik ali
+       odsotnost, ne manjko (isti E2).
+
+    Sodi se po **trenutno veljavnem** urniku, tudi za nazaj (`ADR-028` D2).
+    """
+    if not urniki:
+        return PrazenDan(PRAZEN_BREZ_RAZLOGA)
+
+    pricakujejo = tuple(
+        otrok for otrok, urnik in urniki.items() if predmet in urnik.predmeti_dneva(dan.weekday())
+    )
+    if not pricakujejo:
+        return PrazenDan(PRAZEN_NI_NA_URNIKU)
+    if dan >= danes:
+        return PrazenDan(PRAZEN_SE_PRIDE)
+
+    manjka = tuple(otrok for otrok in pricakujejo if otrok in poslikali)
+    if manjka:
+        return PrazenDan(PRAZEN_MANJKA, komu_manjka=manjka)
+    return PrazenDan(PRAZEN_BREZ_RAZLOGA)

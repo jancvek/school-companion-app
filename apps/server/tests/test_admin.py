@@ -32,7 +32,14 @@ from app.models import (
     Quiz,
 )
 from app.subjects import PREDMETI
-from tests.conftest import CVEK_ID, OTROK_ID, TUJA_DRUZINA_ID, SejaTesta, je_seja
+from tests.conftest import (
+    CVEK_ID,
+    OTROK_ID,
+    TUJA_DRUZINA_ID,
+    SejaTesta,
+    je_seja,
+    slog_zaslona,
+)
 
 # V3-R10 preverja, da premik potegne za sabo statistiko, izbirnik in sosede.
 # Pomagala za to stanje že obstajajo v testih tistih zahtev; podvojena tu bi
@@ -272,9 +279,11 @@ class TestSeznamPredmetov:
 
         besedilo = odjemalec.get("/admin").text
 
-        assert ">2</span>" in vrstica_predmeta(besedilo, "MAT")
-        assert ">0</span>" in vrstica_predmeta(besedilo, "GEO")
-        assert ">1</span>" not in vrstica_predmeta(besedilo, "MAT")
+        # Od V5-R01 je števec na zvezku sklonjen niz in ne golo število;
+        # prazen zvezek pove „še ni slik" (`POC-02`, gradnik Zvezek).
+        assert ">2 sliki</span>" in vrstica_predmeta(besedilo, "MAT")
+        assert ">še ni slik</span>" in vrstica_predmeta(besedilo, "GEO")
+        assert ">1 slika</span>" not in vrstica_predmeta(besedilo, "MAT")
 
     def test_predmet_brez_slik_je_viden_in_dosegljiv(self, odjemalec: TestClient) -> None:
         # Povezava mora biti tudi pri praznem predmetu, sicer je stran s
@@ -299,9 +308,18 @@ class TestSeznamPredmetov:
     def test_vrstni_red_predmetov_je_urnik_in_ne_abeceda(self, odjemalec: TestClient) -> None:
         besedilo = odjemalec.get("/admin").text
 
-        assert besedilo.index("NAR") < besedilo.index("MAT") < besedilo.index("TJA")
+        # Samo polica predmetov (V5-R01, `ADR-060` H): nad njo so od V5-R01
+        # čipi v kartici „Danes", pod njo tabela kvizov — oboje nosi kode v
+        # svojem vrstnem redu in bi trditev naredilo zeleno ali rdečo iz
+        # napačnega razloga.
+        najdeno = re.search(r'<ul class="predmeti">.*?</ul>', besedilo, re.S)
+        assert najdeno is not None
+        polica = najdeno.group(0)
+
+        assert polica.index(">NAR<") < polica.index(">MAT<") < polica.index(">TJA<")
         # Abecedni vrstni red bi DKE postavil predenj; urnik ga postavi za TIT.
-        assert besedilo.index("TIT") < besedilo.index("DKE")
+        assert polica.index(">TIT<") < polica.index(">DKE<")
+        assert polica.count("<li>") == 10
 
 
 class TestSeznamPredmeta:
@@ -310,12 +328,16 @@ class TestSeznamPredmeta:
     def test_najnovejsa_slika_je_prva(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
+        # Od V5-R01 je stran po tednih (`ADR-060` E): „najnovejša prva" velja
+        # za **tedne**, znotraj tedna pa dnevi tečejo od ponedeljka naprej
+        # (glej `TestPredmetPoTednih`). Zapisa sta zato v različnih tednih.
         zapisi(motor, slike, UUID_ENA, taken_at="2026-09-01T07:00:00+00:00")
-        zapisi(motor, slike, UUID_DVA, taken_at="2026-09-04T07:00:00+00:00")
+        zapisi(motor, slike, UUID_DVA, taken_at="2026-09-08T07:00:00+00:00")
 
         besedilo = odjemalec.get("/admin/subjects/MAT").text
 
-        # Dva zapisa z različnim `taken_at`: obrnjen `ORDER BY` ta test podre.
+        # Dva zapisa z različnim `taken_at`: obrnjen vrstni red tednov ta test
+        # podre.
         assert besedilo.index(UUID_DVA) < besedilo.index(UUID_ENA)
 
     def test_slika_v_seznamu_vodi_na_podrobnosti(
@@ -599,8 +621,8 @@ class TestArhiviranje:
 
         besedilo = odjemalec.get("/admin").text
 
-        assert ">1<" in vrstica_predmeta(besedilo, "MAT")
-        assert "V arhivu 1." in besedilo
+        assert ">1 slika<" in vrstica_predmeta(besedilo, "MAT")
+        assert ">1 v arhivu</a>" in besedilo
 
     def test_ponovno_arhiviranje_ne_premakne_casa(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -1247,6 +1269,10 @@ class TestPakiranje:
             "preizkus-ogled.html",
             "_preizkus-izris.html",
             "_preizkus-slog.html",
+            # V5-R01: stran z vsemi kvizi ter dela, ki si ju delita s Predmeti.
+            "kvizi.html",
+            "_kvizi-tabela.html",
+            "_kviz-nov.html",
         }
 
 
@@ -1380,7 +1406,9 @@ class TestPovecava:
         besedilo = self.stran(odjemalec, UUID_ENA)
 
         assert '<div class="prekritje" id="prekritje" hidden>' in besedilo
-        assert ".prekritje[hidden] { display: none; }" in besedilo
+        # Pravilo je od V5-R01 v datoteki sloga, ki jo stran naloži.
+        assert 'href="/admin/static/admin/slog.css"' in besedilo
+        assert ".prekritje[hidden] { display: none; }" in slog_zaslona()
 
     def test_prikaz_kaze_isto_datoteko_brez_omejitve_visine(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -1391,9 +1419,15 @@ class TestPovecava:
         prikaz = del_povecave(besedilo)
 
         assert re.findall(r'src="([^"]*)"', prikaz) == [f"/admin/materials/{UUID_ENA}/image"]
-        # `max-height: 78vh` velja za `.snov img`. Prikaz stoji za zadnjim
-        # elementom `.snov` (povezava nazaj), torej zunaj njega.
-        assert besedilo.index('<div class="prekritje"') > besedilo.index('class="nazaj"')
+        # Omejitev višine velja za sliko v stolpcu `.snov-slika` (od V5-R01
+        # `max-height: 72vh`). Prikaz stoji za zadnjim elementom `.snov`
+        # (tehnični podatki), torej zunaj njega, in sam višine ne omejuje.
+        assert besedilo.index('<div class="prekritje"') > besedilo.index(
+            '<details class="kartica tehnicno">'
+        )
+        slog = slog_zaslona()
+        assert re.search(r"\.snov-slika img \{[^}]*max-height: 72vh", slog)
+        assert ".prekritje-sredina img { max-width: 100%; max-height: 100%; }" in slog
 
     def test_prikaz_ima_gumb_za_zapiranje(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -1558,7 +1592,10 @@ class TestPovecava:
 
         assert f'id="prekritje-naslednja" href="/admin/materials/{UUID_ENA}#povecano"' in prva
         assert f'id="prekritje-prejsnja" href="/admin/materials/{UUID_DVA}#povecano"' in druga
-        assert predmet.index(UUID_DVA) < predmet.index(UUID_ENA)
+        # Od V5-R01 so slike **znotraj dneva** od najstarejše naprej, torej v
+        # obratni smeri kot listanje — in ob enakem času odloči isti `id`,
+        # le obrnjeno. Vrstni red ostane določen: nobena slika ne preskoči.
+        assert predmet.index(UUID_ENA) < predmet.index(UUID_DVA)
 
     # --- Meje `ADR-024` ---
 
@@ -2255,8 +2292,10 @@ class TestPremikVDrugPredmet:
         self.premakni(odjemalec)
 
         besedilo = odjemalec.get("/admin/days?dan=2026-09-04").text
-        assert "SLJ — Slovenščina" in besedilo
+        # Od V5-R01 je koda čip in ime stoji ob njem, brez pomišljaja.
+        assert re.search(r">SLJ</span>\s*Slovenščina", besedilo)
         assert "MAT — Matematika" not in besedilo
+        assert not re.search(r">MAT</span>\s*Matematika", besedilo)
 
     def test_izbirnik_kvizov_ponudi_sliko_pod_novim_predmetom(
         self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str
@@ -2607,7 +2646,7 @@ class TestSlovenskaStevila:
 
         besedilo = odjemalec.get("/admin").text
 
-        assert "Skupaj 2 sliki v uporabi" in besedilo
+        assert "2 sliki v uporabi" in besedilo
         assert "2 slik " not in besedilo
 
     def test_pregled_pri_eni_sliki(
@@ -2615,11 +2654,11 @@ class TestSlovenskaStevila:
     ) -> None:
         zapisi(motor, slike, UUID_ENA)
 
-        assert "Skupaj 1 slika v uporabi" in odjemalec.get("/admin").text
+        assert "1 slika v uporabi" in odjemalec.get("/admin").text
 
     @pytest.mark.parametrize(
         ("koliko", "pricakovano"),
-        [(1, "1 slika,"), (2, "2 sliki,"), (3, "3 slike,"), (5, "5 slik,")],
+        [(1, "1 slika"), (2, "2 sliki"), (3, "3 slike"), (5, "5 slik")],
     )
     def test_seznam_predmeta_sklanja(
         self,
@@ -2636,7 +2675,8 @@ class TestSlovenskaStevila:
 
         besedilo = odjemalec.get("/admin/subjects/MAT").text
 
-        assert f"{pricakovano} najnovejša prva." in besedilo
+        # Vse slike so v istem tednu; od V5-R01 stavek šteje tudi tedne.
+        assert f"{pricakovano} v 1 tednu, najnovejši teden zgoraj." in besedilo
 
     def test_arhiv_sklanja(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -2761,18 +2801,25 @@ class TestKljukiceNaStraniPredmeta:
         assert 'name="csrf"' in obrazec_izbora(besedilo)
         assert '<input type="hidden" name="subject" value="MAT">' in besedilo
 
-    def test_gumb_stoji_nad_seznamom_in_pod_njim(
+    def test_gumb_je_v_vrstici_izbora_ki_ostane_na_zaslonu(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
         # Predmet nosi čez leto nekaj sto slik; en sam gumb na dnu bi pomenil
-        # drsenje čez cel predmet po vsakem izboru na vrhu.
+        # drsenje čez cel predmet po vsakem izboru na vrhu. Do V5-R01 sta to
+        # reševala dva gumba, nad seznamom in pod njim; odtlej je gumb eden, v
+        # vrstici izbora, ki je **prilepljena** na dno zaslona (`POC-02`,
+        # stran Predmet). Kar test varuje, ostane: gumb je dosegljiv brez
+        # drsenja in je v obrazcu izbora.
         zapisi(motor, slike)
 
         besedilo = odjemalec.get("/admin/subjects/MAT").text
+        obrazec = obrazec_izbora(besedilo)
 
-        assert besedilo.count("Prepisi izbranih") == 2
-        # Oba **v istem obrazcu**: gumb zunaj njega ne bi poslal ničesar.
-        assert obrazec_izbora(besedilo).count("Prepisi izbranih") == 2
+        assert besedilo.count("Prepisi izbranih") == 1
+        # **V obrazcu**: gumb zunaj njega ne bi poslal ničesar.
+        vrstica = obrazec[obrazec.index('<div class="vrstica-izbora">') :]
+        assert "Prepisi izbranih" in vrstica
+        assert re.search(r"\.vrstica-izbora \{[^}]*position: sticky; bottom:", slog_zaslona())
 
     def test_izberi_vse_obkljuka_vse(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -3304,7 +3351,7 @@ class TestSkriptaPrepisov:
         # meja 3 prepoveduje. Namesto njega je navodilo za Ctrl+A in Ctrl+C.
         besedilo = self.stran(odjemalec, motor, slike)
 
-        assert 'id="kopiraj" class="gumb gumb-obdelava" type="button" hidden' in besedilo
+        assert 'id="kopiraj" class="gumb obrobljen" type="button" hidden' in besedilo
         assert "gumb.hidden = false;" in skripta(besedilo)
         assert "Ctrl+A" in besedilo
 

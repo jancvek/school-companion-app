@@ -41,7 +41,7 @@ from app.vision import (
     NapakaObdelave,
     naredi_klicalca_preizkusa,
 )
-from tests.conftest import TUJA_DRUZINA_ID, PrijavljenOdjemalec, prijavi
+from tests.conftest import TUJA_DRUZINA_ID, PrijavljenOdjemalec, prijavi, vsebina_strani
 from tests.test_admin import (
     UUID_DVA,
     UUID_ENA,
@@ -503,10 +503,11 @@ class TestGumbNaStraniPredmeta:
         zacetek = besedilo.index('<form method="post" action="/admin/transcripts">')
         obrazec = besedilo[zacetek : besedilo.index("</form>", zacetek)]
 
-        # Nad seznamom in pod njim, kot „Prepisi izbranih"; oba v obrazcu
-        # izbora, da pošljeta iste kljukice in isti CSRF žeton.
-        assert obrazec.count('formaction="/admin/assessments/compose">Kreiraj test') == 2
-        assert besedilo.count("Kreiraj test") == 2
+        # V vrstici izbora ob „Prepisi izbranih" (od V5-R01 en gumb in ne
+        # dva; glej `test_gumb_je_v_vrstici_izbora_ki_ostane_na_zaslonu`), v
+        # obrazcu izbora, da pošlje iste kljukice in isti CSRF žeton.
+        assert obrazec.count('formaction="/admin/assessments/compose">Kreiraj test') == 1
+        assert besedilo.count("Kreiraj test") == 1
 
     def test_drug_predmet_gumba_nima(
         self, odjemalec: PrijavljenOdjemalec, motor: Engine, slike: Path
@@ -517,7 +518,9 @@ class TestGumbNaStraniPredmeta:
 
         assert "Prepisi izbranih" in besedilo
         assert "Kreiraj test" not in besedilo
-        assert "/admin/assessments" not in besedilo
+        # Meni od V5-R01 nosi povezavo „Testi" na vsaki strani; trditev velja
+        # za stran samo.
+        assert "/admin/assessments" not in vsebina_strani(besedilo)
 
     def test_prepisi_izbranih_ostanejo_privzeto_dejanje_obrazca(
         self, odjemalec: PrijavljenOdjemalec, motor: Engine, slike: Path
@@ -529,8 +532,11 @@ class TestGumbNaStraniPredmeta:
         besedilo = odjemalec.get("/admin/subjects/MAT").text
 
         assert besedilo.count('action="/admin/transcripts"') == 1
-        gumb = '<button class="gumb gumb-obdelava" type="submit">Prepisi izbranih</button>'
-        assert gumb in besedilo
+        # Razred gumba se je z V5-R01 spremenil; trditev je, da je navaden
+        # `submit` **brez** `formaction`.
+        [gumb] = re.findall(r"<button[^>]*>Prepisi izbranih</button>", besedilo)
+        assert 'type="submit"' in gumb
+        assert "formaction" not in gumb
         polje = polje_prepisov(prepisi(odjemalec, "MAT", UUID_ENA).text)
         assert polje.startswith("## MAT — 4. september 2026, 09:30\n\n### Povzetek\n")
         assert "### Prepis\nUlomke seštevamo.\n" in polje
@@ -1104,8 +1110,10 @@ class TestSkriptaUrejevalnika:
             "/admin/static/vendor/katex-0.16.22/katex.min.js",
             "/admin/static/vendor/katex-0.16.22/contrib/auto-render.min.js",
         ]
+        # Prvi je slog ogrodja (V5-R01), ki ga nosi vsaka stran; tudi ta je naš.
         assert re.findall(r'<link[^>]+href="([^"]+)"', stran) == [
-            "/admin/static/vendor/katex-0.16.22/katex.min.css"
+            "/admin/static/admin/slog.css",
+            "/admin/static/vendor/katex-0.16.22/katex.min.css",
         ]
 
     def test_brez_skripte_stran_pove_da_je_ne_more_izrisati(self, stran: str) -> None:

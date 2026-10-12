@@ -26,6 +26,7 @@ from sqlalchemy import (
     case,
     create_engine,
     delete,
+    exists,
     func,
     select,
     update,
@@ -35,6 +36,7 @@ from sqlalchemy.orm import Session, selectinload, sessionmaker
 from sqlalchemy.sql import Update
 
 from app import casi
+from app.meni import Stevci
 from app.models import (
     NACIN_SAMOOCENA,
     POVERILNICA_GESLO,
@@ -385,6 +387,19 @@ class _RepozitorijDruzine:
         return self._family_id
 
 
+@dataclass(frozen=True)
+class PolozajVPredmetu:
+    """Mesto slike v naboru svojega predmeta, najnovejša prva (V5-R01)."""
+
+    #: `id` novejše in starejše sosede; `None` na robu nabora.
+    prejsnji: str | None
+    naslednji: str | None
+
+    #: Zaporedno mesto od 1 in število vseh slik predmeta: „3 od 24".
+    mesto: int
+    vseh: int
+
+
 class MaterialsRepository(_RepozitorijDruzine):
     """Operacije nad tabelo `materials` ene družine (V1-R02, V1-R04, V3-R01)."""
 
@@ -471,6 +486,25 @@ class MaterialsRepository(_RepozitorijDruzine):
             )
         )
 
+    def trenutki_slikanja(self, od: datetime, do: datetime) -> list[tuple[str, datetime]]:
+        """(otrok, trenutek posnetka) vsake nearhivirane slike v `[od, do)`.
+
+        **Vsi predmeti in vsi otroci družine**, samo dva stolpca. Stran
+        predmeta iz tega izve, kateri otrok je kateri dan slikal *karkoli*
+        (V5-R01, `ADR-060` C): manjko se javi samo pri delno poslikanem dnevu
+        (`ADR-028` E2). Razvrstitev po lokalnem dnevu je v Pythonu, kot pri
+        `seznam_po_obdobju`.
+        """
+        vrstice = self._session.execute(
+            select(Material.child_id, Material.taken_at).where(
+                self._moje(),
+                Material.archived_at.is_(None),
+                Material.taken_at >= od,
+                Material.taken_at < do,
+            )
+        ).all()
+        return [(otrok, trenutek) for otrok, trenutek in vrstice]
+
     def veljavna_vprasanja_snovi(
         self, material_ids: Iterable[str]
     ) -> dict[str, list[Question]]:
@@ -504,11 +538,12 @@ class MaterialsRepository(_RepozitorijDruzine):
             po_snoveh.setdefault(cast(str, vprasanje.material_id), []).append(vprasanje)
         return po_snoveh
 
-    def sosedi_v_predmetu(self, material: Material) -> tuple[str | None, str | None]:
-        """`id` slike pred `material` in za njim v `seznam_po_predmetu`.
+    def polozaj_v_predmetu(self, material: Material) -> PolozajVPredmetu | None:
+        """Kje v `seznam_po_predmetu` stoji `material`: sosedi, mesto in število.
 
-        Za povečan prikaz (V2-R08). `None` pomeni rob nabora — ovijanja ni.
-        Arhivirane snovi v naboru ni, zato zanjo poizvedbe sploh ni.
+        Za listanje in „3 od 24" na strani slike (V5-R01) ter za povečan
+        prikaz (V2-R08). `None` za arhivirano snov — v naboru predmeta je ni,
+        zato zanjo poizvedbe sploh ni.
 
         Bere samo stolpec `id` in ne cele vrstice: `seznam_po_predmetu` bi za
         dva identifikatorja naložil prepise in revizijsko sled celotnega
@@ -516,7 +551,7 @@ class MaterialsRepository(_RepozitorijDruzine):
         SQL ni enako zapisljiva nad SQLite (testi) in Postgresom.
         """
         if material.archived_at is not None:
-            return None, None
+            return None
 
         idji = list(
             self._session.scalars(
@@ -526,12 +561,27 @@ class MaterialsRepository(_RepozitorijDruzine):
             )
         )
         if material.id not in idji:
-            return None, None
+            return None
 
         mesto = idji.index(material.id)
-        prejsnji = idji[mesto - 1] if mesto > 0 else None
-        naslednji = idji[mesto + 1] if mesto + 1 < len(idji) else None
-        return prejsnji, naslednji
+        return PolozajVPredmetu(
+            prejsnji=idji[mesto - 1] if mesto > 0 else None,
+            naslednji=idji[mesto + 1] if mesto + 1 < len(idji) else None,
+            mesto=mesto + 1,
+            vseh=len(idji),
+        )
+
+    def sosedi_v_predmetu(self, material: Material) -> tuple[str | None, str | None]:
+        """`id` slike pred `material` in za njim v `seznam_po_predmetu`.
+
+        Za povečan prikaz (V2-R08). `None` pomeni rob nabora — ovijanja ni.
+        Arhivirane snovi v naboru ni. Od V5-R01 izpeljano iz
+        `polozaj_v_predmetu`, da nabor in vrstni red ostaneta na enem mestu.
+        """
+        polozaj = self.polozaj_v_predmetu(material)
+        if polozaj is None:
+            return None, None
+        return polozaj.prejsnji, polozaj.naslednji
 
     def seznam_po_obdobju(self, od: datetime, do: datetime, child_id: str) -> list[Material]:
         """Nearhivirane slike **enega otroka**, posnete v `[od, do)`.
@@ -2343,6 +2393,10 @@ class ClanDruzine:
     is_active: bool
     is_system_owner: bool
     created_at: datetime
+    #: Ali ima oseba povezan Google račun (V5-R01). Samo za oznako na seznamu
+    #: družine; iz tega ne izhaja nobena pravica. Privzeto `False`, ker ga
+    #: bere en sam pogled in ga drugi graditelji tega tipa ne poznajo.
+    google_povezan: bool = False
 
 
 class ClaniRepository(_RepozitorijDruzine):
@@ -2554,6 +2608,12 @@ class ClaniRepository(_RepozitorijDruzine):
                 User.is_active,
                 User.is_system_owner,
                 User.created_at,
+                # Podizraz in ne drugi stik: oseba ima največ eno geselno in
+                # največ eno Google poverilnico, drugi stik pa bi vrstice
+                # podvojil, če bi se to kdaj spremenilo.
+                exists()
+                .where(Credential.user_id == User.id, Credential.kind == POVERILNICA_GOOGLE)
+                .correlate(User),
             )
             .outerjoin(
                 Credential,
@@ -2573,6 +2633,7 @@ class ClaniRepository(_RepozitorijDruzine):
             is_active=bool(vrstica[5]),
             is_system_owner=bool(vrstica[6]),
             created_at=casi.utc(vrstica[7]),
+            google_povezan=bool(vrstica[8]),
         )
 
 
@@ -2712,6 +2773,46 @@ class ScheduleRepository(_RepozitorijDruzine):
         self._session.add(urnik)
         self._session.commit()
         return urnik
+
+
+class MeniRepository(_RepozitorijDruzine):
+    """Števci ob postavkah stalnega menija (V5-R01, `ADR-060` F).
+
+    Svoj razred in ne metoda na vsakem od treh repozitorijev: meni je na vsaki
+    strani, zato so vsa štiri štetja **en stavek** — vsaka stran plača eno
+    poizvedbo in ne štirih. Vsak podizraz nosi pogoj družine.
+    """
+
+    def stevci(self) -> Stevci:
+        """Slike v uporabi, čakajoči kvizi, shranjeni testi, arhivirane slike.
+
+        Kviz **čaka**, kadar ni ne preklican ne rešen; preklic ima prednost
+        pred rešenostjo (`ADR-019` C), zato preklican kviz ne čaka nikoli.
+        """
+        druzina = self._family_id
+
+        def stej(tabela: Any, *pogoji: ColumnElement[bool]) -> Any:
+            return (
+                select(func.count())
+                .select_from(tabela)
+                .where(tabela.family_id == druzina, *pogoji)
+                .scalar_subquery()
+            )
+
+        vrstica = self._session.execute(
+            select(
+                stej(Material, Material.archived_at.is_(None)),
+                stej(Quiz, Quiz.canceled_at.is_(None), Quiz.solved_at.is_(None)),
+                stej(Preizkus),
+                stej(Material, Material.archived_at.is_not(None)),
+            )
+        ).one()
+        return Stevci(
+            slik=int(vrstica[0] or 0),
+            cakajocih_kvizov=int(vrstica[1] or 0),
+            testov=int(vrstica[2] or 0),
+            arhiviranih=int(vrstica[3] or 0),
+        )
 
 
 class PreizkusiRepository(_RepozitorijDruzine):

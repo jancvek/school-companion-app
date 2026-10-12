@@ -2,6 +2,8 @@
 
 {% block naslov %}Arhiv{% endblock %}
 
+{# Mreža sličic kot na strani predmeta, brez tednov (V5-R01, *Strani po
+   pravilih*): arhiv je razvrščen po času arhiviranja in ne posnetka. #}
 {% block vsebina %}
   <h1>Arhiv</h1>
 
@@ -9,7 +11,8 @@
     <p class="pod">
       {{ koliko_opis }}, najnovejše arhivirana prva. Prepis in vprašanja teh snovi ostajajo.
     </p>
-    <ul class="mreza">
+
+    <ul class="arhiv">
       {% for snov in snovi %}
         <li>
           <a href="/admin/materials/{{ snov.id }}">
@@ -24,6 +27,7 @@
               <span class="cas">
                 {{ snov.koda }} — {{ snov.cas }}{% if snov.otrok %} · {{ snov.otrok }}{% endif %}
               </span>
+              <span class="oznaka">v arhivu</span>
               <span class="stanje">arhivirano {{ snov.arhivirano_ob }}</span>
               {# Kljukica pove, ali je telefon sliko pri sebi res pobrisal.
                  Dokler je ni, dokončno brisanje ni mogoče. #}
@@ -40,10 +44,8 @@
       {% endfor %}
     </ul>
   {% else %}
-    <p class="opozorilo">
-      Arhiv je prazen. Slika pride sem, ko jo umakneš s strani s podrobnostmi.
+    <p class="obvestilo tiho">
+      <span>Arhiv je prazen. Slika pride sem, ko jo umakneš s strani s podrobnostmi.</span>
     </p>
   {% endif %}
-
-  <a class="nazaj" href="/admin">← Nazaj na predmete</a>
 {% endblock %}
