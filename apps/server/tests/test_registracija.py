@@ -454,6 +454,9 @@ class TestPovratniKlic:
         stran = _do_obrazca(obiskovalec)
 
         assert _stetje(motor) == prej
+        with Session(motor) as seja:
+            # Tudi sledi v `login_attempts` ne: v dnevno mejo šteje šele oddaja.
+            assert not list(seja.scalars(select(LoginAttempt.id)))
         assert not obiskovalec.cookies.get(prijava.PISKOTEK_SEJE)
         assert "Še en korak" in stran.text
         assert EMAIL in stran.text
