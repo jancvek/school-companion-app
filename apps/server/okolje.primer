@@ -83,6 +83,11 @@ DOMENA=school-buddy.duckdns.org
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 
+# Naslov, s katerega starš prenese aplikacijo za otrokov telefon (V6-R02).
+# Neobvezno: brez njega prva stran po odobritvi pove, naj starš povezavo dobi
+# od skrbnika. Vpiši povezavo do zadnje gradnje APK (EAS).
+APK_URL=
+
 # Spremenljivk ADMIN_UPORABNIK in ADMIN_ZGOSTITEV ni več (V3-R03): začasni
 # `basic_auth` v Caddyju je padel, admin varuje prijava v aplikaciji sami
 # (`docs/odlocitve/ADR-035`). Če sta v tvojem `.env` ostali, ju pobriši —

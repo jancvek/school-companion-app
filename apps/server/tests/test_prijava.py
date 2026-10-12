@@ -71,7 +71,10 @@ VZOREC = "vzorec"
 
 
 def poti_pod_adminom(aplikacija: FastAPI) -> list[tuple[str, str]]:
-    """(metoda, pot) za vsako pot pod `/admin` razen prijave.
+    """(metoda, pot) za vsako pot pod `/admin` razen prijave in registracije.
+
+    Izvzeti sta natanko poti iz `main.POTI_BREZ_SEJE` (od V6-R02 dve); kaj je
+    v tem naboru, varuje `test_poti_brez_seje_sta_prijava_in_registracija`.
 
     Bere se iz `app.openapi()`, ker je to edini popoln seznam poti aplikacije —
     ročno vzdrževan seznam bi novo pot spustil mimo.
@@ -80,7 +83,7 @@ def poti_pod_adminom(aplikacija: FastAPI) -> list[tuple[str, str]]:
         (metoda.upper(), pot)
         for pot, metode in aplikacija.openapi()["paths"].items()
         for metoda in metode
-        if pot.startswith("/admin") and pot != prijava.POT_PRIJAVE
+        if pot.startswith("/admin") and pot not in main.POTI_BREZ_SEJE
     )
 
 
@@ -250,13 +253,15 @@ class TestDosegljivost:
         """
         assert frozenset({"/admin"}) == main.IZVZETE_PREDPONE
 
-    def test_poti_brez_seje_ostane_samo_prijava(self) -> None:
-        """`SejaMiddleware` pod `/admin` nima druge izjeme kot prijavno stran.
+    def test_poti_brez_seje_sta_prijava_in_registracija(self) -> None:
+        """`SejaMiddleware` pod `/admin` nima druge izjeme kot ti dve strani.
 
         `V3-R08` je povezovanje Googla namenoma pustil pod `/admin` prav zato,
-        da te izjeme ne bi potreboval (`ADR-046` B).
+        da te izjeme ne bi potreboval (`ADR-046` B). `V6-R02` je dodal okno
+        registracije (`ADR-062` I): kdor se registrira, seje po naravi nima.
+        Tretja pot naj sem ne zaide tiho.
         """
-        assert frozenset({prijava.POT_PRIJAVE}) == main.POTI_BREZ_SEJE
+        assert frozenset({prijava.POT_PRIJAVE, "/admin/register"}) == main.POTI_BREZ_SEJE
 
     def test_prijavna_stran_je_dosegljiva_brez_seje(self, brez_prijave: TestClient) -> None:
         odgovor = brez_prijave.get(prijava.POT_PRIJAVE)

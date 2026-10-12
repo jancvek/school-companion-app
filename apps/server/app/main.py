@@ -11,14 +11,16 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import RedirectResponse, Response
 from starlette.staticfiles import StaticFiles
 
-from app import google, prijava, strani
+from app import google, prijava, registracija, strani
 from app.db import naredi_motor, naredi_tovarno_sej
+from app.dependencies import NeodobrenaDruzina, zahtevaj_odobreno_druzino
 from app.google import OdjemalecGoogla, naredi_odjemalca
 from app.routers import (
     admin,
@@ -93,7 +95,33 @@ IZVZETE_PREDPONE = frozenset({"/admin"})
 
 #: Poti pod `/admin`, ki seje ne zahtevajo. Sicer se ne bi bilo mogoče
 #: prijaviti. **Odjave tu ni**: ta sejo zahteva kot vsak drug `POST`.
-POTI_BREZ_SEJE = frozenset({prijava.POT_PRIJAVE})
+#:
+#: Od `V6-R02` je tu še okno registracije (`docs/odlocitve/ADR-062` I): kdor
+#: se registrira, seje po naravi nima. Plast za ti dve poti ne preverja ne
+#: seje ne CSRF, zato žeton vsak njun `POST` preveri sam, z dvojno oddanim
+#: piškotkom `csrf_prijava` (`ADR-035` D).
+POTI_BREZ_SEJE = frozenset({prijava.POT_PRIJAVE, registracija.POT})
+
+#: Usmerjevalniki pod `/admin`, ki jih vidi samo **odobrena** družina (V6-R02).
+#:
+#: Vsak dobi ob priklopu odvisnost `zahtevaj_odobreno_druzino`; seja družine,
+#: ki čaka ali je zavrnjena, gre z vsake njihove poti na „Moj račun"
+#: (`ADR-057` C, `ADR-062` J). **Nov usmerjevalnik pod `/admin` sodi sem.**
+#: Pozabljenega ujame `test_registracija.py`, ki gre čez vse poti aplikacije.
+#:
+#: Tu **nista** `vstop` (prijava, odjava, registracija in poti telefona) in
+#: `racun` („Moj račun" in izbris sta odprta; njegovi Googlovi dejanji nosita
+#: odvisnost sami).
+USMERJEVALNIKI_ZA_ODOBRENE = (
+    admin.router,
+    kvizi.router,
+    statistika.router,
+    dnevi.router,
+    clani.router,
+    urnik.router,
+    sistem.router,
+    preizkusi.router,
+)
 
 #: Poti, ki CSRF žeton preverijo **same** (`docs/odlocitve/ADR-043`).
 #:
@@ -196,6 +224,15 @@ async def _zivljenjski_cikel(app: FastAPI) -> AsyncIterator[None]:
         await obdelovalec.ustavi()
 
 
+async def na_moj_racun(request: Request, izjema: Exception) -> Response:
+    """Neodobreno družino pelje na edino stran, ki jo ima (`ADR-057` C).
+
+    `303` tudi po `POST`: brskalnik gre na „Moj račun" z `GET`, dejanje pa se
+    ni izvedlo.
+    """
+    return RedirectResponse(registracija.POT_RACUNA, status_code=303)
+
+
 def create_app(
     nastavitve: Settings | None = None,
     motor: Engine | None = None,
@@ -250,6 +287,11 @@ def create_app(
     app.state.klicalec_preizkusa = klicalec_preizkusa
     app.state.odjemalec_googla = odjemalec_googla
     app.state.obdelovalec = None
+    # Ključ, s katerim je podpisana istovetnost med Googlovim povratnim klicem
+    # in oddanim obrazcem registracije (V6-R02, `ADR-062` G). Nov ob vsakem
+    # zagonu: nastavitve ne potrebuje, ponovni zagon pa prekine samo
+    # registracije, ki so ravno v teku.
+    app.state.kljuc_registracije = registracija.nov_kljuc()
 
     # Vrstni red plasti: zadnja dodana je zunanja. Žeton je torej pred sejo.
     # Vsaka od obeh plasti obdela svoje poti in tuje spusti naprej nedotaknjene
@@ -268,6 +310,17 @@ def create_app(
         izvzete_predpone=IZVZETE_PREDPONE,
     )
 
+    # Zapora neodobrene družine (V6-R02): ista odvisnost na vsakem
+    # usmerjevalniku iz `USMERJEVALNIKI_ZA_ODOBRENE`. Priklopi spodaj ostanejo
+    # izpisani po vrsti, ker je vrstni red registracije viden navzven; ali
+    # usmerjevalnik dobi zaporo, pa odloči seznam in ne klic.
+    def prikljuci(usmerjevalnik: APIRouter) -> None:
+        zaprt = usmerjevalnik in USMERJEVALNIKI_ZA_ODOBRENE
+        app.include_router(
+            usmerjevalnik,
+            dependencies=[Depends(zahtevaj_odobreno_druzino)] if zaprt else None,
+        )
+
     # Prijava in odjava brskalnika (V3-R03) ter telefona (V3-R04). Prvi med
     # usmerjevalniki pod `/admin`, ker `/admin/login` ne sme zaiti v ujemalnik
     # `/admin/materials/{id}`.
@@ -275,43 +328,44 @@ def create_app(
     app.include_router(materials.router)
     # Poti telefona za kvize (V2-R02). Niso pod `/admin`, zato zahtevajo žeton.
     app.include_router(resevanje.router)
-    app.include_router(admin.router)
+    prikljuci(admin.router)
     # Za `admin.router` in ne pred njim: `kvizi` doda poti pod isto
     # predpono `/admin`, zato je vrstni red registracije viden navzven.
     # `/admin/quizzes/...` se z nobeno obstoječo potjo ne prekriva —
     # `admin` ima `/admin/materials/...` in `/admin/subjects/...`.
-    app.include_router(kvizi.router)
+    prikljuci(kvizi.router)
     # Statistika čez kvize (V2-R04), pod `/admin/statistics/...` — z nobeno
     # obstoječo potjo se ne prekriva. Pod `/admin` in torej brez ključa:
     # vidna je samo na operaterski strani (`docs/odlocitve/ADR-021` F).
-    app.include_router(statistika.router)
+    prikljuci(statistika.router)
     # Pregled slik po obdobju in predmetih (V2-R07), pod `/admin/days`. Z
     # nobeno obstoječo potjo se ne prekriva in samo bere; varuje jo isto kot
     # ves `/admin` (`docs/odlocitve/ADR-026`).
-    app.include_router(dnevi.router)
+    prikljuci(dnevi.router)
     # Člani družine (V3-R06), pod `/admin/family`. Z nobeno obstoječo potjo se
     # ne prekriva in je varovana z isto plastjo kot ves `/admin` (`ADR-035` A);
     # pravila o tem, kdo sme koga, so v `app/clani.py`.
-    app.include_router(clani.router)
+    prikljuci(clani.router)
     # Urnik otroka (V3-R09), pod `/admin/schedule`. Z nobeno obstoječo potjo se
     # ne prekriva. Edina pot pod `/admin`, ki sprejme datoteko; varuje jo ista
     # plast kot ves `/admin`, pravila urnika pa so v `app/urnik.py`.
-    app.include_router(urnik.router)
+    prikljuci(urnik.router)
     # Stran lastnika sistema (V3-R05), pod `/admin/system`. Z nobeno obstoječo
     # potjo se ne prekriva. Poleg seje jo varuje še `zahtevaj_lastnika_sistema`
     # na samem usmerjevalniku: za starša ta predpona ne obstaja (404, ne 403;
     # `docs/odlocitve/ADR-044` G).
-    app.include_router(sistem.router)
+    prikljuci(sistem.router)
     # Nastavitve prijavljenega starša (V3-R08), pod `/admin/racun`. Z nobeno
     # obstoječo potjo se ne prekriva. Brez posebne odvisnosti: `user_id` pride
     # iz seje, ki jo je razrešila ista plast kot povsod pod `/admin`, in stran
     # zato ne more pokazati ničesar tujega (`docs/odlocitve/ADR-046` B).
-    app.include_router(racun.router)
+    prikljuci(racun.router)
     # Sestavljanje preizkusov (V4-R07), pod `/admin/assessments`. Z nobeno
     # obstoječo potjo se ne prekriva; varuje ga ista plast kot ves `/admin`,
     # tudi klic iz skripte (`ADR-054`, meja 4).
-    app.include_router(preizkusi.router)
+    prikljuci(preizkusi.router)
     _vklopi_dnevnik_porabe()
+    app.add_exception_handler(NeodobrenaDruzina, na_moj_racun)
 
     # Statične datoteke (V4-R07): KaTeX in marked za urejevalnik preizkusa,
     # prepisana v repozitorij (`docs/odlocitve/ADR-054`, meja 2). **Pod

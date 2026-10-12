@@ -477,6 +477,9 @@ def _zavrnitev_gesla(clan: ClanDruzine, seja: SejaUporabnika) -> str | None:
         clan_id=clan.user_id,
         clan_vloga=clan.role,
         clan_je_lastnik_sistema=clan.is_system_owner,
+        # Starš brez vrstice `kind='password'` — registriran z Googlom
+        # (`ADR-062` O). Otrok je tudi nima, a zanj odloči pravilo pred tem.
+        clan_ima_geselno_poverilnico=clan.identifier is not None,
     )
 
 

@@ -34,7 +34,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from app import google, prijava
+from app import google, prijava, registracija, sistem
 from app.db import IdentifikatorZaseden, PrijavaRepository, SejaUporabnika
 from app.dependencies import daj_nastavitve, daj_prijavo, daj_repozitorij_prijave
 from app.prijava import Izid, Vrata
@@ -211,22 +211,34 @@ def zacni_google_prijavo(
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
     csrf: Annotated[str, Form()] = "",
+    namen: Annotated[str, Form()] = "",
 ) -> Response:
     """Začne prijavo z Googlom. Seje še ni, zato CSRF žeton preveri pot sama.
 
     Isti dvojno oddani piškotek kot prijavni obrazec (`ADR-035` D): gumb je
     zato obrazec in ne povezava — povezava bi pomenila, da lahko tuja stran
     tok sproži z `GET` in brskalnik odnese h Googlu brez vednosti uporabnice.
+
+    Isto pot uporablja okno registracije (V6-R02), s poljem `namen`. Polje
+    pove **samo**, na kateri strani se pokaže morebitna napaka; kaj se zgodi,
+    odloči `sub`, ki ga vrne Google (`ADR-062` H). Zato sme priti iz obrazca:
+    kdor ga ponaredi, vidi svojo napako na drugi strani in nič drugega.
     """
     if not nastavitve.google_je_nastavljen:
         return ni_najdeno(predloge, request, google.SPOROCILO_NI_STRANI)
 
+    registrira = namen == google.Namen.REGISTRACIJA.value
+
     if not prijava.zetona_se_ujemata(csrf, request.cookies.get(prijava.PISKOTEK_CSRF_PRIJAVE)):
+        if registrira:
+            return _okno_registracije(predloge, request, sporocilo=SPOROCILO_CSRF, koda=403)
         return _stran_prijave(
             predloge, request, cilj=prijava.PRIVZETI_CILJ, sporocilo=SPOROCILO_CSRF, koda=403
         )
 
-    stanje = google.novo_stanje(google.Namen.PRIJAVA)
+    stanje = google.novo_stanje(
+        google.Namen.REGISTRACIJA if registrira else google.Namen.PRIJAVA
+    )
     odgovor = RedirectResponse(
         google.naslov_privolitve(
             client_id=nastavitve.google_client_id,
@@ -236,6 +248,9 @@ def zacni_google_prijavo(
         status_code=303,
     )
     google.postavi_stanje(odgovor, stanje)
+    # Nov začetek toka zavrže istovetnost prejšnjega (`ADR-062` G): „Drug
+    # račun" je prav ta gumb.
+    registracija.pobrisi_istovetnost(odgovor)
     return odgovor
 
 
@@ -279,18 +294,21 @@ async def google_povratek(
         return _koncaj(_na_prijavo(google.OZNAKA_STANJE))
 
     povezovanje = stanje.namen is google.Namen.POVEZAVA
+    registrira = stanje.namen is google.Namen.REGISTRACIJA
     # Sejo razrešimo takoj za vezivom in pred vsem ostalim: od nje je odvisno
     # ne le, ali povezovanje sme skozi, ampak tudi **kam** povemo napako.
     seja_zdaj = _seja_zahteve(request, repo)
 
     if napaka_googla or not koda:
         return _koncaj(
-            _povej(seja_zdaj, povezovanje, google.OZNAKA_ZAVRNJENO, predloge, request)
+            _povej(
+                seja_zdaj, povezovanje, google.OZNAKA_ZAVRNJENO, predloge, request, registrira
+            )
         )
 
     if not google.povezava_pripada_seji(stanje, seja_zdaj.user_id if seja_zdaj else None):
         return _koncaj(
-            _povej(seja_zdaj, povezovanje, google.OZNAKA_STANJE, predloge, request)
+            _povej(seja_zdaj, povezovanje, google.OZNAKA_STANJE, predloge, request, registrira)
         )
 
     odjemalec: google.OdjemalecGoogla | None = request.app.state.odjemalec_googla
@@ -304,7 +322,9 @@ async def google_povratek(
         racun_googla = await run_in_threadpool(odjemalec.racun, koda)
     except google.NapakaGoogla:
         return _koncaj(
-            _povej(seja_zdaj, povezovanje, google.OZNAKA_NEDOSEGLJIV, predloge, request)
+            _povej(
+                seja_zdaj, povezovanje, google.OZNAKA_NEDOSEGLJIV, predloge, request, registrira
+            )
         )
 
     if povezovanje:
@@ -312,7 +332,11 @@ async def google_povratek(
         # ne pride.
         assert seja_zdaj is not None
         return _koncaj(_povezi(repo, seja_zdaj, racun_googla, predloge, request))
-    return _koncaj(_prijavi_z_googlom(repo, racun_googla, request))
+    return _koncaj(
+        _prijavi_z_googlom(
+            repo, racun_googla, request, registrira=registrira, ze_prijavljen=seja_zdaj is not None
+        )
+    )
 
 
 def _koncaj(odgovor: Response) -> Response:
@@ -342,6 +366,7 @@ def _povej(
     oznaka: str,
     predloge: Jinja2Templates,
     request: Request,
+    registrira: bool = False,
 ) -> Response:
     """Napaka pove tam, kjer jo bo bralec videl, in tako, kot se ga tiče.
 
@@ -359,7 +384,8 @@ def _povej(
     seje nima, zato je „prijavi se z geslom" zanj spet pravi nasvet.
     """
     if seja is None:
-        return _na_prijavo(oznaka)
+        # Kdor je tok začel v oknu registracije, napako prebere tam (V6-R02).
+        return _na_registracijo(oznaka) if registrira else _na_prijavo(oznaka)
     slovar = google.SPOROCILA_POVEZAVE if povezovanje else google.SPOROCILA_PRIJAVE
     return _ni_povezano(predloge, request, slovar[oznaka])
 
@@ -412,13 +438,24 @@ def _povezi(
 
 
 def _prijavi_z_googlom(
-    repo: PrijavaRepository, racun_googla: google.RacunGoogla, request: Request
+    repo: PrijavaRepository,
+    racun_googla: google.RacunGoogla,
+    request: Request,
+    *,
+    registrira: bool = False,
+    ze_prijavljen: bool = False,
 ) -> Response:
-    """Prijavi starša, čigar račun je s tem Googlom **že povezan**.
+    """Prijavi starša, čigar račun je s tem Googlom **že povezan**; neznan
+    Google račun pelje na obrazec registracije.
 
-    **Uporabnika ne ustvari nikoli** (kriterij 3, `ADR-025`): neznan `sub`
-    dobi isto sporočilo kot deaktiviran račun in kot ugasnjena družina, ker je
-    razlika med njimi podatek o tem, kdo v tej namestitvi obstaja.
+    **Uporabnika ne ustvari nikoli** — tudi od `V6-R02` ne. Za neznan `sub`
+    postavi podpisan piškotek z istovetnostjo in pelje na obrazec; družino,
+    starša in poverilnico ustvari šele oddan obrazec (`ADR-057` A,
+    `registriraj`). Izid odloči `sub` in ne to, kateri gumb je tok začel
+    (`ADR-062` H): znan `sub` se prijavi tudi iz okna registracije.
+
+    Deaktiviran račun in ugasnjena družina dasta isto oznako; razlika med
+    njima ni podatek za tistega, ki se prijavlja.
 
     Vrata se preverijo tudi tu. Poverilnica `kind='google'` na otrokovem
     računu po nobeni poti ne more nastati (povezovanje teče pod `/admin`), a
@@ -431,13 +468,20 @@ def _prijavi_z_googlom(
     """
     poverilnica = repo.poverilnica_google(racun_googla.sub)
 
+    if poverilnica is None:
+        if ze_prijavljen:
+            # Kdor je že prijavljen, se ne registrira: obrazec bi mu ustvaril
+            # drugo družino in zamenjal sejo. Izid je tak kot pred `V6-R02`.
+            return _na_prijavo(google.OZNAKA_NEPOVEZAN)
+        return _zacni_registracijo(repo, racun_googla, request)
+
     if (
-        poverilnica is None
-        or not poverilnica.is_active
+        not poverilnica.is_active
         or not poverilnica.family_is_active
         or not prijava.vloga_sodi(poverilnica.role, Vrata.ADMIN)
     ):
-        return _na_prijavo(google.OZNAKA_NEPOVEZAN)
+        oznaka = google.OZNAKA_NEPOVEZAN
+        return _na_registracijo(oznaka) if registrira else _na_prijavo(oznaka)
 
     zdaj = datetime.now(UTC)
     repo.osvezi_oznako_google(poverilnica.credential_id, racun_googla.email, zdaj)
@@ -450,6 +494,243 @@ def _prijavi_z_googlom(
     odgovor = RedirectResponse(prijava.PRIVZETI_CILJ, status_code=303)
     _postavi_piskotek(odgovor, prijava.PISKOTEK_SEJE, zeton, PISKOTEK_SEKUND)
     odgovor.delete_cookie(prijava.PISKOTEK_CSRF_PRIJAVE, path="/")
+    return odgovor
+
+
+# --- Registracija (V6-R02) --------------------------------------------------
+#
+# Okno registracije je pod `/admin` in izvzeto iz seje kot prijavna stran
+# (`docs/odlocitve/ADR-062` I): `SejaMiddleware` zanj ne preverja ne seje ne
+# CSRF, zato `POST` žeton preveri sam, z istim dvojno oddanim piškotkom.
+#
+# Trije koraki in kdo kaj ustvari (`ADR-057` A):
+#
+# 1. gumb „Nadaljuj z Googlom" → `POST /auth/google/login` z `namen`;
+# 2. povratni klic za neznan `sub` → podpisan piškotek in obrazec — **v bazi
+#    še ni ničesar**;
+# 3. oddan obrazec → družina `pending`, starš, poverilnica `google` in seja.
+
+
+def _na_registracijo(oznaka: str) -> Response:
+    """Neuspel tok pelje v okno registracije, ki pojasni z **oznako**."""
+    return RedirectResponse(
+        f"{registracija.POT}?{urlencode({'napaka': oznaka})}", status_code=303
+    )
+
+
+def _zacni_registracijo(
+    repo: PrijavaRepository, racun_googla: google.RacunGoogla, request: Request
+) -> Response:
+    """Neznan Google račun: preveri, ali se sme registrirati, in ga pelje na obrazec.
+
+    **Ne zapiše ničesar.** Istovetnost gre v piškotek, podpisan s ključem tega
+    zagona strežnika (`ADR-062` G); brez podpisa bi si kdorkoli registriral
+    tuj `sub`.
+    """
+    email = racun_googla.email
+    zavrnitev = registracija.zakaj_ne_sme_zaceti(
+        email=email,
+        email_verified=racun_googla.email_verified,
+        enaslov_ima_geslo=bool(email)
+        and repo.enaslov_ima_geslo(prijava.normaliziraj_identifikator(email or "")),
+    )
+    if zavrnitev is not None or not email:
+        return _na_registracijo(zavrnitev or registracija.OZNAKA_NEPOTRJEN)
+
+    odgovor = RedirectResponse(registracija.POT, status_code=303)
+    registracija.postavi_istovetnost(
+        odgovor,
+        registracija.zapisi_istovetnost(
+            registracija.Istovetnost(sub=racun_googla.sub, email=email, name=racun_googla.name),
+            request.app.state.kljuc_registracije,
+            datetime.now(UTC),
+        ),
+    )
+    return odgovor
+
+
+def _istovetnost(request: Request) -> registracija.Istovetnost | None:
+    """Istovetnost iz podpisanega piškotka te zahteve, ali `None`."""
+    return registracija.preberi_istovetnost(
+        request.cookies.get(registracija.PISKOTEK),
+        request.app.state.kljuc_registracije,
+        datetime.now(UTC),
+    )
+
+
+def _je_prek_meje(repo: PrijavaRepository, zdaj: datetime) -> bool:
+    """Ali je javni obrazec ta trenutek zaprt (`ADR-062` F)."""
+    return registracija.je_prek_meje(
+        cakajocih=repo.stevilo_cakajocih(),
+        v_oknu=repo.neuspelih_poskusov(
+            registracija.OZNAKA_POSKUSOV, zdaj - registracija.OKNO_REGISTRACIJ
+        ),
+    )
+
+
+def _okno_registracije(
+    predloge: Jinja2Templates,
+    request: Request,
+    *,
+    istovetnost: registracija.Istovetnost | None = None,
+    sporocilo: str | None = None,
+    opozorilo: str | None = None,
+    vnos: dict[str, str] | None = None,
+    koda: int = 200,
+) -> Response:
+    """Izriše okno registracije: začetek ali, z istovetnostjo, obrazec.
+
+    CSRF piškotek je isti kot pri prijavni strani in se postavi ob vsakem
+    izrisu (`ADR-035` D).
+    """
+    zeton = prijava.nov_zeton()
+    odgovor = predloge.TemplateResponse(
+        request,
+        "registracija.html",
+        {
+            "csrf": zeton,
+            "istovetnost": istovetnost,
+            "sporocilo": sporocilo,
+            "opozorilo": opozorilo,
+            "vnos": vnos
+            or {
+                "ime_druzine": "",
+                "ime": istovetnost.name if istovetnost is not None else "",
+            },
+            "besedilo_zasebnost": sistem.BESEDILO_ZASEBNOST_JAVNO,
+            "namen_registracija": google.Namen.REGISTRACIJA.value,
+            "pot_prijave": prijava.POT_PRIJAVE,
+            "pot_googla": google.POT_PRIJAVE,
+            "pot_registracije": registracija.POT,
+        },
+        status_code=koda,
+    )
+    _postavi_piskotek(odgovor, prijava.PISKOTEK_CSRF_PRIJAVE, zeton, PISKOTEK_SEKUND)
+    return odgovor
+
+
+@router.get(registracija.POT, tags=["registracija"])
+def stran_registracije(
+    request: Request,
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
+    repo: Annotated[PrijavaRepository, Depends(daj_repozitorij_prijave)],
+    napaka: Annotated[str | None, Query()] = None,
+) -> Response:
+    """Okno registracije: začetek (posnetek 02) ali obrazec (04, 06).
+
+    Kdor je že prijavljen, tu nima kaj početi in gre na `/admin` — od tam ga
+    zapora, če je treba, pelje na „Moj račun".
+
+    Registracija je samo z Googlom (`ADR-057` A); namestitev brez Googla te
+    strani nima (`ADR-046` F).
+    """
+    if not nastavitve.google_je_nastavljen:
+        return ni_najdeno(predloge, request, google.SPOROCILO_NI_STRANI)
+    if _seja_zahteve(request, repo) is not None:
+        return RedirectResponse(prijava.PRIVZETI_CILJ, status_code=303)
+
+    # Oznaka in nikoli besedilo; neznana ne pokaže ničesar (`app/google.py`).
+    sporocilo = registracija.SPOROCILA.get(napaka or "") or google.SPOROCILA_PRIJAVE.get(
+        napaka or ""
+    )
+    istovetnost = None if sporocilo else _istovetnost(request)
+    opozorilo = None
+    if istovetnost is not None and _je_prek_meje(repo, datetime.now(UTC)):
+        opozorilo = registracija.SPOROCILO_PREVEC
+    return _okno_registracije(
+        predloge, request, istovetnost=istovetnost, sporocilo=sporocilo, opozorilo=opozorilo
+    )
+
+
+@router.post(registracija.POT, tags=["registracija"])
+def registriraj(
+    request: Request,
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
+    repo: Annotated[PrijavaRepository, Depends(daj_repozitorij_prijave)],
+    csrf: Annotated[str, Form()] = "",
+    ime_druzine: Annotated[str, Form()] = "",
+    ime: Annotated[str, Form()] = "",
+    soglasje: Annotated[str, Form()] = "",
+) -> Response:
+    """Oddan obrazec: **edino mesto, kjer registracija kaj ustvari**.
+
+    Vrstni red: CSRF, istovetnost iz podpisanega piškotka, vnos, meji, šele
+    nato zapis. `sub` in e-naslov prideta **izključno iz piškotka** — obrazec
+    ju ne nosi, zato ju ni mogoče zamenjati v telesu zahteve.
+
+    E-naslov se proti geselnim poverilnicam preveri še enkrat: med povratnim
+    klicem in oddajo je lahko nastal račun z geslom na istem naslovu.
+    """
+    if not nastavitve.google_je_nastavljen:
+        return ni_najdeno(predloge, request, google.SPOROCILO_NI_STRANI)
+
+    if not prijava.zetona_se_ujemata(csrf, request.cookies.get(prijava.PISKOTEK_CSRF_PRIJAVE)):
+        return _okno_registracije(predloge, request, sporocilo=SPOROCILO_CSRF, koda=403)
+
+    if _seja_zahteve(request, repo) is not None:
+        # Prijavljen starš se ne registrira še enkrat — isto kot `GET`.
+        return _brez_istovetnosti(RedirectResponse(prijava.PRIVZETI_CILJ, status_code=303))
+
+    istovetnost = _istovetnost(request)
+    if istovetnost is None:
+        return _brez_istovetnosti(_na_registracijo(registracija.OZNAKA_POTEKLO))
+
+    vnos = {"ime_druzine": ime_druzine, "ime": ime}
+    zdaj = datetime.now(UTC)
+
+    if repo.enaslov_ima_geslo(prijava.normaliziraj_identifikator(istovetnost.email)):
+        return _brez_istovetnosti(_na_registracijo(registracija.OZNAKA_GESLO))
+
+    napaka = registracija.preveri_obrazec(
+        ime_druzine=ime_druzine, ime=ime, soglasje=bool(soglasje)
+    )
+    if napaka is not None:
+        return _okno_registracije(
+            predloge, request, istovetnost=istovetnost, sporocilo=napaka, vnos=vnos, koda=400
+        )
+
+    if _je_prek_meje(repo, zdaj):
+        return _okno_registracije(
+            predloge,
+            request,
+            istovetnost=istovetnost,
+            opozorilo=registracija.SPOROCILO_PREVEC,
+            vnos=vnos,
+            koda=429,
+        )
+
+    try:
+        poverilnica = repo.registriraj(
+            ime_druzine=ime_druzine.strip(),
+            prikazno_ime=ime.strip(),
+            sub=istovetnost.sub,
+            email=istovetnost.email,
+            oznaka_poskusa=registracija.OZNAKA_POSKUSOV,
+            ip_address=request.client.host if request.client else None,
+            ko=zdaj,
+        )
+    except IdentifikatorZaseden:
+        # Ta `sub` je medtem že registriran — dvojna oddaja ali drugo okno.
+        # Druga družina ne nastane; starš se prijavi z istim Googlom.
+        return _brez_istovetnosti(_na_registracijo(registracija.OZNAKA_ZE_REGISTRIRAN))
+
+    zeton = prijava.ustvari_sejo(
+        repo,
+        poverilnica,
+        ko=zdaj,
+        oznaka_naprave=request.headers.get("user-agent", "")[:200] or None,
+    )
+    odgovor = _brez_istovetnosti(RedirectResponse(registracija.POT_RACUNA, status_code=303))
+    _postavi_piskotek(odgovor, prijava.PISKOTEK_SEJE, zeton, PISKOTEK_SEKUND)
+    odgovor.delete_cookie(prijava.PISKOTEK_CSRF_PRIJAVE, path="/")
+    return odgovor
+
+
+def _brez_istovetnosti(odgovor: Response) -> Response:
+    """Odgovor, ki piškotek z istovetnostjo pobriše — enkratna raba (`ADR-062` G)."""
+    registracija.pobrisi_istovetnost(odgovor)
     return odgovor
 
 

@@ -1615,3 +1615,77 @@ def test_razveljavitev_povezave_spusti_tabelo_in_poverilnic_ne_vrne(
         assert _stej(motor) == prej, "razveljavitev ne sme vzeti ničesar drugega s sabo"
     finally:
         motor.dispose()
+
+
+# --- 0015_odobritev_druzine (V6-R02) ----------------------------------------
+
+
+def test_obstojece_druzine_so_po_migraciji_odobrene(baza: str) -> None:
+    """Kriterij `V6-R02`: obstoječe družine dobijo `odobrena`; `is_active` ostane."""
+    config = alembic_nastavitve(baza)
+    command.upgrade(config, "0014_povezava_telefona")
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            povezava.execute(
+                text(
+                    "INSERT INTO families (id, name, is_active, created_at) "
+                    "VALUES ('ugasnjena', 'Ugasnjena', 0, '2026-09-20 10:00:00')"
+                )
+            )
+
+        command.upgrade(config, "head")
+
+        with motor.connect() as povezava:
+            vrstice = {
+                v[0]: (v[1], bool(v[2]), v[3], v[4])
+                for v in povezava.execute(
+                    text("SELECT id, status, is_active, consent_at, decided_at FROM families")
+                )
+            }
+        # Cvek iz `0007_druzine` in družina, vstavljena pred `0015`.
+        assert vrstice[CVEK_ID] == ("approved", True, None, None)
+        # Deaktivacija je ločeno stanje in se z migracijo ne spremeni.
+        assert vrstice["ugasnjena"] == ("approved", False, None, None)
+    finally:
+        motor.dispose()
+
+
+@pytest.mark.parametrize("stanje", ["pending", "rejected"])
+def test_razveljavitev_z_neodobreno_druzino_se_ne_izvede(baza: str, stanje: str) -> None:
+    """Brez stolpca bi čakajoča in zavrnjena družina tiho postali polnopravni."""
+    config = alembic_nastavitve(baza)
+    command.upgrade(config, "head")
+    motor = create_engine(baza)
+    try:
+        with motor.begin() as povezava:
+            povezava.execute(
+                text(
+                    "INSERT INTO families (id, name, status, created_at) "
+                    "VALUES ('nova', 'Nova', :stanje, '2026-10-12 10:00:00')"
+                ),
+                {"stanje": stanje},
+            )
+
+        with pytest.raises(RuntimeError, match="1 družin"):
+            command.downgrade(config, "0014_povezava_telefona")
+
+        stolpci = {s["name"] for s in inspect(motor).get_columns("families")}
+        assert {"status", "consent_at", "decided_at"} <= stolpci
+    finally:
+        motor.dispose()
+
+
+def test_razveljavitev_0015_brez_neodobrenih_spusti_stolpce(baza: str) -> None:
+    config = alembic_nastavitve(baza)
+    command.upgrade(config, "head")
+    motor = create_engine(baza)
+    try:
+        command.downgrade(config, "0014_povezava_telefona")
+
+        stolpci = {s["name"] for s in inspect(motor).get_columns("families")}
+        assert not {"status", "consent_at", "decided_at"} & stolpci
+        with motor.connect() as povezava:
+            assert povezava.execute(text("SELECT COUNT(*) FROM families")).scalar() == 1
+    finally:
+        motor.dispose()

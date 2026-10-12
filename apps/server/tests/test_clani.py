@@ -245,6 +245,9 @@ class TestSeznam:
         assert f"vsaj {prijava.NAJKRAJSE_GESLO[VLOGA_STARS]} znakov" in besedilo
         assert VLOGA_OTROK not in prijava.NAJKRAJSE_GESLO
 
+    # V6-R02: družina brez otroka dobi na `/admin` prvo stran po odobritvi
+    # (`ADR-062` E); ta test govori o pregledu, zato otrok obstaja.
+    @pytest.mark.usefixtures("otrok")
     def test_povezava_je_na_pregledu(self, odjemalec: PrijavljenOdjemalec) -> None:
         """Brez vhoda s `/admin` je stran dosegljiva samo z vtipkanim naslovom."""
         assert f'href="{POT}"' in odjemalec.get("/admin").text
@@ -587,8 +590,11 @@ class TestPonastavitevGesla:
             follow_redirects=False,
         )
 
-        assert odgovor.status_code == 409
-        assert clani.SPOROCILO_NI_SPREMENJENO in odgovor.text
+        # Od V6-R02 (`ADR-062` O) je to pravilo in ne izid pisanja: starš brez
+        # geselne poverilnice — tak je vsak, ki se registrira z Googlom — dobi
+        # `403` z razlago, še preden se karkoli poskusi zapisati.
+        assert odgovor.status_code == 403
+        assert clani.SPOROCILO_STARS_BREZ_GESLA in odgovor.text
 
     def test_lastniku_sistema_drug_stars_gesla_ne_ponastavi(
         self, odjemalec: PrijavljenOdjemalec, motor: Engine, lastnik: str

@@ -533,13 +533,19 @@ class TestPrijavaZGooglom:
     def test_neznan_sub_ne_ustvari_uporabnika(
         self, brez_prijave: PrijavljenOdjemalec, motor: Engine, stars: str
     ) -> None:
-        """Kriterij 3: registracija ostane zaprta (`ADR-025`)."""
+        """Povratni klic sam ne ustvari ničesar — tudi od `V6-R02` ne.
+
+        Do `V6-R02` je neznan `sub` končal na prijavni strani (`ADR-025`,
+        registracija zaprta). Odtlej gre na obrazec registracije
+        (`ADR-057` A); družino in starša ustvari šele oddan obrazec, kar
+        preverja `test_registracija.py`.
+        """
         pred = _stevilo_uporabnikov(motor)
 
         odgovor = _povratek(brez_prijave, _zacni_prijavo(brez_prijave))
 
         assert odgovor.status_code == 303
-        assert google.OZNAKA_NEPOVEZAN in odgovor.headers["location"]
+        assert odgovor.headers["location"] == "/admin/register"
         assert _stevilo_uporabnikov(motor) == pred
         assert not brez_prijave.cookies.get(prijava.PISKOTEK_SEJE)
         with Session(motor) as seja:
@@ -548,17 +554,26 @@ class TestPrijavaZGooglom:
     def test_sporocilo_ne_izda_ali_racun_obstaja(
         self, brez_prijave: PrijavljenOdjemalec, motor: Engine, stars: str
     ) -> None:
-        """Neznan, deaktiviran in ugasnjen dajo **isto** oznako."""
-        odgovor = _povratek(brez_prijave, _zacni_prijavo(brez_prijave))
-        neznan = odgovor.headers["location"]
+        """Deaktiviran račun in ugasnjena družina dasta **isto** oznako.
 
+        Neznan `sub` od `V6-R02` sem ne sodi več: dobi obrazec registracije
+        (`ADR-062` H). Razlika med ostalima dvema ostane skrita.
+        """
         _povezi_google(motor, stars)
         with Session(motor) as seja:
             seja.get(User, stars).is_active = False  # type: ignore[union-attr]
             seja.commit()
-
         odgovor = _povratek(brez_prijave, _zacni_prijavo(brez_prijave))
-        assert odgovor.headers["location"] == neznan
+        deaktiviran = odgovor.headers["location"]
+
+        with Session(motor) as seja:
+            seja.get(User, stars).is_active = True  # type: ignore[union-attr]
+            seja.get(Family, CVEK_ID).is_active = False  # type: ignore[union-attr]
+            seja.commit()
+        odgovor = _povratek(brez_prijave, _zacni_prijavo(brez_prijave))
+
+        assert google.OZNAKA_NEPOVEZAN in deaktiviran
+        assert odgovor.headers["location"] == deaktiviran
 
     def test_ugasnjena_druzina_ne_more_v_admin(
         self, brez_prijave: PrijavljenOdjemalec, motor: Engine, stars: str
@@ -729,6 +744,9 @@ class TestStranRacuna:
         odgovor = odjemalec_g.get(google.POT_RACUNA)
         assert google.POT_POVEZAVE in odgovor.text
 
+    # V6-R02: družina brez otroka dobi na `/admin` prvo stran po odobritvi
+    # (`ADR-062` E); ta test govori o pregledu, zato otrok obstaja.
+    @pytest.mark.usefixtures("otrok")
     def test_glava_pelje_na_racun(self, odjemalec_g: PrijavljenOdjemalec) -> None:
         assert f'href="{google.POT_RACUNA}"' in odjemalec_g.get("/admin").text
 

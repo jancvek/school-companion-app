@@ -80,6 +80,23 @@ class Family(Base):
     #: deaktiviran prej, ostane deaktiviran.
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
+    #: Ali je lastnik sistema družino sprejel (V6-R02): `pending`, `approved`
+    #: ali `rejected`. Družina, ki se registrira sama, nastane `pending` in do
+    #: odobritve vidi samo „Moj račun" (`docs/odlocitve/ADR-057` B, C).
+    #: Privzetek je `approved`: tako nastane vsaka družina, ki jo odpre
+    #: lastnik, in tako so z migracijo `0015` označene vse prejšnje.
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="approved", server_default="approved"
+    )
+
+    #: Kdaj je starš ob registraciji potrdil soglasje (`ADR-057` D). `NULL` pri
+    #: družinah, ki jih je odprl lastnik — zanje velja `ADR-044` C.
+    consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    #: Kdaj je lastnik zahtevek odobril ali zavrnil. `NULL`, dokler čaka, in
+    #: pri družinah izpred V6-R02.
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -585,6 +602,13 @@ VLOGA_OTROK: Vloga = "child"
 VrstaPoverilnice = Literal["password", "google"]
 POVERILNICA_GESLO: VrstaPoverilnice = "password"
 POVERILNICA_GOOGLE: VrstaPoverilnice = "google"
+
+#: Stanja odobritve družine (V6-R02, `docs/odlocitve/ADR-057` B, `ADR-062` K).
+#: Ločeno od `families.is_active`: eno pove, ali je bila družina sprejeta,
+#: drugo, ali je trenutno prižgana. V vmesniku „čaka", „odobrena", „zavrnjena".
+STANJE_CAKA = "pending"
+STANJE_ODOBRENA = "approved"
+STANJE_ZAVRNJENA = "rejected"
 
 
 class User(Base):

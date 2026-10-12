@@ -77,10 +77,21 @@ povezave in pove, naj starš povezavo dobi od skrbnika.
 
 - **Največ 20 družin v stanju `pending`.** Zavrnjene ne štejejo. Meja se
   preveri ob izrisu obrazca (posnetek 06) in znova ob oddaji.
-- **Največ 3 oddane registracije na naslov IP v 24 urah.** Vsaka uspešno
-  oddana registracija zapiše vrstico v `login_attempts` z oznako
-  `REGISTRACIJA` (velike črke, kot `POVEZAVA-TELEFONA`) in naslovom; šteje se
-  po `ip_address`. Brez naslova (ni `request.client`) velja samo prva meja.
+- **Največ 10 oddanih registracij v 24 urah za celo namestitev.** Vsaka
+  uspešno oddana registracija zapiše vrstico v `login_attempts` z oznako
+  `REGISTRACIJA` (velike črke, kot `POVEZAVA-TELEFONA`); šteje se po oznaki.
+  Naslov se zapiše za pogled nazaj, **ne za odločitev**.
+
+  **Meje po IP ni** — popravljeno 12. 10. 2026, pred prvo vrstico kode, s
+  soglasjem lastnika. `ADR-057` F in prvotni kriterij sta jo zahtevala, prva
+  različica te odločitve in plan (`docs/plan/V6-R02.md`, „3 registracije na IP
+  v 24 h") pa sta jo prevzela. V tej postavitvi je ni mogoče narediti: Docker
+  Desktop izvornega naslova ne ohrani in vsi odjemalci pridejo z naslova
+  prehoda (`ADR-034` A, `docs/02-izkusnje.md`). Meja po IP bi bila v resnici
+  skupna meja 3 na dan. Ta odločitev v tem delu **preglasi `ADR-057` F** in
+  vrstice plana o meji po IP; kriterij v `docs/verzije/v6.md` je popravljen.
+  Vsaka registracija že zahteva svoj potrjen Google račun, zato je glavna
+  zavora meja čakajočih; dnevna meja omeji rast zavrnjenih vrstic.
 - Obe dasta isto besedilo („poskusi pozneje"); katera je ugriznila, obrazec
   ne pove.
 - Štetje in vstavljanje nista ena transakcija: ob sočasnih oddajah je meja
@@ -196,7 +207,7 @@ izbris zavrne in stran to pove.
 ### M — kdo bere in piše kaj
 
 - **`PrijavaRepository`** (pred sejo, brez družine): ali ima e-naslov geselno
-  poverilnico, število čakajočih, število registracij z naslova IP, zapis
+  poverilnico, število čakajočih, število registracij v zadnjih 24 urah, zapis
   registracije (družina, starš, poverilnica in vrstica v `login_attempts` v
   eni transakciji). Bere in piše samo tabele identitete in `families`.
 - **`DruzineRepository`** (lastnik): čakajoče družine s staršem in e-naslovom,

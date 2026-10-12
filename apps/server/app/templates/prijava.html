@@ -58,15 +58,18 @@
           <input type="hidden" name="csrf" value="{{ csrf }}">
           <button class="gumb obrobljen sirok" type="submit">Prijava z Google računom</button>
         </form>
+        {# Registracija (V6-R02, `ADR-057` A): samo z Googlom, zato je ni,
+           kadar Googla v tej namestitvi ni. Dva vstopa, en izid — kdo se
+           prijavi in kdo dobi obrazec, odloči Google račun (`ADR-062` H). #}
         <p class="drobno">
-          Z Googlom se lahko prijaviš le, če si svoj Google račun prej povezal v
-          nastavitvah svojega računa. Nove prijave z Googlom ni mogoče odpreti.
+          Še nimaš računa?
+          <a href="/admin/register">Registracija z Google računom</a>
         </p>
       {% endif %}
 
       <p class="drobno">
-        Gesla ne moreš ponastaviti sam: otroku ga nastavi starš, staršu lastnik
-        sistema.
+        Gesla ni mogoče ponastaviti tukaj: staršu ga ponastavi drug starš v
+        družini ali skrbnik sistema.
       </p>
     </div>
   </div>

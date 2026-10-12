@@ -96,6 +96,14 @@ SPOROCILO_PREKLIC_SAMO_OTROKU = (
 )
 
 
+#: Starš, registriran z Googlom, gesla nima in ga tu ni mogoče nastaviti
+#: (`V6-R02`, `ADR-062` O).
+SPOROCILO_STARS_BREZ_GESLA = (
+    "Ta račun se prijavlja z Google računom in gesla nima, zato ga ni mogoče "
+    "ponastaviti. Prijava z Googlom deluje naprej."
+)
+
+
 def _sporocilo_prekratko_geslo(vloga: str) -> str:
     najmanj = NAJKRAJSE_GESLO.get(vloga, NAJKRAJSE_GESLO[VLOGA_STARS])
     return f"Geslo za starša je prekratko; imeti mora vsaj {najmanj} znakov."
@@ -204,11 +212,20 @@ def zakaj_ne_sme_deaktivirati(
 
 
 def zakaj_ne_sme_ponastaviti_gesla(
-    *, izvajalec_id: str, clan_id: str, clan_vloga: str, clan_je_lastnik_sistema: bool
+    *,
+    izvajalec_id: str,
+    clan_id: str,
+    clan_vloga: str,
+    clan_je_lastnik_sistema: bool,
+    clan_ima_geselno_poverilnico: bool = True,
 ) -> str | None:
     """Razlog, zakaj ta starš temu članu ne sme ponastaviti gesla, ali `None`.
 
-    Omejitvi sta dve:
+    Omejitve so tri:
+
+    - **starš brez geselne poverilnice** (`V6-R02`, `ADR-062` O): kdor se je
+      registriral z Googlom, vrstice `kind='password'` nima, zato ponastavitev
+      ne bi imela česa spremeniti. Dejanje se ne ponudi in klic pove, zakaj;
 
     - **otrok gesla nima** (`V6-R01`, `ADR-058` E) — namesto ponastavitve sta
       „Poveži telefon" in „Prekliči prijave";
@@ -219,6 +236,8 @@ def zakaj_ne_sme_ponastaviti_gesla(
     """
     if clan_vloga == VLOGA_OTROK:
         return SPOROCILO_OTROK_NIMA_GESLA
+    if not clan_ima_geselno_poverilnico:
+        return SPOROCILO_STARS_BREZ_GESLA
     if clan_je_lastnik_sistema and clan_id != izvajalec_id:
         return SPOROCILO_TUJE_GESLO_LASTNIKA
     return None

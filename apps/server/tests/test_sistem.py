@@ -298,6 +298,9 @@ def test_lastnik_pride_na_stran(lastnikov_odjemalec: PrijavljenOdjemalec) -> Non
     assert "Družine" in odgovor.text
 
 
+# V6-R02: družina brez otroka dobi na `/admin` prvo stran po odobritvi
+# (`ADR-062` E); ta test govori o pregledu, zato otrok obstaja.
+@pytest.mark.usefixtures("otrok")
 def test_povezave_na_sistem_stars_ne_vidi(
     odjemalec: PrijavljenOdjemalec, lastnikov_odjemalec: PrijavljenOdjemalec
 ) -> None:

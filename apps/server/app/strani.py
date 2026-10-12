@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import Response
 
 from app import meni
-from app.db import MeniRepository, SejaUporabnika
+from app.db import DruzineRepository, MeniRepository, SejaUporabnika
+from app.models import STANJE_ODOBRENA
 from app.settings import Settings
 from app.subjects import PREDMETI
 
@@ -51,18 +52,26 @@ def kontekst_prijave(request: Request) -> dict[str, object]:
     kar poda pot, bi se s tisto vrednostjo boril. Zato je lastnik en sam.
     """
     nastavitve: Settings = request.app.state.nastavitve
-    skupno: dict[str, object] = {"google_na_voljo": nastavitve.google_je_nastavljen}
+    # Hrbti zvezkov na strani brez menija (V5-R01): koda in barva vsakega
+    # predmeta. Podatek predmeta, ne družine — brez seje ga smemo dati. Od
+    # V6-R02 ga dobi vsaka stran: postavitev registracije jo imajo tudi strani
+    # s sejo („Moj račun" neodobrene družine, prva stran po odobritvi).
+    hrbti = [{"koda": predmet.koda, "barva": predmet.barva} for predmet in PREDMETI]
+    skupno: dict[str, object] = {
+        "google_na_voljo": nastavitve.google_je_nastavljen,
+        "hrbti": hrbti,
+    }
     seja: SejaUporabnika | None = getattr(request.state, "prijava", None)
     if seja is None:
-        # Hrbti zvezkov na prijavni strani (V5-R01): koda in barva vsakega
-        # predmeta. Podatek predmeta, ne družine — brez seje ga smemo dati.
-        hrbti = [{"koda": predmet.koda, "barva": predmet.barva} for predmet in PREDMETI]
-        return {**skupno, "prijava": None, "hrbti": hrbti}
+        return {**skupno, "prijava": None}
     return {
         **skupno,
         "prijava": seja,
         "csrf": seja.csrf_token,
-        "meni": _meni(request, seja),
+        # Neodobrena družina menija nima (V6-R02): vse njegove postavke bi jo
+        # preusmerile nazaj na „Moj račun" (`ADR-057` C). Brez menija ostane
+        # tudi stran z napako, ki jo ta seja vidi.
+        "meni": _meni(request, seja) if seja.family_status == STANJE_ODOBRENA else None,
         "ime_druzine": meni.ime_druzine(seja.family_name),
         "zacetnica": meni.zacetnica(seja.display_name),
     }
@@ -80,11 +89,19 @@ def _meni(request: Request, seja: SejaUporabnika) -> meni.Meni:
     """
     pot = request.url.path
     stevci: meni.Stevci | None = None
+    cakajocih = 0
+    tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
     if not meni.je_brez_stevcev(pot):
-        tovarna: sessionmaker[Session] = request.app.state.tovarna_sej
         with tovarna() as seja_baze:
             stevci = MeniRepository(seja_baze, seja.family_id).stevci()
-    return meni.sestavi_meni(pot, lastnik_sistema=seja.is_system_owner, stevci=stevci)
+    if seja.is_system_owner:
+        # Koliko družin čaka na odobritev (V6-R02). Samo lastniku in samo iz
+        # `families` — zato tudi pod `/admin/system` (`ADR-062` Q).
+        with tovarna() as seja_baze:
+            cakajocih = DruzineRepository(seja_baze).stevilo_cakajocih()
+    return meni.sestavi_meni(
+        pot, lastnik_sistema=seja.is_system_owner, stevci=stevci, cakajocih=cakajocih
+    )
 
 
 def ni_najdeno(predloge: Jinja2Templates, request: Request, sporocilo: str) -> Response:

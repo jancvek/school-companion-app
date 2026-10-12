@@ -277,8 +277,10 @@ class TestOdjemalec:
 
         racun = _odjemalec(obdelaj).racun("koda-1")
 
+        # Ime od V6-R02 ostane: predlog za polje „Tvoje ime" v obrazcu
+        # registracije (`ADR-062` R).
         assert racun == RacunGoogla(
-            sub="104829", email="ana@primer.test", email_verified=True
+            sub="104829", email="ana@primer.test", email_verified=True, name="Ana"
         )
         # Skrivnost gre v **telo** zahteve, nikoli v naslov: naslovi se
         # beležijo v posredniških strežnikih, telesa ne.

@@ -808,6 +808,44 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
         NI,
         (a.family_id,),
     ),
+    # V6-R02: odobritev in zavrnitev sta lastnikovi; za starša tuje družine
+    # ne obstajata, kot vse pod `/admin/system` (`ADR-045`).
+    ("GET", "/admin/system/families/{family_id}/approve"): lambda o, a: (
+        o.get(f"/admin/system/families/{a.family_id}/approve"), NI, (a.family_id,),
+    ),
+    ("POST", "/admin/system/families/{family_id}/approve"): lambda o, a: (
+        o.post(f"/admin/system/families/{a.family_id}/approve", follow_redirects=False),
+        NI,
+        (a.family_id,),
+    ),
+    ("GET", "/admin/system/families/{family_id}/reject"): lambda o, a: (
+        o.get(f"/admin/system/families/{a.family_id}/reject"), NI, (a.family_id,),
+    ),
+    ("POST", "/admin/system/families/{family_id}/reject"): lambda o, a: (
+        o.post(f"/admin/system/families/{a.family_id}/reject", follow_redirects=False),
+        NI,
+        (a.family_id,),
+    ),
+    # V6-R02: izbris velja samo za **svojo, zavrnjeno** družino. Družina iz
+    # naslova ne pride, zato tuje ni mogoče niti naciljati; odobrena družina B
+    # dobi `403` in posnetek družine A potrdi, da se ni zgodilo nič.
+    ("GET", "/admin/racun/izbrisi"): lambda o, a: (
+        o.get("/admin/racun/izbrisi"), frozenset({403}), (),
+    ),
+    ("POST", "/admin/racun/izbrisi"): lambda o, a: (
+        o.post("/admin/racun/izbrisi", follow_redirects=False), frozenset({403}), (),
+    ),
+    # V6-R02: okno registracije je javno in ne bere ničesar o nobeni družini.
+    # Prijavljen starš tam nima kaj početi in gre na pregled; oddaja brez
+    # žetona prijavnega obrazca je `403` in ne ustvari ničesar.
+    ("GET", "/admin/register"): lambda o, a: (
+        o.get("/admin/register", follow_redirects=False), PREUSMERITEV, (),
+    ),
+    ("POST", "/admin/register"): lambda o, a: (
+        o.post("/admin/register", data={"ime_druzine": a.znak}, follow_redirects=False),
+        frozenset({403}),
+        (),
+    ),
     ("GET", "/admin/system/families/{family_id}/activate"): lambda o, a: (
         o.get(f"/admin/system/families/{a.family_id}/activate"), NI, (a.family_id,),
     ),
@@ -1313,6 +1351,13 @@ def _brez_stanja_in_sej(
 #: sme brati čez vse. Prav zato potrebuje svoje: nova metoda tu je odločitev o
 #: meji iz `ADR-044` E in ne sme nastati tiho, med pisanjem strani.
 JAVNE_METODE_DRUZIN = {
+    # V6-R02 (`ADR-062` M): čakajoči zahtevki, njihovo število, starši vseh
+    # družin in prehod stanja. Berejo `families`, `users` in `credentials`;
+    # da ne berejo vsebine, trdi `test_registracija.py` s prestrezanjem SQL.
+    "cakajoce",
+    "nastavi_stanje",
+    "starsi",
+    "stevilo_cakajocih",
     "edina",
     "idji",
     "idji_aktivnih",
@@ -1682,6 +1727,12 @@ PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
     ("ClaniRepository", "otroci"): lambda s, a, b: (
         {clan.user_id for clan in _c(s, b).otroci()} == {b.otrok_id}
         and {clan.user_id for clan in _c(s, b).otroci(samo_aktivni=True)} == {b.otrok_id}
+    ),
+    # V6-R02: izbris nima argumenta — družina je tista iz konstruktorja. Za
+    # odobreno družino B ne izbriše ničesar, in posnetek družine A potrdi, da
+    # se tuje ni dotaknil.
+    ("ClaniRepository", "izbrisi_zavrnjeno_druzino"): lambda s, a, b: (
+        _c(s, b).izbrisi_zavrnjeno_druzino() is False
     ),
     ("ClaniRepository", "ponastavi_geslo"): lambda s, a, b: (
         _c(s, b).ponastavi_geslo(a.otrok_id, "vlomljena-zgostitev", datetime.now(UTC)) is False

@@ -41,6 +41,9 @@ from app.models import (
     NACIN_SAMOOCENA,
     POVERILNICA_GESLO,
     POVERILNICA_GOOGLE,
+    STANJE_CAKA,
+    STANJE_ODOBRENA,
+    STANJE_ZAVRNJENA,
     STATUS_NOV,
     STATUS_PRIPRAVLJEN,
     STATUS_V_OBDELAVI,
@@ -150,11 +153,48 @@ class DruzinaZaPregled:
     created_at: datetime
     starsev: int
     otrok: int
+    #: Stanje odobritve (V6-R02): `pending`, `approved` ali `rejected`.
+    status: str = STANJE_ODOBRENA
 
     @property
     def clanov(self) -> int:
         """Skupno število članov — kriterij `V3-R05` govori o številu članov."""
         return self.starsev + self.otrok
+
+
+@dataclass(frozen=True)
+class CakajocaDruzina:
+    """Zahtevek, ki čaka na lastnikovo odločitev (V6-R02, `ADR-057` E)."""
+
+    id: str
+    name: str
+    #: Kdaj je bil zahtevek oddan — `families.created_at`.
+    created_at: datetime
+    stars: str
+    #: E-naslov Google računa (`credentials.label`); `None`, če ga Google ni dal.
+    enaslov: str | None
+
+
+@dataclass(frozen=True)
+class StarsZaPregled:
+    """En starš v tabeli uporabnikov na `/admin/system` (V6-R02, `ADR-062` P).
+
+    Samo starši: otroka ta tip ne zna nositi, ker ga poizvedba ne vrne
+    (`ADR-044` B).
+    """
+
+    user_id: str
+    display_name: str
+    #: Identifikator geselne poverilnice, sicer oznaka Google poverilnice.
+    enaslov: str | None
+    family_id: str
+    family_name: str
+    ima_geslo: bool
+    ima_google: bool
+    family_status: str
+    is_active: bool
+    family_is_active: bool
+    created_at: datetime
 
 
 class DruzineRepository:
@@ -268,7 +308,17 @@ class DruzineRepository:
         """
         family_id = str(uuid4())
         user_id = str(uuid4())
-        self._session.add(Family(id=family_id, name=ime_druzine, is_active=True, created_at=ko))
+        # `approved` izrecno in ne po privzetku stolpca: družina, ki jo odpre
+        # lastnik, je sprejeta (`ADR-057` I), in to naj piše tu, kjer nastane.
+        self._session.add(
+            Family(
+                id=family_id,
+                name=ime_druzine,
+                is_active=True,
+                status=STANJE_ODOBRENA,
+                created_at=ko,
+            )
+        )
         self._session.add(
             User(
                 id=user_id,
@@ -328,6 +378,125 @@ class DruzineRepository:
         self._session.commit()
         return True
 
+    # --- Odobritev (V6-R02) ------------------------------------------------
+
+    def cakajoce(self) -> list[CakajocaDruzina]:
+        """Družine v stanju `pending` s staršem, ki jih je registriral.
+
+        Najstarejši zahtevek prvi: kdor čaka najdlje, je na vrhu. Registracija
+        ustvari natanko enega starša z Google poverilnico (`ADR-057` A), zato
+        je vrstica na družino ena; `outerjoin` na poverilnico, da zahtevek ne
+        izgine s seznama, če bi oznaka kdaj manjkala.
+        """
+        vrstice = self._session.execute(
+            select(Family.id, Family.name, Family.created_at, User.display_name, Credential.label)
+            .join(User, (User.family_id == Family.id) & (User.role == VLOGA_STARS))
+            .outerjoin(
+                Credential,
+                (Credential.user_id == User.id) & (Credential.kind == POVERILNICA_GOOGLE),
+            )
+            .where(Family.status == STANJE_CAKA)
+            .order_by(Family.created_at, Family.id)
+        ).all()
+        return [
+            CakajocaDruzina(
+                id=v[0], name=v[1], created_at=casi.utc(v[2]), stars=v[3], enaslov=v[4]
+            )
+            for v in vrstice
+        ]
+
+    def stevilo_cakajocih(self) -> int:
+        """Koliko družin čaka na odobritev — za števec v meniju lastnika."""
+        return int(
+            self._session.scalar(
+                select(func.count(Family.id)).where(Family.status == STANJE_CAKA)
+            )
+            or 0
+        )
+
+    def starsi(self) -> list[StarsZaPregled]:
+        """Starši vseh družin, po imenu (`ADR-062` P). **Otrok ne vrne.**
+
+        Bere `users`, `families` in `credentials` — meja iz `ADR-044` E,
+        razširjena za način prijave in e-naslov; nikoli vsebine.
+        """
+        geslo = (
+            select(Credential.identifier)
+            .where(Credential.user_id == User.id, Credential.kind == POVERILNICA_GESLO)
+            .correlate(User)
+            .scalar_subquery()
+        )
+        google = (
+            select(Credential.label)
+            .where(Credential.user_id == User.id, Credential.kind == POVERILNICA_GOOGLE)
+            .correlate(User)
+            .scalar_subquery()
+        )
+        ima_google = (
+            exists()
+            .where(Credential.user_id == User.id, Credential.kind == POVERILNICA_GOOGLE)
+            .correlate(User)
+        )
+        vrstice = self._session.execute(
+            select(
+                User.id,
+                User.display_name,
+                geslo,
+                google,
+                ima_google,
+                Family.id,
+                Family.name,
+                Family.status,
+                User.is_active,
+                Family.is_active,
+                User.created_at,
+            )
+            .join(Family, Family.id == User.family_id)
+            .where(User.role == VLOGA_STARS)
+            .order_by(User.display_name, User.id)
+        ).all()
+        return [
+            StarsZaPregled(
+                user_id=v[0],
+                display_name=v[1],
+                enaslov=v[2] if v[2] is not None else v[3],
+                ima_geslo=v[2] is not None,
+                ima_google=bool(v[4]),
+                family_id=v[5],
+                family_name=v[6],
+                family_status=v[7],
+                is_active=bool(v[8]),
+                family_is_active=bool(v[9]),
+                created_at=casi.utc(v[10]),
+            )
+            for v in vrstice
+        ]
+
+    def nastavi_stanje(
+        self, family_id: str, *, iz: tuple[str, ...], v: str, ko: datetime
+    ) -> bool:
+        """Prestavi družino iz enega od stanj `iz` v stanje `v`. Vrne, ali je uspelo.
+
+        **Pogojni `UPDATE` na trenutno stanje** (`ADR-062` K): katere prehode
+        sme kdo zahtevati, odloči `app/sistem.py`, ta stavek pa poskrbi, da
+        dve sočasni odločitvi ne prepišeta druga druge — druga ne najde
+        vrstice v pričakovanem stanju in ne spremeni ničesar. Isto velja, če
+        je zavrnjeni starš medtem svoj račun izbrisal.
+
+        Sej se ne dotakne: zavrnjeni starš mora še videti „Moj račun",
+        odobrenemu pa se ob naslednji zahtevi odpre vse.
+        """
+        izid = self._session.execute(
+            update(Family)
+            .where(Family.id == family_id, Family.status.in_(iz))
+            .values(status=v, decided_at=ko)
+        )
+        if not cast(CursorResult[Any], izid).rowcount:
+            self._session.rollback()
+            return False
+        self._session.commit()
+        return True
+
     # --- Skupno branje -----------------------------------------------------
 
     @staticmethod
@@ -348,9 +517,12 @@ class DruzineRepository:
                 Family.created_at,
                 self._stevilo(VLOGA_STARS),
                 self._stevilo(VLOGA_OTROK),
+                Family.status,
             )
             .outerjoin(User, User.family_id == Family.id)
-            .group_by(Family.id, Family.name, Family.is_active, Family.created_at)
+            .group_by(
+                Family.id, Family.name, Family.is_active, Family.created_at, Family.status
+            )
         )
 
     @staticmethod
@@ -362,6 +534,7 @@ class DruzineRepository:
             created_at=casi.utc(vrstica[3]),
             starsev=int(vrstica[4]),
             otrok=int(vrstica[5]),
+            status=vrstica[6],
         )
 
 
@@ -1995,6 +2168,21 @@ class SejaUporabnika:
     csrf_token: str
     expires_at: datetime
     last_used_at: datetime
+    #: Stanje odobritve družine (V6-R02). Bere ga
+    #: `dependencies.zahtevaj_odobreno_druzino`: seja družine, ki ni
+    #: `approved`, vidi pod `/admin` samo „Moj račun" (`ADR-057` C).
+    family_status: str = STANJE_ODOBRENA
+
+
+@dataclass(frozen=True)
+class Zahtevek:
+    """Kar stran „Moj račun" pokaže neodobreni družini (V6-R02)."""
+
+    #: E-naslov Google računa, s katerim se je starš registriral.
+    enaslov: str | None
+    oddan: datetime
+    #: Kdaj je lastnik odločil; `None`, dokler zahtevek čaka.
+    odlocen: datetime | None
 
 
 class PrijavaRepository:
@@ -2125,6 +2313,141 @@ class PrijavaRepository:
             geslo_nastavljeno=geslo is not None and geslo[4] is not None,
             google_credential_id=google[0] if google is not None else None,
             google_oznaka=google[3] if google is not None else None,
+        )
+
+    # --- Registracija (V6-R02) ---------------------------------------------
+
+    def enaslov_ima_geslo(self, enaslov: str) -> bool:
+        """Ali za ta (normaliziran) e-naslov obstaja geselna poverilnica.
+
+        Tak Google račun se ne registrira in se z obstoječim računom ne združi
+        sam od sebe — to bi bila pot do prevzema računa (`ADR-057` A).
+        """
+        return bool(
+            self._session.scalar(
+                select(
+                    exists().where(
+                        Credential.kind == POVERILNICA_GESLO, Credential.identifier == enaslov
+                    )
+                )
+            )
+        )
+
+    def stevilo_cakajocih(self) -> int:
+        """Koliko družin čaka na odobritev — za mejo javnega obrazca (`ADR-062` F)."""
+        return int(
+            self._session.scalar(
+                select(func.count(Family.id)).where(Family.status == STANJE_CAKA)
+            )
+            or 0
+        )
+
+    def registriraj(
+        self,
+        *,
+        ime_druzine: str,
+        prikazno_ime: str,
+        sub: str,
+        email: str | None,
+        oznaka_poskusa: str,
+        ip_address: str | None,
+        ko: datetime,
+    ) -> PoverilnicaZaPrijavo:
+        """Ustvari družino `pending`, starša in Google poverilnico (`ADR-057` A).
+
+        **Ena transakcija:** družina brez starša ali starš brez poverilnice
+        bi bila vrstica, v katero nihče ne more. V isti transakciji gre tudi
+        vrstica v `login_attempts` pod `oznaka_poskusa`, po kateri se šteje
+        dnevna meja registracij (`ADR-062` F).
+
+        `consent_at` je čas te oddaje: obrazca brez potrjenega soglasja
+        usmerjevalnik sem ne pripelje (`ADR-057` D).
+
+        Zaseden `sub` je `IdentifikatorZaseden` — enoličnost razsodi baza
+        (`ADR-038` E); dvojna oddaja istega obrazca tako ne naredi dveh družin.
+        """
+        family_id = str(uuid4())
+        user_id = str(uuid4())
+        credential_id = str(uuid4())
+        self._session.add(
+            Family(
+                id=family_id,
+                name=ime_druzine,
+                is_active=True,
+                status=STANJE_CAKA,
+                consent_at=ko,
+                created_at=ko,
+            )
+        )
+        self._session.add(
+            User(
+                id=user_id,
+                family_id=family_id,
+                role=VLOGA_STARS,
+                display_name=prikazno_ime,
+                is_system_owner=False,
+                is_active=True,
+                created_at=ko,
+            )
+        )
+        self._session.add(
+            Credential(
+                id=credential_id,
+                user_id=user_id,
+                kind=POVERILNICA_GOOGLE,
+                identifier=sub,
+                secret_hash=None,
+                label=email,
+                created_at=ko,
+                updated_at=ko,
+            )
+        )
+        self._session.add(
+            LoginAttempt(
+                id=str(uuid4()), identifier=oznaka_poskusa, ip_address=ip_address, created_at=ko
+            )
+        )
+        try:
+            self._session.commit()
+        except IntegrityError as izjema:
+            self._session.rollback()
+            if not je_zaseden_identifikator(izjema):
+                raise
+            raise IdentifikatorZaseden(sub) from izjema
+        return PoverilnicaZaPrijavo(
+            credential_id=credential_id,
+            user_id=user_id,
+            family_id=family_id,
+            family_name=ime_druzine,
+            role=VLOGA_STARS,
+            display_name=prikazno_ime,
+            is_active=True,
+            is_system_owner=False,
+            family_is_active=True,
+            secret_hash=None,
+        )
+
+    def zahtevek(self, user_id: str) -> Zahtevek | None:
+        """Zahtevek družine te osebe — za „Moj račun" neodobrene družine.
+
+        `user_id` pride iz seje, nikoli iz naslova, kot pri `nacini_prijave`.
+        """
+        vrstica = self._session.execute(
+            select(Credential.label, Family.created_at, Family.decided_at)
+            .select_from(User)
+            .join(Family, Family.id == User.family_id)
+            .outerjoin(
+                Credential,
+                (Credential.user_id == User.id) & (Credential.kind == POVERILNICA_GOOGLE),
+            )
+            .where(User.id == user_id)
+        ).first()
+        if vrstica is None:
+            return None
+        return Zahtevek(
+            enaslov=vrstica[0],
+            oddan=casi.utc(vrstica[1]),
+            odlocen=casi.utc(vrstica[2]) if vrstica[2] is not None else None,
         )
 
     def povezi_google(
@@ -2304,6 +2627,7 @@ class PrijavaRepository:
                 User.is_active,
                 User.is_system_owner,
                 Family.is_active,
+                Family.status,
             )
             .join(User, User.id == UserSession.user_id)
             .join(Family, Family.id == User.family_id)
@@ -2326,6 +2650,7 @@ class PrijavaRepository:
             is_active=vrstica[9],
             is_system_owner=vrstica[10],
             family_is_active=bool(vrstica[11]),
+            family_status=vrstica[12],
         )
 
     def osvezi_sejo(self, session_id: str, ko: datetime, potece: datetime) -> None:
@@ -2724,6 +3049,45 @@ class ClaniRepository(_RepozitorijDruzine):
             )
         )
         self._session.commit()
+        return True
+
+    def izbrisi_zavrnjeno_druzino(self) -> bool:
+        """Izbriše **to** družino, če je zavrnjena. Vrne, ali je bila izbrisana.
+
+        Edina pot v aplikaciji, ki briše družino, in izjema od „nič se ne
+        briše" (`ADR-057` G): zavrnjena družina nima vsebine, ker do ničesar
+        razen strani „Moj račun" ni prišla, in iz `approved` v `rejected` ni
+        prehoda (`ADR-062` K).
+
+        **Pogoj na stanju je prvi stavek transakcije** in ne preverba pred
+        njo: `UPDATE`, ki ne spremeni ničesar, vrstico zaklene, zato odobritev,
+        ki pride vmes, bodisi zmaga pred njim (in tu ne najdemo zavrnjene
+        družine) bodisi počaka in ne najde več ničesar.
+
+        Tuji ključi so brez `ondelete`. Če bi družina kljub vsemu imela
+        vsebino, baza izbris zavrne; takrat se ne izbriše nič.
+        """
+        zavrnjena = self._session.execute(
+            update(Family)
+            .where(Family.id == self._family_id, Family.status == STANJE_ZAVRNJENA)
+            .values(status=STANJE_ZAVRNJENA)
+        )
+        if not cast(CursorResult[Any], zavrnjena).rowcount:
+            self._session.rollback()
+            return False
+        moji = select(User.id).where(self._moje())
+        try:
+            self._session.execute(
+                delete(LinkToken).where(LinkToken.family_id == self._family_id)
+            )
+            self._session.execute(delete(UserSession).where(UserSession.user_id.in_(moji)))
+            self._session.execute(delete(Credential).where(Credential.user_id.in_(moji)))
+            self._session.execute(delete(User).where(self._moje()))
+            self._session.execute(delete(Family).where(Family.id == self._family_id))
+            self._session.commit()
+        except IntegrityError:
+            self._session.rollback()
+            return False
         return True
 
     def ponastavi_geslo(self, user_id: str, secret_hash: str, ko: datetime) -> bool:

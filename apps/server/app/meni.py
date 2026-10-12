@@ -82,11 +82,18 @@ def je_brez_stevcev(pot: str) -> bool:
     return _je_pod(pot, PREDPONA_SISTEMA)
 
 
-def sestavi_meni(pot: str, *, lastnik_sistema: bool, stevci: Stevci | None) -> Meni:
+def sestavi_meni(
+    pot: str, *, lastnik_sistema: bool, stevci: Stevci | None, cakajocih: int = 0
+) -> Meni:
     """Meni za stran na dani poti.
 
     `stevci` je `None` pod `/admin/system`; ostale strani ga podajo vedno.
     Števec z vrednostjo nič se ne izriše — „Arhiv 0" ne pove ničesar.
+
+    `cakajocih` je število družin, ki čakajo na odobritev (V6-R02); stoji ob
+    postavki „Sistem" in ga zato vidi samo lastnik. **Ni števec vsebine**:
+    bere samo `families`, zato je viden tudi pod `/admin/system`, kjer
+    števcev vsebine ni (`ADR-062` Q).
     """
 
     def postavka(vnos: tuple[str, str, tuple[str, ...], str | None]) -> Postavka:
@@ -96,11 +103,18 @@ def sestavi_meni(pot: str, *, lastnik_sistema: bool, stevci: Stevci | None) -> M
         koliko = getattr(stevci, kljuc) if stevci is not None and kljuc else None
         return Postavka(oznaka=oznaka, href=href, izbrana=izbrana, stevec=koliko or None)
 
-    uprava = _UPRAVA + ((_SISTEM,) if lastnik_sistema else ())
-    return Meni(
-        vsebina=tuple(postavka(vnos) for vnos in _VSEBINA),
-        uprava=tuple(postavka(vnos) for vnos in uprava),
-    )
+    uprava = tuple(postavka(vnos) for vnos in _UPRAVA)
+    if lastnik_sistema:
+        sistem = postavka(_SISTEM)
+        uprava += (
+            Postavka(
+                oznaka=sistem.oznaka,
+                href=sistem.href,
+                izbrana=sistem.izbrana,
+                stevec=cakajocih or None,
+            ),
+        )
+    return Meni(vsebina=tuple(postavka(vnos) for vnos in _VSEBINA), uprava=uprava)
 
 
 def ime_druzine(ime: str) -> str:
