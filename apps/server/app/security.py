@@ -194,6 +194,11 @@ class SejaMiddleware:
     večje od `NAJVECJE_TELO_OBRAZCA`. Tam žeton preveri pot sama
     (`docs/odlocitve/ADR-043`); seja je obvezna enako kot povsod.
 
+    Druga izjema so `javne_datoteke` (V5-R01, `docs/odlocitve/ADR-060` A):
+    slog in pisave, ki jih potrebuje že prijavna stran. Ujamejo se **samo kot
+    točna pot in samo z varno metodo**; vse ostalo pod `/admin/static` ostane
+    za sejo.
+
     Danes je edina nevarna metoda pod `/admin` `POST`. Pravilo je kljub temu
     napisano kot „vse razen varnih": `V3-R06` bo dodajal akcije, in plast, ki
     bi naštevala metode, bi novo spustila brez žetona.
@@ -205,10 +210,18 @@ class SejaMiddleware:
         predpona: str = "/admin",
         izvzete_poti: frozenset[str] = frozenset(),
         poti_s_svojim_csrf: frozenset[str] = frozenset(),
+        javne_datoteke: frozenset[str] = frozenset(),
     ) -> None:
         self.app = app
         self.predpona = predpona
         self.izvzete_poti = izvzete_poti
+        #: Statične datoteke, ki seje ne zahtevajo (`ADR-060` A).
+        #:
+        #: Ločeno polje in ne `izvzete_poti`: tisto je namenjeno poti, na
+        #: kateri seja šele nastane, in izvzame **vsako** metodo. Tu gre za
+        #: datoteke brez podatkov družine, ki se samo berejo — `POST` nanje
+        #: ostane za sejo kot vsak drug.
+        self.javne_datoteke = javne_datoteke
         #: Poti, ki CSRF žeton preverijo **same** (`docs/odlocitve/ADR-043`).
         #:
         #: Ločeno polje in ne `izvzete_poti`: to drugo izvzame pot iz **cele**
@@ -225,6 +238,9 @@ class SejaMiddleware:
             await self.app(scope, receive, send)
             return
         if scope["path"] in self.izvzete_poti:
+            await self.app(scope, receive, send)
+            return
+        if scope["method"] in VARNE_METODE and scope["path"] in self.javne_datoteke:
             await self.app(scope, receive, send)
             return
 

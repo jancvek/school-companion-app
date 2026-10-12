@@ -146,3 +146,26 @@ Nobeden se ne izbriše, ne izključi in ne označi za `skip`.
   urnika, pravilo praznih dni v `app/urnik.py`), `V3-R11` (izbor tedna in
   dneva), `V2-R01` (seznam kvizov na svoji strani); `docs/01-arhitektura.md`
   ob zaključku.
+
+## Dopolnitve med izvedbo (12. 10. 2026)
+
+### A1 — javne datoteke imajo svoj nabor, ne `izvzete_poti`
+
+A pravi, da točne poti pridejo „v `izvzete_poti`". Izvedba jim da **svoje
+polje** plasti (`javne_datoteke`, v `main.py` `JAVNE_DATOTEKE`), iz dveh
+razlogov:
+
+- `izvzete_poti` izvzame **vsako metodo** — namenjen je prijavi, kjer mora
+  skozi tudi `POST`. Javna datoteka se samo bere, zato je izvzeta samo za
+  `GET` in `HEAD`.
+- `test_poti_brez_seje_ostane_samo_prijava` (V3-R08) trdi, da je prijava edina
+  pot brez seje. Tako ostane **nespremenjen in zelen**; nov nabor ima svoj
+  test. Vzorec je isti kot pri `poti_s_svojim_csrf` (`ADR-043`).
+
+Odločitev iz A se s tem ne spremeni: pet točnih poti, nič drugega.
+
+### B1 — tip vsebine pisave je vpisan izrecno
+
+Python 3.12 pripone `.woff2` ne pozna in slika `python:3.12-slim` nima
+`/etc/mime.types`, zato bi `StaticFiles` pisavo postregel kot `text/plain`.
+`main.py` zato vpiše `font/woff2` sam; test ga preverja pri vsaki pisavi.

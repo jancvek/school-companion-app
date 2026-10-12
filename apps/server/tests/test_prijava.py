@@ -277,6 +277,92 @@ class TestDosegljivost:
         assert odgovor.status_code == 401
 
 
+class TestJavneDatoteke:
+    """Slog in pisave so dosegljivi brez seje — in nič drugega (V5-R01).
+
+    Prijavna stran seje nima, zato sloga in pisave izza nje ne bi dobila
+    (`docs/odlocitve/ADR-060` A). Izjema je seznam **točnih poti**; ti testi
+    varujejo, da ostane tak.
+    """
+
+    #: Prepisano sem in ne prebrano iz `main`: test, ki bi bral isti nabor kot
+    #: koda, bi ostal zelen ob vsaki datoteki, dodani vanj.
+    PRICAKOVANE = frozenset(
+        {
+            "/admin/static/admin/slog.css",
+            "/admin/static/pisave/atkinson-hyperlegible-next/AtkinsonHyperlegibleNext-Regular.woff2",
+            "/admin/static/pisave/atkinson-hyperlegible-next/AtkinsonHyperlegibleNext-Medium.woff2",
+            "/admin/static/pisave/atkinson-hyperlegible-next/AtkinsonHyperlegibleNext-Bold.woff2",
+            "/admin/static/pisave/atkinson-hyperlegible-next/AtkinsonHyperlegibleNext-ExtraBold.woff2",
+        }
+    )
+
+    def test_nabor_je_natanko_slog_in_stiri_pisave(self) -> None:
+        assert main.JAVNE_DATOTEKE == self.PRICAKOVANE
+
+    @pytest.mark.parametrize("pot", sorted(PRICAKOVANE))
+    def test_datoteka_je_dosegljiva_brez_seje(self, brez_prijave: TestClient, pot: str) -> None:
+        odgovor = brez_prijave.get(pot, follow_redirects=False)
+
+        assert odgovor.status_code == 200
+        assert len(odgovor.content) > 0
+        pricakovan_tip = "text/css" if pot.endswith(".css") else "font/woff2"
+        assert odgovor.headers["content-type"].startswith(pricakovan_tip)
+
+    def test_pisave_so_res_woff2(self, brez_prijave: TestClient) -> None:
+        for pot in sorted(self.PRICAKOVANE):
+            if pot.endswith(".woff2"):
+                assert brez_prijave.get(pot).content[:4] == b"wOF2", pot
+
+    @pytest.mark.parametrize(
+        "pot",
+        [
+            # Vse ostalo pod `/admin/static` ostane za sejo (`ADR-054`, meja 2).
+            "/admin/static/vendor/katex-0.16.22/katex.min.js",
+            "/admin/static/pisave/atkinson-hyperlegible-next/OFL.txt",
+            # Sosed izvzete poti, ki ga ni: brez seje ne sme povedati niti tega.
+            "/admin/static/admin/drugo.css",
+            # Točna pot, ne predpona.
+            "/admin/static/admin/slog.css/",
+            "/admin/static/admin/slog.css.map",
+            "/admin/static/admin",
+            "/admin/static/pisave/atkinson-hyperlegible-next",
+            # Pot, ki se na izvzeto šele razreši.
+            "/admin/static/vendor/../admin/slog.css",
+            "/admin/static/admin/./slog.css",
+        ],
+    )
+    def test_vse_drugo_pod_static_ostane_za_sejo(self, brez_prijave: TestClient, pot: str) -> None:
+        # `httpx` bi pike v poti razrešil sam; zahteva gre zato z že kodirano
+        # potjo, da strežnik dobi natanko to, kar piše zgoraj.
+        kodirana = pot.replace("/../", "/%2e%2e/").replace("/./", "/%2e/")
+        odgovor = brez_prijave.get(kodirana, follow_redirects=False)
+
+        assert odgovor.status_code == 303, pot
+        assert odgovor.headers["location"].startswith(prijava.POT_PRIJAVE)
+
+    @pytest.mark.parametrize("metoda", ["POST", "PUT", "DELETE"])
+    def test_izvzeta_je_samo_varna_metoda(self, brez_prijave: TestClient, metoda: str) -> None:
+        odgovor = brez_prijave.request(
+            metoda, "/admin/static/admin/slog.css", follow_redirects=False
+        )
+
+        assert odgovor.status_code == 303
+
+    def test_poti_brez_seje_se_s_tem_niso_razsirile(self) -> None:
+        # Slog in pisave imajo svoj nabor; `POTI_BREZ_SEJE` izvzame vsako
+        # metodo in je namenjen samo prijavi.
+        assert main.JAVNE_DATOTEKE.isdisjoint(main.POTI_BREZ_SEJE)
+
+    def test_licenca_pisave_je_ob_pisavi(self) -> None:
+        mapa = main.MAPA_STATICNIH / "pisave" / "atkinson-hyperlegible-next"
+
+        assert "SIL Open Font License" in (mapa / "OFL.txt").read_text(encoding="utf-8")
+        assert sorted(pot.name for pot in mapa.glob("*.woff2")) == sorted(
+            pot.rsplit("/", 1)[1] for pot in self.PRICAKOVANE if pot.endswith(".woff2")
+        )
+
+
 class TestUspesnaPrijava:
     def test_prijava_postavi_sejo_in_piskotek_s_tremi_zastavicami(
         self, brez_prijave: TestClient, motor: Engine
