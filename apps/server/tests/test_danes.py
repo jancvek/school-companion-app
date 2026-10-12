@@ -365,9 +365,10 @@ class TestStran:
 
         assert masina == "Maša ✓ poslikano MAT 2 GEO 1"
         assert "3 slike" in dnevi
-        assert re.search(r"MAT — Matematika\s*<span>2 sliki</span>", dnevi)
-        assert re.search(r"GEO — Geografija\s*<span>1 slika</span>", dnevi)
-        assert "SLJ — " not in dnevi
+        # Od V5-R01 je koda čip, ime in število stojita ob njem.
+        assert re.search(r'>MAT</span>\s*Matematika\s*<span class="zamolklo">2 sliki</span>', dnevi)
+        assert re.search(r'>GEO</span>\s*Geografija\s*<span class="zamolklo">1 slika</span>', dnevi)
+        assert ">SLJ</span>" not in dnevi
 
     @pytest.mark.parametrize(
         ("dan_strani", "pricakovano"),

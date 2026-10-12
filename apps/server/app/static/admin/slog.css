@@ -711,6 +711,98 @@ a.nevarno { color: var(--nevarno); }
   .potrditev { padding: 1.25rem; margin: 0 0 1rem; }
 }
 
+/* ---------- Po dnevih ---------- */
+.orodja.na-levo { justify-content: flex-start; }
+.pod-orodji { margin: 0 0 1.25rem; }
+.dan-kartica { margin-bottom: 1rem; }
+.dan-kartica-glava { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 0.9rem; padding: 0.8rem 1.25rem; border-bottom: 1px solid var(--rob); }
+.dan-kartica-glava h2 { margin: 0; font-size: 1.1rem; }
+.dan-kartica.danasnja { border-color: color-mix(in srgb, var(--poudarek) 55%, var(--rob)); }
+.dan-kartica.danasnja .dan-kartica-glava { background: color-mix(in srgb, var(--poudarek-mehko) 55%, var(--ploskev)); }
+.manjki { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin: 0 0 0 auto; color: var(--nevarno); font-size: 0.875rem; font-weight: 700; }
+.manjki .cip.crtkan { color: var(--nevarno); }
+.dan-predmeti { display: flex; flex-wrap: wrap; gap: 1rem 2rem; padding: 1rem 1.25rem 1.1rem; }
+.dan-predmet h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.45rem; margin: 0 0 0.6rem; font-size: 1rem; }
+.dan-predmet h3 .zamolklo { font-weight: 400; font-size: 0.85rem; }
+.slicice.v-vrsti { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0; }
+.slicice.v-vrsti li { width: 5.25rem; }
+.dan-prazen {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 1rem; margin: 0 0 1rem; padding: 0.6rem 1.25rem;
+  border: 1px dashed var(--rob); border-radius: var(--kartica); color: var(--zamolklo);
+}
+.dan-prazen h2 { margin: 0; font-size: 1rem; }
+.dan-prazen p { margin: 0; font-size: 0.9rem; }
+@media (max-width: 860px) {
+  .manjki { margin-left: 0; flex-basis: 100%; }
+  .dan-predmeti { display: block; }
+  .dan-predmet + .dan-predmet { margin-top: 1rem; }
+}
+
+/* ---------- Nov kviz: izbor snovi in predogled ---------- */
+.koraki { list-style: none; display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; margin: 0 0 1.25rem; padding: 0; color: var(--zamolklo); font-weight: 500; }
+.koraki li { display: flex; align-items: center; gap: 0.5rem; }
+.koraki [aria-current] { color: var(--besedilo); font-weight: 700; }
+.korak-st {
+  display: inline-flex; align-items: center; justify-content: center; width: 1.7rem; height: 1.7rem; border-radius: 50%;
+  border: 1px solid var(--rob); background: var(--ploskev); font-size: 0.85rem; font-weight: 700;
+}
+.koraki [aria-current] .korak-st { background: var(--poudarek); border-color: var(--poudarek); color: var(--na-poudarku); }
+.koraki .opravljen .korak-st { background: var(--poudarek-mehko); border-color: transparent; color: var(--poudarek); }
+.nastavitve-kviza { display: flex; flex-wrap: wrap; gap: 0.5rem 2.5rem; }
+.nastavitve-kviza .polje { margin: 0; align-items: flex-start; }
+.oznaka-polja { font-weight: 700; font-size: 0.9rem; }
+.povezave-izbora.na-desno { justify-content: flex-end; margin-bottom: 0.25rem; }
+.naslov-tedna { margin: 1rem 0 0.4rem; font-size: 0.95rem; color: var(--zamolklo); }
+.izbirnik { list-style: none; margin: 0 0 1rem; padding: 0; }
+.izbirnik li { border-top: 1px solid var(--rob); }
+.izbirnik li:first-child { border-top: 0; }
+.izbirnik label { display: flex; align-items: center; gap: 1rem; padding: 0.6rem 1.1rem; cursor: pointer; font-weight: 400; font-size: 1rem; }
+/* Izbrana vrstica je rahlo obarvana; brez :has() ostane neobarvana. */
+.izbirnik li:has(input:checked) { background: color-mix(in srgb, var(--poudarek-mehko) 55%, var(--ploskev)); }
+/* Neizbirna snov ostane vidna, a zamolkla: je podatek, ne ponudba. */
+.izbirnik .neizbirna label { cursor: default; }
+.izbirnik .neizbirna .cas { color: var(--zamolklo); }
+.izbirnik .neizbirna img { opacity: 0.6; }
+.izbirnik img, .izbirnik .brez-slike {
+  flex: none; width: 3.25rem; height: 4.25rem; object-fit: cover; border: 1px solid var(--rob); border-radius: 4px; background: var(--ploskev-2);
+}
+.izbirnik .brez-slike { display: flex; align-items: center; justify-content: center; color: var(--zamolklo); font-size: 0.6rem; text-align: center; }
+/* Prazen prostor namesto kljukice, da so vrstice poravnane. */
+.izbirnik .brez-kljukice { width: 1.15rem; flex: none; }
+.izbirnik .opis { display: grid; gap: 0.1rem; }
+.izbirnik .cas { font-weight: 700; }
+.izbirnik .stanje { color: var(--zamolklo); font-size: 0.875rem; }
+.izbirnik .razlog { color: var(--opozorilo); font-weight: 500; }
+.predogled { display: grid; gap: 1.5rem; grid-template-columns: minmax(0, 1fr) 19rem; align-items: start; }
+.snov-kviza { margin-bottom: 1rem; }
+.snov-kviza-glava { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 0.75rem; padding: 0.75rem 1.25rem; border-bottom: 1px solid var(--rob); }
+.snov-kviza-glava h2 { margin: 0; font-size: 1.05rem; }
+.snov-kviza-glava .izberi { margin-left: auto; }
+.snov-kviza .vprasanja { padding: 0.6rem 1.25rem 0.4rem; }
+.objava { position: sticky; top: 1.5rem; display: grid; gap: 0.9rem; }
+.objava h2, .objava form { margin: 0; }
+.objava .polje input { width: 100%; }
+.gumb.sirok { width: 100%; }
+
+/* ---------- Kviz in rezultat ---------- */
+.legenda-ocen { list-style: none; display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; margin: 0.6rem 0; padding: 0; font-size: 0.875rem; color: var(--zamolklo); }
+.legenda-ocen li { display: inline-flex; align-items: center; gap: 0.4rem; }
+.pika { width: 0.7rem; height: 0.7rem; border-radius: 3px; background: var(--rob); }
+.rezultat .kartica-glava h2 { font-size: 1.1rem; }
+/* Skupina po oceni: barvni levi rob v barvi ocene. */
+.skupina { border-left-width: 4px; margin-bottom: 1rem; }
+.skupina h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
+.skupina.ocena-0 { border-left-color: var(--ocena-0); }
+.skupina.ocena-1 { border-left-color: var(--ocena-1); }
+.skupina.ocena-2 { border-left-color: var(--ocena-2); }
+.skupina.ocena-3 { border-left-color: var(--ocena-3); }
+.vprasanja .drobno { margin: 0.15rem 0 0; }
+@media (max-width: 860px) {
+  .predogled { grid-template-columns: minmax(0, 1fr); }
+  .objava { position: static; }
+  .izbirnik label { padding: 0.6rem 0.75rem; gap: 0.75rem; }
+}
+
 /* ---------- Strani pred prenovo ----------
    Razredi starih predlog. Vsak korak prenove jih nekaj odvzame; kar ostane
    po zadnjem, se izbrise. */
@@ -746,24 +838,8 @@ a.nevarno { color: var(--nevarno); }
 .napaka { padding: 1rem; border: 1px solid var(--nevarno); border-radius: var(--kartica); background: var(--nevarno-mehko); color: var(--nevarno); }
 .vstopi { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-bottom: 0.5rem; }
 .vstopi form { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin: 0; }
-.izbirnik { list-style: none; margin: 1rem 0 1.5rem; padding: 0; }
-.izbirnik li { border-bottom: 1px solid var(--rob); }
-.izbirnik label { display: flex; align-items: center; gap: 0.9rem; padding: 0.6rem 0.25rem; cursor: pointer; font-weight: 400; }
-.izbirnik .neizbirna label { cursor: default; opacity: 0.65; }
-.izbirnik img { width: 96px; height: 64px; object-fit: cover; border-radius: 4px; background: #000; flex: none; }
-.izbirnik .brez-slike { width: 96px; height: 64px; border-radius: 4px; flex: none; display: flex; align-items: center; justify-content: center; background: var(--ozadje); color: var(--zamolklo); font-size: 0.7rem; text-align: center; }
-.izbirnik .brez-kljukice { width: 13px; flex: none; }
-.izbirnik .opis { font-size: 0.9rem; }
-.izbirnik .razlog { font-style: italic; }
-.skupina { margin-top: 2rem; }
-.skupina h2 { font-size: 1.1rem; margin: 0 0 0.75rem; }
-.skupina h3 { font-size: 0.95rem; margin: 1.2rem 0 0.5rem; }
-.skupina h3 span { color: var(--zamolklo); font-weight: 400; font-size: 0.85rem; }
-.skupina .drobno { margin: 0 0 0.75rem; }
-.skupina .mreza { margin-bottom: 1rem; }
 .izbira-let { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 0 0 1rem; }
 .zaporedje span { white-space: nowrap; }
-.manjki { color: var(--nevarno); font-size: 0.85rem; margin: 0 0 0.75rem; }
 
 /* Povecan prikaz slike (V2-R08). Prikaz je v izrisu skrit z atributom
    hidden; display: grid bi ga prevladal, zato ga to pravilo vrne. */

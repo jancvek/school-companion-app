@@ -12,7 +12,7 @@ strani (CSRF). Novih posledic ni: preklic kviza ničesar ne uniči, objava pa
 ustvari zapis, ki ga je mogoče preklicati.
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,12 +28,15 @@ from app.besedilo import SNOVI, VPRASANJA, stevilo_z_besedo
 from app.casi import (
     cas,
     cas_ali_prazno,
+    dan_in_ura,
     dan_od_do,
+    danes,
     datum,
     kratek_datum,
     mesec,
     oznaka_meseca,
     trajanje,
+    v_domacem,
 )
 from app.db import (
     ClanDruzine,
@@ -70,6 +73,7 @@ from app.subjects import (
     barva_predmeta,
     oznaka_predmeta,
 )
+from app.tedni import oznaka_tedna, ponedeljek_tedna
 
 #: Predpona poti sestavljalnika. Pod `/admin`, torej brez ključa (`ADR-006`).
 PREDPONA = "/admin/quizzes"
@@ -149,6 +153,10 @@ def _ime_otroka(otroci: list[ClanDruzine], user_id: str) -> str | None:
 
 #: Naslov izbirnika za vsak vstop. Operater mora na strani videti, od kod je
 #: prišel — vsi trije vstopi so sicer videti enako.
+#: Vrednosti parametra `?izbor=` na izbirniku (V5-R01).
+IZBOR_VSE = "vse"
+IZBOR_NIC = "nic"
+
 NASLOVI = {
     VSTOP_NOVA: "Nova snov",
     VSTOP_DANES: "Kaj smo se danes učili",
@@ -260,7 +268,14 @@ def _vrstica(
     return {
         "id": snov.material.id,
         "koda": snov.material.subject,
+        "barva": barva_predmeta(snov.material.subject),
         "cas": cas(snov.material.taken_at),
+        # Vrstica seznama po tednih (V5-R01): dan z imenom in ura.
+        "dan_in_ura": dan_in_ura(snov.material.taken_at),
+        "ponedeljek": ponedeljek_tedna(v_domacem(snov.material.taken_at).date()),
+        # Izbirna snov, ki je že bila v kvizu za tega otroka, to pove —
+        # sicer ni videti, zakaj je „Nova snov" ni obkljukala.
+        "ze_v_kvizu": snov.ze_v_kvizu,
         "vprasanj": stevilo_z_besedo(snov.veljavnih_vprasanj, VPRASANJA),
         "izbirna": snov.izbirna,
         "razlog": _razlog(snov),
@@ -404,8 +419,12 @@ def _izrisi_izbirnik(
     imena_otrok: dict[str, str],
     izbrane: set[str] | None = None,
     sporocilo: str | None = None,
+    obkljukaj: str | None = None,
 ) -> Response:
     """Izriše izbirnik. Ena pot za vse tri vstope in za vrnitev iz predogleda.
+
+    `obkljukaj` (`IZBOR_VSE` ali `IZBOR_NIC`) preglasi pravilo vstopa: starš je
+    kliknil „Izberi vse" oziroma „Počisti izbor" (V5-R01).
 
     `izbrane` je `None` ob prvem prihodu (obkljuka pravilo vstopa) in množica
     identifikatorjev ob vrnitvi iz predogleda — takrat velja, kar je operater
@@ -425,7 +444,9 @@ def _izrisi_izbirnik(
         _vrstica(
             snov,
             obkljukana=(
-                _je_obkljukana(vstop, snov)
+                obkljukaj == IZBOR_VSE
+                if obkljukaj is not None
+                else _je_obkljukana(vstop, snov)
                 if izbrane is None
                 else snov.material.id in izbrane
             ),
@@ -435,10 +456,52 @@ def _izrisi_izbirnik(
         for snov in snovi
     ]
 
+    # Seznam po tednih (V5-R01): vrstni red ostane od najnovejše navzdol,
+    # nova skupina je vsaka menjava tedna.
+    danasnji = danes()
+    tedni: list[dict[str, Any]] = []
+    for vrstica in vrstice:
+        oznaka = oznaka_tedna(vrstica["ponedeljek"], danasnji)
+        if not tedni or tedni[-1]["oznaka"] != oznaka:
+            tedni.append({"oznaka": oznaka, "snovi": []})
+        tedni[-1]["snovi"].append(vrstica)
+
+    # Naslov iste strani z drugim otrokom ali drugim izborom: vse, kar ni
+    # predmet menjave, potuje naprej.
+    def naslov_izbirnika(**spremembe: str) -> str:
+        polja = {
+            "vstop": vstop,
+            **({"subject": subject} if subject else {}),
+            "stevilo": str(stevilo),
+            "otrok": naslovljenec.izbrani.user_id,
+            **spremembe,
+        }
+        return f"{PREDPONA}/new?" + "&".join(
+            f"{kljuc}={quote(vrednost, safe='')}" for kljuc, vrednost in polja.items()
+        )
+
     return predloge.TemplateResponse(
         request,
         "kvizi-izbirnik.html",
         {
+            "tedni": tedni,
+            "barva": barva_predmeta(subject) if subject else None,
+            # „Izberi vse / Počisti izbor" sta povezavi na isto stran, kot
+            # `?vse=1` na strani predmeta (`ADR-048` G) — brez skripte.
+            "href_izberi_vse": naslov_izbirnika(izbor=IZBOR_VSE),
+            "href_pocisti": naslov_izbirnika(izbor=IZBOR_NIC),
+            # Zavihki „Kviz za": menjava otroka gre skozi `GET`, ker se morajo
+            # kljukice preračunati po pravilu vstopa (`ADR-039` G).
+            "zavihki_otrok": [
+                {
+                    "oznaka": kdo.display_name,
+                    "href": naslov_izbirnika(otrok=kdo.user_id),
+                    "izbran": kdo.user_id == naslovljenec.izbrani.user_id,
+                }
+                for kdo in naslovljenec.vsi
+            ]
+            if naslovljenec.je_izbirnik
+            else [],
             "vstop": vstop,
             "naslov": NASLOVI[vstop],
             "subject": subject,
@@ -492,8 +555,12 @@ def izbirnik(
     subject: str | None = None,
     stevilo: str = str(PRIVZETO_STEVILO),
     otrok: str | None = None,
+    izbor: str | None = None,
 ) -> Response:
     """Izbirnik slik ob prihodu z enega od treh vstopov.
+
+    `?izbor=vse` obkljuka vso izbirno snov in `?izbor=nic` nobene (V5-R01);
+    brez parametra ali z drugo vrednostjo velja pravilo vstopa.
 
     Registriran je **pred** `/{quiz_id}`: FastAPI ujema po vrstnem redu in
     obratni vrstni red bi „new" prebral kot identifikator kviza.
@@ -517,6 +584,7 @@ def izbirnik(
         stevilo=_prebrano_stevilo(stevilo),
         naslovljenec=naslovljenec,
         imena_otrok=_imena(otroci),
+        obkljukaj=izbor if izbor in (IZBOR_VSE, IZBOR_NIC) else None,
     )
 
 
@@ -651,7 +719,7 @@ def predogled(
             # v gumbih ga ni več, ker objava privzetka nima (`ADR-039` F3).
             "naslovljenec": naslovljenec.izbrani.user_id,
             "naslovljenec_ime": naslovljenec.ime_za_prikaz,
-            "skupine": [_skupina_pogled(skupina) for skupina in skupine],
+            "skupine": _skupine_predogleda(skupine),
             "vprasanja_idji": [
                 vprasanje.id for skupina in skupine for vprasanje in skupina.vprasanja
             ],
@@ -674,17 +742,35 @@ def predogled(
     )
 
 
-def _skupina_pogled(skupina: SnovSVprasanji) -> dict[str, Any]:
-    """Ena snov s svojimi vprašanji, pripravljena za predogled."""
+def _skupina_pogled(skupina: SnovSVprasanji, prva_stevilka: int = 1) -> dict[str, Any]:
+    """Ena snov s svojimi vprašanji, pripravljena za predogled.
+
+    `prva_stevilka` je številka prvega vprašanja te snovi **v kvizu**: predogled
+    šteje zvezno čez vse snovi (V5-R01), ker je to številka, pod katero bo
+    vprašanje otrok videl na telefonu.
+    """
     return {
         "id": skupina.material.id,
         "koda": skupina.material.subject,
+        "barva": barva_predmeta(skupina.material.subject),
         "cas": cas(skupina.material.taken_at),
+        "dan_in_ura": dan_in_ura(skupina.material.taken_at),
+        "vprasanj_opis": stevilo_z_besedo(len(skupina.vprasanja), VPRASANJA),
         "vprasanja": [
-            {"vprasanje": vprasanje.question, "odgovor": vprasanje.answer}
-            for vprasanje in skupina.vprasanja
+            {"stevilka": stevilka, "vprasanje": vprasanje.question, "odgovor": vprasanje.answer}
+            for stevilka, vprasanje in enumerate(skupina.vprasanja, start=prva_stevilka)
         ],
     }
+
+
+def _skupine_predogleda(skupine: Sequence[SnovSVprasanji]) -> list[dict[str, Any]]:
+    """Snovi predogleda z zvezno številko vprašanja čez cel kviz."""
+    pogledi: list[dict[str, Any]] = []
+    naslednja = 1
+    for skupina in skupine:
+        pogledi.append(_skupina_pogled(skupina, naslednja))
+        naslednja += len(skupina.vprasanja)
+    return pogledi
 
 
 @router.post("")
@@ -1088,17 +1174,27 @@ def _rezultat(
     snovi: dict[str, Material],
     mapa_slik: Path,
 ) -> list[dict[str, Any]]:
-    """Skupine rezultata za predlogo, vsaka z oznako in sklanjanim številom."""
+    """Skupine rezultata za predlogo, vsaka z oznako in sklanjanim številom.
+
+    `mesto` (0 do 3, po `OCENE` od najtežje navzdol) da skupini barvo ocene;
+    skupina „brez ocene" ga nima. `delez` je širina skupine v pasu
+    razporeditve, v odstotkih vseh postavk (V5-R01).
+    """
+    skupine = _skupine(kviz.postavke, poskusi)
+    vseh = sum(len(clani) for _, clani in skupine) or 1
     return [
         {
             "oznaka": OZNAKE_OCEN[ocena] if ocena is not None else BREZ_OCENE,
+            "mesto": OCENE.index(ocena) if ocena is not None else None,
+            "stevilo": len(clani),
+            "delez": round(100 * len(clani) / vseh, 2),
             "stevilo_opis": stevilo_z_besedo(len(clani), VPRASANJA),
             "postavke": [
                 _postavka_rezultata(postavka, poskus, snovi, mapa_slik)
                 for postavka, poskus in clani
             ],
         }
-        for ocena, clani in _skupine(kviz.postavke, poskusi)
+        for ocena, clani in skupine
     ]
 
 

@@ -102,6 +102,17 @@ def cas_z_imenom_dneva(trenutek: datetime) -> str:
     return f"{dan[0].upper()}{dan[1:]} ob {lokalni:%H:%M}"
 
 
+def dan_in_ura(trenutek: datetime) -> str:
+    """Trenutek za vrstico seznama (`Četrtek, 8. 10. ob 10:41`).
+
+    Kratek datum in ime dneva: v seznamu po tednih (V5-R01) je dan tisto, po
+    čemer starš sliko prepozna, leto pa nosi okolica.
+    """
+    lokalni = v_domacem(trenutek)
+    ime = IMENA_DNI[lokalni.weekday()]
+    return f"{ime[0].upper()}{ime[1:]}, {lokalni.day}. {lokalni.month}. ob {lokalni:%H:%M}"
+
+
 def dan_z_imenom(dan: date) -> str:
     """Koledarski dan z imenom dneva in meseca (`četrtek, 8. oktober`).
 

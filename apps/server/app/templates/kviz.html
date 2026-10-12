@@ -2,47 +2,104 @@
 
 {% block naslov %}{{ kviz.ime }}{% endblock %}
 
+{# Izvor ene postavke: povezava na snov, kadar ta še obstaja. Deli si ga
+   seznam nerešenega kviza in rezultat; opombe (`postavka.opombe`) ima samo
+   rezultat, zato se stran nerešenega kviza ob arhiviranju ali ponovni
+   obdelavi snovi ne spremeni (`docs/plan/V2-R03.md`, odločitev 3). #}
+{% macro izvor(postavka, z_opombami) %}
+  {% if postavka.snov_id %}
+    <a href="/admin/materials/{{ postavka.snov_id }}">{{ postavka.izvor }}{% if z_opombami %} — slika in prepis{% endif %}</a>
+    {%- if z_opombami %}{% for opomba in postavka.opombe %} · {{ opomba }}{% endfor %}{% endif %}
+  {% elif postavka.izvor %}
+    {# Snov je bila dokončno izbrisana. Vprašanje jo je preživelo in še vedno
+       pove, iz česa je (`ADR-012`); povezave ni kam dati. #}
+    {{ postavka.izvor }} — izvorne slike ni več na strežniku
+  {% else %}
+    izvor ni znan
+  {% endif %}
+{% endmacro %}
+
 {% block vsebina %}
-  <h1>{{ kviz.ime }}</h1>
-  <p class="pod">
-    {# Naslovljenec je od V3-R07 del identitete kviza in ne okras: „kviz" brez
-       njega v družini z več otroki ne pomeni nič. Izbirnika tu ni — kviz ima
-       natanko enega (`docs/odlocitve/ADR-039` F). #}
-    {%- if otrok_ime %}{{ otrok_ime }} · {% endif -%}
-    {{ kviz.koda }} · {{ kviz.vprasanj_opis }} · objavljen {{ kviz.nastal }}
-  </p>
+  <ol class="drobtine">
+    <li><a href="/admin/quizzes">Kvizi</a></li>
+    <li aria-current="page">{{ kviz.ime }}</li>
+  </ol>
+
+  <div class="glava-strani">
+    <div>
+      <h1>{{ kviz.ime }}</h1>
+      <p class="pod">
+        {# Naslovljenec je od V3-R07 del identitete kviza in ne okras: „kviz"
+           brez njega v družini z več otroki ne pomeni nič. Izbirnika tu ni —
+           kviz ima natanko enega (`docs/odlocitve/ADR-039` F). #}
+        {%- if otrok_ime %}{{ otrok_ime }} · {% endif -%}
+        {{ kviz.koda }} · {{ kviz.vprasanj_opis }} · objavljen {{ kviz.nastal }}
+      </p>
+    </div>
+    <p class="oznake">
+      {# Preklic ima prednost pred rešenostjo (`ADR-019` C). #}
+      {% if kviz.stanje == "preklicani" %}
+        <span class="oznaka precrtana">preklican</span>
+      {% elif kviz.stanje == "reseni" %}
+        <span class="oznaka ok">rešen</span>
+      {% else %}
+        <span class="oznaka caka">objavljen</span>
+      {% endif %}
+    </p>
+  </div>
 
   {% if kviz.preklican %}
-    <p class="opozorilo">
-      <strong>Kviz je preklican {{ kviz.preklican_ob }}.</strong>
-      Nič ni izbrisano — vprašanja in odgovori spodaj ostajajo. Snov tega kviza
-      se v „Novi snovi" spet ponudi.
-    </p>
+    <div class="obvestilo tiho">
+      <p>
+        <strong>Kviz je preklican {{ kviz.preklican_ob }}.</strong>
+        Nič ni izbrisano — vprašanja in odgovori spodaj ostajajo. Snov tega kviza
+        se v „Novi snovi" spet ponudi.
+      </p>
+    </div>
   {# Preklic ima prednost pred rešenostjo (`ADR-019` C): preklican kviz, ki
      ga je telefon medtem dokončal, je še vedno preklican. #}
-  {% elif kviz.resen %}
-    <p class="pod">
-      <strong>Kviz je rešen {{ kviz.resen_ob }}.</strong>
-      Vsa vprašanja so ocenjena.
-    </p>
+  {% elif not kviz.resen %}
+    <div class="obvestilo tiho">
+      <p>Kviz čaka na reševanje na telefonu. Rezultat se pokaže tu, ko so ocenjena vsa vprašanja.</p>
+    </div>
   {% endif %}
 
   {% if rezultat %}
     {# Rezultat ima samo rešen kviz (V2-R03), tudi preklican: preklic ima
        prednost pri stanju zgoraj, poskusi pa so dejstvo in se pokažejo
        (`docs/plan/V2-R03.md`, odločitev 1). #}
-    <p class="drobno">
-      {# Ime stoji v glavi te strani in ne v tej povedi: za predlogom bi
-         slovenščina zahtevala sklanjanje poljubnega imena (`ADR-039` F3). #}
-      Ocene so samoocena po razkritju odgovora, ne preverjeno znanje.
-      Najtežja vprašanja so zgoraj.
-    </p>
-    <p>
-      <a href="/admin/quizzes/{{ kviz.id }}/print">Natisni izbrana vprašanja s ključem</a>
-    </p>
+    <section class="kartica rezultat">
+      <div class="kartica-glava">
+        {# Preklican kviz, ki ga je telefon vseeno dokončal, rezultat ima,
+           stanja „rešen" pa ne (`ADR-019` C). #}
+        {% if kviz.preklican %}
+          <h2>Rezultat</h2>
+        {% else %}
+          <h2><strong>Kviz je rešen {{ kviz.resen_ob }}.</strong></h2>
+        {% endif %}
+        <a class="gumb majhen" href="/admin/quizzes/{{ kviz.id }}/print">Natisni izbrana vprašanja s ključem</a>
+      </div>
+      {# Pas razporeditve je slika (širina v odstotkih, brez skripte); števila
+         v legendi pod njim so podatek. #}
+      <div class="razporeditev sirok" aria-hidden="true">
+        {% for skupina in rezultat %}{% if skupina.mesto is not none and skupina.stevilo %}<span class="pas-{{ skupina.mesto }}" style="width: {{ skupina.delez }}%"></span>{% endif %}{% endfor %}
+      </div>
+      <ul class="legenda-ocen">
+        {% for skupina in rezultat %}
+          <li><span class="pika{% if skupina.mesto is not none %} pas-{{ skupina.mesto }}{% endif %}" aria-hidden="true"></span>{{ skupina.oznaka }} {{ skupina.stevilo }}</li>
+        {% endfor %}
+      </ul>
+      <p class="drobno">
+        {# Ime stoji v glavi te strani in ne v tej povedi: za predlogom bi
+           slovenščina zahtevala sklanjanje poljubnega imena (`ADR-039` F3). #}
+        {% if not kviz.preklican %}Vsa vprašanja so ocenjena.{% endif %}
+        Ocene so samoocena po razkritju odgovora, ne preverjeno znanje.
+        Najtežja vprašanja so zgoraj.
+      </p>
+    </section>
 
     {% for skupina in rezultat %}
-      <section class="skupina">
+      <section class="skupina kartica{% if skupina.mesto is not none %} ocena-{{ skupina.mesto }}{% endif %}">
         <h2>{{ skupina.oznaka }} · {{ skupina.stevilo_opis }}</h2>
         {% if skupina.postavke %}
           <ol class="vprasanja">
@@ -57,16 +114,7 @@
                     razmislek {{ postavka.razmislek }} · ocena {{ postavka.cas_ocene }}
                   </p>
                 {% endif %}
-                <p class="drobno">
-                  {% if postavka.snov_id %}
-                    <a href="/admin/materials/{{ postavka.snov_id }}">{{ postavka.izvor }} — slika in prepis</a>
-                    {% for opomba in postavka.opombe %} · {{ opomba }}{% endfor %}
-                  {% elif postavka.izvor %}
-                    {{ postavka.izvor }} — izvorne slike ni več na strežniku
-                  {% else %}
-                    izvor ni znan
-                  {% endif %}
-                </p>
+                <p class="drobno">{{ izvor(postavka, true) }}</p>
               </li>
             {% endfor %}
           </ol>
@@ -74,6 +122,7 @@
       </section>
     {% endfor %}
   {% else %}
+  <section class="kartica">
   <ol class="vprasanja">
     {% for postavka in postavke %}
       <li>
@@ -82,35 +131,31 @@
            snovi tega ne spremeni. #}
         <p class="vprasanje">{{ postavka.vprasanje }}</p>
         <p class="odgovor">{{ postavka.odgovor }}</p>
-        <p class="drobno">
-          {% if postavka.snov_id %}
-            <a href="/admin/materials/{{ postavka.snov_id }}">{{ postavka.izvor }}</a>
-          {% elif postavka.izvor %}
-            {# Snov je bila dokončno izbrisana. Vprašanje jo je preživelo in
-               še vedno pove, iz česa je (`ADR-012`); povezave ni kam dati. #}
-            {{ postavka.izvor }} — izvorne slike ni več na strežniku
-          {% else %}
-            izvor ni znan
-          {% endif %}
-        </p>
+        <p class="drobno">{{ izvor(postavka, false) }}</p>
       </li>
     {% endfor %}
   </ol>
+  </section>
   {% endif %}
 
   {% if not kviz.preklican %}
     {# `POST` in ne povezava, kot pri vsakem dejanju, ki spremeni stanje.
        Vmesne potrditvene strani ni: preklic ničesar ne uniči, za razliko od
        brisanja (`ADR-016` F). #}
-    <form method="post" action="/admin/quizzes/{{ kviz.id }}/cancel">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <button class="gumb" type="submit">Prekliči kviz</button>
-    </form>
-    <p class="drobno">
-      Kviz se umakne iz uporabe, a se ne izbriše. Njegova snov se v „Novi
-      snovi" spet ponudi.
-    </p>
+    <section class="kartica upravljanje">
+      <div class="dejanje">
+        <div>
+          <h3>Prekliči kviz</h3>
+          <p class="drobno">
+            Kviz se umakne iz uporabe, a se ne izbriše. Njegova snov se v „Novi
+            snovi" spet ponudi.
+          </p>
+        </div>
+        <form method="post" action="/admin/quizzes/{{ kviz.id }}/cancel">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="gumb majhen nevaren" type="submit">Prekliči kviz</button>
+        </form>
+      </div>
+    </section>
   {% endif %}
-
-  <a class="nazaj" href="/admin">← Nazaj na pregled</a>
 {% endblock %}

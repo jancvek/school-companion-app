@@ -3,6 +3,11 @@
 {% block naslov %}{{ naslov }}{% endblock %}
 
 {% block vsebina %}
+  <ol class="drobtine">
+    <li><a href="/admin/quizzes">Kvizi</a></li>
+    <li aria-current="page">Nov kviz</li>
+  </ol>
+
   <h1>{{ naslov }}</h1>
   <p class="pod">
     {% if cez_vse_predmete %}
@@ -12,37 +17,20 @@
     {% endif %}
   </p>
 
+  {# Dva koraka: izbor in predogled z objavo. Predogled ničesar ne shrani
+     (`docs/odlocitve/ADR-016` C). #}
+  <ol class="koraki" aria-label="Koraki">
+    <li aria-current="step"><span class="korak-st">1</span> Izberi snov</li>
+    <li><span class="korak-st">2</span> Preglej in objavi</li>
+  </ol>
+
   {# Sporočilo se pokaže samo ob vrnitvi s praznim izborom. Prazen izbor ni
-     napaka strežnika, zato ne `napaka`, ampak `opozorilo`. #}
+     napaka strežnika, zato opozorilo in ne napaka. #}
   {% if sporocilo %}
-    <p class="opozorilo">{{ sporocilo }}</p>
+    <p class="obvestilo caka"><span>{{ sporocilo }}</span></p>
   {% endif %}
 
-  {# Naslovljenec stoji **nad** seznamom, ker odloča, katera snov velja za
-     „že v kvizu" (`docs/odlocitve/ADR-039` G). Svoj obrazec `GET` in ne polje
-     v spodnjem: menjava otroka mora kljukice preračunati po pravilu vstopa,
-     kar zna samo ponoven prihod na stran. Zato se izbere najprej, pred
-     odkljukavanjem. Pri enem otroku se ne izriše — izbirati ni česa. #}
-  {% if je_izbirnik_otrok %}
-    <form method="get" action="/admin/quizzes/new" class="izbira-otroka">
-      <input type="hidden" name="vstop" value="{{ vstop }}">
-      {% if subject %}<input type="hidden" name="subject" value="{{ subject }}">{% endif %}
-      <input type="hidden" name="stevilo" value="{{ stevilo }}">
-      <label>
-        Kviz za:
-        <select name="otrok">
-          {% for otrok in otroci %}
-            <option value="{{ otrok.id }}"
-                    {% if otrok.id == naslovljenec %}selected{% endif %}>{{ otrok.ime }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <button class="gumb" type="submit">Pokaži</button>
-      <span class="drobno">Menjava otroka ponastavi kljukice.</span>
-    </form>
-  {% endif %}
-
-  {% if snovi %}
+  {% if tedni %}
     {# En sam obrazec za oboje: „Sestavi" pelje v predogled, „Nazaj na izbor"
        iz predogleda pripelje sem in obkljuka isto. Brez JavaScripta je to
        navaden `POST` s ponovljenim poljem `snov`. #}
@@ -54,72 +42,107 @@
          ves ostali izbor: predogled ničesar ne shrani (`ADR-016` C). #}
       <input type="hidden" name="otrok" value="{{ naslovljenec }}">
 
-      <p class="drobno">
-        <label>
-          Vprašanj na sliko:
-          <input type="number" name="stevilo" value="{{ stevilo }}"
+      <section class="kartica nastavitve-kviza">
+        {# Naslovljenec stoji **nad** seznamom, ker odloča, katera snov velja
+           za „že v kvizu" (`docs/odlocitve/ADR-039` G). Zavihka sta povezavi
+           `GET` in ne polje tega obrazca: menjava otroka mora kljukice
+           preračunati po pravilu vstopa, kar zna samo ponoven prihod na
+           stran. Pri enem otroku se ne izriše — izbirati ni česa. #}
+        {% if zavihki_otrok %}
+          <div class="polje">
+            <span class="oznaka-polja">Kviz za</span>
+            <ul class="zavihki" aria-label="Kviz za">
+              {% for zavihek in zavihki_otrok %}
+                <li>
+                  <a href="{{ zavihek.href }}"{% if zavihek.izbran %} aria-current="true"{% endif %}>{{ zavihek.oznaka }}</a>
+                </li>
+              {% endfor %}
+            </ul>
+            <span class="drobno">Menjava otroka ponastavi kljukice.</span>
+          </div>
+        {% endif %}
+        <div class="polje">
+          <label for="stevilo-vprasanj">Vprašanj na sliko</label>
+          <input type="number" id="stevilo-vprasanj" name="stevilo" value="{{ stevilo }}"
                  min="{{ najmanj }}" max="{{ najvec }}" class="stevilka">
-        </label>
-        Vzame se prvih toliko vprašanj; če jih je manj, se vzame, kar je.
-      </p>
-
-      <ul class="izbirnik">
-        {% for snov in snovi %}
-          {# Neizbirna snov ostane v seznamu, le brez kljukice in z razlogom.
-             Molčeč izpust bi pomenil kviz iz polovice dneva brez sledi, da
-             manjka pol (`docs/odlocitve/ADR-016` G). #}
-          <li class="{{ '' if snov.izbirna else 'neizbirna' }}">
-            <label>
-              {% if snov.izbirna %}
-                <input type="checkbox" name="snov" value="{{ snov.id }}"
-                       {% if snov.obkljukana %}checked{% endif %}>
-              {% else %}
-                <span class="brez-kljukice" aria-hidden="true"></span>
-              {% endif %}
-
-              {% if snov.ima_sliko %}
-                {# Isti `loading="lazy"` kot na strani predmeta: brez njega bi
-                   seznam celega predmeta prenesel desetine megabajtov. #}
-                <img src="/admin/materials/{{ snov.id }}/image" alt="" loading="lazy">
-              {% else %}
-                <span class="brez-slike">slike na disku ni</span>
-              {% endif %}
-
-              <span class="opis">
-                <span class="cas">{{ snov.koda }} — {{ snov.cas }}{% if snov.otrok %} · {{ snov.otrok }}{% endif %}</span>
-                {% if snov.izbirna %}
-                  <span class="stanje">{{ snov.vprasanj }}</span>
-                {% else %}
-                  <span class="stanje razlog">{{ snov.razlog }}</span>
-                {% endif %}
-              </span>
-            </label>
-          </li>
-        {% endfor %}
-      </ul>
+          <span class="drobno">Vzame se prvih toliko vprašanj; če jih je manj, se vzame, kar je.</span>
+        </div>
+      </section>
 
       {% if izbirnih %}
-        <button class="gumb gumb-obdelava" type="submit">Sestavi</button>
+        <p class="povezave-izbora na-desno">
+          <a href="{{ href_izberi_vse }}">Izberi vse</a>
+          <a href="{{ href_pocisti }}">Počisti izbor</a>
+        </p>
+      {% endif %}
+
+      {% for teden in tedni %}
+        <h2 class="naslov-tedna">{{ teden.oznaka }}</h2>
+        <ul class="izbirnik kartica brez-roba">
+          {% for snov in teden.snovi %}
+            {# Neizbirna snov ostane v seznamu, le brez kljukice in z razlogom.
+               Molčeč izpust bi pomenil kviz iz polovice dneva brez sledi, da
+               manjka pol (`docs/odlocitve/ADR-016` G). #}
+            <li class="{{ '' if snov.izbirna else 'neizbirna' }}">
+              <label>
+                {% if snov.izbirna %}
+                  <input type="checkbox" name="snov" value="{{ snov.id }}"
+                         {% if snov.obkljukana %}checked{% endif %}>
+                {% else %}
+                  <span class="brez-kljukice" aria-hidden="true"></span>
+                {% endif %}
+
+                {% if snov.ima_sliko %}
+                  {# Isti `loading="lazy"` kot na strani predmeta: brez njega
+                     bi seznam celega predmeta prenesel desetine megabajtov. #}
+                  <img src="/admin/materials/{{ snov.id }}/image" alt="" loading="lazy">
+                {% else %}
+                  <span class="brez-slike">slike na disku ni</span>
+                {% endif %}
+
+                <span class="opis">
+                  <span class="cas">{% if cez_vse_predmete %}<span class="cip" style="--barva: {{ snov.barva }}">{{ snov.koda }}</span> {% endif %}{{ snov.dan_in_ura }}{% if snov.otrok %} · {{ snov.otrok }}{% endif %}</span>
+                  {% if snov.izbirna %}
+                    <span class="stanje">{{ snov.vprasanj }}{% if snov.ze_v_kvizu %} · že v kvizu{% endif %}</span>
+                  {% else %}
+                    <span class="stanje razlog">{{ snov.razlog }}</span>
+                  {% endif %}
+                </span>
+              </label>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endfor %}
+
+      {% if izbirnih %}
+        {# Vrstica izbora kot na strani predmeta: šteje izbrane s CSS
+           števcem, brez skripte (`ADR-056` F). #}
+        <div class="vrstica-izbora">
+          <span class="izbranih">Izbrano: <span class="stevilo-izbranih"></span></span>
+          <button class="gumb polni" type="submit">Sestavi</button>
+        </div>
         <p class="drobno">
           Predogled ničesar ne shrani. Kviz nastane šele z gumbom „Objavi".
         </p>
       {% else %}
-        <p class="opozorilo">
-          Nobene od teh snovi še ni mogoče dati v kviz. Razlog je pri vsaki
-          zapisan zgoraj.
+        <p class="obvestilo caka">
+          <span>
+            Nobene od teh snovi še ni mogoče dati v kviz. Razlog je pri vsaki
+            zapisan zgoraj.
+          </span>
         </p>
       {% endif %}
     </form>
   {% else %}
-    <p class="opozorilo">
-      {% if cez_vse_predmete %}
-        Danes ni nobene posnete snovi. Kviza za danes torej ni iz česa
-        sestaviti — poskusi „Nova snov" in zajemi zaostanek.
-      {% else %}
-        Za ta predmet na strežniku ni nobene nearhivirane slike.
-      {% endif %}
+    <p class="obvestilo tiho">
+      <span>
+        {% if cez_vse_predmete %}
+          Danes ni nobene posnete snovi. Kviza za danes torej ni iz česa
+          sestaviti — poskusi „Kviz iz nove snovi" in zajemi zaostanek.
+        {% else %}
+          Za ta predmet na strežniku ni nobene nearhivirane slike.
+        {% endif %}
+      </span>
     </p>
   {% endif %}
-
-  <a class="nazaj" href="/admin">← Nazaj na pregled</a>
 {% endblock %}

@@ -117,6 +117,21 @@ def razvrsti_po_tednih[T](snovi: Iterable[tuple[date, T]]) -> list[Teden[T]]:
     return tedni
 
 
+def oznaka_tedna(ponedeljek: date, danes: date) -> str:
+    """Naslov skupine v seznamu po tednih: „Ta teden", „Prejšnji teden" ali razpon.
+
+    Za izbor snovi za kviz, kjer teden ni blok z dnevi, ampak naslov nad
+    vrsticami. Razpon je vedno od ponedeljka do petka.
+    """
+    teden: Teden[object] = Teden(
+        ponedeljek=ponedeljek,
+        dnevi=tuple(
+            Dan(datum=ponedeljek + timedelta(days=odmik), snovi=()) for odmik in range(PETEK + 1)
+        ),
+    )
+    return teden.oznaka(danes) or teden.razpon[0].upper() + teden.razpon[1:]
+
+
 def v_tednih(koliko: int) -> str:
     """Število tednov v mestniku, za „24 slik v 4 tednih".
 

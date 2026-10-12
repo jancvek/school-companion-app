@@ -2292,7 +2292,8 @@ class TestPremikVDrugPredmet:
         self.premakni(odjemalec)
 
         besedilo = odjemalec.get("/admin/days?dan=2026-09-04").text
-        assert "SLJ — Slovenščina" in besedilo
+        # Od V5-R01 je koda čip in ime stoji ob njem, brez pomišljaja.
+        assert re.search(r">SLJ</span>\s*Slovenščina", besedilo)
         assert "MAT — Matematika" not in besedilo
 
     def test_izbirnik_kvizov_ponudi_sliko_pod_novim_predmetom(
