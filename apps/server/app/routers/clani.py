@@ -1,9 +1,14 @@
-"""Člani družine na operaterski strani (V3-R06).
+"""Člani družine na operaterski strani (V3-R06, V6-R01).
 
-Ena stran s seznamom in dvema obrazcema za dodajanje ter tri vmesne strani —
-ponastavitev gesla, deaktivacija, aktivacija. Odločitve so v
-`docs/odlocitve/ADR-038`, pravila v `app/clani.py`, poizvedbe v
+Ena stran s seznamom in dvema obrazcema za dodajanje ter vmesne strani —
+ponastavitev gesla, deaktivacija, aktivacija in, za otroka, preklic prijav.
+Odločitve so v `docs/odlocitve/ADR-038`, pravila v `app/clani.py`, poizvedbe v
 `ClaniRepository`. Ta modul je prenos: bere obrazec, kliče pravilo, izriše.
+
+**Otrok nima ne uporabniškega imena ne gesla** (V6-R01, `ADR-058`). Starš ga
+doda samo s prikaznim imenom in mu telefon poveže s QR kodo
+(`POST …/members/{id}/link`); ponastavitev gesla zanj nadomesti „Prekliči
+prijave" (`ADR-061`).
 
 Tri vrste zavrnitve in vsaka ima svojo kodo, ker vsaka pomeni drugo pot naprej:
 
@@ -31,7 +36,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.templating import Jinja2Templates
 from starlette.responses import RedirectResponse, Response
 
-from app import clani, meni, prijava
+from app import clani, meni, povezava, prijava
 from app.besedilo import CLANI, stevilo_z_besedo
 from app.casi import datum
 from app.db import ClanDruzine, ClaniRepository, IdentifikatorZaseden, SejaUporabnika
@@ -99,6 +104,10 @@ class Pogled:
     dejanje_gesla: str = "Ponastavi geslo"
     #: Povezava na urnik otroka; `None` pri staršu.
     href_urnika: str | None = None
+    #: Ali kartica ponudi „Poveži telefon" in „Prekliči prijave" (V6-R01).
+    #: Odločita isti pravili, ki dejanje tudi zavrneta (`app/clani.py`).
+    sme_povezavo: bool = False
+    sme_preklic: bool = False
 
 
 OZNAKA_GOOGLE_IN_GESLO = "Google in geslo"
@@ -152,6 +161,14 @@ def _pogled(
             if clan.role == VLOGA_OTROK
             else None
         ),
+        sme_povezavo=clani.zakaj_ne_sme_povezati_telefona(
+            clan_vloga=clan.role, clan_aktiven=clan.is_active
+        )
+        is None,
+        # Deaktiviran otrok sej nima — padle so ob deaktivaciji —, zato mu
+        # kartica preklica ne ponuja; pot sama ga ne zavrne.
+        sme_preklic=clan.is_active
+        and clani.zakaj_ne_sme_preklicati_prijav(clan_vloga=clan.role) is None,
     )
 
 
@@ -209,7 +226,6 @@ def _stran_seznama(
             # (`prijava.NAJKRAJSE_GESLO`). Vtipkana v predlogo bi se z njo
             # razšla in nihče ne bi opazil: zavrnitev bi govorila resnico,
             # obrazec pa bi lagal.
-            "najmanj_otrok": prijava.NAJKRAJSE_GESLO[VLOGA_OTROK],
             "najmanj_stars": prijava.NAJKRAJSE_GESLO[VLOGA_STARS],
         },
         status_code=koda,
@@ -237,78 +253,6 @@ def seznam(
     return _stran_seznama(predloge, request, repo, seja, dodaj=dodaj)
 
 
-def _dodaj(
-    request: Request,
-    predloge: Jinja2Templates,
-    repo: ClaniRepository,
-    seja: SejaUporabnika,
-    *,
-    vloga: str,
-    obrazec: str,
-    ime: str,
-    identifikator: str,
-    napaka_identifikatorja: str | None,
-    geslo: str,
-    geslo_znova: str,
-) -> Response:
-    """Skupno telo obeh dodajanj: preveri, ustvari, vrni se na seznam.
-
-    Otrok in starš se ločita v treh rečeh — vlogi, preverbi identifikatorja in
-    najkrajšem geslu — in v ničemer drugem. Dve ločeni telesi bi se razšli
-    natanko v tistem, kar je skupno (`docs/odlocitve/ADR-038` E).
-    """
-    vnos = {"ime": ime, "identifikator": identifikator}
-
-    # Prva napaka po vrsti polj; ob polju, ki jo je povzročilo, se tudi izpiše.
-    napaka, polje = next(
-        (
-            (besedilo, kje)
-            for besedilo, kje in (
-                (clani.preveri_prikazno_ime(ime), "ime"),
-                (napaka_identifikatorja, "identifikator"),
-                (clani.preveri_novo_geslo(vloga, geslo, geslo_znova), "geslo"),
-            )
-            if besedilo is not None
-        ),
-        (None, None),
-    )
-    if napaka is not None:
-        return _stran_seznama(
-            predloge,
-            request,
-            repo,
-            seja,
-            napaka=napaka,
-            obrazec=obrazec,
-            vnos=vnos,
-            koda=400,
-            polje_napake=polje,
-        )
-
-    try:
-        repo.ustvari_clana(
-            role=vloga,
-            display_name=ime.strip(),
-            identifier=prijava.normaliziraj_identifikator(identifikator),
-            secret_hash=prijava.zgosti_geslo(geslo),
-            ko=datetime.now(UTC),
-        )
-    except IdentifikatorZaseden:
-        return _stran_seznama(
-            predloge,
-            request,
-            repo,
-            seja,
-            napaka=clani.SPOROCILO_IDENTIFIKATOR_ZASEDEN,
-            obrazec=obrazec,
-            vnos=vnos,
-            koda=400,
-            polje_napake="identifikator",
-        )
-
-    return _nazaj()
-
-
 @router.post("/children")
 def dodaj_otroka(
     request: Request,
@@ -316,25 +260,27 @@ def dodaj_otroka(
     repo: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     seja: Annotated[SejaUporabnika, Depends(daj_prijavo)],
     ime: Annotated[str, Form()] = "",
-    uporabnisko_ime: Annotated[str, Form()] = "",
-    geslo: Annotated[str, Form()] = "",
-    geslo_znova: Annotated[str, Form()] = "",
 ) -> Response:
-    """Doda otroka: prikazno ime, uporabniško ime, začetno geslo. Brez e-naslova."""
-    normalizirano = prijava.normaliziraj_identifikator(uporabnisko_ime)
-    return _dodaj(
-        request,
-        predloge,
-        repo,
-        seja,
-        vloga=VLOGA_OTROK,
-        obrazec="otrok",
-        ime=ime,
-        identifikator=uporabnisko_ime,
-        napaka_identifikatorja=clani.preveri_uporabnisko_ime(normalizirano),
-        geslo=geslo,
-        geslo_znova=geslo_znova,
-    )
+    """Doda otroka **samo s prikaznim imenom** (V6-R01, `ADR-058` A).
+
+    Uporabniškega imena in gesla ni; polji s tema imenoma, če ju kdo pošlje,
+    se prezreta. Telefon otroku poveže starš s QR kodo.
+    """
+    napaka = clani.preveri_prikazno_ime(ime)
+    if napaka is not None:
+        return _stran_seznama(
+            predloge,
+            request,
+            repo,
+            seja,
+            napaka=napaka,
+            obrazec="otrok",
+            vnos={"ime": ime},
+            koda=400,
+            polje_napake="ime",
+        )
+    repo.ustvari_otroka(display_name=ime.strip(), ko=datetime.now(UTC))
+    return _nazaj()
 
 
 @router.post("/parents")
@@ -355,19 +301,171 @@ def dodaj_starsa(
     lahko ustvaril tudi sam (`ADR-038` G).
     """
     normaliziran = prijava.normaliziraj_identifikator(enaslov)
-    return _dodaj(
-        request,
-        predloge,
-        repo,
-        seja,
-        vloga=VLOGA_STARS,
-        obrazec="stars",
-        ime=ime,
-        identifikator=enaslov,
-        napaka_identifikatorja=clani.preveri_enaslov(normaliziran),
-        geslo=geslo,
-        geslo_znova=geslo_znova,
+    vnos = {"ime": ime, "identifikator": enaslov}
+
+    # Prva napaka po vrsti polj; ob polju, ki jo je povzročilo, se tudi izpiše.
+    napaka, polje = next(
+        (
+            (besedilo, kje)
+            for besedilo, kje in (
+                (clani.preveri_prikazno_ime(ime), "ime"),
+                (clani.preveri_enaslov(normaliziran), "identifikator"),
+                (clani.preveri_novo_geslo(VLOGA_STARS, geslo, geslo_znova), "geslo"),
+            )
+            if besedilo is not None
+        ),
+        (None, None),
     )
+    if napaka is not None:
+        return _stran_seznama(
+            predloge,
+            request,
+            repo,
+            seja,
+            napaka=napaka,
+            obrazec="stars",
+            vnos=vnos,
+            koda=400,
+            polje_napake=polje,
+        )
+
+    try:
+        repo.ustvari_clana(
+            role=VLOGA_STARS,
+            display_name=ime.strip(),
+            identifier=normaliziran,
+            secret_hash=prijava.zgosti_geslo(geslo),
+            ko=datetime.now(UTC),
+        )
+    except IdentifikatorZaseden:
+        return _stran_seznama(
+            predloge,
+            request,
+            repo,
+            seja,
+            napaka=clani.SPOROCILO_IDENTIFIKATOR_ZASEDEN,
+            obrazec="stars",
+            vnos=vnos,
+            koda=400,
+            polje_napake="identifikator",
+        )
+
+    return _nazaj()
+
+
+# --- Povezava telefona in preklic prijav (V6-R01) ---------------------------
+
+
+@router.get("/members/{user_id}/link")
+def povezava_ni_zaznamek() -> Response:
+    """303 na seznam: stran s kodo nastane samo iz obrazca (`ADR-061` D).
+
+    Brez te poti bi osvežen ali ročno vtipkan naslov vrnil `405` — in koda, ki
+    jo je starš ravnokar gledal, bi bila videti kot napaka strežnika.
+    """
+    return _nazaj()
+
+
+@router.post("/members/{user_id}/link")
+def povezi_telefon(
+    request: Request,
+    user_id: str,
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    repo: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
+) -> Response:
+    """Ustvari povezovalni žeton in izriše QR kodo z gumbom za isti telefon.
+
+    Žeton nastane tu, v čitljivi obliki, in **ne zapusti te zahteve drugače
+    kot v izrisu**: v bazi je samo njegova zgostitev (`ADR-061` B). Stran zato
+    ni zaznamek in se ne sme shraniti v predpomnilnik (`no-store`).
+
+    Vmesne potrditve ni (`ADR-061` D): posledica je samo, da prejšnja,
+    neporabljena koda neha veljati.
+    """
+    clan = repo.clan(user_id)
+    if clan is None:
+        return ni_najdeno(predloge, request, SPOROCILO_NI_CLANA)
+    zavrnitev = clani.zakaj_ne_sme_povezati_telefona(
+        clan_vloga=clan.role, clan_aktiven=clan.is_active
+    )
+    if zavrnitev is not None:
+        return zavrnjeno(predloge, request, zavrnitev)
+
+    zdaj = datetime.now(UTC)
+    zeton = prijava.nov_zeton()
+    if not repo.ustvari_povezavo(
+        clan.user_id,
+        token_hash=prijava.zgostitev_zetona(zeton),
+        ko=zdaj,
+        potece=zdaj + prijava.TRAJANJE_POVEZAVE,
+    ):
+        return ni_dovoljeno(predloge, request, clani.SPOROCILO_NI_SPREMENJENO)
+
+    naslov = povezava.naslov(zeton)
+    odgovor = predloge.TemplateResponse(
+        request,
+        "clani-povezava.html",
+        {
+            "clan_ime": clan.display_name,
+            "zacetnica": meni.zacetnica(clan.display_name),
+            "povezava": naslov,
+            "qr": povezava.qr_svg(naslov),
+            "minut": int(prijava.TRAJANJE_POVEZAVE.total_seconds() // 60),
+            "pot_dejanja": f"{PREDPONA}/members/{clan.user_id}/link",
+            "pot_nazaj": PREDPONA,
+        },
+    )
+    odgovor.headers["Cache-Control"] = "no-store"
+    return odgovor
+
+
+@router.get("/members/{user_id}/revoke")
+def potrdi_preklic_prijav(
+    request: Request,
+    user_id: str,
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    repo: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
+) -> Response:
+    """Vmesna stran pred preklicem prijav (`ADR-038` F: potrditev je za posledice)."""
+    clan = repo.clan(user_id)
+    if clan is None:
+        return ni_najdeno(predloge, request, SPOROCILO_NI_CLANA)
+    zavrnitev = clani.zakaj_ne_sme_preklicati_prijav(clan_vloga=clan.role)
+    if zavrnitev is not None:
+        return zavrnjeno(predloge, request, zavrnitev)
+    return predloge.TemplateResponse(
+        request,
+        "clani-preklic.html",
+        {
+            "clan_ime": clan.display_name,
+            "zacetnica": meni.zacetnica(clan.display_name),
+            "pot_dejanja": f"{PREDPONA}/members/{clan.user_id}/revoke",
+            "pot_nazaj": PREDPONA,
+        },
+    )
+
+
+@router.post("/members/{user_id}/revoke")
+def preklici_prijave(
+    request: Request,
+    user_id: str,
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    repo: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
+) -> Response:
+    """Izbriše vse otrokove seje in neporabljeno kodo (`ADR-061` G).
+
+    Posnetkov na telefonu in na strežniku se ne dotakne; otrok je odjavljen,
+    dokler mu starš telefona ne poveže znova.
+    """
+    clan = repo.clan(user_id)
+    if clan is None:
+        return ni_najdeno(predloge, request, SPOROCILO_NI_CLANA)
+    zavrnitev = clani.zakaj_ne_sme_preklicati_prijav(clan_vloga=clan.role)
+    if zavrnitev is not None:
+        return zavrnjeno(predloge, request, zavrnitev)
+    if not repo.preklici_prijave(clan.user_id):
+        return ni_dovoljeno(predloge, request, clani.SPOROCILO_NI_SPREMENJENO)
+    return _nazaj()
 
 
 # --- Ponastavitev gesla ----------------------------------------------------
@@ -377,6 +475,7 @@ def _zavrnitev_gesla(clan: ClanDruzine, seja: SejaUporabnika) -> str | None:
     return clani.zakaj_ne_sme_ponastaviti_gesla(
         izvajalec_id=seja.user_id,
         clan_id=clan.user_id,
+        clan_vloga=clan.role,
         clan_je_lastnik_sistema=clan.is_system_owner,
     )
 
@@ -401,9 +500,7 @@ def _stran_gesla(
             "pot_dejanja": f"{PREDPONA}/members/{clan.user_id}/password",
             "pot_nazaj": PREDPONA,
             "napaka": napaka,
-            "najmanj": prijava.NAJKRAJSE_GESLO.get(
-                clan.role, prijava.NAJKRAJSE_GESLO[VLOGA_STARS]
-            ),
+            "najmanj": prijava.NAJKRAJSE_GESLO[VLOGA_STARS],
         },
         status_code=koda,
     )

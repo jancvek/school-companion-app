@@ -35,30 +35,16 @@ NAJDALJSI_IDENTIFIKATOR = 320
 SPOROCILO_PRAZNO_IME = "Prikazno ime manjka. Vpiši ime, kot naj se kaže na strani."
 SPOROCILO_PREDOLGO_IME = f"Prikazno ime je predolgo; največ {NAJDALJSE_IME} znakov."
 
-SPOROCILO_PRAZNO_UPORABNISKO_IME = (
-    "Uporabniško ime manjka. S tem imenom se bo otrok prijavil v aplikacijo."
-)
-SPOROCILO_PRESLEDEK_V_IMENU = (
-    "Uporabniško ime ne sme vsebovati presledkov — otrok ga tipka na telefonu."
-)
-SPOROCILO_UPORABNISKO_IME_Z_AFNO = (
-    "Uporabniško ime ne sme vsebovati znaka @. Otrok se prijavi z imenom, ne z e-naslovom."
-)
-SPOROCILO_PREDOLGO_UPORABNISKO_IME = (
-    f"Uporabniško ime je predolgo; največ {NAJDALJSI_IDENTIFIKATOR} znakov."
-)
-
 SPOROCILO_PRAZEN_ENASLOV = "E-naslov manjka. S tem e-naslovom se bo starš prijavil na tej strani."
 SPOROCILO_NI_ENASLOV = "E-naslov ni videti kot e-naslov — manjka mu @ ali kaj ob njem."
 SPOROCILO_PREDOLG_ENASLOV = f"E-naslov je predolg; največ {NAJDALJSI_IDENTIFIKATOR} znakov."
 
-#: Eno besedilo za zaseden e-naslov in za zasedeno uporabniško ime.
+#: Besedilo za zaseden e-naslov.
 #:
 #: Enoličnost je čez **celo namestitev** (`credentials.identifier UNIQUE`), zato
-#: je nekaj informacije neizogibno. Besedilo ne pove ne pri kom je ime zasedeno
-#: ne za katero vrsto računa gre — to je najmanjši možen izid ob kriteriju, ki
-#: hkrati zahteva jasno sporočilo in prepoveduje izdajanje tujih računov
-#: (`ADR-038` E).
+#: je nekaj informacije neizogibno. Besedilo ne pove, pri kom je ime zasedeno
+#: — to je najmanjši možen izid ob kriteriju, ki hkrati zahteva jasno sporočilo
+#: in prepoveduje izdajanje tujih računov (`ADR-038` E).
 SPOROCILO_IDENTIFIKATOR_ZASEDEN = "To ime je že zasedeno. Izberi drugo."
 
 #: Velja samo takrat, kadar v družini **je** drug aktiven starš — pravilo o
@@ -90,10 +76,29 @@ SPOROCILO_NI_SPREMENJENO = (
 )
 
 
+#: Otrok gesla nima (`V6-R01`, `docs/odlocitve/ADR-058` E). Sporočilo pove,
+#: kaj je namesto ponastavitve.
+SPOROCILO_OTROK_NIMA_GESLA = (
+    "Otrok gesla nima, zato ga ni mogoče ponastaviti. Na seznamu družine mu "
+    "poveži telefon s QR kodo ali prekliči prijave."
+)
+
+SPOROCILO_TELEFON_SAMO_OTROKU = (
+    "Telefon se poveže samo otroku. Starš se prijavi na tej spletni strani."
+)
+SPOROCILO_POVEZAVA_DEAKTIVIRANEMU = (
+    "Ta račun je deaktiviran, zato telefona ni mogoče povezati. Najprej ga "
+    "aktiviraj na seznamu družine."
+)
+SPOROCILO_PREKLIC_SAMO_OTROKU = (
+    "Prijave je mogoče preklicati samo otroku. Staršu ponastavi geslo — tudi to "
+    "ga odjavi z vseh naprav."
+)
+
+
 def _sporocilo_prekratko_geslo(vloga: str) -> str:
     najmanj = NAJKRAJSE_GESLO.get(vloga, NAJKRAJSE_GESLO[VLOGA_STARS])
-    cigavo = "otroka" if vloga == VLOGA_OTROK else "starša"
-    return f"Geslo za {cigavo} je prekratko; imeti mora vsaj {najmanj} znakov."
+    return f"Geslo za starša je prekratko; imeti mora vsaj {najmanj} znakov."
 
 
 # --- Veljaven vnos ---------------------------------------------------------
@@ -105,23 +110,6 @@ def preveri_prikazno_ime(ime: str) -> str | None:
         return SPOROCILO_PRAZNO_IME
     if len(ime.strip()) > NAJDALJSE_IME:
         return SPOROCILO_PREDOLGO_IME
-    return None
-
-
-def preveri_uporabnisko_ime(ime: str) -> str | None:
-    """Razlog, zakaj uporabniško ime otroka ni veljavno, ali `None`.
-
-    Preverja se **normalizirana** oblika (`prijava.normaliziraj_identifikator`),
-    ker bo prav ta pristala v bazi.
-    """
-    if not ime:
-        return SPOROCILO_PRAZNO_UPORABNISKO_IME
-    if any(znak.isspace() for znak in ime):
-        return SPOROCILO_PRESLEDEK_V_IMENU
-    if "@" in ime:
-        return SPOROCILO_UPORABNISKO_IME_Z_AFNO
-    if len(ime) > NAJDALJSI_IDENTIFIKATOR:
-        return SPOROCILO_PREDOLGO_UPORABNISKO_IME
     return None
 
 
@@ -149,12 +137,12 @@ def preveri_novo_geslo(vloga: str, geslo: str, ponovitev: str) -> str | None:
     """Razlog, zakaj novo geslo ni veljavno, ali `None`.
 
     Meja je ista in na istem mestu kot pri ukazu `nastavi-geslo`
-    (`prijava.NAJKRAJSE_GESLO`): starš 12 znakov, otrok 8 (`ADR-036` E). Dve
-    meji na dveh mestih bi se razšli.
+    (`prijava.NAJKRAJSE_GESLO`): 12 znakov. Dve meji na dveh mestih bi se
+    razšli. Geslo ima samo starš; otrok ga od `V6-R01` nima.
 
     Geslo se vpiše **dvakrat**, tako kot pri ukazu `nastavi-geslo`: zatipkano
     geslo se nikjer ne pokaže, posledica pa je račun, v katerega se ne da
-    prijaviti — in pri novem otroku bi bila videti kot pokvarjena prijava.
+    prijaviti.
     """
     if not geslo_je_dovolj_dolgo(vloga, geslo):
         return _sporocilo_prekratko_geslo(vloga)
@@ -216,14 +204,47 @@ def zakaj_ne_sme_deaktivirati(
 
 
 def zakaj_ne_sme_ponastaviti_gesla(
-    *, izvajalec_id: str, clan_id: str, clan_je_lastnik_sistema: bool
+    *, izvajalec_id: str, clan_id: str, clan_vloga: str, clan_je_lastnik_sistema: bool
 ) -> str | None:
     """Razlog, zakaj ta starš temu članu ne sme ponastaviti gesla, ali `None`.
 
-    Edina omejitev je lastnik sistema (`ADR-038` G): geslo mu sme ponastaviti
-    samo on sam. Sebi ga sme ponastaviti vsak — in takrat mu pade tudi seja, v
-    kateri ravno kliče (`ADR-038` D).
+    Omejitvi sta dve:
+
+    - **otrok gesla nima** (`V6-R01`, `ADR-058` E) — namesto ponastavitve sta
+      „Poveži telefon" in „Prekliči prijave";
+    - **lastnik sistema** (`ADR-038` G): geslo mu sme ponastaviti samo on sam.
+
+    Sebi ga sme ponastaviti vsak starš — in takrat mu pade tudi seja, v kateri
+    ravno kliče (`ADR-038` D).
     """
+    if clan_vloga == VLOGA_OTROK:
+        return SPOROCILO_OTROK_NIMA_GESLA
     if clan_je_lastnik_sistema and clan_id != izvajalec_id:
         return SPOROCILO_TUJE_GESLO_LASTNIKA
+    return None
+
+
+def zakaj_ne_sme_povezati_telefona(*, clan_vloga: str, clan_aktiven: bool) -> str | None:
+    """Razlog, zakaj temu članu telefona ni mogoče povezati, ali `None` (V6-R01).
+
+    Poveže se samo **aktiven otrok**: starš se na telefon ne prijavi
+    (`ADR-036` D), deaktiviran račun pa se ne more prijaviti nikjer
+    (`ADR-038` A). Isto pravilo odloči, ali kartica dejanje sploh ponudi.
+    """
+    if clan_vloga != VLOGA_OTROK:
+        return SPOROCILO_TELEFON_SAMO_OTROKU
+    if not clan_aktiven:
+        return SPOROCILO_POVEZAVA_DEAKTIVIRANEMU
+    return None
+
+
+def zakaj_ne_sme_preklicati_prijav(*, clan_vloga: str) -> str | None:
+    """Razlog, zakaj temu članu prijav ni mogoče preklicati, ali `None` (V6-R01).
+
+    Dejanje je otrokov nadomestek za ponastavitev gesla (`ADR-058` E). Starš
+    ga nima: njegova pot do istega izida je ponastavitev gesla, in dve poti z
+    različnimi pravili (sebe, lastnik sistema) bi se razšli.
+    """
+    if clan_vloga != VLOGA_OTROK:
+        return SPOROCILO_PREKLIC_SAMO_OTROKU
     return None

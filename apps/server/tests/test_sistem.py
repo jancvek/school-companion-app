@@ -47,6 +47,7 @@ from tests.conftest import (
     PrijavljenOdjemalec,
     prijavi,
     ustvari_otroka,
+    ustvari_povezavo,
     ustvari_sejo,
     ustvari_starsa,
 )
@@ -483,7 +484,10 @@ def test_deaktivacija_ustavi_prijavo_starsa_in_otroka(
     ustvari_starsa(
         motor, family_id=DRUGA_ID, identifikator="drugi@primer.test", prikazno_ime="Drugi"
     )
-    ustvari_otroka(motor, user_id=None, family_id=DRUGA_ID, identifikator="drugiotrok")
+    otrok = ustvari_otroka(motor, user_id=None, family_id=DRUGA_ID, identifikator="drugiotrok")
+    # Koda za povezavo telefona, ustvarjena, ko je bila družina še prižgana
+    # (V6-R01): tudi ta po ugasnitvi ne sme dati seje.
+    koda = ustvari_povezavo(motor, otrok, family_id=DRUGA_ID)
 
     lastnikov_odjemalec.post(f"{POT}/families/{DRUGA_ID}/deactivate")
 
@@ -493,10 +497,11 @@ def test_deaktivacija_ustavi_prijavo_starsa_in_otroka(
     assert prijava.SPOROCILO_NEUSPELA_PRIJAVA in zavrnjen.text
 
     with PrijavljenOdjemalec(aplikacija, base_url="https://testserver") as telefon:
-        na_telefonu = telefon.post(
-            "/auth/login", json={"identifier": "drugiotrok", "password": "geslo-otroka"}
-        )
+        na_telefonu = telefon.post(prijava.POT_POVEZAVE_TELEFONA, json={"token": koda})
     assert na_telefonu.status_code == 401
+    assert na_telefonu.json()["detail"] == prijava.SPOROCILO_KODA_NE_VELJA
+    with Session(motor) as seja:
+        assert list(seja.scalars(select(UserSession.id).where(UserSession.user_id == otrok))) == []
 
 
 def test_deaktivacija_pobrise_seje_clanov(

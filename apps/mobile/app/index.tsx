@@ -14,6 +14,11 @@ export default function HomeScreen() {
   const { cakajocih, osvezi: osveziKvize } = useKvizi();
   const { seja } = usePrijava();
 
+  // Kadar povezave ni ali je seja potekla, vodi gumb naravnost na bralnik
+  // kode: to je edino, kar otrok takrat lahko naredi (V6-R01). Sicer vodi na
+  // zaslon, kjer je odjava.
+  const trebaPovezati = seja === null || prijavaPotekla;
+
   // Števci se osvežijo ob vsakem prihodu na zaslon — po slikanju in po kvizu
   // je to edini trenutek, ko jih uporabnica pogleda.
   useFocusEffect(
@@ -65,8 +70,9 @@ export default function HomeScreen() {
         </Text>
       </Pressable>
 
-      {/* Prijava je vnos, ne vrata (`docs/odlocitve/ADR-036` A): kamera in
-          Zgodovina delata brez nje, prenos pa ne. */}
+      {/* Povezava je vnos, ne vrata (`docs/odlocitve/ADR-036` A): kamera in
+          Zgodovina delata brez nje, prenos pa ne. Gesla ni — telefon poveže
+          starš s QR kodo (`ADR-058`). */}
       <Pressable
         accessibilityRole="button"
         testID="gumb-prijava"
@@ -75,9 +81,11 @@ export default function HomeScreen() {
           styles.buttonSecondary,
           pressed && styles.buttonPressed,
         ]}
-        onPress={() => router.push('/prijava')}
+        onPress={() => router.push(trebaPovezati ? '/povezi' : '/prijava')}
       >
-        <Text style={styles.buttonLabel}>{seja ? `Prijavljena: ${seja.ime}` : 'Prijavi se'}</Text>
+        <Text style={styles.buttonLabel}>
+          {seja !== null && !prijavaPotekla ? `Prijavljena: ${seja.ime}` : 'Poveži s QR kodo'}
+        </Text>
       </Pressable>
 
       <StanjePrenosa
@@ -99,7 +107,7 @@ export default function HomeScreen() {
 
 type StanjePrenosaProps = {
   nastavljen: boolean;
-  /** Ali je kdo prijavljen; brez prijave prenosa ni (V3-R04). */
+  /** Ali je telefon povezan; brez povezave prenosa ni (V3-R04, V6-R01). */
   prijavljena: boolean;
   /** Ali je prenos nazadnje ustavila potekla prijava (V3-R04). */
   prijavaPotekla: boolean;
@@ -137,7 +145,8 @@ export function StanjePrenosa({
     return (
       <View style={styles.stanje}>
         <Text testID="ni-prijave" style={styles.stanjeBesedilo}>
-          Nisi prijavljena. Posnetki se shranjujejo na telefon in se prenesejo po prijavi.
+          Telefon ni povezan. Posnetki se shranjujejo na telefon in se prenesejo, ko ga starš
+          poveže s QR kodo.
         </Text>
       </View>
     );
@@ -150,7 +159,7 @@ export function StanjePrenosa({
     return (
       <View style={styles.stanje}>
         <Text testID="prijava-potekla" style={styles.stanjeNapaka}>
-          Prijava je potekla, prijavi se znova. Posnetki ostanejo na telefonu.
+          Prijava je potekla. Prosi starša za novo kodo. Posnetki ostanejo na telefonu.
         </Text>
       </View>
     );

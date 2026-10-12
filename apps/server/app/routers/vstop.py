@@ -1,16 +1,20 @@
-"""Prijava in odjava — v brskalniku (V3-R03) in na telefonu (V3-R04).
+"""Prijava in odjava — v brskalniku (V3-R03) in na telefonu (V3-R04, V6-R01).
 
-Oboje je tu in ne v dveh usmerjevalnikih, ker je pod obojim ista preverba
-(`prijava.preveri_prijavo`), ista tabela `sessions` in isto omejevanje
-ugibanja. Razlikuje se prenosnik in oblika odgovora:
+Oboje je tu in ne v dveh usmerjevalnikih, ker je pod obojim ista tabela
+`sessions` in isto omejevanje ugibanja. Razlikuje se, s čim se kdo izkaže,
+prenosnik in oblika odgovora:
 
 | | brskalnik | telefon |
 |---|---|---|
-| poti | `/admin/login`, `/admin/logout` | `/auth/login`, `/auth/logout` |
-| žeton potuje v | piškotku `seja` | glavi `Authorization: Bearer` |
+| poti | `/admin/login`, `/admin/logout` | `/auth/link`, `/auth/logout` |
+| izkaže se z | geslom ali Googlom | povezovalnim žetonom iz QR kode |
+| žeton seje potuje v | piškotku `seja` | glavi `Authorization: Bearer` |
 | vsebina | obrazec in HTML | JSON |
 | CSRF | da (dvojno oddan piškotek) | **ne** — brez piškotka ga ni treba |
 | vloga, ki sme skozi | starš | otrok |
+
+`POST /auth/login` od `V6-R01` ni več prijava, ampak škrbina za stari APK
+(`docs/odlocitve/ADR-061` D).
 
 Poti brskalnika sta pod `/admin`, ker sta del operaterske strani; poti telefona
 sta zunaj nje, ker bi ju `SejaMiddleware` sicer zahteval s piškotkom in CSRF
@@ -34,7 +38,7 @@ from app import google, prijava
 from app.db import IdentifikatorZaseden, PrijavaRepository, SejaUporabnika
 from app.dependencies import daj_nastavitve, daj_prijavo, daj_repozitorij_prijave
 from app.prijava import Izid, Vrata
-from app.schemas import OdjavaOpravljena, PrijavaTelefona, ZetonPrijave
+from app.schemas import OdjavaOpravljena, PovezavaTelefona, ZetonPrijave
 from app.settings import Settings
 from app.strani import daj_predloge, ni_dovoljeno, ni_najdeno
 
@@ -158,7 +162,6 @@ async def prijavi(
         repo,
         identifikator,
         geslo,
-        vrata=Vrata.ADMIN,
         ip=request.client.host if request.client else None,
         ko=datetime.now(UTC),
     )
@@ -462,62 +465,75 @@ def odjavi(
     return odgovor
 
 
-# --- Telefon (V3-R04) ------------------------------------------------------
+# --- Telefon (V3-R04, V6-R01) ----------------------------------------------
+
+
+@router.post(
+    prijava.POT_POVEZAVE_TELEFONA,
+    response_model=ZetonPrijave,
+    responses={401: {"description": "Koda ne velja"}},
+    tags=["telefon"],
+)
+async def povezi_telefon(
+    request: Request,
+    telo: PovezavaTelefona,
+    repo: Annotated[PrijavaRepository, Depends(daj_repozitorij_prijave)],
+) -> Response:
+    """Unovči povezovalni žeton iz QR kode in vrne žeton seje (V6-R01).
+
+    Odgovor ima isto obliko, kot jo je imela prijava z geslom: aplikacija iz
+    njega dobi žeton, lastnika lokalnih zapisov in ime (`ADR-036` B).
+
+    Zamik je **pred** preverbo, kot pri prijavi, in šteje neuspehe vse
+    namestitve (`ADR-061` E). Zavrnitev je vedno `401` z enim besedilom, ne
+    glede na to, zakaj žeton ne velja (`ADR-061` F).
+
+    Unovčenje teče v niti: baza je sinhrona in zahteva ne sme ustaviti zanke
+    dogodkov — isti razlog kot pri argon2 v geselni prijavi.
+    """
+    zamik = prijava.koliko_cakati_na_povezavo(repo, datetime.now(UTC))
+    if zamik:
+        await asyncio.sleep(zamik)
+
+    zdaj = datetime.now(UTC)
+    izid = await run_in_threadpool(
+        prijava.unovci_povezavo,
+        repo,
+        telo.token,
+        ip=request.client.host if request.client else None,
+        ko=zdaj,
+        oznaka_naprave=request.headers.get("user-agent", "")[:200] or None,
+    )
+    if izid is None:
+        return JSONResponse({"detail": prijava.SPOROCILO_KODA_NE_VELJA}, status_code=401)
+
+    zeton, otrok = izid
+    return JSONResponse(
+        ZetonPrijave(
+            token=zeton,
+            user_id=otrok.user_id,
+            display_name=otrok.display_name,
+            expires_at=zdaj + prijava.TRAJANJE_SEJE,
+        ).model_dump(mode="json")
+    )
 
 
 @router.post(
     prijava.POT_PRIJAVE_TELEFONA,
-    response_model=ZetonPrijave,
-    responses={401: {"description": "Poverilnica ni prava"}},
+    responses={401: {"description": "Prijave z geslom ni več"}},
     tags=["telefon"],
 )
-async def prijavi_telefon(
-    request: Request,
-    telo: PrijavaTelefona,
-    repo: Annotated[PrijavaRepository, Depends(daj_repozitorij_prijave)],
-) -> Response:
-    """Preveri poverilnico otroka in vrne žeton za glavo `Authorization`.
+def prijava_z_geslom_ni_vec() -> Response:
+    """Škrbina za stari APK: vedno `401` s slovenskim sporočilom (`ADR-061` D).
 
-    Isto zaporedje kot v brskalniku, brez koraka s CSRF: zamik pred preverbo
-    gesla, ne po njej, in zgoščevanje v niti, ker je argon2 sinhronih ~60 ms
-    in bi na zanki dogodkov ustavil vse ostale zahteve — tudi prenos slike.
+    Otrok gesla nima več (`ADR-058` F). Pot ostane, ker stari APK besedilo
+    zavrnitve izpiše dobesedno; brez nje bi otrok videl „Not Found".
 
-    Zavrnitev je vedno `401`, tudi za starša (`ADR-036` D). Koda ne loči
-    primerov; loči jih sporočilo, in to samo tam, kjer je bilo to zavestno
-    dovoljeno.
+    **Telesa ne bere in baze ne odpre**: karkoli pride, je odgovor isti, zato
+    tu ni ne omejevanja ne zapisa v `login_attempts`. Odstranitev je svoja
+    zahteva, ko starega APK ni več na nobenem telefonu.
     """
-    zamik = prijava.koliko_cakati(repo, telo.identifier, datetime.now(UTC))
-    if zamik:
-        await asyncio.sleep(zamik)
-
-    izid = await run_in_threadpool(
-        prijava.preveri_prijavo,
-        repo,
-        telo.identifier,
-        telo.password,
-        vrata=Vrata.TELEFON,
-        ip=request.client.host if request.client else None,
-        ko=datetime.now(UTC),
-    )
-
-    if izid.izid is not Izid.USPEH or izid.poverilnica is None:
-        return JSONResponse({"detail": izid.sporocilo}, status_code=401)
-
-    zdaj = datetime.now(UTC)
-    zeton = prijava.ustvari_sejo(
-        repo,
-        izid.poverilnica,
-        ko=zdaj,
-        oznaka_naprave=request.headers.get("user-agent", "")[:200] or None,
-    )
-    return JSONResponse(
-        ZetonPrijave(
-            token=zeton,
-            user_id=izid.poverilnica.user_id,
-            display_name=izid.poverilnica.display_name,
-            expires_at=zdaj + prijava.TRAJANJE_SEJE,
-        ).model_dump(mode="json")
-    )
+    return JSONResponse({"detail": prijava.SPOROCILO_GESLA_NI_VEC}, status_code=401)
 
 
 @router.post(prijava.POT_ODJAVE_TELEFONA, response_model=OdjavaOpravljena, tags=["telefon"])

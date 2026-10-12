@@ -36,7 +36,8 @@ export default function RootLayout() {
               <Stack.Screen name="zgodovina/[subject]" options={{ title: 'Zgodovina' }} />
               <Stack.Screen name="kvizi/index" options={{ title: 'Kvizi' }} />
               <Stack.Screen name="kvizi/[id]" options={{ title: 'Kviz' }} />
-              <Stack.Screen name="prijava" options={{ title: 'Prijava' }} />
+              <Stack.Screen name="prijava" options={{ title: 'Povezava telefona' }} />
+              <Stack.Screen name="povezi" options={{ title: 'Poveži telefon' }} />
             </Stack>
           </KviziProvider>
         </SyncProvider>

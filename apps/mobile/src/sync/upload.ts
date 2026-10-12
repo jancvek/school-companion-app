@@ -102,7 +102,7 @@ export function razvrstiStatus(status: number): Izid {
 function opisStatusa(status: number): string {
   switch (status) {
     case 403:
-      return 'Strežnik je zahtevo zavrnil. Prijavi se znova; posnetek na telefonu ostane.';
+      return 'Strežnik je zahtevo zavrnil. Prosi starša, naj telefon poveže znova; posnetek na telefonu ostane.';
     case 413:
       return 'Slika je za strežnik prevelika.';
     case 422:

@@ -5,17 +5,21 @@ import {
   KLJUC_SEJE,
   NapakaPrijave,
   odjaviSe,
+  poveziSe,
   pozabiSejo,
   preberiSejo,
-  prijaviSe,
   shraniSejo,
+  SPOROCILO_KODA_NE_VELJA,
 } from '@/sync/prijava';
 
 import { SEJA, ustvariShrambo } from './shramba';
 
 const NASTAVITVE: ServerConfig = { baseUrl: 'https://school-buddy.duckdns.org' };
 
-/** Odgovor, kakršnega vrne strežnik na uspešno prijavo. */
+/** Povezovalni žeton, kakršnega nosi QR koda. */
+const ZETON = 'aB3_dE6-gH9jKlMnOpQrStUvWxYz0123456789-_AbC';
+
+/** Odgovor, kakršnega vrne strežnik na uspešno povezavo. */
 const ODGOVOR = {
   token: 'nov-zeton',
   user_id: 'u-masa',
@@ -31,48 +35,53 @@ function odgovori(status: number, telo: unknown): jest.Mock {
   }));
 }
 
-describe('prijava na telefonu', () => {
-  it('pošlje uporabniško ime in geslo kot JSON', async () => {
+describe('povezava telefona', () => {
+  // Do `V6-R01` je ta razdelek dokazoval prijavo z uporabniškim imenom in
+  // geslom (`POST /auth/login`). Otrok gesla nima več (`ADR-058`): sejo dobi z
+  // enkratnim žetonom iz QR kode. Kar se je dokazovalo o seji in o
+  // sporočilih, se dokazuje naprej.
+  it('pošlje žeton kot JSON na pot povezave', async () => {
     const zahteva = odgovori(200, ODGOVOR);
 
-    await prijaviSe(NASTAVITVE, 'masa', 'geslo-otroka', zahteva as unknown as Zahteva);
+    await poveziSe(NASTAVITVE, ZETON, zahteva as unknown as Zahteva);
 
     const [url, moznosti] = zahteva.mock.calls[0];
-    expect(url).toBe('https://school-buddy.duckdns.org/auth/login');
+    expect(url).toBe('https://school-buddy.duckdns.org/auth/link');
     expect(moznosti.method).toBe('POST');
     expect(moznosti.headers['Content-Type']).toBe('application/json');
-    expect(JSON.parse(moznosti.body)).toEqual({
-      identifier: 'masa',
-      password: 'geslo-otroka',
-    });
+    expect(JSON.parse(moznosti.body)).toEqual({ token: ZETON });
+  });
+
+  it('žetona ne da v naslov', async () => {
+    // Naslov konča v dnevnikih strežnika in posrednikov; telo ne.
+    const zahteva = odgovori(200, ODGOVOR);
+
+    await poveziSe(NASTAVITVE, ZETON, zahteva as unknown as Zahteva);
+
+    expect(zahteva.mock.calls[0][0]).not.toContain(ZETON);
   });
 
   it('vrne sejo z žetonom, lastnikom in imenom', async () => {
-    const seja = await prijaviSe(
-      NASTAVITVE,
-      'masa',
-      'geslo-otroka',
-      odgovori(200, ODGOVOR) as unknown as Zahteva,
-    );
+    const seja = await poveziSe(NASTAVITVE, ZETON, odgovori(200, ODGOVOR) as unknown as Zahteva);
 
     expect(seja).toEqual({ zeton: 'nov-zeton', userId: 'u-masa', ime: 'Maša' });
   });
 
   it('seje sama ne shrani', async () => {
     // Shranjevanje in posvojitev zapisov sta en korak višje (`use-prijava`),
-    // da je na enem mestu vidno, da prijava naredi dvoje, ne eno.
+    // da je na enem mestu vidno, da povezava naredi dvoje, ne eno.
     const shramba = ustvariShrambo();
 
-    await prijaviSe(NASTAVITVE, 'masa', 'g', odgovori(200, ODGOVOR) as unknown as Zahteva);
+    await poveziSe(NASTAVITVE, ZETON, odgovori(200, ODGOVOR) as unknown as Zahteva);
 
     expect(shramba.vsebina()).toBeUndefined();
   });
 
-  it('zavrnitev pokaže sporočilo strežnika, ne statusne kode', async () => {
-    const telo = { detail: 'Ta račun je starševski in se prijavi na spletni strani.' };
+  it('zavrnjena koda pokaže sporočilo strežnika, ne statusne kode', async () => {
+    const telo = { detail: 'Koda ne velja več. Prosi starša za novo.' };
 
     await expect(
-      prijaviSe(NASTAVITVE, 'stars@primer.test', 'g', odgovori(401, telo) as unknown as Zahteva),
+      poveziSe(NASTAVITVE, ZETON, odgovori(401, telo) as unknown as Zahteva),
     ).rejects.toMatchObject({
       name: 'NapakaPrijave',
       message: telo.detail,
@@ -88,46 +97,68 @@ describe('prijava na telefonu', () => {
       },
     }));
 
-    await expect(
-      prijaviSe(NASTAVITVE, 'masa', 'g', zahteva as unknown as Zahteva),
-    ).rejects.toThrow(/ime ali geslo/i);
+    await expect(poveziSe(NASTAVITVE, ZETON, zahteva as unknown as Zahteva)).rejects.toThrow(
+      SPOROCILO_KODA_NE_VELJA,
+    );
+    expect(SPOROCILO_KODA_NE_VELJA).toMatch(/prosi starša/i);
   });
 
-  it('napaka strežnika ni videti kot napačno geslo', async () => {
-    // Sicer bi Maša ob okvari strežnika mislila, da je pozabila geslo.
-    await expect(
-      prijaviSe(NASTAVITVE, 'masa', 'g', odgovori(500, {}) as unknown as Zahteva),
-    ).rejects.toThrow(/ni dosegljiv/i);
+  it.each([
+    [404, { detail: 'Not Found' }],
+    [405, { detail: 'Method Not Allowed' }],
+    [422, { detail: [{ msg: 'String should have at least 1 character' }] }],
+  ])('odgovor %i ne pokaže surovega besedila ogrodja', async (status, telo) => {
+    // Strežnik, ki poti še nima, ali telo, ki ga ne sprejme, odgovori v
+    // angleščini. Tega otrok ne sme videti kot edine vsebine (merilo
+    // dokončanosti); pokaže se samo besedilo, ki ga je napisala pot povezave.
+    const napaka = await poveziSe(
+      NASTAVITVE,
+      ZETON,
+      odgovori(status, telo) as unknown as Zahteva,
+    ).catch((cause: unknown) => cause);
+
+    expect(napaka).toBeInstanceOf(NapakaPrijave);
+    expect((napaka as Error).message).toMatch(/nepričakovano/i);
+    expect((napaka as Error).message).not.toMatch(/Not Found|Not Allowed|String should/);
   });
+
+  it.each([500, 502, 503, 408, 429])(
+    'odgovor %i ni videti kot neveljavna koda',
+    async (status) => {
+      // Sicer bi otrok ob okvari strežnika prosil za novo kodo, čeprav stara
+      // še velja.
+      await expect(
+        poveziSe(NASTAVITVE, ZETON, odgovori(status, {}) as unknown as Zahteva),
+      ).rejects.toThrow(/ni dosegljiv/i);
+    },
+  );
 
   it('nedosegljiv strežnik pove, kaj naj uporabnica naredi', async () => {
     const zahteva = jest.fn(async () => {
       throw new Error('Network request failed');
     });
 
-    const napaka = await prijaviSe(
-      NASTAVITVE,
-      'masa',
-      'g',
-      zahteva as unknown as Zahteva,
-    ).catch((cause: unknown) => cause);
+    const napaka = await poveziSe(NASTAVITVE, ZETON, zahteva as unknown as Zahteva).catch(
+      (cause: unknown) => cause,
+    );
 
     expect(napaka).toBeInstanceOf(NapakaPrijave);
     // Surovo besedilo sistemske napake ne sme biti edina vsebina sporočila.
     expect((napaka as Error).message).not.toMatch(/Network request failed/);
     expect((napaka as Error).message).toMatch(/posnetki/i);
+    expect((napaka as Error).message).toMatch(/poskusi znova/i);
   });
 
   it('nerazberljiv odgovor ne postane seja brez žetona', async () => {
     await expect(
-      prijaviSe(NASTAVITVE, 'masa', 'g', odgovori(200, { user_id: 'u' }) as unknown as Zahteva),
+      poveziSe(NASTAVITVE, ZETON, odgovori(200, { user_id: 'u' }) as unknown as Zahteva),
     ).rejects.toThrow(/nepričakovano/i);
   });
 
-  it('brez nastavljenega naslova pove, da prijava ni mogoča', async () => {
+  it('brez nastavljenega naslova pove, da povezava ni mogoča', async () => {
     const zahteva = jest.fn();
 
-    await expect(prijaviSe(null, 'masa', 'g', zahteva as unknown as Zahteva)).rejects.toThrow(
+    await expect(poveziSe(null, ZETON, zahteva as unknown as Zahteva)).rejects.toThrow(
       /ni nastavljen/i,
     );
     expect(zahteva).not.toHaveBeenCalled();

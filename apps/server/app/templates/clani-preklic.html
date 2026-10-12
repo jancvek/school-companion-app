@@ -1,0 +1,44 @@
+{# Vmesna stran pred preklicem otrokovih prijav (V6-R01, `ADR-058` E).
+
+   Nadomešča ponastavitev gesla, ki je otrok nima več. Ista kartica potrditve
+   kot pri deaktivaciji: kdo zgoraj, naslov kot vprašanje, posledice v
+   seznamu. #}
+{% extends "osnova.html" %}
+
+{% block naslov %}Preklicati prijave?{% endblock %}
+
+{% block vsebina %}
+  <section class="kartica kartica-potrditve">
+    <div class="clan-glava">
+      <span class="krozec velik" aria-hidden="true">{{ zacetnica }}</span>
+      <div>
+        {# Ime je vrednost nad vprašanjem in ne del povedi (`ADR-039` F3). #}
+        <p class="potrditev-kdo"><strong>{{ clan_ime }}</strong></p>
+        <p class="zamolklo">otrok</p>
+      </div>
+    </div>
+
+    <h1>Preklicati prijave?</h1>
+
+    <ul class="posledice">
+      <li class="takoj">
+        Aplikacija bo <strong>odjavljena na vseh telefonih</strong> tega otroka.
+        Tudi koda za povezavo, ki še ni bila uporabljena, neha veljati.
+      </li>
+      <li class="tece">
+        Kamera bo delala naprej, posnetki pa bodo čakali na telefonu, dokler
+        telefona ne povežeš znova s QR kodo.
+      </li>
+      <li class="ostane">
+        <strong>Nič se ne izbriše.</strong> Snov, kvizi in poskusi ostanejo, na
+        strežniku in na telefonu.
+      </li>
+    </ul>
+
+    <form method="post" action="{{ pot_dejanja }}" class="vrstica-gumbov">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="gumb nepovraten" type="submit">Da, prekliči prijave</button>
+      <a class="gumb obrobljen" href="{{ pot_nazaj }}">Ne, nazaj</a>
+    </form>
+  </section>
+{% endblock %}

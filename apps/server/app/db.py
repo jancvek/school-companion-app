@@ -48,6 +48,7 @@ from app.models import (
     VLOGA_STARS,
     Credential,
     Family,
+    LinkToken,
     LoginAttempt,
     Material,
     Preizkus,
@@ -1964,6 +1965,18 @@ class NaciniPrijave:
 
 
 @dataclass(frozen=True)
+class PovezanOtrok:
+    """Otrok, čigar telefon je bil pravkar povezan (V6-R01).
+
+    Samo to, kar odgovor telefonu potrebuje: `user_id` je lastnik lokalnih
+    zapisov, ime gre na domačo stran aplikacije (`ADR-036` B).
+    """
+
+    user_id: str
+    display_name: str
+
+
+@dataclass(frozen=True)
 class SejaUporabnika:
     """Seja skupaj z osebo in družino, ki ji pripada."""
 
@@ -2334,6 +2347,82 @@ class PrijavaRepository:
         self._session.execute(delete(UserSession).where(UserSession.expires_at <= ko))
         self._session.commit()
 
+    # --- Povezava telefona (V6-R01) ----------------------------------------
+
+    def unovci_povezavo(
+        self,
+        link_hash: str,
+        *,
+        token_hash: str,
+        csrf_token: str,
+        ko: datetime,
+        potece: datetime,
+        device_label: str | None,
+    ) -> PovezanOtrok | None:
+        """Porabi povezovalni žeton in v isti transakciji ustvari sejo otroka.
+
+        **Enkratnost je lastnost stavka `DELETE`, ne branja pred njim**
+        (`docs/odlocitve/ADR-061` B): seja nastane samo, če je bila izbrisana
+        natanko ena vrstica. Dva hkratna poskusa z istim žetonom zato ne
+        dobita dveh sej — drugi `DELETE` ne najde ničesar.
+
+        `None` za vsak žeton, ki seje ne da: neznan, potekel, že porabljen,
+        žeton deaktiviranega otroka in žeton ugasnjene družine. Klicatelj
+        primerov ne loči in jih ne sme (`ADR-061` F). V zadnjih dveh primerih
+        se žeton **vseeno porabi** — koda, ki ne sme delovati, naj ne čaka,
+        da bo morda smela.
+
+        Metoda je brez družine iz istega razloga kot prijava: pozna samo
+        žeton in družino šele izve. Bere `users` in `families`, podatkov
+        družine ne.
+        """
+        vrstica = self._session.execute(
+            select(
+                LinkToken.id,
+                User.id,
+                User.display_name,
+                User.role,
+                User.is_active,
+                Family.is_active,
+            )
+            .join(User, User.id == LinkToken.child_id)
+            .join(Family, Family.id == User.family_id)
+            .where(LinkToken.token_hash == link_hash)
+        ).first()
+        if vrstica is None:
+            return None
+
+        izid = self._session.execute(
+            delete(LinkToken).where(LinkToken.id == vrstica[0], LinkToken.expires_at > ko)
+        )
+        if cast(CursorResult[Any], izid).rowcount != 1:
+            self._session.rollback()
+            return None
+
+        if vrstica[3] != VLOGA_OTROK or not vrstica[4] or not vrstica[5]:
+            self._session.commit()
+            return None
+
+        self._session.add(
+            UserSession(
+                id=str(uuid4()),
+                user_id=vrstica[1],
+                token_hash=token_hash,
+                csrf_token=csrf_token,
+                created_at=ko,
+                expires_at=potece,
+                last_used_at=ko,
+                device_label=device_label,
+            )
+        )
+        self._session.commit()
+        return PovezanOtrok(user_id=vrstica[1], display_name=vrstica[2])
+
+    def pocisti_potekle_povezave(self, ko: datetime) -> None:
+        """Izbriše povezovalne žetone, ki jim je rok potekel (`ADR-061` B)."""
+        self._session.execute(delete(LinkToken).where(LinkToken.expires_at <= ko))
+        self._session.commit()
+
 
 # --- Člani družine (V3-R06) ------------------------------------------------
 
@@ -2410,6 +2499,7 @@ class ClaniRepository(_RepozitorijDruzine):
     **Nobena metoda ne bere in ne piše čez mejo družine.** `credentials` in
     `sessions` stolpca družine nimata; njuna družina je družina uporabnika, ki
     mu vrstica pripada, zato gre pogoj skozi `users` (`_moj_uporabnik`).
+    `link_tokens` (V6-R01) stolpec družine ima in ga vsak stavek nosi.
     """
 
     def _moje(self) -> ColumnElement[bool]:
@@ -2544,6 +2634,97 @@ class ClaniRepository(_RepozitorijDruzine):
             raise IdentifikatorZaseden(identifier) from izjema
         return user_id
 
+    def ustvari_otroka(self, *, display_name: str, ko: datetime) -> str:
+        """Ustvari otroka **brez poverilnice**; vrne `user_id` (V6-R01).
+
+        Otrok nima ne uporabniškega imena ne gesla (`docs/odlocitve/ADR-058`
+        A): telefon mu poveže starš (`ustvari_povezavo`). Zato tu ni ničesar,
+        kar bi lahko bilo zasedeno, in metoda ne more pasti na enoličnosti.
+
+        Družino dobi od repozitorija, nikoli iz zahteve.
+        """
+        user_id = str(uuid4())
+        self._session.add(
+            User(
+                id=user_id,
+                family_id=self._family_id,
+                role=VLOGA_OTROK,
+                display_name=display_name,
+                is_system_owner=False,
+                is_active=True,
+                created_at=ko,
+            )
+        )
+        self._session.commit()
+        return user_id
+
+    def _moj_aktiven_otrok(self, user_id: str) -> Select[Any]:
+        """Podpoizvedba `user_id`, a samo za aktivnega otroka te družine."""
+        return select(User.id).where(
+            User.id == user_id,
+            self._moje(),
+            User.role == VLOGA_OTROK,
+            User.is_active.is_(True),
+        )
+
+    def ustvari_povezavo(
+        self, child_id: str, *, token_hash: str, ko: datetime, potece: datetime
+    ) -> bool:
+        """Zapiše nov povezovalni žeton otroka. Vrne, ali je nastal (V6-R01).
+
+        **Nov žeton razveljavi prejšnjega**: stari se izbriše v isti
+        transakciji, zato ima otrok največ enega (`ADR-061` B). Obstoječih
+        sej se ne dotakne — dva telefona sta dovoljena (`ADR-058` E).
+
+        `False` za vsakogar, ki ni **aktiven otrok te družine**: tuj ali
+        neznan `id`, starš, deaktiviran otrok. Takrat se ne spremeni nič, tudi
+        prejšnji žeton ne. Pogoj je v repozitoriju in ne samo v usmerjevalniku,
+        ker je to stavek, ki odloča, čigav telefon se sme povezati.
+        """
+        if self._session.scalar(self._moj_aktiven_otrok(child_id)) is None:
+            return False
+        self._session.execute(
+            delete(LinkToken).where(
+                LinkToken.family_id == self._family_id, LinkToken.child_id == child_id
+            )
+        )
+        self._session.add(
+            LinkToken(
+                id=str(uuid4()),
+                family_id=self._family_id,
+                child_id=child_id,
+                token_hash=token_hash,
+                created_at=ko,
+                expires_at=potece,
+            )
+        )
+        self._session.commit()
+        return True
+
+    def preklici_prijave(self, child_id: str) -> bool:
+        """Izbriše vse seje otroka in njegov neporabljen žeton (V6-R01).
+
+        Oboje v **eni transakciji** (`ADR-061` G): preklic, po katerem bi še
+        deset minut veljala koda na zaslonu, ne bi bil preklic. Nadomešča
+        ponastavitev gesla, ki je otrok nima več (`ADR-058` E).
+
+        `False` za tujega ali neznanega člana in za starša; takrat se ne
+        spremeni nič.
+        """
+        moj_otrok = select(User.id).where(
+            User.id == child_id, self._moje(), User.role == VLOGA_OTROK
+        )
+        if self._session.scalar(moj_otrok) is None:
+            return False
+        self._session.execute(delete(UserSession).where(UserSession.user_id.in_(moj_otrok)))
+        self._session.execute(
+            delete(LinkToken).where(
+                LinkToken.family_id == self._family_id, LinkToken.child_id.in_(moj_otrok)
+            )
+        )
+        self._session.commit()
+        return True
+
     def ponastavi_geslo(self, user_id: str, secret_hash: str, ko: datetime) -> bool:
         """Vpiše novo zgostitev in prekliče **vse** seje člana. Vrne, ali je uspelo.
 
@@ -2590,6 +2771,14 @@ class ClaniRepository(_RepozitorijDruzine):
         if not aktiven:
             self._session.execute(
                 delete(UserSession).where(UserSession.user_id.in_(self._moj_uporabnik(user_id)))
+            )
+            # Tudi neporabljen povezovalni žeton (`ADR-061` G): deaktiviran
+            # otrok se ne sme povezati s kodo, ki je nastala minuto prej.
+            self._session.execute(
+                delete(LinkToken).where(
+                    LinkToken.family_id == self._family_id,
+                    LinkToken.child_id.in_(self._moj_uporabnik(user_id)),
+                )
             )
         self._session.commit()
         return True

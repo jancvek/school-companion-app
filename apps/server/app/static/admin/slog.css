@@ -707,6 +707,17 @@ a.nevarno { color: var(--nevarno); }
 .kartica-potrditve { max-width: 34rem; margin: 1rem auto; padding: 1.75rem; }
 .kartica-potrditve h1 { font-size: 1.5rem; margin: 1.1rem 0 0.75rem; }
 .potrditev-kdo { font-size: 1.05rem; }
+/* Koda za povezavo telefona (V6-R01). Polje je belo v obeh temah: bralniki
+   obrnjeno kodo berejo slabse. */
+.qr-okvir {
+  width: min(100%, 17rem); margin: 1rem auto; padding: 0.5rem; border-radius: 10px;
+  background: #fff; border: 1px solid var(--rob);
+}
+.qr-okvir svg { display: block; width: 100%; height: auto; }
+.kartica-povezave .vrstica-gumbov { justify-content: center; }
+.kartica-povezave .zamolklo { text-align: center; }
+.clan-povezi { margin: 0; }
+.clan-povezi .gumb { width: 100%; }
 .posledice { list-style: none; margin: 0 0 1.25rem; padding: 0; display: grid; gap: 0.6rem; }
 .posledice li { position: relative; padding-left: 1.8rem; }
 .posledice li::before { position: absolute; left: 0.35rem; top: 0; font-weight: 800; }

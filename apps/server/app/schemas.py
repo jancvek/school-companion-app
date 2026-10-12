@@ -132,21 +132,18 @@ class Zivost(BaseModel):
     status: str
 
 
-class PrijavaTelefona(BaseModel):
-    """Telo `POST /auth/login` (V3-R04)."""
+class PovezavaTelefona(BaseModel):
+    """Telo `POST /auth/link` (V6-R01)."""
 
-    #: Uporabniško ime otroka. Enolično čez celotno namestitev (`ADR-027`).
-    identifier: str = Field(min_length=1, max_length=320)
-
-    #: Geslo v čitljivi obliki. Po HTTPS in nikamor zapisano (`ADR-026`).
-    #: Zgornja meja je tu, da zahteva ne more naročiti poljubno dolge argon2
-    #: preverbe; spodnje ni — prekratko geslo zavrne `app/ukazi.py` ob
-    #: nastavitvi, prijava pa mora odgovoriti enako na vsako napačno geslo.
-    password: str = Field(max_length=1024)
+    #: Povezovalni žeton iz QR kode ali iz odprte povezave, v čitljivi obliki.
+    #: Po HTTPS in nikamor zapisan; v bazi je samo njegova zgostitev
+    #: (`ADR-061` B). Zgornja meja je tu, da zahteva ne more naročiti
+    #: zgoščevanja poljubno dolgega niza.
+    token: str = Field(min_length=1, max_length=512)
 
 
 class ZetonPrijave(BaseModel):
-    """Odgovor na uspešen `POST /auth/login` (V3-R04).
+    """Odgovor na uspešen `POST /auth/link` (V6-R01; do takrat `/auth/login`).
 
     Žeton je neprozoren niz; telefon ga ne razčlenjuje in iz njega ničesar ne
     izve (`ADR-027` B2). Kdo je prijavljen, zato pove ta odgovor izrecno —

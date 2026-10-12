@@ -210,7 +210,8 @@ describe('stanje prenosa na domači strani', () => {
   it('potekla prijava to pove naravnost, ne le v števcu', async () => {
     // Kriterij V3-R04: „Ob neveljavnem žetonu aplikacija to pove razumljivo
     // (Prijava je potekla, prijavi se znova) in ne izgubi nobene lokalno
-    // shranjene snovi.“ Zapis v `sync_error` tega ne stori: ne izriše ga
+    // shranjene snovi.“ Od `V6-R01` se otrok ne more prijaviti sam, zato
+    // sporočilo pove, koga naj prosi. Zapis v `sync_error` tega ne stori: ne izriše ga
     // nihče. Brez te vrstice je potekla prijava videti enako kot ugasnjen
     // strežnik — števec stoji in otrok ne ve, da mora kaj narediti.
     await insertMaterial(db, material({ id: 'a' }));
@@ -222,7 +223,8 @@ describe('stanje prenosa na domači strani', () => {
     });
 
     const vrstica = await screen.findByTestId('prijava-potekla');
-    expect(vrstica.props.children).toMatch(/prijavi se znova/i);
+    expect(vrstica.props.children).toMatch(/prosi starša za novo kodo/i);
+    expect(vrstica.props.children).not.toMatch(/prijavi se/i);
     // Snov ostane na telefonu in tega sporočilo tudi pove.
     expect(vrstica.props.children).toMatch(/ostanejo na telefonu/i);
     expect((await listPending(db, SEJA.userId)).map((m) => m.id)).toEqual(['a']);
@@ -278,6 +280,45 @@ describe('stanje prenosa na domači strani', () => {
 
     expect(await screen.findByTestId('ni-prijave')).toBeTruthy();
     expect(screen.queryByTestId('števec-čakajocih')).toBeNull();
+  });
+
+  it('nepovezan telefon pove, kdo ga poveže, in ne omenja prijave z geslom', async () => {
+    // Kriterij `V6-R01`: na domači strani je namesto vnosa prijave „Poveži s
+    // QR kodo" (`ADR-058` G). Otrok se ne more prijaviti sam, zato besedilo
+    // ne sme reči „prijavi se".
+    await izrisi(true, null);
+
+    const vrstica = await screen.findByTestId('ni-prijave');
+    expect(vrstica.props.children).toMatch(/QR kodo/);
+    expect(vrstica.props.children).toMatch(/starš/);
+    expect(vrstica.props.children).toMatch(/shranjujejo na telefon/);
+    expect(screen.queryByText('Prijavi se')).toBeNull();
+    expect(screen.getByText('Poveži s QR kodo')).toBeTruthy();
+  });
+
+  it('nepovezan telefon z gumbom pride naravnost na bralnik kode', async () => {
+    await izrisi(true, null);
+
+    await fireEvent.press(await screen.findByTestId('gumb-prijava'));
+
+    expect(usmerjevalnik.stanje.router.push).toHaveBeenLastCalledWith('/povezi');
+  });
+
+  it('po potekli prijavi gumb pelje na bralnik kode, ne na odjavo', async () => {
+    // Pot po „Prekliči prijave": edino, kar otrok takrat lahko naredi, je
+    // prebrati novo kodo.
+    await insertMaterial(db, material({ id: 'a' }));
+    await izrisi(true, SEJA, {
+      vrsta: 'pending',
+      razlog: SPOROCILO_POTEKLA_PRIJAVA,
+      prijavaPotekla: true,
+    });
+    await screen.findByTestId('prijava-potekla');
+
+    expect(screen.getByText('Poveži s QR kodo')).toBeTruthy();
+    await fireEvent.press(screen.getByTestId('gumb-prijava'));
+
+    expect(usmerjevalnik.stanje.router.push).toHaveBeenLastCalledWith('/povezi');
   });
 
   it('brez prijave domača stran še vedno dela', async () => {

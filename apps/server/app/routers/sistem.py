@@ -169,6 +169,7 @@ def _zavrnitev_gesla(clan: ClanDruzine, seja: SejaUporabnika) -> str | None:
     return clani.zakaj_ne_sme_ponastaviti_gesla(
         izvajalec_id=seja.user_id,
         clan_id=clan.user_id,
+        clan_vloga=clan.role,
         clan_je_lastnik_sistema=clan.is_system_owner,
     )
 

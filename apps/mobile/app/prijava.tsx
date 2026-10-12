@@ -1,64 +1,27 @@
 import { useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { usePrijava } from '@/sync/use-prijava';
-import { useSync } from '@/sync/use-sync';
 import { theme } from '@/ui/theme';
 
 /**
- * Prijava in odjava na telefonu (V3-R04).
+ * Kdo je povezan na tem telefonu, in odjava (V3-R04, V6-R01).
  *
- * Zaslon in ne vrata: do njega se pride z domače strani, aplikacija pa brez
- * njega dela naprej (`docs/odlocitve/ADR-036` A). Kar prijava odklene, je
- * **prenos**, ne kamera.
+ * Do `V6-R01` je bil to prijavni obrazec z uporabniškim imenom in geslom.
+ * Otrok gesla nima več (`docs/odlocitve/ADR-058`): telefon poveže starš s QR
+ * kodo na zaslonu `app/povezi.tsx`, tu pa ostane to, kar se po povezavi še
+ * da narediti — odjava in ponovna povezava.
  *
- * Ko je kdo prijavljen, isti zaslon ponudi odjavo — ločenega zanjo ni, ker je
- * to ista stvar z dveh strani in ker je odjava dejanje, ki se zgodi redko.
+ * Zaslon in ne vrata: aplikacija brez povezave dela naprej (`ADR-036` A).
  */
 export default function PrijavaScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { seja, prijavi, odjavi } = usePrijava();
-  const { nastavljen } = useSync();
+  const { seja, odjavi } = usePrijava();
 
-  const [ime, setIme] = useState('');
-  const [geslo, setGeslo] = useState('');
-  const [napaka, setNapaka] = useState<string | null>(null);
   const [tece, setTece] = useState(false);
-
-  const posljiPrijavo = useCallback(async () => {
-    if (tece) return;
-    setNapaka(null);
-    setTece(true);
-    try {
-      await prijavi(ime.trim(), geslo);
-      // Geslo ne sme ostati v stanju zaslona dlje, kot je nujno.
-      setGeslo('');
-      router.back();
-    } catch (cause: unknown) {
-      // Sporočilo je iz `NapakaPrijave` in je v slovenščini; surovo besedilo
-      // sistemske napake bi bilo tu edina vsebina, kar merilo dokončanosti
-      // prepoveduje, zato ima tudi nepričakovana napaka svoje besedilo.
-      setNapaka(
-        cause instanceof Error && cause.name === 'NapakaPrijave'
-          ? cause.message
-          : 'Prijava ni uspela. Poskusi znova.',
-      );
-    } finally {
-      setTece(false);
-    }
-  }, [geslo, ime, prijavi, router, tece]);
 
   const posljiOdjavo = useCallback(async () => {
     if (tece) return;
@@ -70,6 +33,20 @@ export default function PrijavaScreen() {
       setTece(false);
     }
   }, [odjavi, router, tece]);
+
+  const gumbPovezi = (
+    <Pressable
+      accessibilityRole="button"
+      testID="gumb-povezi"
+      disabled={tece}
+      style={({ pressed }) => [styles.gumb, (pressed || tece) && styles.gumbPritisnjen]}
+      onPress={() => router.push('/povezi')}
+    >
+      <Text style={styles.gumbNapis}>
+        {seja ? 'Poveži znova s QR kodo' : 'Poveži s QR kodo'}
+      </Text>
+    </Pressable>
+  );
 
   if (seja) {
     return (
@@ -86,8 +63,13 @@ export default function PrijavaScreen() {
         </Text>
         <Text style={styles.pojasnilo}>
           Odjava izbriše prijavo s te naprave. Posnetki in odgovori ostanejo na telefonu in
-          se prenesejo, ko se spet prijaviš.
+          se prenesejo, ko ti starš telefon spet poveže.
         </Text>
+        <Text style={styles.pojasnilo}>
+          Če aplikacija pravi, da je prijava potekla, prosi starša za novo kodo in telefon
+          poveži znova.
+        </Text>
+        {gumbPovezi}
         <Pressable
           accessibilityRole="button"
           testID="gumb-odjava"
@@ -106,76 +88,26 @@ export default function PrijavaScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    <View
+      testID="prijava-vsebina"
+      style={[
+        styles.container,
+        styles.vsebina,
+        { paddingBottom: theme.spacing + insets.bottom },
+      ]}
     >
-      <ScrollView
-        testID="prijava-vsebina"
-        contentContainerStyle={[
-          styles.vsebina,
-          { paddingBottom: theme.spacing + insets.bottom },
-        ]}
-        keyboardShouldPersistTaps="handled"
-      >
-        <Text style={styles.naslov}>Prijavi se</Text>
-        <Text style={styles.pojasnilo}>
-          Prijava je potrebna samo za prenos na strežnik. Slikaš lahko tudi brez nje —
-          posnetki počakajo na telefonu.
-        </Text>
-
-        {!nastavljen ? (
-          <Text testID="prenos-ni-nastavljen" style={styles.napaka}>
-            Prenos ni nastavljen, zato prijava ni mogoča. Povej staršu.
-          </Text>
-        ) : null}
-
-        <Text style={styles.oznaka}>Uporabniško ime</Text>
-        <TextInput
-          testID="polje-ime"
-          style={styles.polje}
-          value={ime}
-          onChangeText={setIme}
-          autoCapitalize="none"
-          autoCorrect={false}
-          textContentType="username"
-          placeholder="npr. masa"
-          placeholderTextColor={theme.textMuted}
-        />
-
-        <Text style={styles.oznaka}>Geslo</Text>
-        <TextInput
-          testID="polje-geslo"
-          style={styles.polje}
-          value={geslo}
-          onChangeText={setGeslo}
-          secureTextEntry
-          autoCapitalize="none"
-          autoCorrect={false}
-          textContentType="password"
-          onSubmitEditing={() => void posljiPrijavo()}
-        />
-
-        {napaka !== null ? (
-          <Text testID="napaka-prijave" style={styles.napaka}>
-            {napaka}
-          </Text>
-        ) : null}
-
-        <Pressable
-          accessibilityRole="button"
-          testID="gumb-prijava"
-          disabled={tece || !nastavljen}
-          style={({ pressed }) => [
-            styles.gumb,
-            (pressed || tece || !nastavljen) && styles.gumbPritisnjen,
-          ]}
-          onPress={() => void posljiPrijavo()}
-        >
-          <Text style={styles.gumbNapis}>{tece ? 'Prijavljam…' : 'Prijavi se'}</Text>
-        </Pressable>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      <Text testID="ni-povezan" style={styles.naslov}>
+        Telefon ni povezan
+      </Text>
+      <Text style={styles.pojasnilo}>
+        Povezava je potrebna samo za prenos na strežnik. Slikaš lahko tudi brez nje —
+        posnetki počakajo na telefonu.
+      </Text>
+      <Text style={styles.pojasnilo}>
+        Gesla ne potrebuješ. Prosi starša, naj ti pokaže kodo za povezavo telefona.
+      </Text>
+      {gumbPovezi}
+    </View>
   );
 }
 
@@ -185,10 +117,9 @@ const styles = StyleSheet.create({
     backgroundColor: theme.background,
   },
   /**
-   * Odmik vsebine od robov. Uporabita ga **obe** veji zaslona: prijavna prek
-   * `contentContainerStyle`, odjavna pa neposredno. Brez tega se besedilo in
-   * gumb dotikata levega in desnega roba — edini zaslon v aplikaciji, kjer
-   * bi bilo tako.
+   * Odmik vsebine od robov. Uporabita ga **obe** veji zaslona. Brez tega se
+   * besedilo in gumb dotikata levega in desnega roba — edini zaslon v
+   * aplikaciji, kjer bi bilo tako.
    *
    * `paddingBottom` vsaka veja prišteje sama, ker mora vanj prišteti še
    * spodnji odmik varnega območja (Android riše edge-to-edge).
@@ -208,27 +139,8 @@ const styles = StyleSheet.create({
     color: theme.textMuted,
     fontSize: 15,
   },
-  oznaka: {
-    marginTop: theme.spacing * 0.5,
-    color: theme.textMuted,
-    fontSize: 14,
-  },
-  polje: {
-    padding: theme.spacing * 0.75,
-    borderRadius: theme.radius,
-    borderWidth: 1,
-    borderColor: theme.border,
-    backgroundColor: theme.surface,
-    color: theme.text,
-    fontSize: 18,
-  },
-  napaka: {
-    marginTop: theme.spacing * 0.5,
-    color: theme.danger,
-    fontSize: 15,
-  },
   gumb: {
-    marginTop: theme.spacing * 1.5,
+    marginTop: theme.spacing * 0.5,
     paddingVertical: theme.spacing * 1.25,
     borderRadius: theme.radius,
     backgroundColor: theme.accent,

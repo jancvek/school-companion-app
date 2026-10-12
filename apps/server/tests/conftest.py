@@ -30,6 +30,7 @@ from app.models import (
     Base,
     Credential,
     Family,
+    LinkToken,
     User,
 )
 from app.settings import Settings
@@ -372,6 +373,37 @@ def prijavi(odjemalec: PrijavljenOdjemalec, motor: Engine, user_id: str) -> None
     postavljena = ustvari_sejo(motor, user_id)
     odjemalec.cookies.set(prijava.PISKOTEK_SEJE, postavljena.zeton)
     odjemalec.csrf = postavljena.seja.csrf_token
+
+
+def ustvari_povezavo(
+    motor: Engine,
+    child_id: str,
+    *,
+    family_id: str = CVEK_ID,
+    potece: datetime | None = None,
+) -> str:
+    """Zapiše povezovalni žeton in vrne njegovo čitljivo obliko (V6-R01).
+
+    Vrstica nastane **mimo poti in mimo repozitorija**, kot seja v
+    `ustvari_sejo`: tako jo test lahko postavi tudi v stanje, ki ga pot ne
+    dopušča — potekel žeton, žeton starša, žeton deaktiviranega otroka. Pot,
+    ki žeton v resnici ustvari, ima svoje teste v `tests/test_clani.py`.
+    """
+    zeton = prijava.nov_zeton()
+    zdaj = datetime.now(UTC)
+    with Session(motor) as seja:
+        seja.add(
+            LinkToken(
+                id=str(uuid4()),
+                family_id=family_id,
+                child_id=child_id,
+                token_hash=prijava.zgostitev_zetona(zeton),
+                created_at=zdaj,
+                expires_at=potece if potece is not None else zdaj + prijava.TRAJANJE_POVEZAVE,
+            )
+        )
+        seja.commit()
+    return zeton
 
 
 def ustvari_otroka(

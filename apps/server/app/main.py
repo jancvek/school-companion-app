@@ -55,6 +55,10 @@ dnevnik = logging.getLogger(__name__)
 #: loči „strežnik ne teče" od „prijava ni veljavna". `POST /auth/login` je
 #: pot, na kateri žeton šele nastane; **odjave tu ni** — ta zahteva žeton kot
 #: vsaka druga pot telefona (`docs/odlocitve/ADR-036` G).
+#: `POST /auth/link` je tu z `V6-R01` (`docs/odlocitve/ADR-061` D): na njej
+#: telefon povezovalni žeton iz QR kode zamenja za sejo, torej žetona seje
+#: takrat še nima. `POST /auth/login` ostane izvzeta, čeprav je odslej
+#: škrbina — stari APK jo kliče prav takrat, ko seje nima.
 #: `POST /auth/google/login` in `GET /auth/google/callback` sta tu z `V3-R08`
 #: (`docs/odlocitve/ADR-046` B). Sta **točni poti**, ne predpona.
 #:
@@ -69,6 +73,7 @@ IZVZETE_POTI = frozenset(
     {
         "/health",
         prijava.POT_PRIJAVE_TELEFONA,
+        prijava.POT_POVEZAVE_TELEFONA,
         google.POT_PRIJAVE,
         google.POT_POVRATNA,
     }

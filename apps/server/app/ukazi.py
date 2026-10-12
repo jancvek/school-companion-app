@@ -23,7 +23,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from app.db import PrijavaRepository, naredi_motor
-from app.models import VLOGA_OTROK
+from app.models import VLOGA_STARS
 from app.prijava import (
     NAJKRAJSE_GESLO,
     geslo_je_dovolj_dolgo,
@@ -41,9 +41,17 @@ SPOROCILO_GESLO_V_ARGUMENTU = (
 )
 
 SPOROCILO_NI_RACUNA = (
-    "Računa s tem identifikatorjem ni. Preveri, ali je migracija 0008_uporabniki "
-    "tekla (alembic upgrade head), in ali si e-naslov oziroma uporabniško ime "
-    "vpisal natanko tako, kot je v bazi."
+    "Računa s tem e-naslovom ni. Preveri, ali je migracija 0008_uporabniki "
+    "tekla (alembic upgrade head), in ali si e-naslov vpisal natanko tako, kot "
+    "je v bazi. Otrok gesla nima: telefon mu poveže starš na strani /admin/family."
+)
+
+#: Otrok gesla nima (`V6-R01`, `docs/odlocitve/ADR-058`). Migracija `0014`
+#: otrokove geselne poverilnice izbriše, zato do tega sporočila pride samo
+#: vrstica, ki je v bazi ostala mimo nje — ukaz ji gesla vseeno ne nastavi.
+SPOROCILO_OTROK = (
+    "Ta račun je otrokov in gesla nima. Telefon mu poveže starš s QR kodo na "
+    "strani /admin/family. Nič ni spremenjeno."
 )
 
 SPOROCILO_NEUJEMANJE = "Gesli se ne ujemata. Nič ni spremenjeno; poskusi znova."
@@ -51,13 +59,9 @@ SPOROCILO_NEUJEMANJE = "Gesli se ne ujemata. Nič ni spremenjeno; poskusi znova.
 SPOROCILO_PRAZNO = "Geslo je prazno. Nič ni spremenjeno."
 
 
-def _sporocilo_prekratko(vloga: str) -> str:
-    najmanj = NAJKRAJSE_GESLO[vloga]
-    kdo = "otrokovo geslo" if vloga == VLOGA_OTROK else "staršev račun"
-    return (
-        f"Geslo je prekratko: za {kdo} jih mora biti vsaj {najmanj}. "
-        "Nič ni spremenjeno."
-    )
+def _sporocilo_prekratko() -> str:
+    najmanj = NAJKRAJSE_GESLO[VLOGA_STARS]
+    return f"Geslo je prekratko: znakov mora biti vsaj {najmanj}. Nič ni spremenjeno."
 
 
 def nastavi_geslo(
@@ -89,13 +93,18 @@ def nastavi_geslo(
         if poverilnica is None:
             izpisi(SPOROCILO_NI_RACUNA)
             return NAPAKA
+        if poverilnica.role != VLOGA_STARS:
+            # Pred vprašanjem po geslu: gesla, ki ne bo nastavljeno, naj nihče
+            # ne tipka.
+            izpisi(SPOROCILO_OTROK)
+            return NAPAKA
 
         geslo = vprasaj(f"Novo geslo za {poverilnica.display_name} ({identifikator}): ")
         if not geslo:
             izpisi(SPOROCILO_PRAZNO)
             return NAPAKA
         if not geslo_je_dovolj_dolgo(poverilnica.role, geslo):
-            izpisi(_sporocilo_prekratko(poverilnica.role))
+            izpisi(_sporocilo_prekratko())
             return NAPAKA
         if vprasaj("Še enkrat isto geslo: ") != geslo:
             izpisi(SPOROCILO_NEUJEMANJE)
@@ -125,9 +134,9 @@ def glavni(argumenti: list[str] | None = None) -> int:
 
     geslo = podukazi.add_parser(
         "nastavi-geslo",
-        help="Nastavi geslo računu (e-naslov starša ali uporabniško ime otroka).",
+        help="Nastavi geslo staršu (po e-naslovu). Otrok gesla nima.",
     )
-    geslo.add_argument("identifikator", help="E-naslov ali uporabniško ime.")
+    geslo.add_argument("identifikator", help="E-naslov starša.")
     # Dovoljen samo zato, da lahko ukaz pojasni, zakaj ga ne sprejme. Brez tega
     # bi `argparse` odgovoril s suhim „unrecognized arguments".
     geslo.add_argument("odvecno", nargs="*", help=argparse.SUPPRESS)

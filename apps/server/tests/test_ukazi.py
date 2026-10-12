@@ -6,6 +6,7 @@ argon2id in nikjer nič berljivega.
 """
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import FastAPI
@@ -13,9 +14,11 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from app import ukazi
+from app.db import ClaniRepository
 from app.models import Credential, UserSession
 from app.prijava import geslo_se_ujema
 from tests.conftest import (
+    CVEK_ID,
     GESLO_STARSA,
     OTROK_IDENTIFIKATOR,
     STARS_IDENTIFIKATOR,
@@ -182,65 +185,63 @@ class TestNastaviGeslo:
         assert "vsaj 12" in izpisi[0]
         assert zgostitev_v_bazi(motor, STARS_IDENTIFIKATOR) is None
 
-    def test_otrokovo_geslo_sme_biti_krajse_od_starsevega(
-        self, motor: Engine, izpisi: list[str]
-    ) -> None:
-        """Osem znakov, ne dvanajst — a tudi ne štirje (`ADR-036` E).
+    def test_dvanajst_znakov_je_natanko_dovolj(self, motor: Engine, izpisi: list[str]) -> None:
+        """Spodnji rob meje. Brez tega bi mutacija `>=` v `>` ostala zelena.
 
-        `ADR-035` G je otroku dovolil štiri, ker njegov račun takrat ni imel
-        poti na javni internet. Z `V3-R04` jo dobi.
+        Do `V6-R01` je rob dokazoval otrok (osem znakov); odkar otrok gesla
+        nima, ga dokazuje edina meja, ki je ostala.
         """
-        ustvari_otroka(motor, geslo=None)
+        ustvari_starsa(motor, geslo=None)
+        natanko = "a" * 12
 
         koda = ukazi.nastavi_geslo(
-            OTROK_IDENTIFIKATOR,
-            vprasaj=Tipkovnica("masa-maša", "masa-maša"),
-            izpisi=izpisi.append,
-            motor=motor,
-        )
-
-        assert koda == 0
-
-    def test_osem_znakov_je_natanko_dovolj(self, motor: Engine, izpisi: list[str]) -> None:
-        """Spodnji rob meje. Brez tega bi mutacija `>=` v `>` ostala zelena."""
-        ustvari_otroka(motor, geslo=None)
-
-        koda = ukazi.nastavi_geslo(
-            OTROK_IDENTIFIKATOR,
-            vprasaj=Tipkovnica("masa1234", "masa1234"),
+            STARS_IDENTIFIKATOR,
+            vprasaj=Tipkovnica(natanko, natanko),
             izpisi=izpisi.append,
             motor=motor,
         )
 
         assert koda == 0, izpisi
+        assert geslo_se_ujema(zgostitev_v_bazi(motor, STARS_IDENTIFIKATOR), natanko)
 
-    def test_sedem_znakov_je_premalo(self, motor: Engine, izpisi: list[str]) -> None:
-        """Zgornji rob meje — prvo geslo, ki še ne sme skozi."""
-        ustvari_otroka(motor, geslo=None)
+    def test_otroku_gesla_ni_mogoce_nastaviti(self, motor: Engine, izpisi: list[str]) -> None:
+        """`V6-R01`: otrok gesla nima (`ADR-058`).
+
+        Otrok iz `conftest` geselno poverilnico v bazi še ima — stanje, ki ga
+        migracija `0014` odpravi. Ukaz ji gesla vseeno ne nastavi, sej ne
+        prekliče in po geslu sploh ne vpraša.
+        """
+        otrok = ustvari_otroka(motor, geslo=None)
+        ustvari_sejo(motor, otrok)
+        tipkovnica = Tipkovnica("dovolj-dolgo-geslo", "dovolj-dolgo-geslo")
 
         koda = ukazi.nastavi_geslo(
-            OTROK_IDENTIFIKATOR,
-            vprasaj=Tipkovnica("masa123", "masa123"),
-            izpisi=izpisi.append,
-            motor=motor,
+            OTROK_IDENTIFIKATOR, vprasaj=tipkovnica, izpisi=izpisi.append, motor=motor
         )
 
         assert koda == ukazi.NAPAKA
-        assert "vsaj 8" in izpisi[0]
+        assert izpisi == [ukazi.SPOROCILO_OTROK]
+        assert tipkovnica.vprasanja == []
+        assert zgostitev_v_bazi(motor, OTROK_IDENTIFIKATOR) is None
+        with Session(motor) as seja:
+            assert len(list(seja.scalars(select(UserSession.id)))) == 1
 
-    def test_stiri_znaki_otroku_ne_zadoscajo_vec(self, motor: Engine, izpisi: list[str]) -> None:
-        """Geslo, ki je do V3-R04 veljalo, odslej ne velja več."""
-        ustvari_otroka(motor, geslo=None)
+    def test_otrok_brez_poverilnice_je_racun_ki_ga_ukaz_ne_najde(
+        self, motor: Engine, izpisi: list[str]
+    ) -> None:
+        """Otrok, kakršen nastane od `V6-R01`: samo ime, brez identifikatorja."""
+        with Session(motor) as seja:
+            ClaniRepository(seja, CVEK_ID).ustvari_otroka(
+                display_name="Nika", ko=datetime.now(UTC)
+            )
 
         koda = ukazi.nastavi_geslo(
-            OTROK_IDENTIFIKATOR,
-            vprasaj=Tipkovnica("masa", "masa"),
-            izpisi=izpisi.append,
-            motor=motor,
+            "nika", vprasaj=Tipkovnica("x", "x"), izpisi=izpisi.append, motor=motor
         )
 
         assert koda == ukazi.NAPAKA
-        assert "vsaj 8" in izpisi[0]
+        assert izpisi == [ukazi.SPOROCILO_NI_RACUNA]
+        assert "/admin/family" in ukazi.SPOROCILO_NI_RACUNA
 
 
 class TestUkaznaVrstica:

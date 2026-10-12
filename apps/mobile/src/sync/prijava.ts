@@ -1,5 +1,10 @@
 /**
- * Prijava in odjava telefona (V3-R04).
+ * Povezava in odjava telefona (V3-R04, V6-R01).
+ *
+ * Do `V6-R01` se je otrok prijavil z uporabniškim imenom in geslom. Odslej
+ * gesla nima: telefon poveže starš s QR kodo, aplikacija pa enkratni žeton
+ * iz nje zamenja za sejo (`docs/odlocitve/ADR-058`, `ADR-061`). Seja sama je
+ * ista kot prej.
  *
  * Modul je v `src/sync/`, ker se dotakne omrežja — regresijski test
  * `__tests__/no-network.test.ts` drugje tega ne dovoli. Shramba žetona je
@@ -16,7 +21,10 @@ import * as SecureStore from 'expo-secure-store';
 import type { ServerConfig } from '../config/server';
 import { poslji, type Zahteva } from './http';
 
-/** Koliko čakamo na prijavo; argon2 na strežniku je namenoma počasen. */
+/**
+ * Koliko čakamo na povezavo ali odjavo. Strežnik sme pred preverbo žetona
+ * namenoma počakati (`ADR-061` E), zato meja ni kratka.
+ */
 export const CASOVNA_OMEJITEV_MS = 30_000;
 
 /** Ključ, pod katerim v varni shrambi leži seja. */
@@ -46,7 +54,7 @@ export class NapakaPrijave extends Error {
 }
 
 const SPOROCILO_NI_NASTAVLJEN =
-  'Prenos ni nastavljen, zato prijava ni mogoča. Aplikacijo je treba zgraditi z naslovom strežnika.';
+  'Prenos ni nastavljen, zato telefona ni mogoče povezati. Povej staršu.';
 
 const SPOROCILO_NEDOSEGLJIV =
   'Strežnik ni dosegljiv. Preveri povezavo in poskusi znova; posnetki na telefonu ostanejo.';
@@ -55,12 +63,20 @@ const SPOROCILO_NERAZUMLJIV =
   'Strežnik je odgovoril nepričakovano. Poskusi znova; če se ponovi, povej staršu.';
 
 /**
- * Sporočilo, ki ga uporabnica vidi, ko žeton ni več veljaven.
+ * Sporočilo, ki ga uporabnica vidi, ko žeton seje ni več veljaven.
  *
- * Isto besedilo za potekel in za odvzet žeton: za Mašo je razlika brez
- * pomena, dejanje pa isto (kriterij `V3-R04`).
+ * Isto besedilo za potekel in za odvzet žeton: za otroka je razlika brez
+ * pomena, dejanje pa isto (kriterij `V3-R04`). Od `V6-R01` se otrok ne more
+ * prijaviti sam, zato sporočilo pove, koga naj prosi.
  */
-export const SPOROCILO_POTEKLA_PRIJAVA = 'Prijava je potekla, prijavi se znova.';
+export const SPOROCILO_POTEKLA_PRIJAVA = 'Prijava je potekla. Prosi starša za novo kodo.';
+
+/**
+ * Kar otrok vidi, ko povezovalni žeton ne velja — potekel, že porabljen ali
+ * neznan. Strežnik pove isto (`ADR-061` F); to besedilo je tu za primer, ko
+ * zavrnitev pride brez razumljivega telesa.
+ */
+export const SPOROCILO_KODA_NE_VELJA = 'Koda ne velja več. Prosi starša za novo.';
 
 /** Kar ta modul potrebuje od varne shrambe; v testih se podtakne. */
 export type VarnaShramba = {
@@ -137,7 +153,7 @@ export function glaveSeje(seja: Seja): Record<string, string> {
   return { Authorization: `Bearer ${seja.zeton}` };
 }
 
-/** Odgovor strežnika na uspešno prijavo; strežniku ne verjamemo na besedo. */
+/** Odgovor strežnika na uspešno povezavo; strežniku ne verjamemo na besedo. */
 function sejaIzOdgovora(telo: unknown): Seja {
   if (typeof telo !== 'object' || telo === null) throw new NapakaPrijave(SPOROCILO_NERAZUMLJIV);
   const t = telo as Record<string, unknown>;
@@ -151,27 +167,46 @@ function sejaIzOdgovora(telo: unknown): Seja {
   return { zeton: t.token, userId: t.user_id, ime: t.display_name };
 }
 
-/** Sporočilo strežnika ob zavrnitvi, ali privzeto, če ga ni. */
+/** Sporočilo strežnika ob zavrnjeni kodi, ali privzeto, če ga ni. */
 function sporociloZavrnitve(telo: unknown): string {
   if (typeof telo === 'object' && telo !== null) {
     const podrobnost = (telo as { detail?: unknown }).detail;
     if (typeof podrobnost === 'string' && podrobnost.length > 0) return podrobnost;
   }
-  return 'Uporabniško ime ali geslo ni pravo.';
+  return SPOROCILO_KODA_NE_VELJA;
+}
+
+/** Statusi, ki ne pomenijo sodbe o kodi, ampak „poskusi pozneje" (`ADR-004`). */
+const ZACASNI_STATUSI = new Set([408, 429]);
+
+/**
+ * Sporočilo za neuspešen odgovor.
+ *
+ * Besedilo strežnika se pokaže **samo ob `401`** — to je edini odgovor, za
+ * katerega vemo, da ga je napisala pot povezave in da je v slovenščini.
+ * Vsak drug 4xx (npr. `404` strežnika, ki poti še nima, ali `422`) bi sicer
+ * na zaslon prinesel surovo angleško besedilo ogrodja.
+ */
+function sporociloNeuspeha(status: number, telo: unknown): string {
+  if (status === 401) return sporociloZavrnitve(telo);
+  if (status >= 500 || ZACASNI_STATUSI.has(status)) return SPOROCILO_NEDOSEGLJIV;
+  return SPOROCILO_NERAZUMLJIV;
 }
 
 /**
- * Prijavi se in vrne sejo; ob neuspehu vrže `NapakaPrijave` s sporočilom,
- * ki ga je mogoče pokazati.
+ * Unovči povezovalni žeton in vrne sejo; ob neuspehu vrže `NapakaPrijave` s
+ * sporočilom, ki ga je mogoče pokazati.
  *
  * Seje **ne shrani** — to naredi klicatelj, skupaj s posvojitvijo zapisov
- * brez lastnika. Tako je v enem mestu vidno, da prijava na telefonu naredi
+ * brez lastnika. Tako je v enem mestu vidno, da povezava na telefonu naredi
  * dvoje, ne eno.
+ *
+ * Nedosegljiv strežnik žetona ne porabi: zahteva do njega ni prišla, zato
+ * sme otrok isto kodo prebrati znova (`docs/plan/V6-R01.md`).
  */
-export async function prijaviSe(
+export async function poveziSe(
   nastavitve: ServerConfig | null,
-  identifikator: string,
-  geslo: string,
+  zeton: string,
   zahteva: Zahteva = fetch as unknown as Zahteva,
   casovnaOmejitevMs: number = CASOVNA_OMEJITEV_MS,
 ): Promise<Seja> {
@@ -181,11 +216,11 @@ export async function prijaviSe(
   try {
     odgovor = await poslji(
       zahteva,
-      `${nastavitve.baseUrl}/auth/login`,
+      `${nastavitve.baseUrl}/auth/link`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: identifikator, password: geslo }),
+        body: JSON.stringify({ token: zeton }),
       },
       casovnaOmejitevMs,
     );
@@ -200,9 +235,7 @@ export async function prijaviSe(
     } catch {
       // Telo ni JSON. Sporočilo pade na privzetek; koda je pomembnejša.
     }
-    throw new NapakaPrijave(
-      odgovor.status >= 500 ? SPOROCILO_NEDOSEGLJIV : sporociloZavrnitve(telo),
-    );
+    throw new NapakaPrijave(sporociloNeuspeha(odgovor.status, telo));
   }
 
   try {
