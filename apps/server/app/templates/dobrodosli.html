@@ -29,7 +29,9 @@
           {% endif %}
           <h1>Pozdravljeni{% if ime %}, {{ ime }}{% endif %}</h1>
           <p class="pod">
-            {% if registriran %}{{ druzina }} je odobrena.{% else %}V družini še ni otroka.{% endif %}
+            {# Ime družine je tu v obeh oblikah: stran nima menija, ki ga sicer
+               pove, in kdor jo gleda, mora vedeti, čigavo družino ureja. #}
+            {% if registriran %}{{ druzina }} je odobrena.{% else %}{{ druzina }} še nima otroka.{% endif %}
             Najprej dodaj otroka, potem lahko začne fotografirati.
           </p>
 

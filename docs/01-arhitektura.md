@@ -784,11 +784,15 @@ posnetkov `docs/poc/POC-02/`).
   slog in štirje rezi pisave), ker jih potrebuje že prijavna stran. Izvzete
   so kot **točne poti** in samo za `GET`/`HEAD`; vse ostalo pod
   `/admin/static` ostane za sejo.
-- **Meni** je na vsaki strani s sejo (`app/meni.py`): Predmeti, Po dnevih,
+- **Meni** je na vsaki strani s sejo odobrene družine (`app/meni.py`), razen
+  na prvi strani po odobritvi (V6-R02): Predmeti, Po dnevih,
   Kvizi, Statistika, Testi, Arhiv; pod ločilom Urnik, Družina in — samo
   lastniku sistema — Sistem. Števci (slike v obdelavi in napake, čakajoči
   kvizi, arhiv) so **ena poizvedba na stran** (`MeniRepository.stevci`);
-  pod `/admin/system` jih ni in meni baze ne bere. Števec nič se ne izriše.
+  pod `/admin/system` jih ni. Lastnik ima ob „Sistem" še število družin, ki
+  čakajo na odobritev — ena poizvedba nad `families`, tudi pod
+  `/admin/system` (V6-R02). Števec nič se ne izriše. Neodobrena družina
+  menija nima.
 - **Barva predmeta** je polje v `subjects.py` in pride v predlogo kot
   vrednost `--barva`; v bazi je ni. Neznan predmet dobi `BARVA_NEZNANEGA`.
 - **Stran predmeta** je po koledarskih tednih, najnovejši prvi, znotraj
@@ -877,8 +881,8 @@ zahteva sejo** (V3-R03, glej „Prijava, seje in CSRF") — razen prijavne stran
 in okna registracije; vsak `POST` nosi CSRF žeton. Seja družine, ki **ni
 odobrena**, vidi samo `/admin/racun`, izbris in odjavo (V6-R02, glej
 „Registracija in odobritev"). Poti pod `/admin/system` zahtevajo še lastnika sistema in so za vse
-ostale `404` (V3-R05, glej „Lastnik sistema odpira družine"). Strani kažejo podatke družine iz seje, glava pa pove, čigava družina je
-to in kdo je prijavljen.
+ostale `404` (V3-R05, glej „Lastnik sistema odpira družine"). Strani kažejo podatke družine iz seje, glava menija pa pove, čigava družina je
+to in kdo je prijavljen; strani brez menija (V6-R02) to povedo v besedilu.
 
 Napake pod `/admin` (404, 405 in 500 izbire družine) izriše prestreznik `StarletteHTTPException`,
 registriran v `create_app`. Izven te predpone se umakne privzetemu, ker morajo
@@ -1345,11 +1349,13 @@ obsegi `openid`/`email`/`profile`, nato **Credentials → OAuth client ID** tipa
 `https://school-buddy.duckdns.org/auth/google/callback` — **točno tako**, brez
 končne poševnice, ker Google ujemanje zahteva znak za znak.
 
-Aplikacija ostane v načinu **Testing**. Ker zahteva samo `openid`, `email` in
-`profile`, se po Googlovi dokumentaciji (*Manage App Audience*) lahko prijavi
-in registrira **tudi račun, ki ni na seznamu preizkusnih uporabnikov**, brez
-opozorila in brez izteka po sedmih dneh (`ADR-057` H). Prejšnja trditev tega
-dokumenta, da se lahko prijavijo samo ročno vpisani računi, je bila napačna.
+Aplikacija je v načinu **Testing** in zahteva samo `openid`, `email` in
+`profile`. Po `ADR-057` H (Googlova dokumentacija, *Manage App Audience*) se v
+tem načinu lahko prijavi in registrira tudi račun, ki **ni** na seznamu
+preizkusnih uporabnikov. **To na tej namestitvi še ni preverjeno**; preizkus s
+takim računom je pogoj pred mergem `V6-R02`. Če pade (`403: access_denied`),
+registracija deluje samo za ročno vpisane račune, dokler se aplikacija pri
+Googlu ne objavi.
 
 `client_id` in `client_secret` gresta v `apps/server/.env` kot
 `GOOGLE_CLIENT_ID` in `GOOGLE_CLIENT_SECRET`. Skrivnosti v repozitoriju ni in

@@ -73,8 +73,9 @@ Dve izjemi, dodani po prvem pregledu (12. 10. 2026):
 - **Koraki „Google, Zahtevek, Odobritev" in oznaka „Odobreno" se izrišejo samo
   staršu, ki se je registriral z Googlom** (brez geselne poverilnice, z Google
   poverilnico). Družini, ki jo je odprl lastnik, bi pripovedovali o poti, ki
-  je ni prehodila; ta dobi iste tri korake naprej in stavek „V družini še ni
-  otroka".
+  je ni prehodila; ta dobi iste tri korake naprej in stavek „Družina … še
+  nima otroka". Ime družine je na strani v obeh oblikah, ker stran nima
+  menija, ki ga sicer pove.
 
 Stran je v postavitvi registracije, brez menija, kot na posnetku — zato dobi
 gumb **„Odjava"** (kot 07 in 09), ki ga posnetek 08 nima; stran brez menija in

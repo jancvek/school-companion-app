@@ -56,6 +56,7 @@ from tests.test_racun import (
     SUB,
     PonarejenGoogle,
     _nastavitve_z_googlom,
+    _povezi_google,
     _povratek,
     _stanje_iz,
     _zacni_prijavo,
@@ -472,7 +473,18 @@ class TestPovratniKlic:
 
         assert '<span class="krozec velik" aria-hidden="true">AK</span>' in stran.text
         assert registracija.zacetnici("ana") == "A"
-        assert registracija.zacetnici("") == ""
+        assert registracija.zacetnici("  ") == ""
+
+    def test_ime_iz_samih_presledkov_da_zacetnico_enaslova(
+        self, obiskovalec: PrijavljenOdjemalec, ponaredek: PonarejenGoogle
+    ) -> None:
+        ponaredek.racun_za_vrniti = RacunGoogla(
+            sub=SUB, email=EMAIL, email_verified=True, name="   "
+        )
+
+        stran = _do_obrazca(obiskovalec)
+
+        assert f'aria-hidden="true">{EMAIL[0].upper()}</span>' in stran.text
 
     def test_nov_zacetek_toka_zavrze_prejsnjo_istovetnost(
         self, obiskovalec: PrijavljenOdjemalec
@@ -1477,12 +1489,44 @@ class TestPoOdobritvi:
         assert "Matematika" in stran
         assert stevec(stran, "Sistem") == "1"
 
+    def test_stars_z_geslom_in_googlom_ni_registriran(
+        self, aplikacija: FastAPI, motor: Engine, stars: str
+    ) -> None:
+        """Starš ročno odprte družine, ki je Google povezal pozneje, se ni registriral."""
+        _povezi_google(motor, stars)
+
+        with _odjemalec_za(aplikacija, motor, stars) as odjemalec:
+            stran = odjemalec.get("/admin").text
+
+        assert "Družina Cvek še nima otroka" in stran
+        assert 'class="koraki"' not in stran
+        assert ">Odobreno</span>" not in stran
+
+    def test_stars_brez_vsake_poverilnice_ni_registriran(
+        self, aplikacija: FastAPI, motor: Engine
+    ) -> None:
+        """Brez gesla še ne pomeni „registriran z Googlom" — Google mora biti."""
+        _, user_id = ustvari_registrirano(motor, STANJE_ODOBRENA)
+        with Session(motor) as seja:
+            for poverilnica in seja.scalars(
+                select(Credential).where(Credential.user_id == user_id)
+            ):
+                seja.delete(poverilnica)
+            seja.commit()
+
+        with _odjemalec_za(aplikacija, motor, user_id) as odjemalec:
+            stran = odjemalec.get("/admin").text
+
+        assert "Družina Kovačevi še nima otroka" in stran
+        assert 'class="koraki"' not in stran
+
     def test_druzina_brez_otroka(self, odjemalec: PrijavljenOdjemalec) -> None:
         """Družina, ki jo je odprl lastnik: isti koraki naprej, brez zgodbe o registraciji."""
         stran = odjemalec.get("/admin").text
 
         assert "Pozdravljeni, Dejan" in stran
-        assert "V družini še ni otroka" in stran
+        # Stran nima menija, zato sama pove, čigava družina je to.
+        assert "Družina Cvek še nima otroka" in stran
         assert "je odobrena" not in stran
         assert 'class="koraki"' not in stran
         assert ">Odobreno</span>" not in stran
