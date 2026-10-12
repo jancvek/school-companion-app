@@ -111,6 +111,29 @@ def _kljuc_vnosa(vnos: Vnos) -> tuple[int, int, str]:
     return (vnos.dan, _MESTO.get(vnos.predmet, _ZADNJI), vnos.predmet)
 
 
+def razlike(predlog: Urnik, veljaven: Urnik | None) -> frozenset[tuple[int, str]]:
+    """Celice (dan, predmet), v katerih se predlog razlikuje od veljavnega urnika.
+
+    Za mrežo s predlogom s slike (V5-R01): starš vidi, kaj bi potrditev
+    spremenila, namesto da primerja petdeset celic na pamet. Razlika je vsaka
+    sprememba **stanja celice** — predmet se pojavi, izgine ali zamenja „se
+    slika" z „se ne slika".
+
+    Brez veljavnega urnika razlik ni: vse je novo in pika na vsaki celici ne
+    bi povedala ničesar.
+    """
+    if veljaven is None:
+        return frozenset()
+
+    def stanja(urnik: Urnik) -> dict[tuple[int, str], bool]:
+        return {(vnos.dan, vnos.predmet): vnos.se_ne_slika for vnos in urnik.vnosi}
+
+    nova, stara = stanja(predlog), stanja(veljaven)
+    return frozenset(
+        kljuc for kljuc in nova.keys() | stara.keys() if nova.get(kljuc) != stara.get(kljuc)
+    )
+
+
 def manjkajoci_predmeti(
     urnik: Urnik | None, dan: int, poslikani: Collection[str]
 ) -> tuple[str, ...]:

@@ -26,6 +26,7 @@ from sqlalchemy import (
     case,
     create_engine,
     delete,
+    exists,
     func,
     select,
     update,
@@ -2392,6 +2393,10 @@ class ClanDruzine:
     is_active: bool
     is_system_owner: bool
     created_at: datetime
+    #: Ali ima oseba povezan Google račun (V5-R01). Samo za oznako na seznamu
+    #: družine; iz tega ne izhaja nobena pravica. Privzeto `False`, ker ga
+    #: bere en sam pogled in ga drugi graditelji tega tipa ne poznajo.
+    google_povezan: bool = False
 
 
 class ClaniRepository(_RepozitorijDruzine):
@@ -2603,6 +2608,12 @@ class ClaniRepository(_RepozitorijDruzine):
                 User.is_active,
                 User.is_system_owner,
                 User.created_at,
+                # Podizraz in ne drugi stik: oseba ima največ eno geselno in
+                # največ eno Google poverilnico, drugi stik pa bi vrstice
+                # podvojil, če bi se to kdaj spremenilo.
+                exists()
+                .where(Credential.user_id == User.id, Credential.kind == POVERILNICA_GOOGLE)
+                .correlate(User),
             )
             .outerjoin(
                 Credential,
@@ -2622,6 +2633,7 @@ class ClaniRepository(_RepozitorijDruzine):
             is_active=bool(vrstica[5]),
             is_system_owner=bool(vrstica[6]),
             created_at=casi.utc(vrstica[7]),
+            google_povezan=bool(vrstica[8]),
         )
 
 

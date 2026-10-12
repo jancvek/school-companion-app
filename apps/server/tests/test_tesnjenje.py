@@ -826,6 +826,12 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
     ("GET", "/admin/schedule"): lambda o, a: (
         o.get(f"/admin/schedule?otrok={a.otrok_id}"), NI, (a.otrok_id,),
     ),
+    # V5-R01: slika urnika. Pot sestavi strežnik iz mape **svoje** družine,
+    # zato tuj identifikator ne more zadeti tuje datoteke. Primer z resnično
+    # tujo datoteko na disku je v `test_urnik_videz.py`.
+    ("GET", "/admin/schedule/image/{slika_id}"): lambda o, a: (
+        o.get(f"/admin/schedule/image/{a.akt}"), NI, (a.akt,),
+    ),
     ("POST", "/admin/schedule"): lambda o, a: (
         o.post(
             "/admin/schedule",

@@ -25,17 +25,19 @@ spravila v HTML in v zgodovino brskalnika.
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.templating import Jinja2Templates
 from starlette.responses import RedirectResponse, Response
 
-from app import clani, prijava
+from app import clani, meni, prijava
 from app.besedilo import CLANI, stevilo_z_besedo
 from app.casi import datum
 from app.db import ClanDruzine, ClaniRepository, IdentifikatorZaseden, SejaUporabnika
 from app.dependencies import daj_prijavo, daj_repozitorij_clanov
 from app.models import VLOGA_OTROK, VLOGA_STARS
+from app.settings import Settings
 from app.strani import daj_predloge, ni_dovoljeno, ni_najdeno, zavrnjeno
 
 #: Predpona poti. Pod `/admin`, torej za sejo in s CSRF žetonom (`ADR-035`).
@@ -86,9 +88,31 @@ class Pogled:
     sme_geslo: bool
     sme_deaktivacijo: bool
     sme_aktivacijo: bool
+    #: Kar pokaže kartica člana (V5-R01). `je_otrok` loči skupini; `zacetnica`
+    #: je za krožec ob imenu.
+    je_otrok: bool = False
+    zacetnica: str = ""
+    #: „Google in geslo" ali „samo Google"; `None`, kadar Google ni povezan ali
+    #: ga ta namestitev nima (`ADR-046` F).
+    oznaka_googla: str | None = None
+    #: „Nastavi geslo", kadar gesla še ni, sicer „Ponastavi geslo". Pot je ista.
+    dejanje_gesla: str = "Ponastavi geslo"
+    #: Povezava na urnik otroka; `None` pri staršu.
+    href_urnika: str | None = None
 
 
-def _pogled(clan: ClanDruzine, *, seja: SejaUporabnika, aktivnih_starsev: int) -> Pogled:
+OZNAKA_GOOGLE_IN_GESLO = "Google in geslo"
+OZNAKA_SAMO_GOOGLE = "samo Google"
+
+
+def _pogled(
+    clan: ClanDruzine,
+    *,
+    seja: SejaUporabnika,
+    aktivnih_starsev: int,
+    google_na_voljo: bool = False,
+    vec_otrok: bool = False,
+) -> Pogled:
     sme_deaktivacijo = clan.is_active and (
         clani.zakaj_ne_sme_deaktivirati(
             izvajalec_id=seja.user_id,
@@ -114,6 +138,20 @@ def _pogled(clan: ClanDruzine, *, seja: SejaUporabnika, aktivnih_starsev: int) -
         sme_geslo=_zavrnitev_gesla(clan, seja) is None,
         sme_deaktivacijo=sme_deaktivacijo,
         sme_aktivacijo=not clan.is_active,
+        je_otrok=clan.role == VLOGA_OTROK,
+        zacetnica=meni.zacetnica(clan.display_name),
+        oznaka_googla=(
+            (OZNAKA_GOOGLE_IN_GESLO if clan.geslo_nastavljeno else OZNAKA_SAMO_GOOGLE)
+            if google_na_voljo and clan.google_povezan
+            else None
+        ),
+        dejanje_gesla="Ponastavi geslo" if clan.geslo_nastavljeno else "Nastavi geslo",
+        # `?otrok=` samo pri več kot enem otroku, kot povsod (`ADR-039` B).
+        href_urnika=(
+            ("/admin/schedule" + (f"?otrok={quote(clan.user_id, safe='')}" if vec_otrok else ""))
+            if clan.role == VLOGA_OTROK
+            else None
+        ),
     )
 
 
@@ -127,24 +165,45 @@ def _stran_seznama(
     obrazec: str | None = None,
     vnos: dict[str, str] | None = None,
     koda: int = 200,
+    polje_napake: str | None = None,
+    dodaj: str | None = None,
 ) -> Response:
     """Seznam članov; ob napaki isti seznam z besedilom in vrnjenim vnosom.
+
+    `polje_napake` pove, ob katerem polju se napaka izpiše (V5-R01): `ime`,
+    `identifikator` ali `geslo`. `dodaj` (`otrok` ali `stars`) odpre obrazec
+    za dodajanje — z gumbom na vrhu strani, brez skripte.
 
     Vnos se vrne, da uporabnici ni treba znova tipkati imena — **geslo ne**,
     nikoli. `obrazec` pove, kateremu od obeh obrazcev napaka pripada; brez tega
     bi se sporočilo o otroku pokazalo nad obrazcem za starša.
     """
     aktivnih = repo.aktivnih_starsev()
+    vsi = repo.clani()
+    nastavitve: Settings = request.app.state.nastavitve
+    vec_otrok = sum(clan.role == VLOGA_OTROK for clan in vsi) > 1
     vrstice = [
-        _pogled(clan, seja=seja, aktivnih_starsev=aktivnih) for clan in repo.clani()
+        _pogled(
+            clan,
+            seja=seja,
+            aktivnih_starsev=aktivnih,
+            google_na_voljo=nastavitve.google_je_nastavljen,
+            vec_otrok=vec_otrok,
+        )
+        for clan in vsi
     ]
     return predloge.TemplateResponse(
         request,
         "clani.html",
         {
             "clani": vrstice,
+            "otroci": [clan for clan in vrstice if clan.je_otrok],
+            "starsi": [clan for clan in vrstice if not clan.je_otrok],
             "skupaj_opis": stevilo_z_besedo(len(vrstice), CLANI),
             "napaka": napaka,
+            "polje_napake": polje_napake,
+            # Kateri obrazec je odprt: tisti z napako, sicer tisti iz naslova.
+            "odprt_obrazec": obrazec or (dodaj if dodaj in ("otrok", "stars") else None),
             "obrazec": obrazec,
             "vnos": vnos or {},
             # Nalepka o najkrajšem geslu pride iz istega mesta kot zavrnitev
@@ -169,9 +228,14 @@ def seznam(
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     repo: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     seja: Annotated[SejaUporabnika, Depends(daj_prijavo)],
+    dodaj: str | None = None,
 ) -> Response:
-    """Člani družine z vlogo in stanjem ter obrazca za dodajanje."""
-    return _stran_seznama(predloge, request, repo, seja)
+    """Člani družine z vlogo in stanjem ter obrazca za dodajanje.
+
+    `?dodaj=otrok` ali `?dodaj=stars` izriše isto stran z odprtim obrazcem
+    (V5-R01); vsaka druga vrednost se prezre.
+    """
+    return _stran_seznama(predloge, request, repo, seja, dodaj=dodaj)
 
 
 def _dodaj(
@@ -196,14 +260,30 @@ def _dodaj(
     """
     vnos = {"ime": ime, "identifikator": identifikator}
 
-    napaka = (
-        clani.preveri_prikazno_ime(ime)
-        or napaka_identifikatorja
-        or clani.preveri_novo_geslo(vloga, geslo, geslo_znova)
+    # Prva napaka po vrsti polj; ob polju, ki jo je povzročilo, se tudi izpiše.
+    napaka, polje = next(
+        (
+            (besedilo, kje)
+            for besedilo, kje in (
+                (clani.preveri_prikazno_ime(ime), "ime"),
+                (napaka_identifikatorja, "identifikator"),
+                (clani.preveri_novo_geslo(vloga, geslo, geslo_znova), "geslo"),
+            )
+            if besedilo is not None
+        ),
+        (None, None),
     )
     if napaka is not None:
         return _stran_seznama(
-            predloge, request, repo, seja, napaka=napaka, obrazec=obrazec, vnos=vnos, koda=400
+            predloge,
+            request,
+            repo,
+            seja,
+            napaka=napaka,
+            obrazec=obrazec,
+            vnos=vnos,
+            koda=400,
+            polje_napake=polje,
         )
 
     try:
@@ -224,6 +304,7 @@ def _dodaj(
             obrazec=obrazec,
             vnos=vnos,
             koda=400,
+            polje_napake="identifikator",
         )
 
     return _nazaj()

@@ -589,6 +589,128 @@ input[name="snov"]:checked { counter-increment: izbranih; }
   .snov-slika img { max-height: 60vh; }
 }
 
+/* ---------- Urnik ---------- */
+.urnik-teden .dan { padding: 0.9rem 0.8rem 1rem; }
+.urnik-teden .dan-glava { font-size: 1.05rem; margin-bottom: 0.75rem; }
+.urnik-predmeti { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.45rem; }
+.urnik-predmeti li {
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.55rem;
+  border-radius: 6px; border-left: 3px solid var(--barva);
+  background: color-mix(in srgb, var(--barva) 10%, var(--ploskev)); line-height: 1.25;
+}
+.urnik-predmeti li.se-ne-slika { background: transparent; border: 1px dashed var(--rob); border-left: 3px dashed var(--barva); color: var(--zamolklo); }
+.urnik-predmeti .drobno { display: block; margin: 0; }
+.urnik-uredi > summary { font-size: 1.05rem; }
+.urnik-uredi > summary .zamolklo { font-weight: 400; }
+.urnik-postavitev { display: grid; gap: 1.5rem; grid-template-columns: minmax(0, 1fr) 17rem; align-items: start; }
+.urnik-ob-strani { display: grid; gap: 1rem; }
+.kartica.mala { margin: 0; padding: 0.9rem 1rem; background: var(--ploskev-2); box-shadow: none; }
+.kartica.mala h2 { font-size: 1rem; margin: 0 0 0.35rem; }
+.kartica.mala .drobno { margin: 0 0 0.6rem; }
+.kartica.mala ul { margin: 0; padding-left: 1.1rem; }
+.kartica.mala img { display: block; width: 100%; border: 1px solid var(--rob); border-radius: 5px; }
+.kartica.mala form { display: grid; gap: 0.5rem; justify-items: start; }
+.kartica.mala input[type="file"] { width: 100%; border-style: dashed; }
+.kartica.opozorilna { background: var(--opozorilo-mehko); border-color: color-mix(in srgb, var(--opozorilo) 35%, transparent); }
+.mreza-urnika { border-collapse: separate; border-spacing: 0.25rem; width: 100%; margin: 0.75rem 0 1rem; }
+.mreza-urnika thead th { color: var(--zamolklo); font-size: 0.85rem; font-weight: 700; text-align: center; padding-bottom: 0.25rem; }
+.mreza-urnika thead th:first-child { text-align: left; }
+.mreza-urnika thead th::first-letter { text-transform: uppercase; }
+.mreza-urnika tbody th { text-align: left; font-weight: 400; white-space: nowrap; padding-right: 0.75rem; }
+.mreza-urnika td { position: relative; padding: 0; }
+/* Celica je izbirnik s tremi stanji; videti je kot ploscica. Barva pride po
+   izbrani moznosti, kjer brskalnik zna :has(); drugod ostane nevtralna. */
+.mreza-urnika select {
+  width: 100%; min-width: 4.25rem; padding: 0.5rem 0.25rem; text-align: center; text-align-last: center;
+  border: 1px solid var(--rob); border-radius: 6px; background: var(--ploskev-2); color: var(--zamolklo);
+  font-weight: 700; appearance: none; cursor: pointer;
+}
+.mreza-urnika select:has(option[value="da"]:checked) { background: var(--barva); border-color: var(--barva); color: #fff; }
+.mreza-urnika select:has(option[value="brez"]:checked) { background: var(--ploskev); border: 1px dashed var(--barva); color: var(--besedilo); font-weight: 500; font-size: 0.8rem; }
+/* Izbirni seznam sam ostane berljiv ne glede na barvo ploscice. */
+.mreza-urnika option { background: var(--ploskev); color: var(--besedilo); font-weight: 400; }
+.mreza-urnika td.spremenjena::after {
+  content: ""; position: absolute; top: -0.2rem; right: -0.2rem; width: 0.6rem; height: 0.6rem;
+  border-radius: 50%; background: var(--opozorilo); border: 2px solid var(--ploskev);
+}
+.legenda-celic { list-style: none; padding: 0 !important; display: grid; gap: 0.45rem; font-size: 0.875rem; }
+.legenda-celic li { display: flex; align-items: center; gap: 0.6rem; }
+.vzorec {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 2.6rem; height: 1.5rem;
+  border: 1px solid var(--rob); border-radius: 5px; background: var(--ploskev); color: var(--zamolklo); font-size: 0.75rem; font-weight: 700;
+}
+.vzorec.polna { background: #2d5a8e; border-color: #2d5a8e; color: #fff; }
+.vzorec.crtkana { border: 1px dashed #2d5a8e; }
+@media (max-width: 860px) {
+  .urnik-postavitev { grid-template-columns: minmax(0, 1fr); }
+  .urnik-teden .dan { display: block; }
+  .mreza-urnika .ime-predmeta { display: none; }
+  .mreza-urnika select { min-width: 2.6rem; padding: 0.45rem 0.1rem; font-size: 0.85rem; }
+  .mreza-urnika select:has(option[value="brez"]:checked) { font-size: 0.6rem; }
+  .mreza-urnika thead th { font-size: 0; }
+  .mreza-urnika thead th::first-letter { font-size: 0.85rem; }
+}
+
+/* ---------- Druzina ---------- */
+.clani-skupina { margin: 0 0 1.75rem; }
+.clani-skupina h2 { margin-bottom: 0.1rem; }
+.clani-skupina > p { margin: 0 0 0.75rem; }
+.clani { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.9rem; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); }
+.clan {
+  display: flex; flex-direction: column; gap: 0.75rem; padding: 1rem 1.1rem 0.9rem;
+  background: var(--ploskev); border: 1px solid var(--rob); border-radius: var(--kartica); box-shadow: var(--senca);
+}
+.clan.deaktiviran { background: transparent; border-style: dashed; box-shadow: none; color: var(--zamolklo); }
+.clan-glava { display: flex; align-items: center; gap: 0.9rem; }
+.clan-glava h3 { margin: 0; font-size: 1.1rem; }
+.clan-glava p { margin: 0; }
+.clan-glava strong { font-weight: 700; word-break: break-all; }
+.krozec.velik { width: 2.75rem; height: 2.75rem; font-size: 1.05rem; }
+.clan-oznake { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0; }
+.clan-dejanja {
+  display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin: auto 0 0; padding-top: 0.75rem;
+  border-top: 1px solid var(--rob); font-weight: 700;
+}
+.clan-dejanja a { text-decoration: none; }
+.clan-dejanja a:hover { text-decoration: underline; }
+.clan-dejanja .nevarno { margin-left: auto; }
+a.nevarno { color: var(--nevarno); }
+.dodajanje { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); align-items: start; }
+.dodajanje details { margin: 0; }
+.dodajanje summary { display: grid; gap: 0.1rem; list-style: none; padding-left: 2.6rem; position: relative; }
+.dodajanje summary::-webkit-details-marker { display: none; }
+.dodajanje summary::before {
+  content: "+"; position: absolute; left: 0; top: 0.15rem; width: 1.9rem; height: 1.9rem; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--poudarek-mehko); color: var(--poudarek); font-weight: 800;
+}
+.dodajanje details[open] > summary::before { content: "\2212"; }
+.dodaj-naslov { font-size: 1.05rem; }
+.dodajanje summary .zamolklo { font-weight: 400; font-size: 0.9rem; }
+.dodajanje form { margin-top: 0.5rem; }
+.polje input, .polje select, .polje textarea { width: 100%; }
+.polje .drobno { margin: 0; }
+.polji-v-vrsti { display: grid; gap: 0 0.9rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.polji-v-vrsti .napaka-polja { grid-column: 1 / -1; margin: -0.5rem 0 0.9rem; }
+.napaka-polja { color: var(--nevarno); font-size: 0.875rem; font-weight: 500; }
+.z-napako input { border-color: var(--nevarno); }
+
+/* Kartica potrditve: kdo zgoraj, vprasanje, posledice, gumba. */
+.potrditev { max-width: 34rem; margin: 1rem auto; padding: 1.75rem; }
+.potrditev h1 { font-size: 1.5rem; margin: 1.1rem 0 0.75rem; }
+.potrditev-kdo { font-size: 1.05rem; }
+.posledice { list-style: none; margin: 0 0 1.25rem; padding: 0; display: grid; gap: 0.6rem; }
+.posledice li { position: relative; padding-left: 1.8rem; }
+.posledice li::before { position: absolute; left: 0.35rem; top: 0; font-weight: 800; }
+.posledice .takoj::before { content: "!"; color: var(--nevarno); }
+.posledice .tece::before { content: "\2022"; color: var(--zamolklo); }
+.posledice .ostane::before { content: "\2713"; color: var(--poudarek); left: 0.2rem; }
+.potrditev form { margin: 0; }
+@media (max-width: 860px) {
+  .polji-v-vrsti { grid-template-columns: minmax(0, 1fr); }
+  .potrditev { padding: 1.25rem; margin: 0 0 1rem; }
+}
+
 /* ---------- Strani pred prenovo ----------
    Razredi starih predlog. Vsak korak prenove jih nekaj odvzame; kar ostane
    po zadnjem, se izbrise. */
