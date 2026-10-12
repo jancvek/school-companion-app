@@ -485,7 +485,6 @@ def _izrisi_izbirnik(
         "kvizi-izbirnik.html",
         {
             "tedni": tedni,
-            "barva": barva_predmeta(subject) if subject else None,
             # „Izberi vse / Počisti izbor" sta povezavi na isto stran, kot
             # `?vse=1` na strani predmeta (`ADR-048` G) — brez skripte.
             "href_izberi_vse": naslov_izbirnika(izbor=IZBOR_VSE),

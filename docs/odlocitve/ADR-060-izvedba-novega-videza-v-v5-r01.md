@@ -222,8 +222,38 @@ iz `ADR-024` (meja 3): povezava odpre izvirnik.
 
 Posnetek 04 ima pod sliko gumb „Povečaj". Ta je druga povezava
 `a[data-povecava]` na isti izvirnik, zato skripta klik prestreže na **vseh**
-takih povezavah (`querySelectorAll` namesto `querySelector`). To je edina
-sprememba skripte; njene meje ostanejo.
+takih povezavah (`querySelectorAll` namesto `querySelector`) in si zapomni,
+katera je prikaz odprla, da se fokus ob zaprtju vrne nanjo. To sta edini
+spremembi skripte; njene meje ostanejo.
+
+### J1 — slog ima dva dela: zaslon in papir (po pregledu)
+
+Prvi pregled je pokazal, da „pravila za tisk so nespremenjena" ni isto kot
+„papir je nespremenjen": nova osnovna pravila (naslovi, povezave, prelom
+besed, pisava) so veljala tudi na papirju in na listu A4 preizkusa, ki je
+papir že na zaslonu.
+
+`slog.css` ima zato dva dela in nič tretjega razen `@font-face`:
+
+- **`@media screen`** — vsa pravila novega videza. Temna tema je znotraj
+  njega, zato papir ostane svetel brez posebnega pogoja.
+- **`@media print`** — **dobesedno** slog, ki ga je `osnova.html` nosila pred
+  V5-R01, s svojim blokom za tisk na koncu. Varuje ga zamrznjena kopija
+  `apps/server/tests/podatki/slog_pred_v5_r01.css`: kdor spremeni papir,
+  mora spremeniti tudi njo, in to se vidi v pregledu.
+
+List A4 (`.list`) je na zaslonu, zato ga varuje peščica pravil v delu za
+zaslon, ki splošna pravila novega videza na njem razveljavijo (višina vrstice
+in velikost naslovov, barva povezav, prelom besed). Po višini lista merilnik
+računa strani (`ADR-054`).
+
+Posledica: predloga, ki bi na papirju potrebovala **nov** razred, ga v delu
+za papir nima. Tisk kviza in list preizkusa uporabljata samo razrede izpred
+V5-R01.
+
+Pravilo urejevalnika za odstavek z napako je zoženo na `p.napaka`, da ne
+zadene oznake in značke z razredom `napaka`. Postavitev prijavne strani nosi
+razred telesa `prijavna` in ne `:has()`.
 
 ## Odstopanja od posnetkov in zapisa POC-02 (12. 10. 2026)
 

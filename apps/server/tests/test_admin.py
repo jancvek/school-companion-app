@@ -38,7 +38,7 @@ from tests.conftest import (
     TUJA_DRUZINA_ID,
     SejaTesta,
     je_seja,
-    slog_admina,
+    slog_zaslona,
 )
 
 # V3-R10 preverja, da premik potegne za sabo statistiko, izbirnik in sosede.
@@ -1408,7 +1408,7 @@ class TestPovecava:
         assert '<div class="prekritje" id="prekritje" hidden>' in besedilo
         # Pravilo je od V5-R01 v datoteki sloga, ki jo stran naloži.
         assert 'href="/admin/static/admin/slog.css"' in besedilo
-        assert ".prekritje[hidden] { display: none; }" in slog_admina()
+        assert ".prekritje[hidden] { display: none; }" in slog_zaslona()
 
     def test_prikaz_kaze_isto_datoteko_brez_omejitve_visine(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -1425,7 +1425,7 @@ class TestPovecava:
         assert besedilo.index('<div class="prekritje"') > besedilo.index(
             '<details class="kartica tehnicno">'
         )
-        slog = slog_admina()
+        slog = slog_zaslona()
         assert re.search(r"\.snov-slika img \{[^}]*max-height: 72vh", slog)
         assert ".prekritje-sredina img { max-width: 100%; max-height: 100%; }" in slog
 
@@ -2818,7 +2818,7 @@ class TestKljukiceNaStraniPredmeta:
         # **V obrazcu**: gumb zunaj njega ne bi poslal ničesar.
         vrstica = obrazec[obrazec.index('<div class="vrstica-izbora">') :]
         assert "Prepisi izbranih" in vrstica
-        assert re.search(r"\.vrstica-izbora \{[^}]*position: sticky; bottom:", slog_admina())
+        assert re.search(r"\.vrstica-izbora \{[^}]*position: sticky; bottom:", slog_zaslona())
 
     def test_izberi_vse_obkljuka_vse(
         self, odjemalec: TestClient, motor: Engine, slike: Path

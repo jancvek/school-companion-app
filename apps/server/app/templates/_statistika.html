@@ -6,7 +6,7 @@
 {# Obdobje kot zavihki (V5-R01). Izbrano je besedilo in ne povezava, kot
    prej: zavihek, ki pelje na stran, na kateri že si, ne pove ničesar. #}
 {% macro izbira_let(leta, neprebrano) %}
-  <ul class="zavihki izbira-let" aria-label="Obdobje">
+  <ul class="zavihki" aria-label="Obdobje">
     {% for leto in leta %}
       <li>
         {% if leto.izbrano %}
@@ -36,7 +36,7 @@
    (`docs/odlocitve/ADR-039` B). #}
 {% macro izbira_otrok(otroci) %}
   {% if otroci %}
-    <ul class="zavihki izbira-otroka" aria-label="Otrok">
+    <ul class="zavihki" aria-label="Otrok">
       {% for otrok in otroci %}
         <li>
           {% if otrok.izbrano %}

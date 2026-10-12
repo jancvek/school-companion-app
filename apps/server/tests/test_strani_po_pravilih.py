@@ -23,7 +23,7 @@ from tests.conftest import (
     CVEK_ID,
     PrijavljenOdjemalec,
     prijavi,
-    slog_admina,
+    slog_zaslona,
     ustvari_starsa,
     vsebina_strani,
 )
@@ -98,7 +98,7 @@ class TestNobenaStranVStaremSlogu:
             assert '{% extends "osnova.html" %}' in pot.read_text(encoding="utf-8"), pot.name
 
     def test_slog_nima_vec_prehodnega_razdelka(self) -> None:
-        slog = slog_admina()
+        slog = slog_zaslona()
 
         assert "pred prenovo" not in slog
         for razred in ("izid", "vstopi", "mreza", "stevec", "kdo"):
@@ -106,7 +106,7 @@ class TestNobenaStranVStaremSlogu:
 
     def test_razredi_urejevalnika_ne_trcijo_z_novim_slogom(self) -> None:
         """Urejevalnik ima svoje `.potrditev`, `.slicice` in `.orodja` (`ADR-054`)."""
-        slog = slog_admina()
+        slog = slog_zaslona()
 
         for razred in ("potrditev", "slicice", "orodja"):
             assert not re.search(rf"\.{razred}(?![\w-])", slog), razred

@@ -20,7 +20,7 @@
   {% block glava %}{% endblock %}
 </head>
 {# Brez seje — na prijavni strani — menija ni in stran je ena sama ploskev. #}
-<body class="{% if prijava %}z-menijem{% else %}brez-menija{% endif %}">
+<body class="{% if prijava %}z-menijem{% else %}brez-menija{% endif %}{% block razred_telesa %}{% endblock %}">
   {% if prijava %}
     {# Stalni meni (`ADR-056` G). Razred `ne-tiskaj` ga umakne s papirja po
        istem pravilu kot obrazce — pravila za tisk se zato niso spremenila. #}

@@ -255,7 +255,6 @@ def razvrsti_po_dnevih(
         naslov = dan_z_imenom(dan)
         izpis.append(
             {
-                "datum": datum_dneva(dan),
                 # Naslov kartice dneva (V5-R01): „Četrtek, 8. oktober".
                 "naslov": naslov[0].upper() + naslov[1:],
                 "je_danes": dan == danasnji,

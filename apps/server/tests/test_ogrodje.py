@@ -25,6 +25,8 @@ from tests.conftest import (
     meni_strani,
     prijavi,
     slog_admina,
+    slog_papirja,
+    slog_zaslona,
     ustvari_starsa,
     vsebina_strani,
 )
@@ -66,6 +68,10 @@ def stevec(besedilo: str, oznaka: str) -> str | None:
     )
     assert najdeno is not None, oznaka
     return najdeno.group(1)
+
+
+#: Zamrznjeni podatki testov (slog izpred V5-R01).
+MAPA_PODATKOV = Path(__file__).parent / "podatki"
 
 
 class TestPravilaMenija:
@@ -223,7 +229,7 @@ class TestMeniVIzrisu:
             besedilo = brez_seje.get(prijava.POT_PRIJAVE).text
 
         assert "<nav" not in besedilo
-        assert '<body class="brez-menija">' in besedilo
+        assert '<body class="brez-menija prijavna">' in besedilo
 
     def test_stran_z_napako_ima_meni(self, odjemalec: PrijavljenOdjemalec) -> None:
         odgovor = odjemalec.get("/admin/tega-ni")
@@ -330,6 +336,8 @@ class TestOgrodjeVsakeStrani:
         "/admin/family",
         "/admin/assessments",
         "/admin/quizzes/new?subject=MAT&vstop=rocna",
+        "/admin/quizzes",
+        "/admin/family?dodaj=otrok",
     )
 
     @pytest.mark.parametrize("pot", STRANI)
@@ -389,24 +397,22 @@ class TestSlog:
         raise AssertionError(zacetek)
 
     def test_svetli_zetoni_so_iz_dogovora(self) -> None:
-        svetli = self._blok(slog_admina(), ":root {")
+        svetli = self._blok(slog_zaslona(), ":root {")
 
         for ime, (svetla, _temna) in self.ZETONI.items():
             assert f"--{ime}: {svetla};" in svetli, ime
 
     def test_temni_zetoni_so_iz_dogovora_in_vsak_ima_temno_razlicico(self) -> None:
-        temni = self._blok(slog_admina(), "@media screen and (prefers-color-scheme: dark)")
+        temni = self._blok(slog_zaslona(), "@media (prefers-color-scheme: dark)")
 
         for ime, (_svetla, temna) in self.ZETONI.items():
             assert f"--{ime}: {temna};" in temni, ime
 
     def test_temna_tema_velja_samo_za_zaslon(self) -> None:
-        # Papir je svetel tudi pri temnem sistemu: brez `screen` bi se kviz
-        # natisnil s svetlim besedilom na belem listu.
-        slog = slog_admina()
-
-        assert slog.count("prefers-color-scheme") == 1
-        assert "@media screen and (prefers-color-scheme: dark)" in slog
+        # Papir je svetel tudi pri temnem sistemu: zunaj dela za zaslon bi se
+        # kviz natisnil s svetlim besedilom na belem listu.
+        assert slog_admina().count("prefers-color-scheme") == 1
+        assert slog_zaslona().count("@media (prefers-color-scheme: dark)") == 1
 
     def test_pisava_je_z_lastnega_streznika_v_stirih_rezah(self) -> None:
         slog = slog_admina()
@@ -444,42 +450,74 @@ class TestSlog:
             assert not re.search(r"url\(\s*[\"']?(?:https?:)?//", besedilo), pot.name
 
     def test_fokus_in_zmanjsano_gibanje(self) -> None:
-        slog = slog_admina()
+        slog = slog_zaslona()
 
         assert re.search(r":focus-visible \{[^}]*outline: 3px solid", slog)
         assert "outline: none" not in slog and "outline: 0" not in slog
         assert "@media (prefers-reduced-motion: reduce)" in slog
 
     def test_locilo_telefona_je_860(self) -> None:
-        assert "@media (max-width: 860px)" in slog_admina()
+        assert "@media (max-width: 860px)" in slog_zaslona()
 
-    #: Pravila za papir, kot so bila v `osnova.html` pred V5-R01. Dobesedna
-    #: kopija: `ADR-056` H pravi, da se tisk ne spremeni.
-    PRAVILA_ZA_TISK = (
-        "header, .ne-tiskaj { display: none; }",
-        "body { background: #fff; padding: 0; font-size: 12pt; }",
-        "main { max-width: none; padding: 0; }",
-        ".tisk { margin: 0; padding: 0; border: 0; }",
-        ".kljuc { break-before: page; page-break-before: always; margin-top: 0; }",
-        ".prostor { border-bottom-color: #999; }",
-        "a { color: inherit; text-decoration: none; }",
-    )
+    def test_papir_je_dobesedno_slog_izpred_v5_r01(self) -> None:
+        """`ADR-056` H: tisk se ne spremeni.
 
-    def test_pravila_za_tisk_so_nespremenjena(self) -> None:
-        slog = slog_admina()
-        blok = self._blok(slog, "@media print")
-        pravila = [vrstica.strip() for vrstica in blok.splitlines()[1:-1]]
+        Del za papir je cel slog, ki ga je ogrodje nosilo pred V5-R01, in
+        nič drugega. Zamrznjena kopija je prepis `<style>` iz `osnova.html`
+        na `main` tik pred to zahtevo; kdor jo popravi, spremeni papir.
+        """
+        zamrznjen = (MAPA_PODATKOV / "slog_pred_v5_r01.css").read_text(encoding="utf-8")
 
-        assert tuple(pravila) == self.PRAVILA_ZA_TISK
-        assert slog.count("@media print") == 1
+        assert slog_papirja().strip("\n") == zamrznjen.strip("\n")
 
-    @pytest.mark.parametrize(
-        "pravilo",
-        [
-            ".tisk-vprasanja li { margin-bottom: 1.2rem; break-inside: avoid; }",
-            ".prostor { height: 4.5rem; margin-top: 0.4rem; border-bottom: 1px solid var(--rob); }",
-            ".kljuc { margin-top: 2.5rem; }",
-        ],
-    )
-    def test_pravila_lista_za_tisk_so_nespremenjena(self, pravilo: str) -> None:
-        assert pravilo in slog_admina()
+    def test_nobeno_pravilo_ne_stoji_zunaj_zaslona_in_papirja(self) -> None:
+        # Pravilo zunaj obeh delov bi veljalo povsod — tudi na papirju, ki se
+        # po `ADR-056` H ne sme spremeniti. Zunaj sme samo pisava: `@font-face`
+        # ničesar ne oblikuje, dokler ga pravilo ne uporabi.
+        slog = re.sub(r"/\*.*?\*/", "", slog_admina(), flags=re.S)
+        for del_sloga in (slog_zaslona(), slog_papirja()):
+            brez_opomb = re.sub(r"/\*.*?\*/", "", del_sloga, flags=re.S)
+            assert slog.count(brez_opomb) == 1
+            slog = slog.replace(brez_opomb, "")
+        slog = re.sub(r"@font-face \{[^}]*\}", "", slog)
+
+        assert slog.split() == ["@media", "screen", "{}", "@media", "print", "{}"]
+
+    def test_del_za_zaslon_nima_pravil_za_tisk(self) -> None:
+        assert "print" not in slog_zaslona()
+
+    @pytest.mark.parametrize("razred", ["oznaka", "znacka"])
+    def test_oznaka_napake_ni_okvir_urejevalnika(self, razred: str) -> None:
+        """Urejevalnik ima odstavek `.napaka` z okvirjem (`ADR-054`).
+
+        Njegovo pravilo sme zadeti samo odstavek: oznaka in značka z razredom
+        `napaka` sta majhni tableti in bi z njegovim odmikom in robom postali
+        okvirja sredi vrstice.
+        """
+        slog = slog_zaslona()
+        izbirniki = re.findall(r"(?m)^([^{}@/\n][^{}]*?)\s*\{", slog)
+        okvirji = [i for i in izbirniki if ".napaka:not(.obvestilo)" in i]
+
+        assert okvirji, "pravilo urejevalnika je izginilo"
+        for izbirnik in okvirji:
+            for del_izbirnika in izbirnik.split(","):
+                if ".napaka" in del_izbirnika:
+                    assert del_izbirnika.strip().startswith("p.napaka"), izbirnik
+        assert re.search(rf"\.{razred}\.napaka \{{", slog)
+
+    def test_list_a4_ostane_papir_tudi_na_zaslonu(self) -> None:
+        # Po višini lista merilnik računa strani (`ADR-054`); splošna pravila
+        # novega videza za naslove, povezave in prelom besed ga ne smejo doseči.
+        slog = slog_zaslona()
+
+        assert ".list { overflow-wrap: normal; font-variant-numeric: normal; }" in slog
+        assert ".list h1, .list h2, .list h3, .list h4 { line-height: inherit; }" in slog
+        naslovi = ".list h3, .list h4 { font-size: revert; font-weight: revert; margin: revert; }"
+        assert naslovi in slog
+        assert ".list a { color: revert; }" in slog
+
+    def test_prijava_ne_stoji_na_has(self) -> None:
+        # Postavitev prijavne strani nosi razred telesa; `:has()` sme biti samo
+        # nadgradnja, brez katere stran še deluje.
+        assert "body.prijavna main {" in slog_zaslona()
+        assert not re.search(r"body[^{]*:has\(", slog_zaslona())

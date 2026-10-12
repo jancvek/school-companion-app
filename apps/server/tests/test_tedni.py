@@ -589,12 +589,12 @@ class TestSlicica:
     def test_vrstica_izbora_steje_brez_skripte(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
-        from tests.conftest import slog_admina
+        from tests.conftest import slog_zaslona
 
         zapisi(motor, slike, "edina", taken_at=lokalno(date(2026, 9, 15)))
 
         besedilo = odjemalec.get(POT).text
-        slog = slog_admina()
+        slog = slog_zaslona()
 
         assert "<script" not in besedilo.lower()
         assert '<span class="stevilo-izbranih"></span>' in besedilo

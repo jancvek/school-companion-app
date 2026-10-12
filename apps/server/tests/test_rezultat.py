@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.casi import trajanje
 from app.models import Material, Question, QuestionAttempt, Quiz, QuizItem
-from tests.conftest import CVEK_ID, SejaTesta, je_seja, slog_admina, vsebina_strani
+from tests.conftest import CVEK_ID, SejaTesta, je_seja, slog_papirja, vsebina_strani
 from tests.test_kvizi import UUID_DVA, UUID_ENA, objavi, snov, upokoji
 from tests.test_resevanje import poskus, poslji
 
@@ -672,8 +672,7 @@ class TestTisk:
         besedilo = tisk(odjemalec, quiz_id)
         # Pravila za papir so od V5-R01 v datoteki sloga, ki jo stran naloži.
         assert 'href="/admin/static/admin/slog.css"' in besedilo
-        celoten = slog_admina()
-        slog = celoten[celoten.index("@media print") :]
+        slog = slog_papirja()
 
         assert "header, .ne-tiskaj { display: none; }" in slog
         assert re.search(r"\.kljuc \{[^}]*break-before: page", slog)

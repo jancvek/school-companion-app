@@ -196,7 +196,6 @@ def _stran_seznama(
         request,
         "clani.html",
         {
-            "clani": vrstice,
             "otroci": [clan for clan in vrstice if clan.je_otrok],
             "starsi": [clan for clan in vrstice if not clan.je_otrok],
             "skupaj_opis": stevilo_z_besedo(len(vrstice), CLANI),

@@ -60,7 +60,7 @@ from app.dependencies import (
 )
 from app.models import STATUS_V_OBDELAVI, Material, Question
 from app.prepisi import Prepisi, SnovZaPrepis, VprasanjeZaPrepis, izbrane, sestavi
-from app.routers.kvizi import seznam_kvizov
+from app.routers.kvizi import predmeti_za_izbiro, seznam_kvizov
 from app.settings import Settings
 from app.storage import je_znotraj, mapa_druzine, pobrisi_sliko, velikost_slike
 from app.strani import daj_predloge, neveljavna_zahteva, ni_dovoljeno, ni_najdeno
@@ -402,9 +402,7 @@ def pregled(
             "je_stolpec_otrok": len(otroci) > 1,
             # Izbirnik predmeta za nov kviz: isti predmeti kot na polici,
             # tudi tisti zunaj seznama desetih.
-            "predmeti_za_kviz": [
-                {"koda": vrstica["koda"], "oznaka": vrstica["oznaka"]} for vrstica in vrstice
-            ],
+            "predmeti_za_kviz": predmeti_za_izbiro(steviloma),
             "danes_datum": dan_z_imenom(dan),
             # Barve čipov v kartici „danes": vrednost iz `subjects.py`, nikoli
             # iz baze (`ADR-056` E).

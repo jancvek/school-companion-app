@@ -5,6 +5,9 @@
 
 {% block naslov %}Prijava{% endblock %}
 
+{# Postavitev čez celo okno; razred in ne `:has()`, da ne visi na brskalniku. #}
+{% block razred_telesa %} prijavna{% endblock %}
+
 {% block vsebina %}
   <div class="prijavna-stran">
     {# Barvna plošča z znakom in polico zvezkov v barvah predmetov. Okras:

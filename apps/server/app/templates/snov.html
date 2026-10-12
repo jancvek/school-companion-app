@@ -423,6 +423,7 @@
       (function () {
         var prekritje = document.getElementById("prekritje");
         var povezave = document.querySelectorAll("a[data-povecava]");
+        // Kamor se ob zaprtju vrne fokus: povezava, ki je prikaz odprla.
         var povezava = povezave[0];
         var zapri = document.getElementById("prekritje-zapri");
         var prejsnja = document.getElementById("prekritje-prejsnja");
@@ -447,6 +448,7 @@
         povezave.forEach(function (ena) {
           ena.addEventListener("click", function (dogodek) {
             dogodek.preventDefault();
+            povezava = ena;
             odpri();
           });
         });
