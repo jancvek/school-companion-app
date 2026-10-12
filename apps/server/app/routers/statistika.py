@@ -52,7 +52,7 @@ from app.statistika import (
     solska_leta,
 )
 from app.strani import daj_predloge, ni_najdeno
-from app.subjects import OZNAKE_OCEN, PREDMETI, oznaka_predmeta, poisci_predmet
+from app.subjects import OZNAKE_OCEN, PREDMETI, barva_predmeta, oznaka_predmeta, poisci_predmet
 
 #: Predpona poti statistike. Pod `/admin`, torej brez ključa (`ADR-006`).
 PREDPONA = "/admin/statistics"
@@ -280,6 +280,7 @@ def pregled(
         return {
             "koda": koda or "?",
             "oznaka": oznaka,
+            "barva": barva_predmeta(koda),
             # Vprašanje brez predmeta nima kam voditi.
             "url": (
                 f"{PREDPONA}/subjects/{quote(koda, safe='')}{poizvedba(okno, izbira)}"
@@ -420,6 +421,7 @@ def predmet(
         {
             "koda": koda,
             "oznaka": oznaka_predmeta(koda),
+            "barva": barva_predmeta(koda),
             "nazaj": f"{PREDPONA}{poizvedba(okno, izbira)}",
             "po_mesecih": okno.leto is not None,
             "casovnica": casovnica,

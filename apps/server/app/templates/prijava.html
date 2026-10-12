@@ -1,51 +1,70 @@
 {# Prijavna stran (V3-R03). Edina stran pod `/admin`, ki je dosegljiva brez
-   seje, zato tudi edina brez glave z imenom družine. #}
+   seje, zato tudi edina brez menija. Slog in pisavo dobi, ker sta njuni poti
+   izvzeti iz seje (`docs/odlocitve/ADR-060` A). #}
 {% extends "osnova.html" %}
 
 {% block naslov %}Prijava{% endblock %}
 
 {% block vsebina %}
-  <h1>Prijava</h1>
-  <p class="pod">Stran je dosegljiva z interneta, zato brez prijave ne gre.</p>
+  <div class="prijavna-stran">
+    {# Barvna plošča z znakom in polico zvezkov v barvah predmetov. Okras:
+       bralnik zaslona jo preskoči, vsebina strani je obrazec ob njej. #}
+    <div class="prijava-plosca" aria-hidden="true">
+      <p class="prijava-znamka"><span class="meni-znak"></span> Šolski pomočnik</p>
+      <ul class="hrbti">
+        {% for hrbet in hrbti %}
+          <li style="--barva: {{ hrbet.barva }}"><span>{{ hrbet.koda }}</span></li>
+        {% endfor %}
+      </ul>
+      <p class="prijava-geslo">Kaj se je otrok učil, po dnevih in predmetih — iz slik zvezka.</p>
+    </div>
 
-  {% if sporocilo %}
-    <p class="napaka">{{ sporocilo }}</p>
-  {% endif %}
+    <div class="prijava-obrazec">
+      <h1>Prijava</h1>
+      <p class="pod">Stran je dosegljiva z interneta, zato brez prijave ne gre.</p>
 
-  <form method="post" action="/admin/login" class="prijava">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input type="hidden" name="cilj" value="{{ cilj }}">
+      {% if sporocilo %}
+        <p class="obvestilo napaka"><span>{{ sporocilo }}</span></p>
+      {% endif %}
 
-    <label for="identifikator">E-naslov</label>
-    <input class="ime" type="email" id="identifikator" name="identifikator"
-           autocomplete="username" required autofocus>
+      <form method="post" action="/admin/login" class="prijava">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="cilj" value="{{ cilj }}">
 
-    <label for="geslo">Geslo</label>
-    <input class="ime" type="password" id="geslo" name="geslo"
-           autocomplete="current-password" required>
+        <label for="identifikator">E-naslov</label>
+        <input class="ime" type="email" id="identifikator" name="identifikator"
+               autocomplete="username" required autofocus>
 
-    <button class="gumb gumb-obdelava" type="submit">Prijavi me</button>
-  </form>
+        <label for="geslo">Geslo</label>
+        <input class="ime" type="password" id="geslo" name="geslo"
+               autocomplete="current-password" required>
 
-  {# Google (V3-R08). Obrazec in ne povezava: `GET` bi pomenil, da lahko tuja
-     stran tok sproži in brskalnik odnese h Googlu brez tvoje vednosti. Nosi
-     isti dvojno oddani žeton kot obrazec zgoraj (`ADR-035` D).
+        <button class="gumb polni sirok" type="submit">Prijavi me</button>
+      </form>
 
-     Gumba ni, kadar Google v tej namestitvi ni nastavljen (`ADR-046` F) —
-     ponudba, ki ne bi delovala, je slabša od odsotnosti. #}
-  {% if google_na_voljo %}
-    <form method="post" action="/auth/google/login" class="prijava">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <button class="gumb" type="submit">Prijava z Google računom</button>
-    </form>
-    <p class="drobno">
-      Z Googlom se lahko prijaviš le, če si svoj Google račun prej povezal v
-      nastavitvah svojega računa. Nove prijave z Googlom ni mogoče odpreti.
-    </p>
-  {% endif %}
+      {# Google (V3-R08). Obrazec in ne povezava: `GET` bi pomenil, da lahko
+         tuja stran tok sproži in brskalnik odnese h Googlu brez tvoje
+         vednosti. Nosi isti dvojno oddani žeton kot obrazec zgoraj
+         (`ADR-035` D).
 
-  <p class="drobno">
-    Gesla ne moreš ponastaviti sam: otroku ga nastavi starš, staršu lastnik
-    sistema.
-  </p>
+         Gumba ni, kadar Google v tej namestitvi ni nastavljen (`ADR-046` F) —
+         ponudba, ki ne bi delovala, je slabša od odsotnosti. #}
+      {% if google_na_voljo %}
+        <p class="locilo-ali"><span>ali</span></p>
+        <form method="post" action="/auth/google/login" class="prijava">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="gumb obrobljen sirok" type="submit">Prijava z Google računom</button>
+        </form>
+        <p class="drobno">
+          Z Googlom se lahko prijaviš le, če si svoj Google račun prej povezal v
+          nastavitvah svojega računa. Nove prijave z Googlom ni mogoče odpreti.
+        </p>
+      {% endif %}
+
+      <p class="drobno">
+        Gesla ne moreš ponastaviti sam: otroku ga nastavi starš, staršu lastnik
+        sistema.
+      </p>
+    </div>
+  </div>
 {% endblock %}

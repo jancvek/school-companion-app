@@ -803,13 +803,74 @@ a.nevarno { color: var(--nevarno); }
   .izbirnik label { padding: 0.6rem 0.75rem; gap: 0.75rem; }
 }
 
+/* ---------- Statistika ---------- */
+.zavihki strong { display: inline-flex; padding: 0.4rem 0.9rem; border-radius: 7px; background: var(--poudarek-mehko); color: var(--poudarek); font-weight: 700; white-space: nowrap; }
+.orodja .legenda-ocen { margin: 0; }
+.razporeditev.prazna { background: repeating-linear-gradient(135deg, var(--ploskev-2) 0 5px, var(--rob) 5px 6px); }
+.statistika-skupaj .stevila { display: flex; flex-wrap: wrap; gap: 0.5rem 2.5rem; margin-bottom: 0.9rem; }
+.stevila dt { margin: 0; color: var(--zamolklo); font-size: 0.875rem; }
+.stevila dd { margin: 0; font-size: 1.6rem; font-weight: 800; line-height: 1.2; }
+.statistika-skupaj .drobno { margin-top: 0.5rem; }
+.statistika-tabela td.siroka { min-width: 12rem; }
+.statistika-tabela td.siroka .razporeditev { display: flex; width: 100%; max-width: 16rem; }
+.statistika-tabela td.siroka .drobno { display: block; margin-top: 0.25rem; }
+.statistika-tabela td:first-child, .statistika-tabela th:first-child { padding-left: 1.4rem; }
+.statistika-tabela .glavna { white-space: nowrap; }
+.statistika-tabela .glavna a { margin-left: 0.4rem; }
+.vprasanja-statistike { list-style: none; margin: 0 0 1.5rem; padding: 0; display: grid; gap: 0.75rem; }
+.vprasanja-statistike .kartica { margin: 0; }
+.vprasanja-statistike p { margin: 0 0 0.3rem; }
+.zaporedje { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.6rem !important; }
+.ocena-v-zaporedju { padding: 0.3rem 0.6rem; border: 1px solid var(--rob); border-radius: 6px; background: var(--ploskev-2); }
+main > section > h2 { margin-top: 1.75rem; }
+@media (max-width: 860px) {
+  .statistika-tabela.zlozi td.siroka { flex: 1 0 100%; order: 5; }
+  .statistika-tabela.zlozi td.siroka .razporeditev { max-width: none; }
+  .statistika-tabela.zlozi td:first-child { padding-left: 0; }
+}
+
+/* ---------- Prijava ---------- */
+body.brez-menija:has(.prijavna-stran) main { max-width: none; padding: 0; margin: 0; }
+.prijavna-stran { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); min-height: 100vh; }
+.prijava-plosca { display: flex; flex-direction: column; justify-content: space-between; gap: 2rem; padding: 2.5rem 3.5rem; background: #2f5d50; color: #fff; }
+.prijava-plosca p { margin: 0; }
+.prijava-znamka { display: flex; align-items: center; gap: 0.75rem; font-weight: 700; font-size: 1.1rem; }
+.prijava-znamka .meni-znak { background: #fff; }
+.prijava-znamka .meni-znak::after { background: #2f5d50; }
+.prijava-geslo { max-width: 20rem; font-size: 1.1rem; }
+/* Polica desetih hrbtov v barvah predmetov; visine so okras. */
+.hrbti { list-style: none; display: flex; align-items: flex-end; gap: 0.25rem; margin: 0; padding: 0 0 0.4rem; border-bottom: 0.4rem solid rgba(0, 0, 0, 0.25); }
+.hrbti li {
+  flex: 1 1 0; max-width: 3rem; height: 11rem; border-radius: 3px 3px 0 0; background: var(--barva);
+  box-shadow: inset 0.3rem 0 0 rgba(0, 0, 0, 0.18); display: flex; justify-content: center; align-items: flex-start; padding-top: 0.6rem;
+}
+.hrbti li:nth-child(3n) { height: 9.5rem; }
+.hrbti li:nth-child(4n + 1) { height: 10.5rem; }
+.hrbti li:nth-child(5) { height: 13rem; }
+.hrbti li:nth-child(2), .hrbti li:nth-child(9) { height: 12.25rem; }
+.hrbti span { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.05em; }
+.prijava-obrazec { align-self: center; justify-self: center; width: min(100%, 25rem); padding: 2rem 0; }
+.prijava { display: flex; flex-direction: column; gap: 0.35rem; }
+.prijava label { margin-top: 0.8rem; }
+.prijava input.ime { width: 100%; }
+.prijava .gumb { margin-top: 1rem; }
+.locilo-ali { display: flex; align-items: center; gap: 0.75rem; margin: 1rem 0 0; color: var(--zamolklo); font-size: 0.875rem; }
+.locilo-ali::before, .locilo-ali::after { content: ""; flex: 1; height: 1px; background: var(--rob); }
+.prijava-obrazec .drobno { margin-top: 0.9rem; }
+@media (max-width: 860px) {
+  .prijavna-stran { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  /* Na telefonu je plosca nizek pas nad obrazcem. */
+  .prijava-plosca { padding: 1.25rem 1rem 1rem; gap: 1rem; }
+  .prijava-geslo { display: none; }
+  .hrbti li { height: 3.5rem !important; padding-top: 0.3rem; }
+  .hrbti span { font-size: 0.6rem; }
+  .prijava-obrazec { width: auto; justify-self: stretch; padding: 1.5rem 1rem 3rem; }
+}
+
 /* ---------- Strani pred prenovo ----------
    Razredi starih predlog. Vsak korak prenove jih nekaj odvzame; kar ostane
    po zadnjem, se izbrise. */
 .kdo .zamolklo { color: var(--zamolklo); }
-.prijava { display: flex; flex-direction: column; gap: 0.35rem; max-width: 26rem; }
-.prijava label { margin-top: 0.8rem; }
-.prijava .gumb { align-self: flex-start; }
 .koda { font-weight: 700; }
 .stevec { color: var(--zamolklo); }
 .mreza { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); list-style: none; margin: 0; padding: 0; }
@@ -838,8 +899,6 @@ a.nevarno { color: var(--nevarno); }
 .napaka { padding: 1rem; border: 1px solid var(--nevarno); border-radius: var(--kartica); background: var(--nevarno-mehko); color: var(--nevarno); }
 .vstopi { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-bottom: 0.5rem; }
 .vstopi form { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin: 0; }
-.izbira-let { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 0 0 1rem; }
-.zaporedje span { white-space: nowrap; }
 
 /* Povecan prikaz slike (V2-R08). Prikaz je v izrisu skrit z atributom
    hidden; display: grid bi ga prevladal, zato ga to pravilo vrne. */

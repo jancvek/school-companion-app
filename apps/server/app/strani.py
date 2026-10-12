@@ -17,6 +17,7 @@ from starlette.responses import Response
 from app import meni
 from app.db import MeniRepository, SejaUporabnika
 from app.settings import Settings
+from app.subjects import PREDMETI
 
 
 def daj_predloge(request: Request) -> Jinja2Templates:
@@ -53,7 +54,10 @@ def kontekst_prijave(request: Request) -> dict[str, object]:
     skupno: dict[str, object] = {"google_na_voljo": nastavitve.google_je_nastavljen}
     seja: SejaUporabnika | None = getattr(request.state, "prijava", None)
     if seja is None:
-        return {**skupno, "prijava": None}
+        # Hrbti zvezkov na prijavni strani (V5-R01): koda in barva vsakega
+        # predmeta. Podatek predmeta, ne družine — brez seje ga smemo dati.
+        hrbti = [{"koda": predmet.koda, "barva": predmet.barva} for predmet in PREDMETI]
+        return {**skupno, "prijava": None, "hrbti": hrbti}
     return {
         **skupno,
         "prijava": seja,

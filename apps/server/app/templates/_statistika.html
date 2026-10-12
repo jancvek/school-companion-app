@@ -3,50 +3,70 @@
    ga vključi. Predloga ne računa in ne sklanja — vse pride pripravljeno iz
    `app/routers/statistika.py`. #}
 
+{# Obdobje kot zavihki (V5-R01). Izbrano je besedilo in ne povezava, kot
+   prej: zavihek, ki pelje na stran, na kateri že si, ne pove ničesar. #}
 {% macro izbira_let(leta, neprebrano) %}
-  <p class="izbira-let">
-    Obdobje:
+  <ul class="zavihki izbira-let" aria-label="Obdobje">
     {% for leto in leta %}
-      {% if leto.izbrano %}
-        <strong>{{ leto.oznaka }}</strong>
-      {% else %}
-        <a href="{{ leto.url }}">{{ leto.oznaka }}</a>
-      {% endif %}
+      <li>
+        {% if leto.izbrano %}
+          <strong aria-current="true">{{ leto.oznaka }}</strong>
+        {% else %}
+          <a href="{{ leto.url }}">{{ leto.oznaka }}</a>
+        {% endif %}
+      </li>
     {% endfor %}
-  </p>
+  </ul>
+{% endmacro %}
+
+{% macro neprebrano_obdobje(neprebrano) %}
   {% if neprebrano %}
-    <p class="opozorilo">
-      Obdobja „{{ neprebrano }}“ ni mogoče prebrati, zato je prikazano tekoče
-      šolsko leto.
+    <p class="obvestilo caka">
+      <span>
+        Obdobja „{{ neprebrano }}“ ni mogoče prebrati, zato je prikazano tekoče
+        šolsko leto.
+      </span>
     </p>
   {% endif %}
 {% endmacro %}
 
-{# `razvrsceno` samo tam, kjer je res: pregled po predmetih je po urniku in ne
-   po težavnosti, in trditev bi tam lagala. #}
 {# Izbira otroka je povezava in ne obrazec: obe izbiri (otrok, obdobje)
    sta v naslovu, zato je stran dosegljiva iz zgodovine brskalnika, kot vse
    pod `/admin`. Prazna, kadar ima družina enega otroka — izbirati ni česa
    (`docs/odlocitve/ADR-039` B). #}
 {% macro izbira_otrok(otroci) %}
   {% if otroci %}
-    <p class="izbira-let izbira-otroka">
-      Otrok:
+    <ul class="zavihki izbira-otroka" aria-label="Otrok">
       {% for otrok in otroci %}
-        {% if otrok.izbrano %}
-          <strong>{{ otrok.oznaka }}</strong>
-        {% else %}
-          <a href="{{ otrok.url }}">{{ otrok.oznaka }}</a>
-        {% endif %}
+        <li>
+          {% if otrok.izbrano %}
+            <strong aria-current="true">{{ otrok.oznaka }}</strong>
+          {% else %}
+            <a href="{{ otrok.url }}">{{ otrok.oznaka }}</a>
+          {% endif %}
+        </li>
       {% endfor %}
-    </p>
+    </ul>
   {% endif %}
+{% endmacro %}
+
+{# Legenda štirih ocen ob orodjih: pas je slika, legenda pove, kaj barve
+   pomenijo. Vrstni red je vrstni red pasu — od najtežje navzdol. #}
+{% macro legenda(s) %}
+  <ul class="legenda-ocen">
+    {% for ocena in s.ocene %}
+      <li><span class="pika pas-{{ loop.index0 }}" aria-hidden="true"></span>{{ ocena.oznaka }}</li>
+    {% endfor %}
+  </ul>
 {% endmacro %}
 
 {# Imena tu ni: `ADR-014` zahteva, da je jasno, **čigava** trditev je, in to
    pove glava strani, ki pri več kot enem otroku nosi izbranega. Zapisano
    „Mašina" je bilo napačno za vsako družino razen Cveka, ime za predlogom pa
-   bi zahtevalo sklanjanje (`ADR-039` F3). #}
+   bi zahtevalo sklanjanje (`ADR-039` F3).
+
+   `razvrsceno` samo tam, kjer je res: pregled po predmetih je po urniku in ne
+   po težavnosti, in trditev bi tam lagala. #}
 {% macro samoocena(razvrsceno=True) %}
   <p class="drobno">
     Ocene so samoocena po razkritju odgovora, ne preverjeno znanje.
@@ -56,9 +76,10 @@
 {% endmacro %}
 
 {# Pas je slika, števila ob njem so podatek: pas brez števil ne bi povedal
-   ničesar bralniku zaslona ne papirju. #}
-{% macro pas(s) %}
-  <span class="razporeditev" aria-hidden="true">
+   ničesar bralniku zaslona ne papirju. `razred` doda npr. `sirok`. Pas brez
+   ene same ocene je šrafiran, da ni videti kot napaka. #}
+{% macro pas(s, razred="") %}
+  <span class="razporeditev{% if razred %} {{ razred }}{% endif %}{% if not s.poskusov %} prazna{% endif %}" aria-hidden="true">
     {%- for ocena in s.ocene -%}
       {%- if ocena.sirina -%}
         <span class="pas-{{ loop.index0 }}" style="width: {{ ocena.sirina }}%"
@@ -74,8 +95,22 @@
   {%- endfor -%}
 {% endmacro %}
 
+{# Kartica „skupaj": števila, širok pas in pravilo štetja. #}
+{% macro skupaj_kartica(s, razvrsceno) %}
+  <section class="kartica statistika-skupaj">
+    <dl class="stevila">
+      <div><dt>Ocen</dt><dd>{{ s.poskusov }}</dd></div>
+      <div><dt>Pravilnih</dt><dd>{{ s.pravilnih }}</dd></div>
+      <div><dt>Težkih</dt><dd>{{ s.tezkih }}</dd></div>
+    </dl>
+    {{ pas(s, "sirok") }}
+    <p class="drobno">{{ ocene(s) }}</p>
+    {{ samoocena(razvrsceno) }}
+  </section>
+{% endmacro %}
+
 {% macro opombe(seznam) %}
   {% for opomba in seznam %}
-    <p class="opozorilo">{{ opomba }}</p>
+    <p class="obvestilo tiho"><span>{{ opomba }}</span></p>
   {% endfor %}
 {% endmacro %}

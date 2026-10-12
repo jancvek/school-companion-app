@@ -4,62 +4,74 @@
 {% block naslov %}Statistika čez kvize{% endblock %}
 
 {% block vsebina %}
-  <h1>Statistika čez kvize</h1>
-  <p class="pod">
-    {%- if otrok_ime %}{{ otrok_ime }} · {% endif -%}
-    {{ okno }} · {{ skupaj.poskusov_opis }}
-  </p>
+  <div class="glava-strani">
+    <div>
+      <h1>Statistika čez kvize</h1>
+      <p class="pod">
+        {%- if otrok_ime %}{{ otrok_ime }} · {% endif -%}
+        {{ okno }} · {{ skupaj.poskusov_opis }}
+      </p>
+    </div>
+    {{ deli.izbira_otrok(otroci) }}
+  </div>
 
-  {{ deli.izbira_otrok(otroci) }}
-  {{ deli.izbira_let(leta, neprebrano) }}
-  {# Predmeti so po urniku, ne po težavnosti. #}
-  {{ deli.samoocena(False) }}
+  <div class="orodja">
+    {{ deli.izbira_let(leta, neprebrano) }}
+    {{ deli.legenda(skupaj) }}
+  </div>
+  {{ deli.neprebrano_obdobje(neprebrano) }}
   {{ deli.opombe(opombe) }}
 
   {% if brez_otroka %}
-    <p class="opozorilo">
-      Statistika je vezana na otroka, tvoja družina pa še nima nobenega.
-      Dodaj ga v razdelku <a href="/admin/family">Družina</a>.
+    <p class="obvestilo caka">
+      <span>
+        Statistika je vezana na otroka, tvoja družina pa še nima nobenega.
+        Dodaj ga v razdelku <a href="/admin/family">Družina</a>.
+      </span>
     </p>
   {% elif not skupaj.poskusov %}
-    <p class="opozorilo">V tem obdobju ni nobene ocene.</p>
+    <p class="obvestilo tiho"><span>V tem obdobju ni nobene ocene.</span></p>
   {% endif %}
+
+  {# Predmeti so po urniku, ne po težavnosti. #}
+  {{ deli.skupaj_kartica(skupaj, False) }}
 
   {# Vseh deset predmetov tudi brez ocen, kot na `/admin`: seznam naj ne
      spreminja dolžine in naj pokaže, česa ni. #}
-  <div class="tabela-ovoj">
-    <table class="tabela">
-      <thead>
-        <tr>
-          <th>Predmet</th>
-          <th>Poskusov</th>
-          <th>Razporeditev</th>
-          <th>Pravilnih</th>
-          <th>Težkih</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for vrstica in predmeti %}
-          <tr class="{{ '' if vrstica.poskusov else 'prazen' }}">
-            <td>
-              {% if vrstica.url %}
-                <a href="{{ vrstica.url }}"><span class="koda">{{ vrstica.koda }}</span> — {{ vrstica.oznaka }}</a>
-              {% else %}
-                <span class="koda">{{ vrstica.koda }}</span> — {{ vrstica.oznaka }}
-              {% endif %}
-            </td>
-            <td>{{ vrstica.poskusov_opis }}</td>
-            <td>
-              {{ deli.pas(vrstica) }}
-              <span class="drobno">{{ deli.ocene(vrstica) }}</span>
-            </td>
-            <td>{{ vrstica.pravilnih }}</td>
-            <td>{{ vrstica.tezkih }}</td>
+  <section class="kartica brez-roba">
+    <div class="tabela-ovoj">
+      <table class="tabela zlozi statistika-tabela">
+        <thead>
+          <tr>
+            <th scope="col">Predmet</th>
+            <th scope="col">Poskusov</th>
+            <th scope="col">Razporeditev</th>
+            <th scope="col" class="st">Pravilnih</th>
+            <th scope="col" class="st">Težkih</th>
           </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <a class="nazaj" href="/admin">← Nazaj na pregled</a>
+        </thead>
+        <tbody>
+          {% for vrstica in predmeti %}
+            <tr class="{{ '' if vrstica.poskusov else 'prazen' }}">
+              <td class="glavna">
+                <span class="cip" style="--barva: {{ vrstica.barva }}"><span class="koda">{{ vrstica.koda }}</span></span>
+                {% if vrstica.url %}
+                  <a href="{{ vrstica.url }}">{{ vrstica.oznaka }}</a>
+                {% else %}
+                  {{ vrstica.oznaka }}
+                {% endif %}
+              </td>
+              <td>{{ vrstica.poskusov_opis }}</td>
+              <td class="siroka">
+                {{ deli.pas(vrstica) }}
+                <span class="drobno">{% if vrstica.poskusov %}{{ deli.ocene(vrstica) }}{% else %}—{% endif %}</span>
+              </td>
+              <td class="st">{{ vrstica.pravilnih }}</td>
+              <td class="st">{{ vrstica.tezkih }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
 {% endblock %}
