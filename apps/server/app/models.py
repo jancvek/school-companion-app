@@ -737,6 +737,9 @@ class UserSession(Base):
 class LoginAttempt(Base):
     """Neuspel poskus prijave. Uspešni se ne zapisujejo.
 
+    Od `V6-R01` tu štejejo tudi neuspela unovčenja povezovalnega žetona, pod
+    stalno oznako `prijava.OZNAKA_POSKUSOV_POVEZAVE` (`ADR-061` E).
+
     Šteje se **samo identifikator**, ne naslov odjemalca: Docker Desktop
     naslova ne ohrani (`docs/odlocitve/ADR-034` A), zato bi štetje po naslovu
     upočasnilo vse hkrati. Naslov se vseeno zapiše — za pogled nazaj, ne za
@@ -758,6 +761,53 @@ class LoginAttempt(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
+
+
+class LinkToken(Base):
+    """Povezovalni žeton: enkratna koda, s katero starš poveže otrokov telefon.
+
+    Odločitve so v `docs/odlocitve/ADR-058` in `ADR-061`. Žetona v bazi ni —
+    je samo njegova SHA-256, kot pri seji. **Vrstica živi največ deset minut**
+    in ob unovčenju izgine: stolpca `used_at` ni, ker so porabljen, potekel in
+    neznan žeton za telefon isto stanje (`ADR-061` B).
+
+    Otrok ima največ enega; nov prejšnjega izbriše v isti transakciji
+    (`ClaniRepository.ustvari_povezavo`). To drži **zaporedno**: `child_id` ni
+    enoličen, zato dve hkratni zahtevi lahko pustita dva žetona, ki oba
+    potečeta v desetih minutah (znana omejitev v `docs/01-arhitektura.md`).
+    """
+
+    __tablename__ = "link_tokens"
+
+    __table_args__ = (UniqueConstraint("token_hash", name="link_tokens_token_hash_key"),)
+
+    #: UUID, generiran na strežniku.
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    #: Družina otroka. Izpeljiva iz `child_id`, a zapisana: vrstico ustvarja in
+    #: preklicuje repozitorij z družino v konstruktorju (`ADR-025`).
+    family_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("families.id", name="fk_link_tokens_family_id"),
+        nullable=False,
+        index=True,
+    )
+
+    #: Otrok, čigar sejo žeton odpre.
+    child_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", name="fk_link_tokens_child_id"),
+        nullable=False,
+        index=True,
+    )
+
+    #: SHA-256 žetona iz povezave, zapisana šestnajstiško.
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    #: Kdaj žeton neha veljati. Rok je trd, ne drseči.
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class Schedule(Base):

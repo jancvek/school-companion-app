@@ -72,6 +72,7 @@ from tests.conftest import (
     naredi_testne_nastavitve,
     prijavi,
     ustvari_otroka,
+    ustvari_povezavo,
     ustvari_sejo,
     ustvari_starsa,
 )
@@ -174,6 +175,10 @@ def _zgradi(
         family_id=family_id,
         identifikator=f"otrok-{znak}".lower(),
     )
+    # Neporabljena koda za povezavo telefona (V6-R01). Je del posnetka družine:
+    # pot ali metoda, ki bi jo v imenu druge družine porabila, preklicala ali
+    # zamenjala, bi posnetek spremenila in test bi padel.
+    ustvari_povezavo(motor, otrok_id, family_id=family_id)
 
     with Session(motor) as seja:
         for vloga, material_id in idji.items():
@@ -659,16 +664,28 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
         PREUSMERITEV,
         (),
     ),
-    # Identiteta na telefonu (V3-R04). Isti dve vprašanji kot pri prijavi v
-    # brskalniku, z drugim prenosnikom: ali odgovor izda obstoj tujega računa
-    # in ali se da z njim doseči tujo sejo.
+    # Identiteta na telefonu (V3-R04, V6-R01). Isti dve vprašanji kot pri
+    # prijavi v brskalniku, z drugim prenosnikom: ali odgovor izda obstoj
+    # tujega računa in ali se da z njim doseči tujo sejo.
+    #
+    # `/auth/login` je od `V6-R01` škrbina; tu ostane s **pravim** geslom
+    # tujega otroka (`conftest.GESLO_OTROKA`), ker mora veljati prav takrat:
+    # seja ne nastane, tudi če poverilnica v bazi še obstaja.
     ("POST", "/auth/login"): lambda o, a: (
         o.post(
             "/auth/login",
-            json={"identifier": f"otrok-{a.znak}", "password": "to-geslo-ni-pravo"},
+            json={"identifier": f"otrok-{a.znak}".lower(), "password": "geslo-otroka"},
         ),
         frozenset({401}),
         (a.znak,),
+    ),
+    # Žeton je edino, kar ta pot pozna, zato „v imenu tuje družine" pomeni:
+    # s tem, kar druga družina o tuji lahko ve ali ugane — `id` tujega otroka.
+    # Koda družine A obstaja (`_zgradi`) in mora preživeti.
+    ("POST", "/auth/link"): lambda o, a: (
+        o.post("/auth/link", json={"token": a.otrok_id}),
+        frozenset({401}),
+        (a.otrok_id,),
     ),
     ("POST", "/auth/logout"): lambda o, a: (
         o.post("/auth/logout"),
@@ -679,20 +696,17 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
     # da tak uporabnik obstaja. Zato so tu **vse** poti člana, obe metodi, in
     # v obeh vlogah — starš in otrok tuje družine.
     ("GET", "/admin/family"): lambda o, a: (o.get("/admin/family"), OK, ()),
+    # Od `V6-R01` otrok nastane samo z imenom, zato tu ni več ničesar, kar bi
+    # lahko bilo zasedeno pri tuji družini: otrok nastane v **svoji** družini
+    # in posnetek tuje ostane nedotaknjen. Uporabniško ime tujega otroka je
+    # poslano vseeno — pot ga mora prezreti, ne pa po njem iskati.
     ("POST", "/admin/family/children"): lambda o, a: (
         o.post(
             "/admin/family/children",
-            data={
-                "ime": "Vrinjen otrok",
-                # Uporabniško ime tuje družine: če bi ga ta pot sprejela, bi
-                # nastal drugi račun z istim imenom — ali pa bi sporočilo o
-                # zasedenosti izdalo, čigav je.
-                "uporabnisko_ime": f"otrok-{a.znak}".lower(),
-                "geslo": "geslo-otroka-8",
-                "geslo_znova": "geslo-otroka-8",
-            },
+            data={"ime": "Vrinjen otrok", "uporabnisko_ime": f"otrok-{a.znak}".lower()},
+            follow_redirects=False,
         ),
-        frozenset({400}),
+        PREUSMERITEV,
         (a.znak,),
     ),
     ("POST", "/admin/family/parents"): lambda o, a: (
@@ -718,6 +732,27 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
             data={"geslo": "vlomljeno-geslo", "geslo_znova": "vlomljeno-geslo"},
             follow_redirects=False,
         ),
+        NI,
+        (a.otrok_id,),
+    ),
+    # Povezava telefona in preklic prijav (V6-R01): kode tujemu otroku ni
+    # mogoče ne ustvariti ne preklicati. `GET …/link` v bazo ne pogleda in
+    # vsakogar pelje na njegov seznam, zato o tujem otroku ne pove ničesar.
+    ("GET", "/admin/family/members/{user_id}/link"): lambda o, a: (
+        o.get(f"/admin/family/members/{a.otrok_id}/link", follow_redirects=False),
+        PREUSMERITEV,
+        (a.otrok_id,),
+    ),
+    ("POST", "/admin/family/members/{user_id}/link"): lambda o, a: (
+        o.post(f"/admin/family/members/{a.otrok_id}/link", follow_redirects=False),
+        NI,
+        (a.otrok_id,),
+    ),
+    ("GET", "/admin/family/members/{user_id}/revoke"): lambda o, a: (
+        o.get(f"/admin/family/members/{a.otrok_id}/revoke"), NI, (a.otrok_id,),
+    ),
+    ("POST", "/admin/family/members/{user_id}/revoke"): lambda o, a: (
+        o.post(f"/admin/family/members/{a.otrok_id}/revoke", follow_redirects=False),
         NI,
         (a.otrok_id,),
     ),
@@ -1650,6 +1685,27 @@ PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
     ),
     ("ClaniRepository", "ponastavi_geslo"): lambda s, a, b: (
         _c(s, b).ponastavi_geslo(a.otrok_id, "vlomljena-zgostitev", datetime.now(UTC)) is False
+    ),
+    # V6-R01: seje in koda tujega otroka ostanejo; posnetek to potrdi.
+    ("ClaniRepository", "preklici_prijave"): lambda s, a, b: (
+        _c(s, b).preklici_prijave(a.otrok_id) is False
+    ),
+    ("ClaniRepository", "ustvari_otroka"): lambda s, a, b: (
+        _nalozi(
+            s,
+            User,
+            _c(s, b).ustvari_otroka(display_name="Vrinjen otrok", ko=datetime.now(UTC)),
+        ).family_id
+        == b.family_id
+    ),
+    ("ClaniRepository", "ustvari_povezavo"): lambda s, a, b: (
+        _c(s, b).ustvari_povezavo(
+            a.otrok_id,
+            token_hash="0" * 64,
+            ko=datetime.now(UTC),
+            potece=datetime.now(UTC) + timedelta(minutes=10),
+        )
+        is False
     ),
     # Enoličnost identifikatorja je **globalna** (`ADR-038` E), zato ta klic ne
     # more uspeti — a mora pasti na bazi in ne na poizvedbi čez tujo družino,

@@ -8,7 +8,13 @@
 
 export type RouterMockState = {
   params: Record<string, string>;
-  router: { push: jest.Mock; back: jest.Mock; dismissAll: jest.Mock };
+  router: {
+    push: jest.Mock;
+    back: jest.Mock;
+    dismissAll: jest.Mock;
+    replace: jest.Mock;
+    canGoBack: jest.Mock;
+  };
 };
 
 export function expoRouterMock() {
@@ -16,7 +22,14 @@ export function expoRouterMock() {
 
   const stanje: RouterMockState = {
     params: {},
-    router: { push: jest.fn(), back: jest.fn(), dismissAll: jest.fn() },
+    router: {
+      push: jest.fn(),
+      back: jest.fn(),
+      dismissAll: jest.fn(),
+      replace: jest.fn(),
+      // Privzeto „ima se kam vrniti": zaslon je bil odprt z domače strani.
+      canGoBack: jest.fn(() => true),
+    },
   };
   return {
     __esModule: true,

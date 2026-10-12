@@ -17,19 +17,27 @@
         {# Ime je vrednost nad vprašanjem in ne del povedi: „Deaktivirati
            račun?" ne potrebuje sklona imena (`ADR-039` F3). #}
         <p class="potrditev-kdo"><strong>{{ clan.ime }}</strong></p>
-        <p class="zamolklo">{{ clan.vloga }} &middot; {{ clan.identifikator }} &middot; nastal {{ clan.nastal }}</p>
+        <p class="zamolklo">{{ clan.vloga }}{% if not clan.je_otrok %} &middot; {{ clan.identifikator }}{% endif %} &middot; nastal {{ clan.nastal }}</p>
       </div>
     </div>
 
     {% if aktiviramo %}
       <h1>Vrniti račun v uporabo?</h1>
       <ul class="posledice">
-        <li class="ostane">Račun bo spet mogoče uporabiti za prijavo z istim geslom kot prej.</li>
+        {% if clan.je_otrok %}
+          <li class="ostane">Telefon bo spet mogoče povezati s QR kodo.</li>
+        {% else %}
+          <li class="ostane">Račun bo spet mogoče uporabiti za prijavo z istim geslom kot prej.</li>
+        {% endif %}
         <li class="takoj">
           <strong>Prijavljen ni nihče</strong> — seje so bile ob deaktivaciji
           preklicane in se ne vrnejo.
         </li>
-        <li class="tece">Če gesla ne pozna nihče več, ga po aktivaciji ponastavi na seznamu družine.</li>
+        {% if clan.je_otrok %}
+          <li class="tece">Po aktivaciji mu na seznamu družine znova poveži telefon.</li>
+        {% else %}
+          <li class="tece">Če gesla ne pozna nihče več, ga po aktivaciji ponastavi na seznamu družine.</li>
+        {% endif %}
       </ul>
       <form method="post" action="{{ pot_dejanja }}" class="vrstica-gumbov">
         <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -45,7 +53,7 @@
         </li>
         <li class="tece">
           Če je to otrok, bo kamera pri njem delala naprej, posnetki pa bodo
-          čakali na prenos do naslednje prijave.
+          čakali na prenos, dokler mu po aktivaciji telefona ne povežeš znova.
         </li>
         <li class="ostane">
           <strong>Nič se ne izbriše.</strong> Snov, vprašanja, kvizi in poskusi

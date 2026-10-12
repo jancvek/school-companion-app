@@ -3,7 +3,8 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-
 import PrijavaScreen from '../app/prijava';
 import { insertMaterial, listPending, type MaterialsDatabase } from '@/db/materials';
 import { migriraj } from '@/db/migrations';
-import { jeOdjavaNedokoncana, zacniOdjavo } from '@/db/naprava';
+import { jeOdjavaNedokoncana } from '@/db/naprava';
+import { shraniSejo } from '@/sync/prijava';
 import { PrijavaProvider } from '@/sync/use-prijava';
 import { SyncProvider } from '@/sync/use-sync';
 import type { Material } from '@/types';
@@ -29,11 +30,14 @@ const usmerjevalnik = jest.requireMock('expo-router') as { stanje: RouterMockSta
 const NASTAVITVE = { baseUrl: 'https://school-buddy.duckdns.org' };
 
 /**
- * Prijavni zaslon (V3-R04).
+ * Zaslon povezave in odjave (V3-R04, V6-R01).
  *
- * Zaslon ne kliče strežnika sam — to počne `src/sync/prijava.ts`, ki ima svoje
- * teste. Tu se preverja, kaj vidi in dobi **uporabnica**: da so sporočila v
- * slovenščini, da prijava ne izgubi posnetkov in da je odjava odjava.
+ * Do `V6-R01` je bil to prijavni obrazec z uporabniškim imenom in geslom.
+ * Otrok gesla nima več (`ADR-058`): sejo da zaslon `app/povezi.tsx`, in testi,
+ * ki so skozi obrazec dokazovali prijavo, njena sporočila in posvojitev, so
+ * zdaj v `povezi-zaslon.test.tsx`. Tu ostane, kar se dogaja **brez**
+ * povezovanja: obnovitev seje z diska, odjava in oznaka o nedokončani odjavi
+ * (`ADR-036`, `ADR-037`).
  */
 
 function material(overrides: Partial<Material> = {}): Material {
@@ -61,7 +65,7 @@ function odmik(style: unknown): number {
   return 0;
 }
 
-describe('prijavni zaslon', () => {
+describe('zaslon povezave in odjave', () => {
   let db: MaterialsDatabase & { close(): void };
   let odgovor: jest.Mock;
 
@@ -101,35 +105,17 @@ describe('prijavni zaslon', () => {
     // Branje žetona z diska je učinek; dokler ne steče, je zaslon videti kot
     // neprijavljen. Testi zato počakajo na obliko, ki jo pričakujejo.
     await waitFor(() => {
-      expect(screen.getByTestId(prijavljena ? 'prijavljen' : 'polje-ime')).toBeTruthy();
+      expect(screen.getByTestId(prijavljena ? 'prijavljen' : 'ni-povezan')).toBeTruthy();
     });
     return izid;
   }
 
   /**
-   * Pritisne gumb in počaka, da se zaslon umiri.
+   * Pritisne gumb za odjavo in počaka, da se zaslon umiri.
    *
-   * Prijava je veriga obljub (klic, shramba, posvojitev); en `act` ne
-   * zajamči, da so vse že pretekle. Čakanje na izginotje napisa
-   * `Prijavljam…` je pogoj, ki ga zaslon sam postavi in odstrani.
-   */
-  async function vpisiInPotrdi(ime: string, geslo: string) {
-    await fireEvent.changeText(screen.getByTestId('polje-ime'), ime);
-    await fireEvent.changeText(screen.getByTestId('polje-geslo'), geslo);
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('gumb-prijava'));
-    });
-    await waitFor(() => {
-      expect(screen.queryByText('Prijavljam…')).toBeNull();
-    });
-  }
-
-  /**
-   * Isto za odjavo.
-   *
-   * Čaka na prijavni obrazec in ne le na izginotje napisa `Odjavljam…`:
-   * odjava je veriga obljub (oznaka, shramba, strežnik), zaslon pa je
-   * odjavljen šele, ko pokaže obrazec. Brez tega bi se naslednji `render` v
+   * Čaka na nepovezano obliko zaslona in ne le na izginotje napisa
+   * `Odjavljam…`: odjava je veriga obljub (oznaka, shramba, strežnik), zaslon
+   * pa je odjavljen šele, ko to pokaže. Brez tega bi se naslednji `render` v
    * istem testu prepletel z nedokončanim `act`.
    */
   async function odjavi() {
@@ -137,33 +123,9 @@ describe('prijavni zaslon', () => {
       fireEvent.press(screen.getByTestId('gumb-odjava'));
     });
     await waitFor(() => {
-      expect(screen.getByTestId('polje-ime')).toBeTruthy();
+      expect(screen.getByTestId('ni-povezan')).toBeTruthy();
     });
   }
-
-  it('uspešna prijava shrani sejo in se vrne nazaj', async () => {
-    const shramba = ustvariShrambo();
-    await izrisi(shramba);
-
-    await vpisiInPotrdi('masa', 'geslo-otroka');
-
-    expect(shramba.vsebina()).toContain('nov-zeton');
-    expect(usmerjevalnik.stanje.router.back).toHaveBeenCalled();
-  });
-
-  it('prijava posvoji posnetke, ki so nastali pred njo', async () => {
-    // Kriterij V3-R04 in `ADR-036` B: vrsta, ki je nastala brez prijave, po
-    // prijavi odide — ne obtiči.
-    const shramba = ustvariShrambo();
-    await insertMaterial(db, material({ id: 'pred-prijavo', user_id: null }));
-    await izrisi(shramba);
-
-    await vpisiInPotrdi('masa', 'geslo-otroka');
-
-    await waitFor(async () => {
-      expect((await listPending(db, SEJA.userId)).map((m) => m.id)).toEqual(['pred-prijavo']);
-    });
-  });
 
   it('obnovljena seja posvoji zapise, ki so nastali brez prijave', async () => {
     // Posnetek, ki nastane, **dokler je aplikacija videti neprijavljena**
@@ -174,7 +136,7 @@ describe('prijavni zaslon', () => {
     // samo prijava (`docs/odlocitve/ADR-036` B).
     await insertMaterial(db, material({ id: 'v-oknu', user_id: null }));
 
-    // Zagon z žetonom, ki je že v shrambi: `prijavi()` se ne pokliče.
+    // Zagon z žetonom, ki je že v shrambi: `povezi()` se ne pokliče.
     await izrisi(ustvariShrambo(SEJA), true);
 
     await waitFor(async () => {
@@ -203,24 +165,27 @@ describe('prijavni zaslon', () => {
     // ročno — `screen` kaže na zadnji izris, pospravi pa ju oba `cleanup`.
     await izrisi(shramba);
 
-    // Aplikacija je neprijavljena in Jakov posnetek čaka na **njegovo**
-    // prijavo, ne na Mašino.
-    expect(screen.getByTestId('polje-ime')).toBeTruthy();
+    // Aplikacija je nepovezana in Jakov posnetek čaka na **njegovo**
+    // povezavo, ne na Mašino.
+    expect(screen.getByTestId('ni-povezan')).toBeTruthy();
     expect(await listPending(db, SEJA.userId)).toEqual([]);
     expect((await listPending(db, null)).map((m) => m.id)).toEqual(['jakov']);
   });
 
   it('uspešna odjava oznake ne pusti za sabo', async () => {
-    // Sicer bi naslednja prijava na isti napravi ostala brez posvojitve,
-    // ker bi oznaka že veljavno sejo razglasila za ostanek.
+    // Sicer bi naslednja seja na isti napravi ostala brez posvojitve, ker bi
+    // oznaka že veljavno sejo razglasila za ostanek.
     const shramba = ustvariShrambo(SEJA);
     await izrisi(shramba, true);
 
     await odjavi();
+    expect(await jeOdjavaNedokoncana(db)).toBe(false);
     await insertMaterial(db, material({ id: 'po-odjavi', user_id: null }));
 
-    await izrisi(shramba);
-    await vpisiInPotrdi('masa', 'geslo-otroka');
+    // Nova seja na disku, kakršno zapiše povezava telefona (njen zaslon ima
+    // svoje teste), in nov zagon: seja obvelja in posvoji.
+    await shraniSejo(SEJA, shramba);
+    await izrisi(shramba, true);
 
     await waitFor(async () => {
       expect((await listPending(db, SEJA.userId)).map((m) => m.id)).toEqual(['po-odjavi']);
@@ -261,31 +226,8 @@ describe('prijavni zaslon', () => {
     await izrisi(shramba);
 
     expect(await jeOdjavaNedokoncana(db)).toBe(true);
-    expect(screen.getByTestId('polje-ime')).toBeTruthy();
+    expect(screen.getByTestId('ni-povezan')).toBeTruthy();
     expect(shramba.vsebina()).toContain(SEJA.zeton);
-  });
-
-  it('prijava prekliče nedokončano odjavo pred njo', async () => {
-    // Oznaka brez žetona: odjava je žeton pobrisala, `koncaj` pa je padel
-    // (okvarjena baza). Zagon je tedaj ne počisti — veja za ostanek se
-    // ujame samo, kadar žeton **je**. Počisti jo prijava, in to je edino
-    // mesto, kjer se to zgodi.
-    //
-    // Sicer bi **veljaven** žeton ob naslednjem zagonu srečal staro oznako
-    // in bi bil zavržen — tiha odjava brez sporočila (`ADR-037`).
-    await zacniOdjavo(db, '2026-09-19T08:00:00.000Z');
-    const shramba = ustvariShrambo();
-
-    await izrisi(shramba);
-    expect(await jeOdjavaNedokoncana(db)).toBe(true);
-
-    await vpisiInPotrdi('masa', 'geslo-otroka');
-
-    expect(await jeOdjavaNedokoncana(db)).toBe(false);
-
-    // Nov zagon: sveža seja obvelja in ni zavržena kot ostanek.
-    await izrisi(shramba, true);
-    expect(screen.getByTestId('prijavljen')).toBeTruthy();
   });
 
   it('oznaka nastane pred brisanjem iz varne shrambe', async () => {
@@ -337,34 +279,6 @@ describe('prijavni zaslon', () => {
     expect(await screen.findByTestId('prijavljen')).toBeTruthy();
   });
 
-  it('prijava uspe, tudi če posvojitev pade', async () => {
-    // Zrcalno: žeton je ob padcu posvojitve že na disku in seja na
-    // strežniku ustvarjena, zato bi bilo sporočilo „Prijava ni uspela“ laž.
-    const pokvarjena = {
-      ...db,
-      runAsync: async (stavek: string, parametri: unknown[]) => {
-        if (stavek.includes('user_id IS NULL')) throw new Error('database is locked');
-        return db.runAsync(stavek, parametri as never);
-      },
-    };
-    const shramba = ustvariShrambo();
-
-    await render(
-      <PrijavaProvider db={pokvarjena} nastavitve={NASTAVITVE} shramba={shramba}>
-        <SyncProvider db={pokvarjena} nastavitve={NASTAVITVE}>
-          <PrijavaScreen />
-        </SyncProvider>
-      </PrijavaProvider>,
-    );
-    await waitFor(() => expect(screen.getByTestId('polje-ime')).toBeTruthy());
-
-    await vpisiInPotrdi('masa', 'geslo-otroka');
-
-    expect(screen.queryByTestId('napaka-prijave')).toBeNull();
-    expect(shramba.vsebina()).toContain('nov-zeton');
-    expect(usmerjevalnik.stanje.router.back).toHaveBeenCalled();
-  });
-
   it('obnovljena seja ne posvoji zapisov druge uporabnice', async () => {
     // Posvojitev je za zapise **brez** lastnika; tuj zapis ostane tuj.
     await insertMaterial(db, material({ id: 'jakov', user_id: 'u-jaka' }));
@@ -375,68 +289,42 @@ describe('prijavni zaslon', () => {
     expect((await listPending(db, 'u-jaka')).map((m) => m.id)).toEqual(['jakov']);
   });
 
-  it('napačno geslo pokaže sporočilo v slovenščini in ne shrani ničesar', async () => {
-    odgovor.mockResolvedValue({
-      ok: false,
-      status: 401,
-      json: async () => ({ detail: 'Uporabniško ime ali geslo ni pravo.' }),
-    });
-    const shramba = ustvariShrambo();
-    await izrisi(shramba);
-
-    await vpisiInPotrdi('masa', 'napacno');
-
-    expect(await screen.findByTestId('napaka-prijave')).toBeTruthy();
-    expect(screen.getByTestId('napaka-prijave').props.children).toMatch(/geslo/i);
-    expect(shramba.vsebina()).toBeUndefined();
-  });
-
-  it('starševski račun dobi razlago, kam sodi', async () => {
-    odgovor.mockResolvedValue({
-      ok: false,
-      status: 401,
-      json: async () => ({
-        detail: 'Ta račun je starševski in se prijavi na spletni strani, ne v aplikaciji.',
-      }),
-    });
-    await izrisi(ustvariShrambo());
-
-    await vpisiInPotrdi('stars@primer.test', 'geslo-starsa-12');
-
-    expect((await screen.findByTestId('napaka-prijave')).props.children).toMatch(
-      /spletni strani/i,
-    );
-  });
-
-  it('nedosegljiv strežnik ne pokaže surove sistemske napake', async () => {
-    odgovor.mockRejectedValue(new Error('Network request failed'));
-    await izrisi(ustvariShrambo());
-
-    await vpisiInPotrdi('masa', 'geslo-otroka');
-
-    const besedilo = (await screen.findByTestId('napaka-prijave')).props.children as string;
-    expect(besedilo).not.toMatch(/Network request failed/);
-    expect(besedilo).toMatch(/posnetki/i);
-  });
-
-  it('brez nastavljenega naslova pove, zakaj prijava ni mogoča', async () => {
-    await render(
-      <PrijavaProvider db={db} nastavitve={null} shramba={ustvariShrambo()}>
-        <SyncProvider db={db} nastavitve={null}>
-          <PrijavaScreen />
-        </SyncProvider>
-      </PrijavaProvider>,
-    );
-    await act(async () => {});
-
-    expect(screen.getByTestId('prenos-ni-nastavljen')).toBeTruthy();
-  });
-
   it('prijavljeni vidi svoje ime in gumb za odjavo', async () => {
     await izrisi(ustvariShrambo(SEJA), true);
 
     expect(screen.getByTestId('prijavljen').props.children).toContain('Maša');
     expect(screen.getByTestId('gumb-odjava')).toBeTruthy();
+  });
+
+  it('polj za uporabniško ime in geslo ni več', async () => {
+    // Kriterij `V6-R01`: mobilna prijava z geslom odpade. Zaslon mora to tudi
+    // povedati, sicer otrok išče, kam bi geslo vpisal.
+    await izrisi(ustvariShrambo());
+
+    expect(screen.queryByTestId('polje-ime')).toBeNull();
+    expect(screen.queryByTestId('polje-geslo')).toBeNull();
+    expect(screen.getByText(/Gesla ne potrebuješ/)).toBeTruthy();
+    expect(odgovor).not.toHaveBeenCalled();
+  });
+
+  it('nepovezan telefon ponudi povezavo s QR kodo', async () => {
+    await izrisi(ustvariShrambo());
+
+    expect(screen.getByText('Poveži s QR kodo')).toBeTruthy();
+    await fireEvent.press(screen.getByTestId('gumb-povezi'));
+
+    expect(usmerjevalnik.stanje.router.push).toHaveBeenLastCalledWith('/povezi');
+  });
+
+  it('povezan telefon je mogoče povezati znova', async () => {
+    // Pot po „Prekliči prijave": telefon še hrani žeton, ki na strežniku ne
+    // velja več, in otrok mora priti do bralnika brez odjave (`ADR-061` I).
+    await izrisi(ustvariShrambo(SEJA), true);
+
+    expect(screen.getByText('Poveži znova s QR kodo')).toBeTruthy();
+    await fireEvent.press(screen.getByTestId('gumb-povezi'));
+
+    expect(usmerjevalnik.stanje.router.push).toHaveBeenLastCalledWith('/povezi');
   });
 
   it('odjava pobriše žeton, lokalnih posnetkov pa ne', async () => {
@@ -473,9 +361,7 @@ describe('prijavni zaslon', () => {
 
     const vsebina = screen.getByTestId('prijava-vsebina');
 
-    expect(odmikSpodaj(vsebina.props.contentContainerStyle)).toBe(
-      theme.spacing + TEST_INSETS.bottom,
-    );
+    expect(odmikSpodaj(vsebina.props.style)).toBe(theme.spacing + TEST_INSETS.bottom);
   });
 
   it('prijavljena veja ne obtiči pod sistemsko navigacijsko vrstico', async () => {
@@ -492,9 +378,7 @@ describe('prijavni zaslon', () => {
     // Odjavna veja ga je sprva imela samo spodaj, zato sta se besedilo in
     // gumb dotikala levega in desnega roba — edini tak zaslon v aplikaciji.
     await izrisi(ustvariShrambo());
-    expect(odmik(screen.getByTestId('prijava-vsebina').props.contentContainerStyle)).toBe(
-      theme.spacing * 1.5,
-    );
+    expect(odmik(screen.getByTestId('prijava-vsebina').props.style)).toBe(theme.spacing * 1.5);
 
     await izrisi(ustvariShrambo(SEJA), true);
     expect(odmik(screen.getByTestId('odjava-vsebina').props.style)).toBe(

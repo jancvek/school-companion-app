@@ -212,7 +212,10 @@ class TestDodajanje:
     def test_obrazca_sta_zlozena_in_ohranita_poti_in_polja(
         self, odjemalec: TestClient
     ) -> None:
-        """`ADR-056` I: isti `POST`, ista imena polj."""
+        """`ADR-056` I: isti `POST`, ista imena polj.
+
+        Od `V6-R01` ima obrazec za otroka samo prikazno ime (`ADR-058` A).
+        """
         besedilo = odjemalec.get(POT).text
 
         assert '<details class="kartica" id="dodaj-otroka">' in besedilo
@@ -220,16 +223,7 @@ class TestDodajanje:
         assert '<form method="post" action="/admin/family/children">' in besedilo
         assert '<form method="post" action="/admin/family/parents">' in besedilo
         polja = re.findall(r'<input type="(?:text|password)" id="[^"]+" name="([^"]+)"', besedilo)
-        assert polja == [
-            "ime",
-            "uporabnisko_ime",
-            "geslo",
-            "geslo_znova",
-            "ime",
-            "enaslov",
-            "geslo",
-            "geslo_znova",
-        ]
+        assert polja == ["ime", "ime", "enaslov", "geslo", "geslo_znova"]
 
     @pytest.mark.parametrize(
         ("dodaj", "odprt"), [("otrok", "dodaj-otroka"), ("stars", "dodaj-starsa")]
@@ -248,31 +242,42 @@ class TestDodajanje:
         assert " open>" not in odjemalec.get(f"{POT}?dodaj=vse").text
 
     @pytest.mark.parametrize(
-        ("podatki", "polje", "ob"),
+        ("pot", "odprt", "podatki", "ob"),
         [
-            ({"ime": "", "uporabnisko_ime": "nov", "geslo": "geslo-1234"}, "ime", "otrok-ime"),
+            ("children", "dodaj-otroka", {"ime": ""}, "otrok-ime"),
             (
-                {"ime": "Nov", "uporabnisko_ime": "z presledkom", "geslo": "geslo-1234"},
-                "identifikator",
-                "otrok-uporabnisko-ime",
+                "parents",
+                "dodaj-starsa",
+                {"ime": "", "enaslov": "nov@primer.test", "geslo": "geslo-1234-56"},
+                "stars-ime",
             ),
-            ({"ime": "Nov", "uporabnisko_ime": "nov", "geslo": "kratko"}, "geslo", "otrok-geslo"),
+            (
+                "parents",
+                "dodaj-starsa",
+                {"ime": "Nov", "enaslov": "ni naslov", "geslo": "geslo-1234-56"},
+                "stars-enaslov",
+            ),
+            (
+                "parents",
+                "dodaj-starsa",
+                {"ime": "Nov", "enaslov": "nov@primer.test", "geslo": "kratko"},
+                "stars-geslo",
+            ),
         ],
     )
     def test_napaka_stoji_ob_polju_ki_jo_je_povzrocilo(
-        self, odjemalec: TestClient, podatki: dict[str, str], polje: str, ob: str
+        self, odjemalec: TestClient, pot: str, odprt: str, podatki: dict[str, str], ob: str
     ) -> None:
+        """Otrok ima od `V6-R01` eno samo polje; ostala tri mesta dokazuje starš."""
         odgovor = odjemalec.post(
-            f"{POT}/children", data={**podatki, "geslo_znova": podatki["geslo"]}
+            f"{POT}/{pot}", data={**podatki, "geslo_znova": podatki.get("geslo", "")}
         )
 
         assert odgovor.status_code == 400
         besedilo = odgovor.text
-        # Natanko ena napaka, v obrazcu za otroka, ki je odprt.
+        # Natanko ena napaka, v obrazcu, ki je odprt.
         assert besedilo.count('class="napaka-polja"') == 1
-        assert re.findall(r'<details class="kartica" id="([^"]+)" open>', besedilo) == [
-            "dodaj-otroka"
-        ]
+        assert re.findall(r'<details class="kartica" id="([^"]+)" open>', besedilo) == [odprt]
         zacetek = besedilo.index(f'id="{ob}"')
         do_napake = besedilo[zacetek : besedilo.index('class="napaka-polja"', zacetek)]
         # Med poljem in napako ni drugega polja z drugo skupino.
@@ -280,29 +285,33 @@ class TestDodajanje:
         assert do_napake.count("z-napako") == 0
         assert besedilo.count("z-napako") == 1
 
-    def test_zasedeno_ime_je_napaka_ob_uporabniskem_imenu(
-        self, odjemalec: TestClient
-    ) -> None:
+    def test_zaseden_enaslov_je_napaka_ob_enaslovu(self, odjemalec: TestClient) -> None:
+        """Zasedenost je od `V6-R01` mogoča samo pri staršu: otrok imena za prijavo nima."""
         podatki = {
             "ime": "Druga",
-            "uporabnisko_ime": "otrok",  # že zaseden (`conftest`)
-            "geslo": "geslo-1234",
-            "geslo_znova": "geslo-1234",
+            "enaslov": "stars@primer.test",  # že zaseden (`conftest`)
+            "geslo": "geslo-1234-56",
+            "geslo_znova": "geslo-1234-56",
         }
 
-        besedilo = odjemalec.post(f"{POT}/children", data=podatki).text
+        besedilo = odjemalec.post(f"{POT}/parents", data=podatki).text
 
-        blok = besedilo[besedilo.index('id="otrok-uporabnisko-ime"') :]
+        blok = besedilo[besedilo.index('id="stars-enaslov"') :]
         blok = blok[: blok.index("</div>")]
         assert '<span class="napaka-polja">To ime je že zasedeno. Izberi drugo.</span>' in blok
 
     def test_geslo_se_ob_napaki_ne_vrne(self, odjemalec: TestClient) -> None:
         besedilo = odjemalec.post(
-            f"{POT}/children",
-            data={"ime": "", "uporabnisko_ime": "nov", "geslo": "tajno-1234", "geslo_znova": "x"},
+            f"{POT}/parents",
+            data={
+                "ime": "",
+                "enaslov": "nov@primer.test",
+                "geslo": "tajno-1234-56",
+                "geslo_znova": "x",
+            },
         ).text
 
-        assert "tajno-1234" not in besedilo
+        assert "tajno-1234-56" not in besedilo
 
 
 class TestPotrditev:

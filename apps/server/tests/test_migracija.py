@@ -798,6 +798,11 @@ def test_migracija_ustvari_lastnika_in_otroka(baza: str) -> None:
     Test je natančen glede **identifikatorjev**, ne le glede števila vrstic:
     napačen e-naslov bi pomenil, da ukaz `nastavi-geslo` računa ne najde in da
     admina po namestitvi ni mogoče odkleniti brez ročnega posega v bazo.
+
+    Od `V6-R01` otrok po `head` poverilnice nima več (`0014_povezava_telefona`,
+    `ADR-061` H): Maša ostane, njeno uporabniško ime `masa` pa ne. Zato je
+    stik `LEFT JOIN` — z notranjim bi otrok iz izida izginil in test ne bi
+    več dokazoval, da oseba obstaja.
     """
     command.upgrade(alembic_nastavitve(baza), "head")
 
@@ -807,12 +812,12 @@ def test_migracija_ustvari_lastnika_in_otroka(baza: str) -> None:
             motor,
             "SELECT u.role, u.display_name, u.is_system_owner, u.is_active, "
             "u.family_id, c.kind, c.identifier, c.secret_hash "
-            "FROM users u JOIN credentials c ON c.user_id = u.id "
+            "FROM users u LEFT JOIN credentials c ON c.user_id = u.id "
             "ORDER BY u.role",
         )
 
         assert uporabniki == [
-            ("child", "Maša", 0, 1, CVEK_ID, "password", "masa", None),
+            ("child", "Maša", 0, 1, CVEK_ID, None, None, None),
             (
                 "parent",
                 "Dejan",
@@ -829,12 +834,19 @@ def test_migracija_ustvari_lastnika_in_otroka(baza: str) -> None:
 
 
 def test_gesla_v_migraciji_ni(baza: str) -> None:
-    """`secret_hash` je `NULL`: privzeto geslo v repozitoriju bi bilo javno geslo."""
-    command.upgrade(alembic_nastavitve(baza), "head")
+    """`secret_hash` je `NULL`: privzeto geslo v repozitoriju bi bilo javno geslo.
+
+    Pred `0014_povezava_telefona` sta poverilnici dve (starš in otrok), po njej
+    ena; brez gesla morata biti v obeh stanjih.
+    """
+    config = alembic_nastavitve(baza)
+    command.upgrade(config, "0013_preizkusi")
 
     motor = create_engine(baza)
     try:
         assert _vrstice(motor, "SELECT secret_hash FROM credentials") == [(None,), (None,)]
+        command.upgrade(config, "head")
+        assert _vrstice(motor, "SELECT secret_hash FROM credentials") == [(None,)]
         besedilo = (KOREN / "alembic" / "versions" / "0008_uporabniki.py").read_text(
             encoding="utf-8"
         )
@@ -1425,5 +1437,181 @@ def test_razveljavitev_preizkusov_ohrani_ostalo(baza: str, slike: Path) -> None:
 
         assert "preizkusi" not in set(inspect(motor).get_table_names())
         assert _stej(motor) == prej, "razveljavitev preizkusov ne sme vzeti ničesar s sabo"
+    finally:
+        motor.dispose()
+
+
+# --- Povezava telefona (V6-R01, `0014_povezava_telefona`) ---
+
+#: Stalen `id` starša (lastnika) se bere iz baze; drugo družino in njene člane
+#: test vstavi sam, da pogoj migracije dokaže čez **vse** družine.
+DRUGA_DRUZINA = "9d4c2b1a-7e6f-4d5c-8b3a-1f2e3d4c5b6a"
+
+
+def _stanje_pred_povezavo(motor: Any) -> str:
+    """Baza v stanju `0013`, kakršna je na produkciji: gesla, Google, seje.
+
+    Vrne `id` starša družine Cvek. Vstavi:
+
+    - geslo Maši in staršu (zgostitvi sta poljubna niza — migracija ju ne bere);
+    - Google poverilnico staršu;
+    - drugo družino s staršem in otrokom, oba z geslom;
+    - po eno sejo Maši, staršu in otroku druge družine.
+    """
+    with motor.begin() as povezava:
+        stars_id = povezava.execute(
+            text("SELECT id FROM users WHERE role = 'parent'")
+        ).scalar_one()
+        povezava.execute(text("UPDATE credentials SET secret_hash = 'zgostitev'"))
+        povezava.execute(
+            text(
+                "INSERT INTO credentials "
+                "(id, user_id, kind, identifier, secret_hash, label, created_at, updated_at) "
+                "VALUES ('g1', :stars, 'google', 'sub-123', NULL, 'd@primer.test', "
+                "'2026-10-01 08:00:00', '2026-10-01 08:00:00')"
+            ),
+            {"stars": stars_id},
+        )
+        povezava.execute(
+            text(
+                "INSERT INTO families (id, name, created_at, is_active) "
+                "VALUES (:id, 'Druga', '2026-10-01 08:00:00', 1)"
+            ),
+            {"id": DRUGA_DRUZINA},
+        )
+        for user_id, vloga, ime, identifikator in (
+            ("ds", "parent", "Ana", "ana@primer.test"),
+            ("do", "child", "Tine", "tine"),
+        ):
+            povezava.execute(
+                text(
+                    "INSERT INTO users (id, family_id, role, display_name, "
+                    "is_system_owner, is_active, created_at) "
+                    "VALUES (:id, :druzina, :vloga, :ime, 0, 1, '2026-10-01 08:00:00')"
+                ),
+                {"id": user_id, "druzina": DRUGA_DRUZINA, "vloga": vloga, "ime": ime},
+            )
+            povezava.execute(
+                text(
+                    "INSERT INTO credentials "
+                    "(id, user_id, kind, identifier, secret_hash, created_at, updated_at) "
+                    "VALUES (:id, :uporabnik, 'password', :identifikator, 'zgostitev', "
+                    "'2026-10-01 08:00:00', '2026-10-01 08:00:00')"
+                ),
+                {"id": f"c-{user_id}", "uporabnik": user_id, "identifikator": identifikator},
+            )
+        for zaporedna, user_id in enumerate((MASA_ID, stars_id, "do")):
+            povezava.execute(
+                text(
+                    "INSERT INTO sessions (id, user_id, token_hash, csrf_token, created_at, "
+                    "expires_at, last_used_at, device_label) "
+                    "VALUES (:id, :uporabnik, :zgostitev, 'csrf', '2026-10-01 08:00:00', "
+                    "'2026-11-01 08:00:00', '2026-10-01 08:00:00', 'telefon')"
+                ),
+                {"id": f"s{zaporedna}", "uporabnik": user_id, "zgostitev": f"h{zaporedna}"},
+            )
+    return str(stars_id)
+
+
+def test_povezava_izbrise_geselne_poverilnice_otrok_in_nic_drugega(
+    baza: str, slike: Path
+) -> None:
+    """Kriterij `V6-R01`: otrokova geselna poverilnica odpade, seje ostanejo.
+
+    Baza je polna in ima dve družini: pogoj migracije mora zajeti otroke
+    **vseh** družin in nobenega starša (`ADR-061` H). Ostale tabele se ne
+    smejo premakniti.
+    """
+    config = alembic_nastavitve(baza)
+    _polna_baza_pred_druzinami(baza, slike)
+    command.upgrade(config, "0013_preizkusi")
+
+    motor = create_engine(baza)
+    try:
+        _stanje_pred_povezavo(motor)
+        prej = _stej(motor)
+        tabele_prej = set(inspect(motor).get_table_names())
+        seje_prej = _vrstice(motor, "SELECT id, user_id, token_hash FROM sessions ORDER BY id")
+        assert len(seje_prej) == 3
+
+        command.upgrade(config, "head")
+
+        assert set(inspect(motor).get_table_names()) - tabele_prej == {"link_tokens"}
+        assert _vrstice(
+            motor,
+            "SELECT u.role, c.kind, c.identifier, c.secret_hash FROM credentials c "
+            "JOIN users u ON u.id = c.user_id ORDER BY c.identifier",
+        ) == [
+            ("parent", "password", "ana@primer.test", "zgostitev"),
+            ("parent", "password", "dejan.ambrus@gmail.com", "zgostitev"),
+            ("parent", "google", "sub-123", None),
+        ]
+        # Otroka ostaneta — izgine samo način prijave, ne oseba.
+        otroci = _vrstice(motor, "SELECT display_name FROM users WHERE role = 'child' ORDER BY 1")
+        assert otroci == [("Maša",), ("Tine",)]
+        # Seje visijo na osebi, ne na poverilnici: vse tri veljajo naprej.
+        assert (
+            _vrstice(motor, "SELECT id, user_id, token_hash FROM sessions ORDER BY id") == seje_prej
+        )
+        assert _vrstice(motor, "SELECT COUNT(*) FROM link_tokens") == [(0,)]
+        assert _stej(motor) == prej, "migracija ne sme premakniti nobene vrstice podatkov"
+    finally:
+        motor.dispose()
+
+
+def test_zeton_povezave_je_enolicen_in_kaze_na_druzino_in_otroka(baza: str) -> None:
+    command.upgrade(alembic_nastavitve(baza), "head")
+
+    motor = create_engine(baza)
+    try:
+        pregled = inspect(motor)
+        assert ["token_hash"] in [
+            u["column_names"] for u in pregled.get_unique_constraints("link_tokens")
+        ]
+        kljuci = {
+            (tuple(k["constrained_columns"]), k["referred_table"])
+            for k in pregled.get_foreign_keys("link_tokens")
+        }
+        assert kljuci == {(("family_id",), "families"), (("child_id",), "users")}
+        stolpci = {s["name"]: s["nullable"] for s in pregled.get_columns("link_tokens")}
+        assert stolpci == {
+            "id": False,
+            "family_id": False,
+            "child_id": False,
+            "token_hash": False,
+            "created_at": False,
+            "expires_at": False,
+        }
+    finally:
+        motor.dispose()
+
+
+def test_razveljavitev_povezave_spusti_tabelo_in_poverilnic_ne_vrne(
+    baza: str, slike: Path
+) -> None:
+    """`downgrade` je nepovraten v enem: izbrisanih zgostitev ni več nikjer.
+
+    Zapisana cena (`ADR-061` H). Seje in vse ostalo ostane.
+    """
+    config = alembic_nastavitve(baza)
+    _polna_baza_pred_druzinami(baza, slike)
+    command.upgrade(config, "0013_preizkusi")
+
+    motor = create_engine(baza)
+    try:
+        _stanje_pred_povezavo(motor)
+        command.upgrade(config, "head")
+        prej = _stej(motor)
+
+        command.downgrade(config, "0013_preizkusi")
+
+        assert "link_tokens" not in set(inspect(motor).get_table_names())
+        assert _vrstice(
+            motor,
+            "SELECT COUNT(*) FROM credentials c JOIN users u ON u.id = c.user_id "
+            "WHERE u.role = 'child'",
+        ) == [(0,)]
+        assert _vrstice(motor, "SELECT COUNT(*) FROM sessions") == [(3,)]
+        assert _stej(motor) == prej, "razveljavitev ne sme vzeti ničesar drugega s sabo"
     finally:
         motor.dispose()

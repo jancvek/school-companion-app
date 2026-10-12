@@ -1,0 +1,61 @@
+{# Stran s kodo za povezavo otrokovega telefona (V6-R01, `ADR-058`, `ADR-061`).
+
+   Nastane samo kot odgovor na `POST` — žeton je v izrisu (v QR kodi in v
+   povezavi gumba), v bazi pa samo njegova zgostitev. Stran zato ni zaznamek
+   in gre ven z `Cache-Control: no-store`.
+
+   QR koda je SVG, ki ga izriše strežnik (`app/povezava.py`): brez skripte in
+   brez zunanjega vira (`ADR-024`). `|safe` je tu upravičen, ker sliko v
+   celoti sestavi `segno` iz naslova, ki ga sestavimo sami. #}
+{% extends "osnova.html" %}
+
+{% block naslov %}Poveži telefon{% endblock %}
+
+{% block vsebina %}
+  <section class="kartica kartica-potrditve kartica-povezave">
+    <div class="clan-glava">
+      <span class="krozec velik" aria-hidden="true">{{ clan_zacetnica }}</span>
+      <div>
+        {# Ime je vrednost nad naslovom in ne del povedi (`ADR-039` F3). #}
+        <p class="potrditev-kdo"><strong>{{ clan_ime }}</strong></p>
+        <p class="zamolklo">otrok</p>
+      </div>
+    </div>
+
+    <h1>Poveži telefon</h1>
+
+    <p>
+      Na otrokovem telefonu odpri aplikacijo Šolski pomočnik, izberi
+      <strong>Poveži s QR kodo</strong> in s kamero preberi to kodo.
+    </p>
+
+    <div class="qr-okvir" role="img" aria-label="QR koda za povezavo telefona">{{ qr|safe }}</div>
+
+    <p class="vrstica-gumbov">
+      <a class="gumb polni" href="{{ povezava }}">Odpri na tem telefonu</a>
+    </p>
+    <p class="zamolklo">
+      Gumb je za primer, ko to stran gledaš na telefonu, ki ga povezuješ:
+      odpre aplikacijo in jo poveže brez kamere.
+    </p>
+
+    <ul class="posledice">
+      <li class="takoj">
+        Koda velja <strong>{{ minut }} minut</strong> in <strong>samo enkrat</strong>.
+        Ko je telefon povezan, je ni mogoče uporabiti znova.
+      </li>
+      <li class="tece">Telefoni, ki so že povezani, ostanejo povezani.</li>
+      <li class="ostane">
+        Kode ne pošiljaj nikomur zunaj družine — kdor jo prebere, je v
+        aplikaciji prijavljen kot ta otrok.
+      </li>
+    </ul>
+
+    <form method="post" action="{{ pot_dejanja }}" class="vrstica-gumbov">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="gumb obrobljen" type="submit">Nova koda</button>
+      <a class="gumb obrobljen" href="{{ pot_nazaj }}">Nazaj na družino</a>
+    </form>
+    <p class="zamolklo">Nova koda razveljavi to, ki jo gledaš.</p>
+  </section>
+{% endblock %}

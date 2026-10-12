@@ -146,7 +146,7 @@ export function SyncProvider({
     async (material): Promise<Izid> => {
       if (prenesiEnoLastnost) return prenesiEnoLastnost(material);
       if (!nastavitve) return { vrsta: 'pending', razlog: 'Prenos ni nastavljen.' };
-      if (!seja) return { vrsta: 'pending', razlog: 'Nisi prijavljena.' };
+      if (!seja) return { vrsta: 'pending', razlog: 'Telefon ni povezan.' };
       return prenesi(material, nastavitve, seja);
     },
     [nastavitve, prenesiEnoLastnost, seja],

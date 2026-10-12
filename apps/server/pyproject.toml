@@ -25,6 +25,11 @@ dependencies = [
     # izrecno, ker se na tranzitivno odvisnost ne zanasamo — dan, ko `openai`
     # zamenja odjemalca, ne sme biti dan, ko pade prijava (`ADR-046` E).
     "httpx",
+    # Izris QR kode za povezavo otrokovega telefona (V6-R01,
+    # `docs/odlocitve/ADR-061` A). Cisti Python brez lastnih odvisnosti; vrne
+    # SVG, ki gre vgrajen v stran. Zgornja meja iz istega razloga kot pri
+    # SQLAlchemy: `--build` ne sme tiho prinesti nove glavne razlicice.
+    "segno>=1.6,<2",
 ]
 
 [project.optional-dependencies]

@@ -1,5 +1,9 @@
 /**
- * Kdo je prijavljen na tej napravi (V3-R04).
+ * Kdo je prijavljen na tej napravi (V3-R04, V6-R01).
+ *
+ * Od `V6-R01` seja ne nastane iz gesla, ampak iz povezovalnega žetona, ki ga
+ * starš pokaže kot QR kodo (`docs/odlocitve/ADR-058`, `ADR-061`). Vse ostalo
+ * — posvojitev, oznaka odjave, obnovitev z diska — je ostalo, kot je bilo.
  *
  * Najbolj zunanji od treh ponudnikov: prenos in kvizi brez seje nimata s kom
  * govoriti, seja pa o njiju ne ve ničesar.
@@ -17,6 +21,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -27,10 +32,11 @@ import { jeOdjavaNedokoncana, koncajOdjavo, zacniOdjavo } from '../db/naprava';
 import { asMaterialsDatabase } from '../db/open';
 import { useSQLiteContext } from 'expo-sqlite';
 import {
+  NapakaPrijave,
   odjaviSe,
+  poveziSe,
   pozabiSejo,
   preberiSejo,
-  prijaviSe,
   shraniSejo,
   type Seja,
   type VarnaShramba,
@@ -94,13 +100,20 @@ export type PrijavaVrednost = {
   /** Trenutna seja, ali `null`, kadar ni prijavljen nihče. */
   seja: Seja | null;
   /**
-   * Prijavi se. Ob neuspehu **vrže** `NapakaPrijave` s slovenskim sporočilom,
-   * ki ga zaslon pokaže; ob uspehu posvoji zapise brez lastnika.
+   * Poveže telefon z žetonom iz QR kode ali odprte povezave. Ob neuspehu
+   * **vrže** `NapakaPrijave` s slovenskim sporočilom, ki ga zaslon pokaže, in
+   * obstoječe seje se ne dotakne; ob uspehu posvoji zapise brez lastnika in
+   * zamenja sejo, če je katera že bila (`ADR-061` I).
    */
-  prijavi(identifikator: string, geslo: string): Promise<void>;
+  povezi(zeton: string): Promise<void>;
   /** Odjavi se. Lokalnih slik in poskusov se ne dotakne (`ADR-036` G). */
   odjavi(): Promise<void>;
 };
+
+/** Kar otrok vidi, kadar varna shramba telefona seje ne sprejme (V6-R01). */
+export const SPOROCILO_SEJE_NI_MOGOCE_SHRANITI =
+  'Telefon prijave ni mogel shraniti, zato ni povezan. Prosi starša za novo kodo in ' +
+  'poskusi znova; posnetki na telefonu ostanejo.';
 
 const PrijavaContext = createContext<PrijavaVrednost | null>(null);
 
@@ -128,7 +141,36 @@ export function PrijavaProvider({
     [nastavitveLastnost],
   );
 
-  const [seja, setSeja] = useState<Seja | null>(null);
+  const [seja, setSejaStanja] = useState<Seja | null>(null);
+
+  // Ista vrednost kot `seja`, dosegljiva **po** `await`. `povezi` počaka na
+  // konec branja ob zagonu in šele nato pogleda, katero sejo zamenjuje; iz
+  // zaprtja bi takrat prebral vrednost izpred čakanja — pri povezavi, ki
+  // aplikacijo šele odpre, vedno `null` — in prejšnje seje na strežniku ne bi
+  // odjavil.
+  const trenutna = useRef<Seja | null>(null);
+  const setSeja = useCallback((nova: Seja | null) => {
+    trenutna.current = nova;
+    setSejaStanja(nova);
+  }, []);
+
+  // Obljuba, ki se izpolni, ko je branje žetona z diska ob zagonu končano.
+  // Nanjo počaka `povezi`: povezava, ki aplikacijo šele odpre, sproži
+  // unovčenje, še preden je to branje steklo — in branje bi nato novo sejo v
+  // stanju prepisalo s staro, v najslabšem primeru (oznaka iz `ADR-037`) pa
+  // pravkar shranjen žeton pobrisalo z diska.
+  //
+  // Nastane ob prvem izrisu in ne v učinku: učinki otrok tečejo pred učinki
+  // staršev, zato bi zaslon s povezavo sicer čakal na obljubo, ki je še ni.
+  // Stanje z začetno funkcijo in ne referenca: vrednost se ne spremeni nikoli,
+  // referenc pa se med izrisom ne bere.
+  const [zagon] = useState(() => {
+    let koncan: () => void = () => {};
+    const obljuba = new Promise<void>((izpolni) => {
+      koncan = izpolni;
+    });
+    return { obljuba, koncan };
+  });
 
   // Žeton z diska ob zagonu. Ne `preberiSejo` ne `posvoji` ne vržeta, zato tu
   // ni veje za napako: nedosegljiva shramba ali baza pomeni neprijavljeno
@@ -143,43 +185,69 @@ export function PrijavaProvider({
   useEffect(() => {
     let velja = true;
     void (async () => {
-      const najdena = await preberiSejo(shramba);
-      // Žeton, ki ga sreča oznaka o nedokončani odjavi, je **ostanek** in ne
-      // seja (`docs/odlocitve/ADR-037`). Brez tega bi se po spodleteli odjavi
-      // prejšnja seja obnovila in posvojila posnetke, ki jih je med tem
-      // naredil kdo drug.
-      if (najdena !== null && (await ostanekOdjave(db))) {
-        if (await pozabiSejo(shramba)) await koncaj(db);
+      try {
+        const najdena = await preberiSejo(shramba);
+        // Žeton, ki ga sreča oznaka o nedokončani odjavi, je **ostanek** in ne
+        // seja (`docs/odlocitve/ADR-037`). Brez tega bi se po spodleteli odjavi
+        // prejšnja seja obnovila in posvojila posnetke, ki jih je med tem
+        // naredil kdo drug.
+        if (najdena !== null && (await ostanekOdjave(db))) {
+          if (await pozabiSejo(shramba)) await koncaj(db);
+          if (!velja) return;
+          setSeja(null);
+          return;
+        }
+        // Posvojitev teče pred `velja`: tudi če je zaslon medtem odšel, je
+        // vrstica že v bazi in pravi lastnik je znan. Klic je idempotenten.
+        if (najdena !== null) await posvoji(db, najdena.userId);
         if (!velja) return;
-        setSeja(null);
-        return;
+        setSeja(najdena);
+      } finally {
+        // V vsakem primeru: povezava, ki čaka na zagon, ne sme čakati večno.
+        zagon.koncan();
       }
-      // Posvojitev teče pred `velja`: tudi če je zaslon medtem odšel, je
-      // vrstica že v bazi in pravi lastnik je znan. Klic je idempotenten.
-      if (najdena !== null) await posvoji(db, najdena.userId);
-      if (!velja) return;
-      setSeja(najdena);
     })();
     return () => {
       velja = false;
     };
-  }, [db, shramba]);
+  }, [db, setSeja, shramba, zagon]);
 
-  const prijavi = useCallback(
-    async (identifikator: string, geslo: string) => {
-      const nova = await prijaviSe(nastavitve, identifikator, geslo);
-      await shraniSejo(nova, shramba);
-      // Posvojitev je del prijave in ne prenosa: zapisi, ki so nastali, ko ni
-      // bil prijavljen nihče — na Mašinem telefonu ob nadgradnji vsi —, bi
-      // sicer v vrsti obtičali za vedno (`ADR-036` B). Isto stori obnovitev
-      // seje z diska; pravilo je „vsaka razrešena seja posvoji", ne „prijava".
+  const povezi = useCallback(
+    async (zeton: string) => {
+      await zagon.obljuba;
+      const prejsnja = trenutna.current;
+      // Unovčenje je **prvo** (`ADR-061` I): če spodleti, vrže in vse ostane,
+      // kot je bilo — tudi seja, ki je morda že bila.
+      const nova = await poveziSe(nastavitve, zeton);
+      // Nova seja staro prepiše pod istim ključem v enem zapisu, zato stari
+      // žeton na disku ne ostane in oznake iz `ADR-037` ta pot ne postavlja.
+      try {
+        await shraniSejo(nova, shramba);
+      } catch {
+        // Koda je porabljena, seje pa telefon ne more obdržati. Brez tega bi
+        // otrok videl „poskusi znova", ista koda pa bi bila nato neveljavna.
+        // Sejo, ki je ne bo imel nihče, na strežniku pospravimo (najboljši
+        // poskus), prejšnja — če je bila — ostane nedotaknjena.
+        void odjaviSe(nastavitve, nova);
+        throw new NapakaPrijave(SPOROCILO_SEJE_NI_MOGOCE_SHRANITI);
+      }
+      // Posvojitev je del povezave in ne prenosa: zapisi, ki so nastali, ko ni
+      // bil povezan nihče, bi sicer v vrsti obtičali za vedno (`ADR-036` B).
+      // Isto stori obnovitev seje z diska; pravilo je „vsaka razrešena seja
+      // posvoji". Zapisi prejšnjega otroka ostanejo njegovi.
       await posvoji(db, nova.userId);
-      // Nova prijava prekliče vsako nedokončano odjavo pred njo: žeton na
+      // Nova povezava prekliče vsako nedokončano odjavo pred njo: žeton na
       // disku je odslej ta, ne prejšnji (`ADR-037`).
       await koncaj(db);
       setSeja(nova);
+      // Prejšnja seja te naprave na strežniku ni več potrebna. Najboljši
+      // poskus, kot pri odjavi (`ADR-036` G), in nanj se ne čaka: telefon je
+      // že povezan in zaslon naj ne visi na strežniku.
+      if (prejsnja !== null && prejsnja.zeton !== nova.zeton) {
+        void odjaviSe(nastavitve, prejsnja);
+      }
     },
-    [db, nastavitve, shramba],
+    [db, nastavitve, setSeja, shramba, zagon],
   );
 
   const odjavi = useCallback(async () => {
@@ -193,11 +261,11 @@ export function PrijavaProvider({
     setSeja(null);
     if (await pozabiSejo(shramba)) await koncaj(db);
     if (prejsnja !== null) await odjaviSe(nastavitve, prejsnja);
-  }, [db, nastavitve, seja, shramba]);
+  }, [db, nastavitve, seja, setSeja, shramba]);
 
   const vrednost = useMemo<PrijavaVrednost>(
-    () => ({ seja, prijavi, odjavi }),
-    [odjavi, prijavi, seja],
+    () => ({ seja, povezi, odjavi }),
+    [odjavi, povezi, seja],
   );
 
   return <PrijavaContext.Provider value={vrednost}>{children}</PrijavaContext.Provider>;
@@ -209,7 +277,7 @@ export function PrijavaProvider({
  */
 const BREZ_PONUDNIKA: PrijavaVrednost = {
   seja: null,
-  prijavi: async () => {},
+  povezi: async () => {},
   odjavi: async () => {},
 };
 

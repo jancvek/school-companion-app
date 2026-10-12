@@ -12,7 +12,12 @@
       <span class="krozec velik" aria-hidden="true">{{ clan.zacetnica }}</span>
       <div>
         <h3>{{ clan.ime }}</h3>
-        <p class="zamolklo">{% if clan.je_otrok %}Uporabniško ime {% endif %}<strong>{{ clan.identifikator }}</strong></p>
+        {# Otrok identifikatorja nima (V6-R01): telefon mu poveže starš. #}
+        {% if clan.je_otrok %}
+          <p class="zamolklo">Telefon se poveže s QR kodo</p>
+        {% else %}
+          <p class="zamolklo"><strong>{{ clan.identifikator }}</strong></p>
+        {% endif %}
       </div>
     </div>
     <p class="clan-oznake">
@@ -20,9 +25,20 @@
       {% if clan.lastnik_sistema %}<span class="oznaka">lastnik sistema</span>{% endif %}
       {% if clan.oznaka_googla %}<span class="oznaka{% if clan.brez_gesla %} caka{% endif %}">{{ clan.oznaka_googla }}</span>{% endif %}
       <span class="oznaka">{{ clan.stanje }}</span>
-      {% if clan.brez_gesla and not clan.oznaka_googla %}<span class="oznaka caka">geslo ni nastavljeno</span>{% endif %}
+      {% if clan.brez_gesla and not clan.oznaka_googla and not clan.je_otrok %}<span class="oznaka caka">geslo ni nastavljeno</span>{% endif %}
     </p>
+    {# „Poveži telefon" je gumb in ne povezava: ustvari kodo in razveljavi
+       prejšnjo, zato je `POST` s CSRF žetonom (`ADR-061` D). #}
+    {% if clan.sme_povezavo %}
+      <form method="post" action="/admin/family/members/{{ clan.id }}/link" class="clan-povezi">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="gumb obrobljen" type="submit">Poveži telefon</button>
+      </form>
+    {% endif %}
     <p class="clan-dejanja">
+      {% if clan.sme_preklic %}
+        <a href="/admin/family/members/{{ clan.id }}/revoke">Prekliči prijave</a>
+      {% endif %}
       {% if clan.sme_geslo %}
         <a href="/admin/family/members/{{ clan.id }}/password">{{ clan.dejanje_gesla }}</a>
       {% endif %}
@@ -53,7 +69,7 @@
 
   <section class="clani-skupina">
     <h2>Otroci</h2>
-    <p class="zamolklo">V aplikacijo na telefonu se prijavijo z uporabniškim imenom in geslom.</p>
+    <p class="zamolklo">Gesla nimajo. Telefon jim povežeš ti, s QR kodo.</p>
     {% if otroci %}
       <ul class="clani">
         {% for clan in otroci %}{{ kartica_clana(clan) }}{% endfor %}
@@ -71,15 +87,15 @@
     </ul>
   </section>
 
-  {# Dodajanje nima vmesne potrditve: ta bi začetno geslo spravila v skrito
-     polje druge strani (`docs/odlocitve/ADR-038` F). Ob napaki se vrneta ime
-     in identifikator, geslo pa nikoli. Napaka stoji ob polju, ki jo je
-     povzročilo. #}
+  {# Dodajanje nima vmesne potrditve: ta bi staršu začetno geslo spravila v
+     skrito polje druge strani (`docs/odlocitve/ADR-038` F). Ob napaki se
+     vrneta ime in identifikator, geslo pa nikoli. Napaka stoji ob polju, ki
+     jo je povzročilo. Otrok ima samo ime (V6-R01). #}
   <div class="dodajanje">
     <details class="kartica" id="dodaj-otroka"{% if odprt_obrazec == "otrok" %} open{% endif %}>
       <summary>
         <span class="dodaj-naslov">Dodaj otroka</span>
-        <span class="zamolklo">Račun za aplikacijo na telefonu</span>
+        <span class="zamolklo">Samo ime; telefon povežeš potem</span>
       </summary>
       <form method="post" action="/admin/family/children">
         <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -88,33 +104,14 @@
           <label for="otrok-ime">Prikazno ime</label>
           <input type="text" id="otrok-ime" name="ime"
                  value="{{ vnos.ime if obrazec == 'otrok' else '' }}" autocomplete="off">
-          <span class="drobno">Tako je otrok imenovan povsod v pregledu.</span>
+          <span class="drobno">
+            Tako je otrok imenovan povsod v pregledu. Uporabniškega imena in
+            gesla ne potrebuje: po dodajanju mu na kartici povežeš telefon.
+          </span>
           {% if moja and polje_napake == "ime" %}<span class="napaka-polja">{{ moja }}</span>{% endif %}
         </div>
-        <div class="polje{% if moja and polje_napake == 'identifikator' %} z-napako{% endif %}">
-          <label for="otrok-uporabnisko-ime">Uporabniško ime za prijavo v aplikacijo</label>
-          <input type="text" id="otrok-uporabnisko-ime" name="uporabnisko_ime"
-                 value="{{ vnos.identifikator if obrazec == 'otrok' else '' }}" autocomplete="off">
-          <span class="drobno">
-            Otrok e-naslova nima — v aplikacijo se prijavi z uporabniškim imenom.
-            Ime je enolično za celo namestitev, zato je lahko že zasedeno.
-          </span>
-          {% if moja and polje_napake == "identifikator" %}<span class="napaka-polja">{{ moja }}</span>{% endif %}
-        </div>
-        <div class="polji-v-vrsti{% if moja and polje_napake == 'geslo' %} z-napako{% endif %}">
-          <div class="polje">
-            <label for="otrok-geslo">Začetno geslo (vsaj {{ najmanj_otrok }} znakov)</label>
-            <input type="password" id="otrok-geslo" name="geslo" autocomplete="new-password">
-          </div>
-          <div class="polje">
-            <label for="otrok-geslo-znova">Isto geslo še enkrat</label>
-            <input type="password" id="otrok-geslo-znova" name="geslo_znova"
-                   autocomplete="new-password">
-          </div>
-          {% if moja and polje_napake == "geslo" %}<span class="napaka-polja">{{ moja }}</span>{% endif %}
-        </div>
         {# Napaka, ki je ne znamo pripisati polju, ne sme izpasti. #}
-        {% if moja and polje_napake not in ("ime", "identifikator", "geslo") %}
+        {% if moja and polje_napake != "ime" %}
           <p class="napaka-polja">{{ moja }}</p>
         {% endif %}
         <button class="gumb polni" type="submit">Dodaj otroka</button>

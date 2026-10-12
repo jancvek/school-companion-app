@@ -29,7 +29,7 @@ from urllib.parse import urlsplit
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 
-from app.db import PoverilnicaZaPrijavo, PrijavaRepository, SejaUporabnika
+from app.db import PoverilnicaZaPrijavo, PovezanOtrok, PrijavaRepository, SejaUporabnika
 from app.models import VLOGA_OTROK, VLOGA_STARS
 
 #: Poti prijave in odjave v brskalniku. Pod `/admin` sta zato, ker sta del
@@ -41,8 +41,13 @@ POT_ODJAVE = "/admin/logout"
 #: Poti prijave in odjave telefona (V3-R04). **Zunaj `/admin`**: tam govori
 #: brskalnik s piškotkom in CSRF žetonom, tu pa telefon z JSON in glavo
 #: `Authorization: Bearer` (`docs/odlocitve/ADR-036` G).
+#:
+#: Od `V6-R01` je `/auth/login` **škrbina**, ki vedno zavrne: otrok gesla nima
+#: več, pot pa ostane zaradi starega APK (`docs/odlocitve/ADR-061` D). Sejo
+#: telefonu odslej da `/auth/link`.
 POT_PRIJAVE_TELEFONA = "/auth/login"
 POT_ODJAVE_TELEFONA = "/auth/logout"
+POT_POVEZAVE_TELEFONA = "/auth/link"
 
 #: Shema, v kateri telefon pošlje žeton.
 SHEMA_ZETONA = "bearer"
@@ -78,26 +83,45 @@ HRAMBA_POSKUSOV = timedelta(days=30)
 
 #: Najkrajše geslo po vlogi. Ključ je `str` in ne `Vloga`: vloga pride iz baze
 #: kot navaden niz in vrednost, ki je v tabeli ne bi smelo biti, mora pasti na
-#: privzetek za starša (strožjega), ne na `KeyError`.
+#: privzetek za starša, ne na `KeyError`.
 #:
-#: Otrokovih 8 in ne 4: `ADR-035` G je kratko geslo dovolil z utemeljitvijo,
-#: da otrokov račun služi mobilni prijavi in do `/admin` ne pride — mobilne
-#: prijave takrat ni bilo. Z `V3-R04` nastane in je dosegljiva z javnega
-#: interneta, `ADR-035` E pa priznava, da upočasnitev ne velja za napadalca z
-#: vzporednimi povezavami (`docs/odlocitve/ADR-036` E).
-NAJKRAJSE_GESLO: dict[str, int] = {VLOGA_STARS: 12, VLOGA_OTROK: 8}
+#: **Otroka tu ni več** (`V6-R01`, `docs/odlocitve/ADR-058`): gesla nima in
+#: telefon mu poveže starš s QR kodo.
+NAJKRAJSE_GESLO: dict[str, int] = {VLOGA_STARS: 12}
+
+#: Kako dolgo velja povezovalni žeton (`ADR-061` B). Rok je trd.
+TRAJANJE_POVEZAVE = timedelta(minutes=10)
+
+#: Oznaka, pod katero se v `login_attempts` štejejo neuspela unovčenja
+#: povezovalnega žetona (`ADR-061` E).
+#:
+#: **Velike črke niso okras.** Identifikator računa gre v tabelo vedno skozi
+#: `normaliziraj_identifikator`, ki ga pretvori v male črke — vrednost z
+#: velikimi zato ne more biti identifikator nobene prijave in števca se ne
+#: mešata.
+OZNAKA_POSKUSOV_POVEZAVE = "POVEZAVA-TELEFONA"
 
 #: Eno samo sporočilo za vse neuspehe, ki bi sicer izdali, ali račun obstaja.
 SPOROCILO_NEUSPELA_PRIJAVA = (
     "E-naslov ali geslo ni pravo. Poskusi znova; po več zaporednih poskusih bo prijava počasnejša."
 )
 
-#: Izjema od enotnega sporočila (`ADR-035` F): Maša mora razumeti, zakaj ne gre.
-SPOROCILO_OTROK = "Ta račun je otrokov in se prijavi v mobilni aplikaciji, ne na tej strani."
+#: Izjema od enotnega sporočila (`ADR-035` F): otrok mora razumeti, zakaj ne gre.
+SPOROCILO_OTROK = (
+    "Ta račun je otrokov. Otrok uporablja mobilno aplikacijo; telefon mu poveže starš."
+)
 
-#: Zrcalna izjema na telefonu (`ADR-036` D). Cena je ista in se prizna enako:
-#: sporočilo izda vlogo računa, čigar geslo tisti, ki ga vidi, že pozna.
-SPOROCILO_STARS = "Ta račun je starševski in se prijavi na spletni strani, ne v aplikaciji."
+#: Eno besedilo za **vsak** neveljaven povezovalni žeton: potekel, porabljen,
+#: neznan, žeton deaktiviranega otroka in žeton ugasnjene družine
+#: (`ADR-061` F). Razlika bi povedala, da žeton obstaja ali je obstajal.
+SPOROCILO_KODA_NE_VELJA = "Koda ne velja več. Prosi starša za novo."
+
+#: Kar pove škrbina `POST /auth/login` (`ADR-061` D). Stari APK besedilo
+#: zavrnitve izpiše dobesedno, zato pove, kaj naj otrok naredi.
+SPOROCILO_GESLA_NI_VEC = (
+    "Prijava z geslom ni več mogoča. Prosi starša, naj namesti novo aplikacijo "
+    "in telefon poveže s QR kodo."
+)
 
 _ZGOSCEVALNIK = PasswordHasher()
 
@@ -118,21 +142,20 @@ class Vrata(Enum):
     in ne dve zrcalni veji — `ADR-035` F ga je zapisal za admin, `ADR-036` D
     za telefon, in odkar obstajata oboja vrata, je ena tabela cenejša od dveh
     posebnih primerov, ki se lahko razideta.
+
+    Od `V6-R01` se z geslom prijavlja samo še admin; seja telefona nastane iz
+    povezovalnega žetona (`unovci_povezavo`). Vrata ostanejo za **uporabo**
+    seje — tam se preverjajo ob vsaki zahtevi (`vloga_sodi`).
     """
 
     ADMIN = "admin"
     TELEFON = "telefon"
 
 
-#: Katera vloga sodi na katera vrata, in kaj dobi tista, ki pride na napačna.
+#: Katera vloga sodi na katera vrata.
 _VLOGA_ZA_VRATA: dict[Vrata, str] = {
     Vrata.ADMIN: VLOGA_STARS,
     Vrata.TELEFON: VLOGA_OTROK,
-}
-
-_SPOROCILO_NAPACNA_VRATA: dict[Vrata, str] = {
-    Vrata.ADMIN: SPOROCILO_OTROK,
-    Vrata.TELEFON: SPOROCILO_STARS,
 }
 
 
@@ -154,8 +177,10 @@ class Izid(Enum):
 
     USPEH = "uspeh"
     ZAVRNJENO = "zavrnjeno"
-    #: Poverilnica je prava, a vloga na ta vrata ne sodi. Do V3-R04 se je ta
-    #: izid imenoval `OTROK` in je obstajal samo za admin stran.
+    #: Poverilnica je prava, a vloga na admin ne sodi. Od `V6-R01` otrok
+    #: geselne poverilnice nima, zato ta izid nastane samo še iz vrstice, ki
+    #: je v bazo prišla mimo aplikacije; pravilo vseeno stoji tam, kjer seja
+    #: nastane (isto sklepanje kot `ADR-046` H).
     NAPACNA_VRATA = "napacna-vrata"
 
 
@@ -292,7 +317,6 @@ def preveri_prijavo(
     identifikator: str,
     geslo: str,
     *,
-    vrata: Vrata,
     ip: str | None,
     ko: datetime,
 ) -> IzidPrijave:
@@ -306,11 +330,11 @@ def preveri_prijavo(
     Sicer bi v natanko tistem stanju, ki ga pusti migracija — račun brez
     gesla, torej brez uspešne prijave — tabela poskusov rasla brez meje.
 
-    `vrata` povedo, od kod prijava prihaja. Vloga, ki tja ne sodi, dobi
-    `NAPACNA_VRATA` z razlago namesto enotnega sporočila — glej `Vrata`.
+    Z geslom se prijavlja **samo admin** (`V6-R01`). Vloga, ki tja ne sodi,
+    dobi `NAPACNA_VRATA` z razlago namesto enotnega sporočila — glej `Vrata`.
 
     **Identifikator se normalizira tu in ne v usmerjevalniku** (`ADR-038` E):
-    pravilo mora veljati za obe vrati in za vsak zapis v `login_attempts`, in
+    pravilo mora veljati za vsak zapis v `login_attempts`, in
     pravilo, ki bi ga moral vsak klicatelj ponoviti, je pravilo, ki ga bo kdo
     kdaj pozabil.
 
@@ -340,12 +364,67 @@ def preveri_prijavo(
         repo.zabelezi_neuspeh(identifikator, ip, ko)
         return IzidPrijave(Izid.ZAVRNJENO, SPOROCILO_NEUSPELA_PRIJAVA)
 
-    if not vloga_sodi(poverilnica.role, vrata):
+    if not vloga_sodi(poverilnica.role, Vrata.ADMIN):
         # Geslo je pravo, zato to ni neuspel poskus in se ne šteje.
-        return IzidPrijave(Izid.NAPACNA_VRATA, _SPOROCILO_NAPACNA_VRATA[vrata])
+        return IzidPrijave(Izid.NAPACNA_VRATA, SPOROCILO_OTROK)
 
     repo.pozabi_poskuse(identifikator)
     return IzidPrijave(Izid.USPEH, poverilnica=poverilnica)
+
+
+# --- Povezava telefona (V6-R01) --------------------------------------------
+
+
+def koliko_cakati_na_povezavo(repo: PrijavaRepository, ko: datetime) -> float:
+    """Zamik pred preverbo povezovalnega žetona ob času `ko`.
+
+    Isti prag in isti zamik kot pri prijavi, a **en števec za vso
+    namestitev** (`ADR-061` E): neuspel poskus nima identifikatorja, naslov
+    odjemalca pa ni podatek (`ADR-034` A). Upočasnitev, ne zaklep — zaklep bi
+    pomenil, da kdorkoli z interneta ustavi povezovanje vsem družinam.
+    """
+    return zamik_pred_preverbo(
+        repo.neuspelih_poskusov(OZNAKA_POSKUSOV_POVEZAVE, ko - OKNO_POSKUSOV)
+    )
+
+
+def unovci_povezavo(
+    repo: PrijavaRepository,
+    zeton_povezave: str,
+    *,
+    ip: str | None,
+    ko: datetime,
+    oznaka_naprave: str | None,
+) -> tuple[str, PovezanOtrok] | None:
+    """Unovči povezovalni žeton; vrne žeton nove seje in otroka, ali `None`.
+
+    Žeton izgine in seja nastane v **eni transakciji**
+    (`PrijavaRepository.unovci_povezavo`), zato isti žeton ne da dveh sej.
+
+    Neuspeh se zabeleži, **uspeh pa števca ne pobriše** — za razliko od
+    prijave: števec je skupen, zato bi tuj uspeh pobrisal napadalčeve poskuse
+    (`ADR-061` E).
+
+    Čiščenje poteklih žetonov, starih poskusov in poteklih sej teče tu, ob
+    vsakem poskusu, iz istega razloga kot pri prijavi (`ADR-035` C).
+    """
+    repo.pocisti_stare_poskuse(ko - HRAMBA_POSKUSOV)
+    repo.pocisti_potekle_seje(ko)
+    repo.pocisti_potekle_povezave(ko)
+
+    zeton_seje = nov_zeton()
+    otrok = repo.unovci_povezavo(
+        zgostitev_zetona(zeton_povezave),
+        token_hash=zgostitev_zetona(zeton_seje),
+        csrf_token=nov_zeton(),
+        ko=ko,
+        potece=ko + TRAJANJE_SEJE,
+        device_label=oznaka_naprave,
+    )
+    if otrok is None:
+        repo.zabelezi_neuspeh(OZNAKA_POSKUSOV_POVEZAVE, ip, ko)
+        return None
+    return zeton_seje, otrok
 
 
 def ustvari_sejo(
