@@ -357,10 +357,17 @@ def pregled(
     (V6-R02, posnetek 08): trije naslednji koraki. Brez stolpca „že videno" —
     pregled brez otroka nima česa pokazati, zato je pravilo kar stanje samo
     (`docs/odlocitve/ADR-062` E).
+
+    **Lastnik sistema te strani ne dobi**: je brez menija, on pa prav v meniju
+    vidi „Sistem" in število zahtevkov, ki čakajo nanj. Koraki „Google,
+    Zahtevek, Odobritev" in oznaka „Odobreno" se izrišejo samo staršu, ki se
+    je res registriral z Googlom — družini, ki jo je odprl lastnik, bi
+    pripovedovali o poti, ki je ni prehodila.
     """
     otroci = clani.otroci()
-    if not otroci:
+    if not otroci and not seja.is_system_owner:
         imena = seja.display_name.split()
+        jaz = clani.clan(seja.user_id)
         return predloge.TemplateResponse(
             request,
             "dobrodosli.html",
@@ -368,6 +375,9 @@ def pregled(
                 # Samo prvo ime, kot na posnetku: pozdrav, ne naslov.
                 "ime": imena[0] if imena else "",
                 "druzina": ime_druzine(seja.family_name),
+                # Starš brez geselne poverilnice in z Googlom: tako nastane
+                # samo z registracijo (`ADR-057` A).
+                "registriran": jaz is not None and jaz.identifier is None and jaz.google_povezan,
                 "apk_url": nastavitve.apk_url,
                 "pot_odjave": prijava.POT_ODJAVE,
             },

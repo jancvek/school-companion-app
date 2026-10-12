@@ -81,7 +81,8 @@ logika testljiva brez naprave.
 | `app/routers/urnik.py` | urnik otroka pod `/admin/schedule`: mreža, predlog s slike, potrditev (V3-R09) |
 | `app/routers/clani.py` | člani družine pod `/admin/family`: seznam, dodajanje, ponastavitev gesla, deaktivacija in aktivacija (V3-R06) |
 | `app/routers/sistem.py` | stran lastnika sistema pod `/admin/system`: družine, odpiranje nove, stanje družine in dejanja nad starši (V3-R05) |
-| `app/routers/racun.py` | nastavitve prijavljenega starša pod `/admin/racun`: načini prijave, povezava in odstranitev Googla (V3-R08) |
+| `app/routers/racun.py` | nastavitve prijavljenega starša pod `/admin/racun`: načini prijave, povezava in odstranitev Googla (V3-R08); „Moj račun" neodobrene družine in izbris zavrnjenega računa (V6-R02) |
+| `app/registracija.py` | registracija z Googlom: meji javnega obrazca, sporočila, podpisan piškotek z istovetnostjo (V6-R02). Brez FastAPI in brez baze |
 | `app/google.py` | Google prijava: poti, naslovi, vezivo stanja, razsodbe in **edini modul, ki govori z Googlom** (V3-R08). Brez FastAPI in brez baze |
 | `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository`, `StatistikaRepository` (V2-R04, samo bere), `ClaniRepository` (V3-R06), `ScheduleRepository` (V3-R09) in `PreizkusiRepository` (V4-R08) — vsak z obvezno družino (V3-R01) — ter `DruzineRepository` (od V3-R05 tudi pregled čez družine) in `PrijavaRepository` (V3-R03), edina brez družine; edina pot do baze |
 | `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03); `link_tokens` (V6-R01); `child_id` na snovi, kvizu in poskusu (V3-R07); `schedules` in `schedule_entries` (V3-R09); `credentials.label` (V3-R08); `preizkusi` (V4-R08) |
@@ -97,10 +98,10 @@ logika testljiva brez naprave.
 | `app/ukazi.py` | `python -m app.ukazi nastavi-geslo <identifikator>`; geslo z `getpass`, nikoli iz argumenta (V3-R03); prekliče seje računa (V3-R06) |
 | `app/clani.py` | pravila o članih družine: veljaven vnos in kdo sme koga — brez FastAPI in brez baze (V3-R06) |
 | `app/povezava.py` | povezava, ki odpre aplikacijo, in njen QR kot SVG; **edini modul, ki uvaža `segno`** (V6-R01). Brez FastAPI in brez baze |
-| `app/sistem.py` | pravila lastnika sistema: ime družine, česa niti on ne sme, besedilo o zunanjem vision API-ju — brez FastAPI in brez baze (V3-R05) |
-| `app/routers/vstop.py` | prijava in odjava: `GET/POST /admin/login`, `POST /admin/logout` (V3-R03); `POST /auth/link` (povezava telefona, V6-R01), škrbina `POST /auth/login` in `POST /auth/logout` za telefon (V3-R04); `POST /auth/google/login` in `GET /auth/google/callback` (V3-R08) |
+| `app/sistem.py` | pravila lastnika sistema: ime družine, česa niti on ne sme, besedili o zunanjem vision API-ju (lastnikovo in javno), prehodi stanja odobritve (V6-R02) — brez FastAPI in brez baze (V3-R05) |
+| `app/routers/vstop.py` | prijava in odjava: `GET/POST /admin/login`, `POST /admin/logout` (V3-R03); `POST /auth/link` (povezava telefona, V6-R01), škrbina `POST /auth/login` in `POST /auth/logout` za telefon (V3-R04); `POST /auth/google/login` in `GET /auth/google/callback` (V3-R08); okno registracije `GET/POST /admin/register` (V6-R02) |
 | `app/settings.py` | nastavitve iz okolja |
-| `app/dependencies.py` | odvisnosti poti iz `app.state`; družina iz seje — ene same, za obe strani (`daj_druzino`, V3-R04; začasne `daj_druzino_telefona` ni več) |
+| `app/dependencies.py` | odvisnosti poti iz `app.state`; družina iz seje — ene same, za obe strani (`daj_druzino`, V3-R04; začasne `daj_druzino_telefona` ni več); `zahtevaj_odobreno_druzino` (V6-R02) |
 | `app/urnik.py` | pravila urnika in manjkov: kateri predmeti so kateri dan, česa tisti dan ni na sliki (V3-R09). Brez FastAPI in brez baze |
 | `app/otroci.py` | izbira otroka v pogledih, ki so ločeni po otroku: privzetek, 404 za tujega, kdaj se izbirnik izriše (V3-R07). Brez FastAPI in brez seje |
 | `app/danes.py` | kartica „danes" na `/admin`: vikend, vrstica na aktivnega otroka, predmeti s števili, ime samo pri več otrocih (V3-R13). Nabor da klicatelj s `seznam_po_obdobju` kot `/admin/days`. Brez FastAPI in brez seje |
@@ -280,8 +281,15 @@ je prenesen — `oznaciPrenesene` teče pred `pobrisiKvizeRazen`.
 
 Tabela `families`: `id` (`VARCHAR(36)`, UUID s strežnika, hkrati ime mape
 slik), `name` (`VARCHAR(200) NOT NULL`, **ni enoličen**), `created_at` in — od
-V3-R05 — `is_active` (`BOOLEAN NOT NULL`, privzeto `true`). Nič drugega; ni
-naslova in ni nastavitev.
+V3-R05 — `is_active` (`BOOLEAN NOT NULL`, privzeto `true`). Od V6-R02 še
+`status` (`VARCHAR(16) NOT NULL`, privzeto `approved`; `pending`, `approved`
+ali `rejected`), `consent_at` in `decided_at` (oba `NULL`-abilna). Ni naslova
+in ni nastavitev.
+
+Migracija `0015_odobritev_druzine` doda te tri stolpce; obstoječe družine so s
+privzetkom `approved`. `downgrade` se **ne izvede**, dokler obstaja družina, ki
+ni `approved` — brez stolpca bi čakajoča in zavrnjena tiho postali
+polnopravni.
 
 `family_id NOT NULL` imajo `materials`, `questions`, `quizzes` in
 `question_attempts`. **Izpeljave:** `quiz_items` stolpca nima — družina
@@ -794,7 +802,7 @@ posnetkov `docs/poc/POC-02/`).
 
 | Pot | Metoda | Kaj |
 |---|---|---|
-| `/admin` | GET | vseh deset predmetov s števci; predmet iz baze, ki ga na seznamu ni, je viden pod svojo kodo; nad njimi kartica „danes" (V3-R13) |
+| `/admin` | GET | vseh deset predmetov s števci; predmet iz baze, ki ga na seznamu ni, je viden pod svojo kodo; nad njimi kartica „danes" (V3-R13). Družina **brez otroka** dobi namesto tega stran s tremi naslednjimi koraki, brez menija; lastnik sistema ne (V6-R02) |
 | `/admin/subjects/{koda}` | GET | slike predmeta po tednih, najnovejši teden prvi, lena naložitev (V5-R01); kljukice za izbor, `?vse=1` obkljuka vse (V3-R11), `?teden=<ponedeljek>` in `?dan=<dan>` obkljukata teden oziroma dan (V5-R01); pri `MAT` drugi gumb „Kreiraj test" (V4-R07) in povezava „Shranjeni testi (N)" (V4-R08) |
 | `/admin/transcripts` | GET | 303 na pregled; obstaja zato, da pot ni videti kot 405 (V3-R11) |
 | `/admin/transcripts` | POST | povzetki, prepisi in vprašanja izbranih slik enega predmeta v enem polju; **ničesar ne shrani** (V3-R11, V3-R12) |
@@ -843,7 +851,7 @@ posnetkov `docs/poc/POC-02/`).
 | `/admin/family/members/{id}/deactivate` | POST | deaktivira in prekliče vse seje člana (V3-R06) |
 | `/admin/family/members/{id}/activate` | GET | vmesna stran (V3-R06) |
 | `/admin/family/members/{id}/activate` | POST | vrne račun v uporabo; sej ne obnovi (V3-R06) |
-| `/admin/system` | GET | vse družine s števili članov in stanjem, obrazec za novo družino, besedilo o vision API-ju (V3-R05) |
+| `/admin/system` | GET | vse družine s števili članov in stanjem, obrazec za novo družino, besedilo o vision API-ju (V3-R05); seznam „Čaka na odobritev", stanje odobritve in tabela staršev vseh družin (V6-R02) |
 | `/admin/system/families` | GET | 303 na seznam; obstaja zato, da pot ni videti kot 405 (V3-R05) |
 | `/admin/system/families` | POST | ustvari družino in v njej prvega starša v eni transakciji (V3-R05) |
 | `/admin/system/families/{id}` | GET | ena družina: starši poimensko, otroci samo kot število (V3-R05) |
@@ -852,7 +860,11 @@ posnetkov `docs/poc/POC-02/`).
 | `/admin/system/families/{id}/parents/{user_id}/password` | GET, POST | ponastavitev gesla staršu (V3-R05) |
 | `/admin/system/families/{id}/parents/{user_id}/deactivate` | GET, POST | vmesna stran in deaktivacija starša (V3-R05) |
 | `/admin/system/families/{id}/parents/{user_id}/activate` | GET, POST | vmesna stran in aktivacija starša (V3-R05) |
-| `/admin/racun` | GET | načini prijave prijavljenega starša; `user_id` iz seje, nikoli iz naslova (V3-R08) |
+| `/admin/system/families/{id}/approve` | GET, POST | vmesna stran in odobritev čakajoče ali zavrnjene družine (V6-R02) |
+| `/admin/system/families/{id}/reject` | GET, POST | vmesna stran in zavrnitev čakajoče družine; odobrene ni mogoče zavrniti (V6-R02) |
+| `/admin/racun` | GET | načini prijave prijavljenega starša; `user_id` iz seje, nikoli iz naslova (V3-R08). Za neodobreno družino stanje zahtevka — čaka ali zavrnjena (V6-R02) |
+| `/admin/racun/izbrisi` | GET, POST | vmesna stran in izbris **zavrnjene** družine: družina, starš, poverilnice in seje (V6-R02) |
+| `/admin/register` | GET, POST | okno registracije in oddaja zahtevka; **brez seje**, CSRF preveri sama (V6-R02) |
 | `/admin/racun/google` | POST | začne povezovanje: postavi piškotek stanja in pelje na Googlov zaslon (V3-R08) |
 | `/admin/racun/google/odstrani` | POST | odstrani Google povezavo; gesla in sej se ne dotakne (V3-R08) |
 
@@ -861,8 +873,10 @@ nista v tej tabeli: `POST /auth/google/login` in `GET /auth/google/callback`
 (glej „Google prijava za starša").
 
 Poti so angleške kot obstoječi API, vidno besedilo slovensko. **Vsaka od njih
-zahteva sejo** (V3-R03, glej „Prijava, seje in CSRF"); vsak `POST` nosi CSRF
-žeton. Poti pod `/admin/system` zahtevajo še lastnika sistema in so za vse
+zahteva sejo** (V3-R03, glej „Prijava, seje in CSRF") — razen prijavne strani
+in okna registracije; vsak `POST` nosi CSRF žeton. Seja družine, ki **ni
+odobrena**, vidi samo `/admin/racun`, izbris in odjavo (V6-R02, glej
+„Registracija in odobritev"). Poti pod `/admin/system` zahtevajo še lastnika sistema in so za vse
 ostale `404` (V3-R05, glej „Lastnik sistema odpira družine"). Strani kažejo podatke družine iz seje, glava pa pove, čigava družina je
 to in kdo je prijavljen.
 
@@ -909,7 +923,8 @@ Odločitve so v `ADR-027` (model) in `ADR-035` (izvedba).
 | `/admin/logout` | POST | izbriše sejo te naprave (zahteva sejo in CSRF žeton) |
 
 - **`SejaMiddleware` je plast, ne odvisnost.** Zahteva sejo za vsako pot pod
-  `/admin` razen `/admin/login`; brez nje odgovori s `303` na prijavo z
+  `/admin` razen `/admin/login` in — od V6-R02 — `/admin/register`
+  (`POTI_BREZ_SEJE`, dvočlanska, varuje test); brez nje odgovori s `303` na prijavo z
   `?next=<zahtevana pot>`. Pot, ki je nihče ni dodal na noben seznam, je zato
   varovana po privzetku. `next` se sprejme samo kot relativna pot pod `/admin`,
   zapiše se z `urlencode` (sicer se cilj z dvema parametroma odreže pri `&`) in
@@ -1154,8 +1169,10 @@ poizvedbe v `DruzineRepository` in `ClaniRepository`, odločitve v
   (isto sklepanje kot `ADR-038` G).
 - **Besedilo o zunanjem vision API-ju** je konstanta `sistem.BESEDILO_ZASEBNOST`,
   izrisana ob obrazcu za novo družino — na mestu in v trenutku, ko ga lastnik
-  potrebuje. Obrazca soglasja ni: to bi bil pravni okvir, ki ga `ADR-025`
-  izrecno ne želi.
+  potrebuje. Za ročno odprto družino obrazca soglasja ni (`ADR-044` C); starš,
+  ki se registrira sam, soglasje potrdi (V6-R02).
+- **Družina, ki jo odpre lastnik, je odobrena takoj** (`status = approved`,
+  brez `consent_at`).
 
 ### Deaktivirana družina
 
@@ -1259,10 +1276,10 @@ ali z Googlom in obe poti dasta sejo v isti tabeli `sessions`. Odločitve so v
   njegovo družino vstopal, kolikor dolgo bi hotel — zato ima vsak od teh
   pogojev svoj test, ki dokaže tudi, da poverilnica **ni** nastala in da do
   Googla sploh ni prišlo.
-- **Prijava nikoli ne ustvari uporabnika ali družine** (kriterij 3,
-  `ADR-025`). Neznan `sub`, deaktiviran račun in ugasnjena družina dajo **isto**
-  oznako napake; razlika bi bila podatek o tem, kdo v tej namestitvi obstaja.
-  Registracija ostane zaprta.
+- **Povratni klic nikoli ne ustvari uporabnika ali družine.** Deaktiviran
+  račun in ugasnjena družina dasta **isto** oznako napake. **Neznan `sub`** od
+  V6-R02 dobi obrazec registracije (`ADR-057` A); ustvari šele oddan obrazec.
+  Kdor je ob tem že prijavljen, obrazca ne dobi.
 - **Skozi naslov potuje oznaka, nikoli besedilo.** Prijavna stran izriše samo
   oznako, ki jo pozna `google.SPOROCILA_PRIJAVE`; neznana ne pokaže ničesar.
   Prosto besedilo v naslovu bi pomenilo, da lahko kdorkoli s pripravljeno
@@ -1307,7 +1324,10 @@ namestitvi ni na voljo (`Settings.google_je_nastavljen`, `ADR-046` F):
 - ime v glavi ni povezava na `/admin/racun`,
 - vseh **pet** Googlovih poti vrne **404** (ne 503: pot, ki je ta namestitev
   nima, za obiskovalca ne obstaja). Pet in ne štiri: poleg obeh dejanj in
-  obeh poti zunaj `/admin` je tu tudi `GET /admin/racun` sam.
+  obeh poti zunaj `/admin` je tu tudi `GET /admin/racun` sam — razen za
+  **neodobreno družino**, ki svojo stran vidi vedno (V6-R02).
+- okna registracije ni (`/admin/register` je 404) in prijavna stran ga ne
+  ponudi: registracija je samo z Googlom.
 
 Strežnik se zažene normalno — ista drža kot pri manjkajočem `OPENAI_API_KEY`
 (`ADR-009`): manjkajoča nastavitev ustavi eno zmožnost, ne strežnika. Prijava z
@@ -1325,9 +1345,11 @@ obsegi `openid`/`email`/`profile`, nato **Credentials → OAuth client ID** tipa
 `https://school-buddy.duckdns.org/auth/google/callback` — **točno tako**, brez
 končne poševnice, ker Google ujemanje zahteva znak za znak.
 
-Aplikacija ostane v načinu **Testing**: prijavijo se lahko samo ročno vpisani
-preizkusni računi (do 100). Za krog znancev je to dovolj in prihrani Googlovo
-preverjanje aplikacije; širši krog je nova zahteva, ne popravek (`ADR-025`).
+Aplikacija ostane v načinu **Testing**. Ker zahteva samo `openid`, `email` in
+`profile`, se po Googlovi dokumentaciji (*Manage App Audience*) lahko prijavi
+in registrira **tudi račun, ki ni na seznamu preizkusnih uporabnikov**, brez
+opozorila in brez izteka po sedmih dneh (`ADR-057` H). Prejšnja trditev tega
+dokumenta, da se lahko prijavijo samo ročno vpisani računi, je bila napačna.
 
 `client_id` in `client_secret` gresta v `apps/server/.env` kot
 `GOOGLE_CLIENT_ID` in `GOOGLE_CLIENT_SECRET`. Skrivnosti v repozitoriju ni in
@@ -1346,6 +1368,64 @@ ne sme biti; `okolje.primer` nosi imeni brez vrednosti, kar varuje test.
   dotaknila (kriterij 1) in seznama prijavljenih naprav ni (`ADR-038` H).
 - **Odjava iz Googla ni naša.** Naša odjava izbriše našo sejo; Googlove ne in
   je ne sme.
+
+## Registracija in odobritev (V6-R02)
+
+Starš brez računa se registrira z Googlom; družina čaka, dokler je lastnik
+sistema ne odobri ali zavrne. Odločitve so v `ADR-057` (kaj) in `ADR-062`
+(kako), pravila v `app/registracija.py` in `app/sistem.py`.
+
+- **Trije koraki, ustvari samo zadnji.** Gumb v oknu `/admin/register` gre
+  skozi isti `POST /auth/google/login` kot prijava (polje `namen` pove samo,
+  kje se pokaže napaka). Povratni klic za neznan `sub` postavi piškotek
+  `registracija` in **ne zapiše ničesar**. Šele oddan obrazec (ime družine,
+  ime, soglasje) ustvari družino `pending` s `consent_at`, starša, poverilnico
+  `google` in sejo.
+- **Izid odloči `sub`, ne gumb.** Znan `sub` se prijavi tudi iz okna
+  registracije; neznan dobi obrazec tudi s prijavne strani.
+- **Piškotek z istovetnostjo je podpisan** (HMAC-SHA256; `sub`, e-naslov, ime,
+  rok 10 minut). Ključ nastane ob zagonu strežnika in živi v `app.state`;
+  ponovni zagon prekine registracije, ki so ravno v teku. `sub` in e-naslov
+  prideta izključno iz piškotka, obrazec ju ne nosi.
+- **Ne registrira se** Google račun brez potrjenega e-naslova in račun, čigar
+  e-naslov že ima geselno poverilnico (računa se ne združita; preverjeno ob
+  povratnem klicu in ob oddaji).
+- **Meji javnega obrazca sta za celo namestitev:** največ 20 družin v stanju
+  `pending` in največ 10 oddanih registracij v 24 urah (vrstice
+  `login_attempts` z oznako `REGISTRACIJA`). **Meje po IP ni** — naslov
+  odjemalca v tej postavitvi ni podatek (`ADR-034` A).
+- **Zapora je odvisnost** `zahtevaj_odobreno_druzino`, pripeta ob priklopu
+  vsakemu usmerjevalniku iz `main.USMERJEVALNIKI_ZA_ODOBRENE`. Seja družine,
+  ki ni `approved`, dobi z vsake poti `303` na `/admin/racun`. Odprte so samo
+  `/admin/racun` (`GET`), `/admin/racun/izbrisi`, odjava, prijava in okno
+  registracije. **Nov usmerjevalnik pod `/admin` sodi na ta seznam**; test gre
+  čez vse poti aplikacije. Neodobrena družina nima menija.
+- **Prehodi:** `pending → approved`, `pending → rejected`, `rejected →
+  approved`. Odobrene ni mogoče zavrniti. Prehod je pogojni `UPDATE`; sej se
+  ne dotakne.
+- **Izbris zavrnjenega računa** je edina pot, ki briše družino: seje,
+  poverilnice, uporabniki in družina v eni transakciji, pogojno na
+  `status = 'rejected'` v istem stavku. Družina pride iz seje.
+- **Starš, registriran z Googlom, nima geselne poverilnice**; ponastavitev
+  gesla se zanj ne ponudi in klic da `403` z razlago.
+- **Število čakajočih** je ob postavki „Sistem" v meniju lastnika, tudi pod
+  `/admin/system`.
+- **`APK_URL`** (neobvezno) je naslov za prenos aplikacije na prvi strani po
+  odobritvi; brez njega vrstica pove, naj starš povezavo dobi od skrbnika.
+
+### Znane omejitve
+
+- **Statične datoteke pod `/admin/static` zapora ne zajame** (slog, pisava,
+  KaTeX, marked); podatkov družin tam ni.
+- **Meji se štejeta pred zapisom, ne v isti transakciji**; ob sočasnih oddajah
+  sta lahko preseženi za nekaj vrstic.
+- **Čakajoč zahtevek starš ne more umakniti**; izbris je samo za zavrnjene.
+- **Staršu, registriranemu z Googlom, gesla ni mogoče nastaviti.**
+- **Povezav na predstavitveno stran in pravila zasebnosti ni** do `V6-R03`;
+  soglasje pokaže celotno besedilo ob potrditvenem polju.
+- **Sočasnost izbrisa in odobritve ni dokazana s testom nad Postgresom**;
+  utemeljena je z zasnovo stavka (prvi stavek transakcije zaklene vrstico).
+- **Zavrnjene družine ostanejo v bazi**, dokler jih starš ne izbriše sam.
 
 ## Sestavljalnik kvizov (V2-R01)
 

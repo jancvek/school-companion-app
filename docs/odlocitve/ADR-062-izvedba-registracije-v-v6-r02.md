@@ -8,7 +8,9 @@
   njegova meja), `ADR-038` (vmesne potrditve, pravila o članih), `ADR-035`
   (seja, dvojno oddan CSRF žeton), `ADR-024` (skripta je izjema)
 - **Spreminja:** kriterij `V6-R02` o posnetkih (`02–09` → `02, 04–09`, glej A);
-  `ADR-046` F v delu „`/admin/racun` brez Googla je 404" (glej J).
+  `ADR-046` F v delu „`/admin/racun` brez Googla je 404" (glej J);
+  **`ADR-057` F** in kriterij `V6-R02` v delu „omejevanje po IP" — nadomešča ju
+  dnevna meja za celo namestitev (glej F).
 
 ## Kontekst
 
@@ -63,6 +65,16 @@ pravi „administrator"; gre za isto osebo, lastnika sistema).
 Brez novega stolpca: `GET /admin` za družino brez otrok izriše posnetek 08
 („Pozdravljeni, …", trije koraki). Ko je dodan prvi otrok, je `/admin`
 običajen pregled. Vidi jo tudi ročno odprta družina brez otrok.
+
+Dve izjemi, dodani po prvem pregledu (12. 10. 2026):
+
+- **Lastnik sistema te strani ne dobi.** Je brez menija, on pa prav v meniju
+  vidi „Sistem" in število zahtevkov, ki čakajo nanj.
+- **Koraki „Google, Zahtevek, Odobritev" in oznaka „Odobreno" se izrišejo samo
+  staršu, ki se je registriral z Googlom** (brez geselne poverilnice, z Google
+  poverilnico). Družini, ki jo je odprl lastnik, bi pripovedovali o poti, ki
+  je ni prehodila; ta dobi iste tri korake naprej in stavek „V družini še ni
+  otroka".
 
 Stran je v postavitvi registracije, brez menija, kot na posnetku — zato dobi
 gumb **„Odjava"** (kot 07 in 09), ki ga posnetek 08 nima; stran brez menija in

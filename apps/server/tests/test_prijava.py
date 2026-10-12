@@ -903,6 +903,9 @@ class TestCsrfPodAdminom:
 class TestGlavaStrani:
     """Kriterij (dodan v fazi 1): glava pove, čigavo družino gledaš in kdo si."""
 
+    # V6-R02: družina brez otroka dobi na `/admin` prvo stran po odobritvi, ki
+    # menija nima (`ADR-062` E); ta test govori o glavi, zato otrok obstaja.
+    @pytest.mark.usefixtures("otrok")
     def test_glava_pokaze_druzino_uporabnika_in_odjavo(self, odjemalec: TestClient) -> None:
         besedilo = odjemalec.get("/admin").text
 

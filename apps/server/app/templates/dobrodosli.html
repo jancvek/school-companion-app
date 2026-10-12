@@ -19,13 +19,18 @@
 
     <div class="okno-ovoj">
       <div class="okno">
-        {{ koraki("opravljen", "opravljen", "opravljen") }}
+        {# Koraki in „Odobreno" samo staršu, ki se je registriral sam; družina,
+           ki jo je odprl lastnik, te poti ni prehodila. #}
+        {% if registriran %}{{ koraki("opravljen", "opravljen", "opravljen") }}{% endif %}
         <div class="okno-telo">
-          <p><span class="oznaka ok">Odobreno</span></p>
+          {% if registriran %}
+            <p class="okno-kljukica" aria-hidden="true">✓</p>
+            <p><span class="oznaka ok">Odobreno</span></p>
+          {% endif %}
           <h1>Pozdravljeni{% if ime %}, {{ ime }}{% endif %}</h1>
           <p class="pod">
-            {{ druzina }} je odobrena. Najprej dodaj otroka, potem lahko začne
-            fotografirati.
+            {% if registriran %}{{ druzina }} je odobrena.{% else %}V družini še ni otroka.{% endif %}
+            Najprej dodaj otroka, potem lahko začne fotografirati.
           </p>
 
           <ul class="naslednji-koraki">

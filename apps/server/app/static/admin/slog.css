@@ -909,6 +909,7 @@ body.prijavna main { max-width: none; padding: 0; margin: 0; }
 .okno-telo form { margin: 0; }
 .okno-telo .gumb.sirok { width: 100%; }
 .okno-telo .obvestilo { margin: 0 0 1rem; }
+.okno-kljukica { display: inline-flex; align-items: center; justify-content: center; width: 3.2rem; height: 3.2rem; margin: 0 0 0.9rem; border-radius: 50%; background: var(--poudarek-mehko); color: var(--poudarek); font-size: 1.4rem; font-weight: 800; }
 .nadnaslov { margin: 0 0 0.6rem; color: var(--zamolklo); font-size: 0.8rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 .koraki { list-style: none; display: flex; gap: 0.5rem; justify-content: space-between; margin: 0; padding: 0.9rem 1.75rem; border-bottom: 1px solid var(--rob); color: var(--zamolklo); font-size: 0.9rem; font-weight: 700; }
 .koraki li { display: flex; align-items: center; gap: 0.5rem; }

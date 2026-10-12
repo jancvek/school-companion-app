@@ -64,6 +64,9 @@ SPOROCILO_PREVEC = (
 SPOROCILO_PRAZNO_IME_DRUZINE = (
     "Ime družine manjka. Vpiši ga — prikazano bo v meniju in skrbniku ob odobritvi."
 )
+SPOROCILO_NEVELJAVEN_ZNAK = (
+    "V imenu je znak, ki ga ne morem shraniti. Vpiši ime znova, brez posebnih znakov."
+)
 SPOROCILO_BREZ_SOGLASJA = (
     "Brez soglasja zahtevka ne morem oddati. Preberi besedilo in potrdi polje, "
     "če se strinjaš."
@@ -219,6 +222,11 @@ def pobrisi_istovetnost(odgovor: Response) -> None:
 # --- Razsodbe ---------------------------------------------------------------
 
 
+def zacetnici(ime: str) -> str:
+    """Do dve veliki začetnici za krožec ob računu: „Ana Kovač" → „AK"."""
+    return "".join(beseda[0] for beseda in ime.split()[:2]).upper()
+
+
 def je_prek_meje(*, cakajocih: int, v_oknu: int) -> bool:
     """Ali je javni obrazec ta trenutek zaprt (`ADR-062` F).
 
@@ -249,6 +257,10 @@ def preveri_obrazec(*, ime_druzine: str, ime: str, soglasje: bool) -> str | None
     Imeni preverjata isti funkciji kot na lastnikovi in starševi strani; tu je
     novo samo soglasje, brez katerega registracija ne nastane (`ADR-057` D).
     """
+    if "\x00" in ime_druzine or "\x00" in ime:
+        # Postgres znaka NUL v besedilu ne sprejme; brez te vrstice bi javni
+        # obrazec nanj odgovoril s 500 namesto s sporočilom.
+        return SPOROCILO_NEVELJAVEN_ZNAK
     if not ime_druzine.strip():
         # Svoje besedilo: lastnikovo („po katerem boš družino prepoznal na
         # seznamu") nagovarja nekoga, ki seznam družin vidi.

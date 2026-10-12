@@ -590,6 +590,9 @@ def _okno_registracije(
         {
             "csrf": zeton,
             "istovetnost": istovetnost,
+            "zacetnici": registracija.zacetnici(
+                istovetnost.name or istovetnost.email if istovetnost is not None else ""
+            ),
             "sporocilo": sporocilo,
             "opozorilo": opozorilo,
             "vnos": vnos

@@ -466,6 +466,30 @@ class TestPovratniKlic:
         assert 'name="soglasje"' in stran.text
         assert sistem.BESEDILO_ZASEBNOST_JAVNO[:40] in stran.text
 
+    def test_obrazec_kaze_zacetnici_imena(self, obiskovalec: PrijavljenOdjemalec) -> None:
+        """Posnetek 04: krožec ob računu nosi začetnici („AK")."""
+        stran = _do_obrazca(obiskovalec)
+
+        assert '<span class="krozec velik" aria-hidden="true">AK</span>' in stran.text
+        assert registracija.zacetnici("ana") == "A"
+        assert registracija.zacetnici("") == ""
+
+    def test_nov_zacetek_toka_zavrze_prejsnjo_istovetnost(
+        self, obiskovalec: PrijavljenOdjemalec
+    ) -> None:
+        """`ADR-062` G: „Drug račun" je nov začetek; stari piškotek ne sme preživeti."""
+        stran = _do_obrazca(obiskovalec)
+        assert obiskovalec.cookies.get(registracija.PISKOTEK)
+
+        odgovor = obiskovalec.post(
+            google.POT_PRIJAVE,
+            data={"csrf": zeton_obrazca(stran.text), "namen": "registracija"},
+        )
+
+        assert odgovor.status_code == 303
+        assert not obiskovalec.cookies.get(registracija.PISKOTEK)
+        assert "Nadaljuj z Googlom" in obiskovalec.get(registracija.POT).text
+
     def test_piskotek_istovetnosti_ima_zastavice(self, obiskovalec: PrijavljenOdjemalec) -> None:
         povratek = _povratek(obiskovalec, _zacni_registracijo(obiskovalec))
 
@@ -611,6 +635,9 @@ class TestOddaja:
                 sistem.SPOROCILO_PREDOLGO_IME_DRUZINE,
             ),
             ({"ime": "A" * (clani.NAJDALJSE_IME + 1)}, clani.SPOROCILO_PREDOLGO_IME),
+            # Postgres znaka NUL ne sprejme; javni obrazec nanj ne sme dati 500.
+            ({"ime": "Ana\x00"}, registracija.SPOROCILO_NEVELJAVEN_ZNAK),
+            ({"ime_druzine": "\x00Kovačevi"}, registracija.SPOROCILO_NEVELJAVEN_ZNAK),
         ],
     )
     def test_neveljaven_vnos_nic_ne_ustvari(
@@ -1425,11 +1452,40 @@ class TestStevecCakajocih:
 class TestPoOdobritvi:
     """`ADR-062` E: `/admin` za družino brez otroka (posnetek 08)."""
 
+    def test_registrirana_druzina_brez_otroka(self, aplikacija: FastAPI, motor: Engine) -> None:
+        """Starš, ki se je registriral z Googlom in bil odobren: koraki in „Odobreno"."""
+        _, user_id = ustvari_registrirano(motor, STANJE_ODOBRENA)
+
+        with _odjemalec_za(aplikacija, motor, user_id) as odjemalec:
+            stran = odjemalec.get("/admin").text
+
+        assert "Pozdravljeni, Ana" in stran
+        assert "Družina Kovačevi je odobrena" in stran
+        assert ">Odobreno</span>" in stran
+        assert 'class="koraki"' in stran
+        assert '<nav class="meni' not in stran
+
+    def test_lastnik_sistema_brez_otroka_ohrani_pregled_in_meni(
+        self, lastnikov: PrijavljenOdjemalec, motor: Engine
+    ) -> None:
+        """Stran brez menija bi lastniku skrila „Sistem" in število čakajočih."""
+        ustvari_registrirano(motor, STANJE_CAKA)
+
+        stran = lastnikov.get("/admin").text
+
+        assert "Pozdravljeni" not in stran
+        assert "Matematika" in stran
+        assert stevec(stran, "Sistem") == "1"
+
     def test_druzina_brez_otroka(self, odjemalec: PrijavljenOdjemalec) -> None:
+        """Družina, ki jo je odprl lastnik: isti koraki naprej, brez zgodbe o registraciji."""
         stran = odjemalec.get("/admin").text
 
         assert "Pozdravljeni, Dejan" in stran
-        assert "Družina Cvek je odobrena" in stran
+        assert "V družini še ni otroka" in stran
+        assert "je odobrena" not in stran
+        assert 'class="koraki"' not in stran
+        assert ">Odobreno</span>" not in stran
         assert 'href="/admin/family?dodaj=otrok"' in stran
         assert 'href="/admin/schedule"' in stran
         assert "Namesti aplikacijo na otrokov telefon" in stran
