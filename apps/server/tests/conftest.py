@@ -473,3 +473,33 @@ def odjemalec(aplikacija: FastAPI, motor: Engine, stars: str) -> Iterator[Prijav
         yield odjemalec
 
 
+
+
+def slog_admina() -> str:
+    """Besedilo sloga spletnega pregleda (V5-R01).
+
+    Do V5-R01 je bil slog vgrajen v `osnova.html` in testi so pravila brali iz
+    izrisane strani. Odkar je ločena datoteka (`docs/odlocitve/ADR-060` A), jih
+    berejo od tu — trditev je ista, vir pa datoteka, ki jo stran naloži.
+    """
+    from app.main import MAPA_STATICNIH
+
+    return (MAPA_STATICNIH / "admin" / "slog.css").read_text(encoding="utf-8")
+
+
+def vsebina_strani(besedilo: str) -> str:
+    """Del izrisa med `<main>` in `</main>`: stran brez stalnega menija.
+
+    Meni je od V5-R01 na vsaki strani in nosi povezave na vse razdelke ter
+    števce, ki se spreminjajo neodvisno od strani. Test, ki trdi nekaj o
+    **strani** („te povezave tu ni", „stran se ni spremenila"), gleda zato
+    samo njeno vsebino.
+    """
+    zacetek = besedilo.index("<main>")
+    return besedilo[zacetek : besedilo.index("</main>", zacetek)]
+
+
+def meni_strani(besedilo: str) -> str:
+    """Stalni meni iz izrisa: od `<nav` do `</nav>`."""
+    zacetek = besedilo.index("<nav")
+    return besedilo[zacetek : besedilo.index("</nav>", zacetek)]

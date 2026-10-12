@@ -41,12 +41,14 @@ from app.db import (
     IzidObdelave,
     KviziRepository,
     MaterialsRepository,
+    MeniRepository,
     PoskusZaZapis,
     PreizkusiRepository,
     ScheduleRepository,
     StatistikaRepository,
 )
 from app.main import create_app
+from app.meni import Stevci
 from app.models import (
     NACIN_SAMOOCENA,
     STATUS_NOV,
@@ -1421,6 +1423,14 @@ def _poskus(postavka: str) -> PoskusZaZapis:
 Preverba = Callable[[Session, Druzina, Druzina], bool]
 
 PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
+    # MeniRepository (V5-R01). Števci so na **vsaki** strani, zato bi uhajanje
+    # tu pomenilo tuje število na vsaki strani. Obe družini sta zgrajeni enako
+    # (tri slike v uporabi, en odprt kviz, en test, dve arhivirani), zato bi
+    # stavek brez pogoja družine vrnil dvojne vrednosti.
+    ("MeniRepository", "stevci"): lambda s, a, b: (
+        MeniRepository(s, b.family_id).stevci()
+        == Stevci(slik=3, cakajocih_kvizov=1, testov=1, arhiviranih=2)
+    ),
     # PreizkusiRepository (V4-R08). `shrani` ne sme sprejeti tujega otroka,
     # tujega avtorja ne tuje osnove, in tujega `id` ne sme ne vrniti ne
     # prepisati (`None` → 409 v poti).
@@ -1641,6 +1651,7 @@ def test_vsaka_javna_metoda_repozitorija_ima_primer() -> None:
             ClaniRepository,
             ScheduleRepository,
             PreizkusiRepository,
+            MeniRepository,
         )
         for ime, clan in inspect.getmembers(razred)
         if not ime.startswith("_") and callable(clan)

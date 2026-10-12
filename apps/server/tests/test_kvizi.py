@@ -1148,7 +1148,11 @@ class TestPoizvedbe:
         # na dolžino seznama", in ta drži naprej — otroci so ena poizvedba na
         # stran, ne ena na vrstico. Dvanajst snovi je tu prav zato, da bi N+1
         # padel.
-        assert koliko == 4
+        #
+        # **Štiri je postalo pet** z V5-R01 (`ADR-060` F, soglasje lastnika):
+        # peta je meni s števci, ki je na vsaki strani — ena poizvedba na
+        # stran, ne ena na vrstico. Lastnost ostane ista.
+        assert koliko == 5
 
     def test_stran_kviza_ne_bere_vprasanja_na_postavko(
         self, odjemalec: TestClient, motor: Engine, slike: Path

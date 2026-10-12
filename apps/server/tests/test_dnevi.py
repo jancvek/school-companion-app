@@ -33,7 +33,7 @@ from app.db import MaterialsRepository, ScheduleRepository
 from app.models import STATUS_NOV, Material
 from app.routers.dnevi import DNI_V_TEDNU, Obdobje, preberi_obdobje
 from app.urnik import Vnos
-from tests.conftest import CVEK_ID, OTROK_ID
+from tests.conftest import CVEK_ID, OTROK_ID, meni_strani
 
 
 @pytest.fixture(autouse=True)
@@ -689,17 +689,15 @@ class TestDosegljivostInMeje:
     ) -> None:
         besedilo = odjemalec.get("/admin").text
 
-        # Sidro je povezava in ne naslov razdelka: „Pregled po dnevih" stoji
-        # tudi v komentarju sloga v `osnova.html`, torej pred telesom strani.
-        zacetek = besedilo.index('href="/admin/days"')
-        razdelek = besedilo[zacetek : besedilo.index("</section>", zacetek)]
+        # Od V5-R01 povezava ni več razdelek pod seznamom predmetov, ampak
+        # postavka stalnega menija (`ADR-056` G) — in ta stoji **pred**
+        # predmeti. Trditev ostane: povezava je na domači strani in s seboj
+        # ne prinese kode predmeta, ki bi bila prva pojavitev na strani.
+        meni = meni_strani(besedilo)
 
-        # Razdelek stoji pod seznamom predmetov in brez kod: koda pred
-        # seznamom bi podrla test, ki po vrstnem redu pojavitev dokazuje, da so
-        # predmeti našteti po urniku in ne po abecedi.
-        assert besedilo.index("NAR") < zacetek
+        assert 'href="/admin/days"' in meni
         for koda in ("NAR", "MAT", "TJA", "GEO"):
-            assert koda not in razdelek
+            assert koda not in meni
 
     def test_stran_ne_uporablja_skripte(self, odjemalec: TestClient) -> None:
         odgovor = odjemalec.get(POT)

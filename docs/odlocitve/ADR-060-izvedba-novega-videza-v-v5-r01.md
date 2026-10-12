@@ -169,3 +169,15 @@ Odločitev iz A se s tem ne spremeni: pet točnih poti, nič drugega.
 Python 3.12 pripone `.woff2` ne pozna in slika `python:3.12-slim` nima
 `/etc/mime.types`, zato bi `StaticFiles` pisavo postregel kot `text/plain`.
 `main.py` zato vpiše `font/woff2` sam; test ga preverja pri vsaki pisavi.
+
+### F1 — števci so en stavek; dva testa štetja poizvedb dobita novo številko
+
+Štiri štetja menija so en sam stavek s štirimi podizrazi (`MeniRepository`),
+vsak s pogojem družine: vsaka stran plača eno poizvedbo in ne štirih.
+
+Dva prej zelena testa štejeta poizvedbe strani z natančno številko in ju H ne
+pokriva (nista testa zgradbe). Lastnik je 12. 10. 2026 odobril dvig:
+`test_izbirnik_je_stiri_poizvedbe_ne_glede_na_stevilo_snovi` s 4 na 5 in
+`test_rezultat_je_sest_poizvedb` s 6 na 7. Lastnost, ki jo varujeta — stalno
+število ne glede na dolžino seznama — ostane; imeni testov ostaneta, ker ju
+navajajo starejši zapisi.

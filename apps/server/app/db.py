@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session, selectinload, sessionmaker
 from sqlalchemy.sql import Update
 
 from app import casi
+from app.meni import Stevci
 from app.models import (
     NACIN_SAMOOCENA,
     POVERILNICA_GESLO,
@@ -2712,6 +2713,46 @@ class ScheduleRepository(_RepozitorijDruzine):
         self._session.add(urnik)
         self._session.commit()
         return urnik
+
+
+class MeniRepository(_RepozitorijDruzine):
+    """Števci ob postavkah stalnega menija (V5-R01, `ADR-060` F).
+
+    Svoj razred in ne metoda na vsakem od treh repozitorijev: meni je na vsaki
+    strani, zato so vsa štiri štetja **en stavek** — vsaka stran plača eno
+    poizvedbo in ne štirih. Vsak podizraz nosi pogoj družine.
+    """
+
+    def stevci(self) -> Stevci:
+        """Slike v uporabi, čakajoči kvizi, shranjeni testi, arhivirane slike.
+
+        Kviz **čaka**, kadar ni ne preklican ne rešen; preklic ima prednost
+        pred rešenostjo (`ADR-019` C), zato preklican kviz ne čaka nikoli.
+        """
+        druzina = self._family_id
+
+        def stej(tabela: Any, *pogoji: ColumnElement[bool]) -> Any:
+            return (
+                select(func.count())
+                .select_from(tabela)
+                .where(tabela.family_id == druzina, *pogoji)
+                .scalar_subquery()
+            )
+
+        vrstica = self._session.execute(
+            select(
+                stej(Material, Material.archived_at.is_(None)),
+                stej(Quiz, Quiz.canceled_at.is_(None), Quiz.solved_at.is_(None)),
+                stej(Preizkus),
+                stej(Material, Material.archived_at.is_not(None)),
+            )
+        ).one()
+        return Stevci(
+            slik=int(vrstica[0] or 0),
+            cakajocih_kvizov=int(vrstica[1] or 0),
+            testov=int(vrstica[2] or 0),
+            arhiviranih=int(vrstica[3] or 0),
+        )
 
 
 class PreizkusiRepository(_RepozitorijDruzine):

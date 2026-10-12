@@ -32,7 +32,14 @@ from app.models import (
     Quiz,
 )
 from app.subjects import PREDMETI
-from tests.conftest import CVEK_ID, OTROK_ID, TUJA_DRUZINA_ID, SejaTesta, je_seja
+from tests.conftest import (
+    CVEK_ID,
+    OTROK_ID,
+    TUJA_DRUZINA_ID,
+    SejaTesta,
+    je_seja,
+    slog_admina,
+)
 
 # V3-R10 preverja, da premik potegne za sabo statistiko, izbirnik in sosede.
 # Pomagala za to stanje že obstajajo v testih tistih zahtev; podvojena tu bi
@@ -1380,7 +1387,9 @@ class TestPovecava:
         besedilo = self.stran(odjemalec, UUID_ENA)
 
         assert '<div class="prekritje" id="prekritje" hidden>' in besedilo
-        assert ".prekritje[hidden] { display: none; }" in besedilo
+        # Pravilo je od V5-R01 v datoteki sloga, ki jo stran naloži.
+        assert 'href="/admin/static/admin/slog.css"' in besedilo
+        assert ".prekritje[hidden] { display: none; }" in slog_admina()
 
     def test_prikaz_kaze_isto_datoteko_brez_omejitve_visine(
         self, odjemalec: TestClient, motor: Engine, slike: Path
