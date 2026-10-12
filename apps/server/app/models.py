@@ -772,7 +772,9 @@ class LinkToken(Base):
     neznan žeton za telefon isto stanje (`ADR-061` B).
 
     Otrok ima največ enega; nov prejšnjega izbriše v isti transakciji
-    (`ClaniRepository.ustvari_povezavo`).
+    (`ClaniRepository.ustvari_povezavo`). To drži **zaporedno**: `child_id` ni
+    enoličen, zato dve hkratni zahtevi lahko pustita dva žetona, ki oba
+    potečeta v desetih minutah (znana omejitev v `docs/01-arhitektura.md`).
     """
 
     __tablename__ = "link_tokens"

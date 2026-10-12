@@ -47,9 +47,18 @@ export type Seja = {
  * sistemske napake ne kaže kot edine vsebine (merilo dokončanosti).
  */
 export class NapakaPrijave extends Error {
-  constructor(sporocilo: string) {
+  /**
+   * Ali sme isti poskus znova (V6-R01). `true` samo, kadar zahteva do
+   * strežnika ni prišla ali je ta odgovoril „poskusi pozneje": koda takrat ni
+   * porabljena. Po zavrnitvi bi ponovitev iste kode samo štela v mejo
+   * poskusov, ki je skupna za vso namestitev (`ADR-061` E).
+   */
+  readonly ponovljivo: boolean;
+
+  constructor(sporocilo: string, ponovljivo = false) {
     super(sporocilo);
     this.name = 'NapakaPrijave';
+    this.ponovljivo = ponovljivo;
   }
 }
 
@@ -225,7 +234,7 @@ export async function poveziSe(
       casovnaOmejitevMs,
     );
   } catch {
-    throw new NapakaPrijave(SPOROCILO_NEDOSEGLJIV);
+    throw new NapakaPrijave(SPOROCILO_NEDOSEGLJIV, true);
   }
 
   if (!odgovor.ok) {
@@ -235,7 +244,8 @@ export async function poveziSe(
     } catch {
       // Telo ni JSON. Sporočilo pade na privzetek; koda je pomembnejša.
     }
-    throw new NapakaPrijave(sporociloNeuspeha(odgovor.status, telo));
+    const sporocilo = sporociloNeuspeha(odgovor.status, telo);
+    throw new NapakaPrijave(sporocilo, sporocilo === SPOROCILO_NEDOSEGLJIV);
   }
 
   try {

@@ -170,3 +170,51 @@ kodo").
 - **Na katere zahteve to vpliva:** `V3-R04` (prijava na telefonu — vnos
   nadomesti povezava), `V3-R06` (obrazec za otroka, ponastavitev gesla),
   `V6-R03` (predstavitvena stran omenja povezavo s QR).
+
+## Dopolnitve med izvedbo in po pregledih (12. 10. 2026)
+
+Spodnje odločitve so nastale ob izvedbi in ob dveh pregledih. **Dopolnjujejo**
+tekst zgoraj, ne razveljavljajo ga.
+
+### Ukaz `nastavi-geslo` otroka zavrne
+
+Plan je predvidel, da ukaz otroka „ne najde", ker poverilnice nima. Vrstica,
+ki je v bazi ostala mimo migracije `0014`, bi pa geslo vseeno dobila. Ukaz
+zato račun z vlogo, ki ni starš, zavrne izrecno in po geslu sploh ne vpraša.
+
+### Aplikacija pokaže besedilo strežnika samo ob `401`
+
+`401` je edini odgovor, za katerega aplikacija ve, da ga je napisala pot
+povezave in da je v slovenščini. Vsak drug 4xx — `404` strežnika, ki poti še
+nima, ali `422` — bi na zaslon prinesel angleško besedilo ogrodja, kar merilo
+dokončanosti prepoveduje. Takrat aplikacija pokaže svoje sporočilo.
+
+### Ponovitev iste kode samo po nedosegljivem strežniku
+
+Prvi pregled je našel, da „Poskusi znova" pri odprti povezavi žetona ne pošlje
+znova — in prav to je pot družine z enim telefonom. Drugi pregled je našel,
+da ga popravek pošlje znova tudi po zavrnitvi, kjer vsak pritisk šteje v
+skupno mejo iz E. Sklep: napaka nosi podatek, ali je poskus ponovljiv; to je
+samo nedosegljiv strežnik (omrežje, 5xx, 408, 429). Po zavrnjeni odprti
+povezavi gumba za ponovitev ni; ostane kamera, če je na voljo.
+
+### Seja, ki je telefon ne more shraniti
+
+Če varna shramba po unovčenju odpove, je koda porabljena, seje pa telefon
+nima. Aplikacija takrat pove, da je potrebna **nova koda**, in pravkar
+ustvarjeno sejo na strežniku odjavi (najboljši poskus). Prejšnja seja, če je
+bila, ostane nedotaknjena.
+
+### Povezava počaka na branje žetona ob zagonu
+
+Povezava, ki aplikacijo šele odpre, sproži unovčenje, še preden je steklo
+branje žetona z diska. Brez čakanja bi to branje novo sejo v stanju prepisalo
+s staro, ob oznaki iz `ADR-037` pa pravkar shranjen žeton pobrisalo. `povezi`
+zato počaka na konec branja ob zagonu in šele nato pogleda, katero sejo
+zamenjuje. Najdeno s testom, ne z branjem.
+
+### Zavestno neodpravljeno
+
+Zapisano kot znane omejitve v `docs/01-arhitektura.md`: sočasnost unovčenja
+je utemeljena z zasnovo in ne dokazana s testom; „največ en žeton na otroka"
+drži zaporedno; nova povezava med zahtevo, ki še teče, sproži drugo zahtevo.

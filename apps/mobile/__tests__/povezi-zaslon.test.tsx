@@ -207,6 +207,22 @@ describe('zaslon za povezavo telefona', () => {
     expect(usmerjevalnik.stanje.router.replace).not.toHaveBeenCalled();
   });
 
+  it('zavrnjene odprte povezave ni mogoče poslati znova', async () => {
+    // Koda je mrtva. Vsak ponoven poskus z njo bi štel v mejo poskusov, ki je
+    // skupna za vso namestitev (`ADR-061` E) — pet pritiskov bi povezovanje
+    // upočasnilo vsem družinam. Brez kamere zato gumba sploh ni; sporočilo
+    // pove, da otrok potrebuje novo kodo.
+    kamera.stanje.permission = dovoljenje({ granted: false });
+    odgovor.mockResolvedValue(zavrnitev(401, 'Koda ne velja več. Prosi starša za novo.'));
+
+    await izrisi(ustvariShrambo(), ZETON);
+    await screen.findByTestId('napaka-povezave');
+
+    expect(screen.queryByTestId('gumb-znova')).toBeNull();
+    expect(screen.queryByTestId('gumb-kamera')).toBeNull();
+    expect(zahtevePovezave()).toHaveLength(1);
+  });
+
   it('po zavrnjeni povezavi je mogoče prebrati novo kodo s kamero', async () => {
     odgovor.mockResolvedValueOnce(zavrnitev(401, 'Koda ne velja več. Prosi starša za novo.'));
     const shramba = ustvariShrambo();
@@ -580,11 +596,14 @@ describe('zaslon za povezavo telefona', () => {
     expect(besedilo).not.toMatch(/Keystore/);
     expect(shramba.vsebina()).toBeUndefined();
     expect(usmerjevalnik.stanje.router.back).not.toHaveBeenCalled();
+    // Porabljene kode ni mogoče poslati znova.
+    expect(screen.queryByTestId('gumb-znova')).toBeNull();
     await waitFor(() => {
       const odjave = odgovor.mock.calls.filter(([url]) => String(url).endsWith('/auth/logout'));
       expect(odjave).toHaveLength(1);
       expect(odjave[0][1].headers['Authorization']).toBe(`Bearer ${NOVA.zeton}`);
     });
+    expect(zahtevePovezave()).toHaveLength(1);
   });
 
   it('povezava uspe, tudi če posvojitev pade', async () => {

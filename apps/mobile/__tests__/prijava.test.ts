@@ -147,6 +147,24 @@ describe('povezava telefona', () => {
     expect((napaka as Error).message).not.toMatch(/Network request failed/);
     expect((napaka as Error).message).toMatch(/posnetki/i);
     expect((napaka as Error).message).toMatch(/poskusi znova/i);
+    // Zahteva do strežnika ni prišla, zato koda ni porabljena.
+    expect((napaka as NapakaPrijave).ponovljivo).toBe(true);
+  });
+
+  it.each([
+    [401, false],
+    [404, false],
+    [422, false],
+    [503, true],
+    [429, true],
+  ])('odgovor %i: ponovitev iste kode je dovoljena = %p', async (status, pricakovano) => {
+    const napaka = await poveziSe(
+      NASTAVITVE,
+      ZETON,
+      odgovori(status, { detail: 'x' }) as unknown as Zahteva,
+    ).catch((cause: unknown) => cause);
+
+    expect((napaka as NapakaPrijave).ponovljivo).toBe(pricakovano);
   });
 
   it('nerazberljiv odgovor ne postane seja brez žetona', async () => {

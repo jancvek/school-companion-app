@@ -54,6 +54,10 @@ function Povezi({ z }: { z?: string }) {
   // Ali zadnji poskus izhaja iz odprte povezave. Dokler je tako, „Poskusi
   // znova" pošlje isti žeton; ko otrok izbere kamero, velja prebrana koda.
   const [izPovezaveVelja, setIzPovezaveVelja] = useState(() => jeZeton(z));
+  // Ali zadnja napaka dopušča ponovitev iste kode: samo nedosegljiv strežnik.
+  // Zavrnjena koda je mrtva; vsak nov poskus z njo bi štel v mejo poskusov,
+  // ki je skupna za vso namestitev (`ADR-061` E).
+  const [ponovljivo, setPonovljivo] = useState(false);
 
   // Zaporo drži referenca: bralnik isto kodo javi večkrat na sekundo in stanje
   // bi se posodobilo šele ob naslednjem izrisu.
@@ -77,11 +81,9 @@ function Povezi({ z }: { z?: string }) {
         // Sporočilo je iz `NapakaPrijave` in je v slovenščini; surovo besedilo
         // sistemske napake bi bilo tu edina vsebina, kar merilo dokončanosti
         // prepoveduje, zato ima tudi nepričakovana napaka svoje besedilo.
-        setNapaka(
-          cause instanceof Error && cause.name === 'NapakaPrijave'
-            ? cause.message
-            : SPOROCILO_NEPRICAKOVANO,
-        );
+        const nasa = cause instanceof Error && cause.name === 'NapakaPrijave';
+        setPonovljivo(nasa && (cause as { ponovljivo?: unknown }).ponovljivo === true);
+        setNapaka(nasa ? cause.message : SPOROCILO_NEPRICAKOVANO);
       } finally {
         zaklep.current = false;
         setPovezujem(false);
@@ -134,12 +136,12 @@ function Povezi({ z }: { z?: string }) {
     // Žeton iz odprte povezave se pošlje znova. Družina z enim telefonom kode
     // ne more prebrati s kamero — gumb „Odpri na tem telefonu" je njena edina
     // pot, in „Poskusi znova" mora zanjo pomeniti prav to.
-    if (izPovezaveVelja && nastavljen && jeZeton(z) && !zaklep.current) {
+    if (izPovezaveVelja && ponovljivo && nastavljen && jeZeton(z) && !zaklep.current) {
       unovci(z);
       return;
     }
     setNapaka(null);
-  }, [izPovezaveVelja, nastavljen, unovci, z]);
+  }, [izPovezaveVelja, nastavljen, ponovljivo, unovci, z]);
 
   const preberiSKamero = useCallback(() => {
     obdelano.current = null;
@@ -186,14 +188,18 @@ function Povezi({ z }: { z?: string }) {
         <Text testID="napaka-povezave" style={styles.napaka}>
           {napaka}
         </Text>
-        <Pressable
-          accessibilityRole="button"
-          testID="gumb-znova"
-          style={({ pressed }) => [styles.gumb, pressed && styles.gumbPritisnjen]}
-          onPress={poskusiZnova}
-        >
-          <Text style={styles.gumbNapis}>Poskusi znova</Text>
-        </Pressable>
+        {/* Po zavrnjeni odprti povezavi ponovitve ni: koda je mrtva in otrok
+            potrebuje novo. Ostane kamera, če je na voljo. */}
+        {!izPovezaveVelja || ponovljivo ? (
+          <Pressable
+            accessibilityRole="button"
+            testID="gumb-znova"
+            style={({ pressed }) => [styles.gumb, pressed && styles.gumbPritisnjen]}
+            onPress={poskusiZnova}
+          >
+            <Text style={styles.gumbNapis}>Poskusi znova</Text>
+          </Pressable>
+        ) : null}
         {/* Po neuspeli odprti povezavi je druga pot nova koda pred kamero. */}
         {izPovezaveVelja && permission?.granted ? (
           <Pressable

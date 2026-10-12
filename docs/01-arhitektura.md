@@ -40,6 +40,7 @@ običajnim orodjem (`npm`/`package.json` v `apps/mobile`,
 | `src/photos/` | stiskanje slike in zapis v `documentDirectory/photos/` |
 | `src/materials/` | shranjevanje posnetka: najprej datoteka, nato vrstica |
 | `src/capture/` | stanje zaslona s kamero (kamera ↔ predogled) |
+| `src/povezava/` | razčlenjevanje povezave `school-companion://povezi?z=…` iz QR kode; brez omrežja (V6-R01) |
 | `src/ui/` | skupni gradniki in barve |
 | `src/types.ts` | tip `Material` (ena vrstica tabele `materials`); od V2-R02 še kviz, postavka, poskus in ocena |
 | `__tests__/` | enotski in komponentni testi |
@@ -83,7 +84,7 @@ logika testljiva brez naprave.
 | `app/routers/racun.py` | nastavitve prijavljenega starša pod `/admin/racun`: načini prijave, povezava in odstranitev Googla (V3-R08) |
 | `app/google.py` | Google prijava: poti, naslovi, vezivo stanja, razsodbe in **edini modul, ki govori z Googlom** (V3-R08). Brez FastAPI in brez baze |
 | `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository`, `StatistikaRepository` (V2-R04, samo bere), `ClaniRepository` (V3-R06), `ScheduleRepository` (V3-R09) in `PreizkusiRepository` (V4-R08) — vsak z obvezno družino (V3-R01) — ter `DruzineRepository` (od V3-R05 tudi pregled čez družine) in `PrijavaRepository` (V3-R03), edina brez družine; edina pot do baze |
-| `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03); `child_id` na snovi, kvizu in poskusu (V3-R07); `schedules` in `schedule_entries` (V3-R09); `credentials.label` (V3-R08); `preizkusi` (V4-R08) |
+| `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03); `link_tokens` (V6-R01); `child_id` na snovi, kvizu in poskusu (V3-R07); `schedules` in `schedule_entries` (V3-R09); `credentials.label` (V3-R08); `preizkusi` (V4-R08) |
 | `app/storage.py` | zapis, meja mape in brisanje slik na disku; mapa družine (V3-R01); podmapa `urniki/` (V3-R09) |
 | `app/vision.py` | **edini modul, ki uvaža `openai`**: prompta, shemi odgovorov, klic. Trije klicalci — snov (V1-R03) in urnik (V3-R09) nad skupnim `_izvedi_klic`, preizkus (V4-R07, brez slike, svoj ključ in model) — vsi nad skupnim `_poslji` |
 | `app/preizkus.py` | pravila sestavljanja preizkusa: navodilo modelu po predmetu, sestava vhoda, shema in razčlenitev odgovora (V4-R07); naslov, naslovljenec in primerjava z izhodiščem ob shranjevanju (V4-R08). Brez FastAPI, brez baze in brez `openai` |
@@ -95,8 +96,9 @@ logika testljiva brez naprave.
 | `app/prijava.py` | gesla (argon2id), žetoni sej, CSRF, omejevanje ugibanja, varen `next` — brez FastAPI (V3-R03); `Vrata` in `vloga_sodi`: katera vloga sme kam (V3-R04); `normaliziraj_identifikator` (V3-R06) |
 | `app/ukazi.py` | `python -m app.ukazi nastavi-geslo <identifikator>`; geslo z `getpass`, nikoli iz argumenta (V3-R03); prekliče seje računa (V3-R06) |
 | `app/clani.py` | pravila o članih družine: veljaven vnos in kdo sme koga — brez FastAPI in brez baze (V3-R06) |
+| `app/povezava.py` | povezava, ki odpre aplikacijo, in njen QR kot SVG; **edini modul, ki uvaža `segno`** (V6-R01). Brez FastAPI in brez baze |
 | `app/sistem.py` | pravila lastnika sistema: ime družine, česa niti on ne sme, besedilo o zunanjem vision API-ju — brez FastAPI in brez baze (V3-R05) |
-| `app/routers/vstop.py` | prijava in odjava: `GET/POST /admin/login`, `POST /admin/logout` (V3-R03); `POST /auth/login` in `POST /auth/logout` za telefon (V3-R04); `POST /auth/google/login` in `GET /auth/google/callback` (V3-R08) |
+| `app/routers/vstop.py` | prijava in odjava: `GET/POST /admin/login`, `POST /admin/logout` (V3-R03); `POST /auth/link` (povezava telefona, V6-R01), škrbina `POST /auth/login` in `POST /auth/logout` za telefon (V3-R04); `POST /auth/google/login` in `GET /auth/google/callback` (V3-R08) |
 | `app/settings.py` | nastavitve iz okolja |
 | `app/dependencies.py` | odvisnosti poti iz `app.state`; družina iz seje — ene same, za obe strani (`daj_druzino`, V3-R04; začasne `daj_druzino_telefona` ni več) |
 | `app/urnik.py` | pravila urnika in manjkov: kateri predmeti so kateri dan, česa tisti dan ni na sliki (V3-R09). Brez FastAPI in brez baze |
@@ -588,13 +590,22 @@ ne nova shema; `users` in `sessions` se nista dotaknila.
 | Tabela | Stolpci | Opomba |
 |---|---|---|
 | `users` | `id`, `family_id NOT NULL` (FK, indeks), `role` (`parent`\|`child`), `display_name`, `is_system_owner`, `is_active`, `created_at` | oseba brez gesla; `is_active` pišeta in bereta poti `V3-R06` (glej „Člani družine"), `is_system_owner` odpira `/admin/system` (`V3-R05`) |
-| `credentials` | `id`, `user_id NOT NULL` (FK, indeks), `kind` (`password`\|`google`), `identifier` **UNIQUE**, `secret_hash`, `label`, `created_at`, `updated_at` | `identifier` je e-naslov starša, uporabniško ime otroka ali Googlov `sub` (V3-R08), enoličen čez celo namestitev; `secret_hash IS NULL` pomeni „geslo ni nastavljeno" — pri `google` pomeni, da ta vrsta zgostitve nima; `label` je e-naslov Google računa **samo za izris** (V3-R08) |
+| `credentials` | `id`, `user_id NOT NULL` (FK, indeks), `kind` (`password`\|`google`), `identifier` **UNIQUE**, `secret_hash`, `label`, `created_at`, `updated_at` | `identifier` je e-naslov starša ali Googlov `sub` (V3-R08), enoličen čez celo namestitev; **otrok poverilnice nima** (V6-R01); `secret_hash IS NULL` pomeni „geslo ni nastavljeno" — pri `google` pomeni, da ta vrsta zgostitve nima; `label` je e-naslov Google računa **samo za izris** (V3-R08) |
 | `sessions` | `id`, `user_id NOT NULL` (FK, indeks), `token_hash` **UNIQUE**, `csrf_token`, `created_at`, `expires_at`, `last_used_at`, `device_label` | žetona v bazi ni, samo SHA-256 |
 | `login_attempts` | `id`, `identifier` (indeks), `ip_address`, `created_at` (indeks) | **edina tabela brez družine**: poskus se zabeleži tudi za identifikator, ki ne obstaja |
 
 Migracija `0008_uporabniki` ustvari starša (lastnika sistema, `is_system_owner`)
-in otroka v družini Cvek, **oba brez gesla**. Geslo vpiše lastnik z ukazom;
-privzeto geslo v migraciji bi bilo javno geslo (`ADR-035` G).
+in otroka v družini Cvek, **oba brez gesla**. Geslo staršu vpiše lastnik z
+ukazom; privzeto geslo v migraciji bi bilo javno geslo (`ADR-035` G).
+
+Tabela `link_tokens` (V6-R01): `id`, `family_id NOT NULL` (FK, indeks),
+`child_id NOT NULL` (FK na `users`, indeks), `token_hash` **UNIQUE** (SHA-256),
+`created_at`, `expires_at`. Vrstica živi največ deset minut in ob unovčenju
+izgine; stolpca `used_at` ni (`ADR-061` B).
+
+Migracija `0014_povezava_telefona` ustvari `link_tokens` in **izbriše geselne
+poverilnice vseh otrok**, v vseh družinah. Seje ostanejo, ker visijo na
+`users`. `downgrade` tabelo spusti, poverilnic pa **ne vrne**.
 
 `PrijavaRepository` je poleg `DruzineRepository` edini repozitorij brez
 družine, in to neizogibno: prijava pozna samo identifikator in družino šele
@@ -625,8 +636,10 @@ spremeniti samo od sebe.
 **Žeton** preverja **ASGI vmesna plast** (`ZetonMiddleware`, od V3-R04), ne
 odvisnost endpointa: FastAPI telo zahteve prebere pred razreševanjem
 odvisnosti, zato bi strežnik večmegabajtno sliko najprej prebral in šele nato
-ugotovil, da prijava ne velja. Izvzeti so `GET /health`, `POST /auth/login` in
-celotna predpona `/admin`; odjava telefona izvzeta **ni**.
+ugotovil, da prijava ne velja. Izvzeti so `GET /health`, `POST /auth/link`,
+škrbina `POST /auth/login`, obe Googlovi poti brez seje in celotna predpona
+`/admin`; odjava telefona izvzeta **ni**. Popis je pribit v
+`tests/test_security.py`.
 
 Do V3-R04 je bil tu en sam vgrajen `API_KEY` za vse družine. Odpadel je ostro,
 ne postopno (`ADR-027` C2, `ADR-036`): strežnik ne sprejema obojega.
@@ -819,10 +832,13 @@ posnetkov `docs/poc/POC-02/`).
 | `/admin/schedule/proposal` | POST | naloži sliko urnika, pokliče model, izriše **predlagano** mrežo; nič ne zapiše v bazo (V3-R09) |
 | `/admin/schedule` | POST | potrdi mrežo; prejšnji urnik upokoji (V3-R09) |
 | `/admin/family` | GET | člani družine z vlogo in stanjem; `?dodaj=otrok\|stars` odpre obrazec za dodajanje (V3-R06, V5-R01) |
-| `/admin/family/children` | POST | doda otroka: prikazno ime, uporabniško ime, začetno geslo (V3-R06) |
+| `/admin/family/children` | POST | doda otroka **samo s prikaznim imenom**, brez poverilnice (V6-R01) |
 | `/admin/family/parents` | POST | doda starša: prikazno ime, e-naslov, začetno geslo (V3-R06) |
-| `/admin/family/members/{id}/password` | GET | vmesna stran s poljema za novo geslo (V3-R06) |
-| `/admin/family/members/{id}/password` | POST | zapiše zgostitev in prekliče vse seje člana (V3-R06) |
+| `/admin/family/members/{id}/password` | GET | vmesna stran s poljema za novo geslo (V3-R06); za otroka `403` (V6-R01) |
+| `/admin/family/members/{id}/password` | POST | zapiše zgostitev in prekliče vse seje člana (V3-R06); za otroka `403` (V6-R01) |
+| `/admin/family/members/{id}/link` | POST | ustvari povezovalni žeton otroka in izriše QR kodo z gumbom „Odpri na tem telefonu"; `no-store` (V6-R01) |
+| `/admin/family/members/{id}/link` | GET | 303 na seznam; stran s kodo ni zaznamek (V6-R01) |
+| `/admin/family/members/{id}/revoke` | GET, POST | vmesna stran in „Prekliči prijave": izbriše otrokove seje in neporabljeno kodo (V6-R01) |
 | `/admin/family/members/{id}/deactivate` | GET | vmesna stran (V3-R06) |
 | `/admin/family/members/{id}/deactivate` | POST | deaktivira in prekliče vse seje člana (V3-R06) |
 | `/admin/family/members/{id}/activate` | GET | vmesna stran (V3-R06) |
@@ -941,9 +957,7 @@ Odločitve so v `ADR-027` (model) in `ADR-035` (izvedba).
   Geslo pride z `getpass`, nikoli iz argumenta ali okolja. **Od V3-R06 ukaz
   prekliče vse seje tega računa**, enako kot stran `/admin/family` — dve poti
   do istega dejanja z različnim pomenom bi bili past (`ADR-038` C). Najkrajše geslo je
-  12 znakov za starša in **8 za otroka** — otrokovih 4 iz `ADR-035` G je
-  razveljavil `ADR-036` E, ko je mobilna prijava postala dosegljiva z javnega
-  interneta.
+  12 znakov. **Otrok gesla nima** (V6-R01): ukaz otrokov račun zavrne.
 - **Seja pade ob treh rečeh, ne le ob poteku:** potekel rok, deaktiviran račun
   (`V3-R06`) in ugasnjena družina (`V3-R05`). Prvi dve sta v `seja_za_zeton` od
   svojih zahtev, tretja od `V3-R05`; vse tri so preverjene **ob vsaki uporabi
@@ -952,15 +966,67 @@ Odločitve so v `ADR-027` (model) in `ADR-035` (izvedba).
   `sessions`, le da žeton nosi v glavi `Authorization: Bearer`; glej razdelek
   spodaj.
 
-## Prijava na telefonu (V3-R04)
+## Seja na telefonu (V3-R04, V6-R01)
 
 Isti model identitete kot v brskalniku (`ADR-027`), drug prenosnik.
-Izvedbene odločitve so v `ADR-036`.
+Izvedbene odločitve so v `ADR-036`; kako seja nastane, v `ADR-058` in
+`ADR-061`.
 
 | Pot | Metoda | Kaj |
 |---|---|---|
-| `/auth/login` | POST | JSON `{identifier, password}` → žeton, `user_id`, ime |
+| `/auth/link` | POST | JSON `{token}` (povezovalni žeton iz QR kode) → žeton seje, `user_id`, ime (V6-R01) |
+| `/auth/login` | POST | **škrbina** za stari APK: vedno `401` s slovenskim sporočilom; telesa ne bere in baze ne odpre (V6-R01) |
 | `/auth/logout` | POST | izbriše sejo te naprave (zahteva žeton) |
+
+### Povezava telefona s QR kodo (V6-R01)
+
+Otrok nima ne uporabniškega imena ne gesla. Starš na `/admin/family` pritisne
+„Poveži telefon"; stran pokaže QR kodo in gumb „Odpri na tem telefonu", oba z
+isto povezavo `school-companion://povezi?z=<žeton>`.
+
+- **Žeton** je `secrets.token_urlsafe(32)`, v bazi samo SHA-256, velja
+  **10 minut** in **enkrat**. Nov žeton prejšnjega izbriše; obstoječih sej ne
+  prekliče — dva telefona sta dovoljena.
+- **Povezava nosi samo žeton.** Naslov strežnika ima aplikacija iz gradnje.
+- **QR je SVG, ki ga izriše strežnik** (`app/povezava.py`, `segno`), vgrajen v
+  stran: brez skripte in brez zunanjega vira (`ADR-024`).
+- **Unovčenje je pogojni `DELETE`**; seja nastane v isti transakciji in samo,
+  če je bila izbrisana natanko ena vrstica. Ustvarja in preklicuje
+  `ClaniRepository` (z družino), unovči `PrijavaRepository` (brez nje).
+- **Vsak neveljaven žeton da isti `401`** in isto besedilo: potekel,
+  porabljen, neznan, deaktiviran otrok, ugasnjena družina.
+- **Meja poskusov je upočasnitev, skupna za namestitev**: po 5 neuspehih v
+  15 minutah vsak nadaljnji poskus čaka 2 s pred preverbo. Neuspehi so v
+  `login_attempts` pod oznako `POVEZAVA-TELEFONA` (velike črke — identifikator
+  prijave je vedno z malimi); uspeh števca ne pobriše.
+- **„Prekliči prijave"** v eni transakciji izbriše otrokove seje in
+  neporabljeno kodo; isto stori deaktivacija. Nadomešča ponastavitev gesla.
+- **Na telefonu** je en zaslon (`app/povezi.tsx`) za kamero (`expo-camera`,
+  samo vrsta `qr`) in za odprto povezavo. Razčlenjevanje je v
+  `src/povezava/naslov.ts`, klic v `src/sync/prijava.ts`. `app/prijava.tsx` je
+  samo še odjava in vstop v ponovno povezavo.
+- **Povezava zamenja sejo, ki je na telefonu že bila**: unovči → shrani
+  (prepiše staro) → posvoji → počisti oznako odjave → odjavi prejšnjo sejo na
+  strežniku (najboljši poskus). Pred tem počaka, da se konča branje žetona z
+  diska ob zagonu.
+- **Ponovitev iste kode** aplikacija ponudi samo po nedosegljivem strežniku;
+  zavrnjena koda je mrtva in ponovitev bi štela v skupno mejo poskusov.
+
+#### Znane omejitve
+
+- **Stari APK po izteku seje ne more več noter.** Škrbina pove, naj se
+  namesti nova aplikacija; do takrat dela z obstoječo sejo.
+- **Sočasnost ni dokazana s testom.** Enkratnost unovčenja je utemeljena z
+  zasnovo stavka, ne s sočasnim preizkusom nad Postgresom.
+- **„Otrok ima največ en žeton" drži zaporedno.** `child_id` ni enoličen;
+  dvojni klik na „Poveži telefon" lahko pusti dva žetona, ki oba potečeta v
+  desetih minutah.
+- **Po „Prekliči prijave" telefon še kaže „Prijavljena: …"**, dokler prenos
+  ne dobi `401`. Preklic na strežniku velja takoj; zaostaja samo napis.
+- **Nova povezava med zahtevo, ki še teče**, sproži drugo zahtevo vzporedno;
+  seje, ki izgubi, na strežniku nihče ne odjavi in poteče sama.
+- **Ali nova povezava v že odprt zaslon zamenja parameter ali odpre nov
+  zaslon**, določa `expo-router` in se vidi samo na napravi.
 
 - **`ZetonMiddleware` je plast, ne odvisnost**, iz istega razloga kot
   `SejaMiddleware`: telo zahteve se bere pred odvisnostmi, zato bi bila
@@ -990,15 +1056,19 @@ Izvedbene odločitve so v `ADR-036`.
   prijavo; to je edina izjema od pravila `ADR-004` poleg `410`. Izid ga
   **loči** od nedosegljivega strežnika (`Izid.prijavaPotekla`), ker je to
   edino stanje vrste, ki ga uporabnica more odpraviti sama: domača stran
-  pove „Prijava je potekla, prijavi se znova". Odjave ob `401` ni —
+  pove „Prijava je potekla. Prosi starša za novo kodo." (V6-R01). Odjave ob `401` ni —
   aplikacija pove, ne ukrepa namesto otroka (`ADR-036`, tretji pregled).
 
 ## Člani družine (V3-R06)
 
-Starš na `/admin/family` odpre račun otroku ali drugemu staršu, ponastavi geslo
-in člana deaktivira. Poti so v tabeli zgoraj, pravila v `app/clani.py`,
-poizvedbe v `ClaniRepository`, odločitve v `docs/odlocitve/ADR-038`. Nove
-tabele ni — `users`, `credentials` in `sessions` so postavljene v V3-R03.
+Starš na `/admin/family` doda otroka ali drugega starša, staršu ponastavi
+geslo in člana deaktivira. Poti so v tabeli zgoraj, pravila v `app/clani.py`,
+poizvedbe v `ClaniRepository`, odločitve v `docs/odlocitve/ADR-038`.
+
+**Od V6-R01 otrok nima poverilnice**: doda se samo s prikaznim imenom,
+ponastavitve gesla zanj ni (`403` z razlago), namesto nje sta „Poveži telefon"
+in „Prekliči prijave" (glej „Povezava telefona s QR kodo"). Kar spodaj govori
+o geslu, velja za starša.
 
 - **Tri kode zavrnitve in vsaka pomeni drugo pot naprej.** `404` za tujega in
   za neobstoječega člana (isto besedilo — obstoj tujega računa ni podatek za
@@ -2204,7 +2274,7 @@ Sklop zunaj repozitorija, po vrsti:
 | Odvisnost | Namen | Kdaj dodana |
 |---|---|---|
 | Expo SDK 57 (`expo`, `expo-router`, `expo-status-bar`, `expo-splash-screen`) | ogrodje in datotečno usmerjanje | V1-R01 |
-| `expo-camera` | zajem fotografije in dovoljenje za kamero | V1-R01 |
+| `expo-camera` | zajem fotografije in dovoljenje za kamero; od V6-R01 tudi branje QR kode | V1-R01 |
 | `expo-sqlite` | lokalna baza na telefonu | V1-R01 |
 | `expo-file-system` | `documentDirectory/photos/`, premik in brisanje datotek | V1-R01 |
 | `expo-image-manipulator` | pomanjšanje na 1600 px in JPEG 0.8 | V1-R01 |
@@ -2235,6 +2305,7 @@ lastnost.
 | `pydantic-settings` | nastavitve iz okolja | V1-R02 |
 | `jinja2` | predloge operaterske strani | V1-R04 |
 | `openai` | klic vision modela; izbran zaradi strukturiranega izhoda po shemi | V1-R03 |
+| `segno` (`>=1.6,<2`) | izris QR kode kot SVG; čisti Python brez lastnih odvisnosti (`ADR-061` A) | V6-R01 |
 | razvojno: `ruff`, `mypy`, `pytest`, `httpx` | preverbe; `httpx` rabi `TestClient` | V1-R02 |
 
 ### Knjižnici v brskalniku (prepisani v repozitorij)
@@ -2399,9 +2470,8 @@ docker compose -f apps\server\docker-compose.yml exec api `
   python -m app.ukazi nastavi-geslo dejan.ambrus@gmail.com
 ```
 
-Isti ukaz nastavi geslo otroku (identifikator `masa`). **Od V3-R04 ni več
-izbiren:** brez njega se otrok ne more prijaviti v aplikacijo in prenos ne
-teče. Najkrajše otrokovo geslo je 8 znakov, starševo 12 (`ADR-036` E).
+**Otrok gesla nima** (V6-R01): telefon mu poveže starš na `/admin/family`
+s QR kodo, ukaz pa otrokov račun zavrne. Najkrajše starševo geslo je 12 znakov.
 Piškotek seje ima zastavico `Secure`; brskalniki jo sprejmejo tudi na
 `http://localhost`, zato razvojni zagon mimo Caddyja deluje.
 

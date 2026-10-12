@@ -2673,8 +2673,9 @@ class ClaniRepository(_RepozitorijDruzine):
         """Zapiše nov povezovalni žeton otroka. Vrne, ali je nastal (V6-R01).
 
         **Nov žeton razveljavi prejšnjega**: stari se izbriše v isti
-        transakciji, zato ima otrok največ enega (`ADR-061` B). Obstoječih
-        sej se ne dotakne — dva telefona sta dovoljena (`ADR-058` E).
+        transakciji, zato ima otrok največ enega (`ADR-061` B) — zaporedno;
+        enoličnosti na `child_id` ni in dve hkratni zahtevi lahko pustita dva.
+        Obstoječih sej se ne dotakne — dva telefona sta dovoljena (`ADR-058` E).
 
         `False` za vsakogar, ki ni **aktiven otrok te družine**: tuj ali
         neznan `id`, starš, deaktiviran otrok. Takrat se ne spremeni nič, tudi
