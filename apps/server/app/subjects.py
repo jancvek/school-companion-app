@@ -25,19 +25,23 @@ class Predmet(NamedTuple):
     #: Ime za prikaz.
     oznaka: str
 
+    #: Barva platnice, čipa in celice urnika; enaka v svetli in temni temi, z
+    #: belim besedilom na njej (`docs/odlocitve/ADR-056` E, `POC-02`).
+    barva: str
+
 
 #: Cel urnik v vrstnem redu, ki ni abeceden in se ne preurejaj (V1-R01).
 PREDMETI: tuple[Predmet, ...] = (
-    Predmet("NAR", "Naravoslovje"),
-    Predmet("MAT", "Matematika"),
-    Predmet("TJA", "Tuji jezik angleščina"),
-    Predmet("GEO", "Geografija"),
-    Predmet("SLJ", "Slovenščina"),
-    Predmet("LUM", "Likovna umetnost"),
-    Predmet("ZGO", "Zgodovina"),
-    Predmet("TIT", "Tehnika in tehnologija"),
-    Predmet("DKE", "Domovinska in državljanska kultura in etika"),
-    Predmet("GUM", "Glasbena umetnost"),
+    Predmet("NAR", "Naravoslovje", "#3d7856"),
+    Predmet("MAT", "Matematika", "#2d5a8e"),
+    Predmet("TJA", "Tuji jezik angleščina", "#8a3a5b"),
+    Predmet("GEO", "Geografija", "#8b5a26"),
+    Predmet("SLJ", "Slovenščina", "#a63f3b"),
+    Predmet("LUM", "Likovna umetnost", "#6f55a0"),
+    Predmet("ZGO", "Zgodovina", "#6a5843"),
+    Predmet("TIT", "Tehnika in tehnologija", "#44636e"),
+    Predmet("DKE", "Domovinska in državljanska kultura in etika", "#5a7530"),
+    Predmet("GUM", "Glasbena umetnost", "#2b7a80"),
 )
 
 _PO_KODI = {predmet.koda: predmet for predmet in PREDMETI}
@@ -56,6 +60,23 @@ def oznaka_predmeta(koda: str) -> str:
     """
     predmet = _PO_KODI.get(koda)
     return predmet.oznaka if predmet is not None else koda
+
+
+#: Barva predmeta, ki ga na seznamu desetih ni: žeton `zamolklo`, ki ima svojo
+#: vrednost v vsaki temi. Tak predmet ostane viden (glej vrh modula), le
+#: svoje barve nima.
+BARVA_NEZNANEGA = "var(--zamolklo)"
+
+
+def barva_predmeta(koda: str) -> str:
+    """Barva predmeta za atribut `style`; za neznano kodo nevtralna.
+
+    Vrne **vrednost** in ne imena razreda: koda sme vsebovati karkoli
+    (`POST /materials` jo omejuje samo po dolžini), barva pa pride iz tega
+    modula in nikoli iz baze.
+    """
+    predmet = _PO_KODI.get(koda)
+    return predmet.barva if predmet is not None else BARVA_NEZNANEGA
 
 
 #: Stanje obdelave v slovenščini.
