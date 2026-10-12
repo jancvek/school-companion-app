@@ -12,6 +12,7 @@ strani (CSRF). Novih posledic ni: preklic kviza ničesar ne uniči, objava pa
 ustvari zapis, ki ga je mogoče preklicati.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,10 +25,27 @@ from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
 from app.besedilo import SNOVI, VPRASANJA, stevilo_z_besedo
-from app.casi import cas, cas_ali_prazno, dan_od_do, datum, trajanje
-from app.db import ClanDruzine, ClaniRepository, KviziRepository, SnovSVprasanji, SnovZaIzbor
+from app.casi import (
+    cas,
+    cas_ali_prazno,
+    dan_od_do,
+    datum,
+    kratek_datum,
+    mesec,
+    oznaka_meseca,
+    trajanje,
+)
+from app.db import (
+    ClanDruzine,
+    ClaniRepository,
+    KviziRepository,
+    MaterialsRepository,
+    SnovSVprasanji,
+    SnovZaIzbor,
+)
 from app.dependencies import (
     daj_nastavitve,
+    daj_repozitorij,
     daj_repozitorij_clanov,
     daj_repozitorij_kvizov,
 )
@@ -44,8 +62,14 @@ from app.models import (
 )
 from app.settings import Settings
 from app.storage import je_znotraj, mapa_druzine, velikost_slike
-from app.strani import daj_predloge, ni_dovoljeno, ni_najdeno
-from app.subjects import OZNAKE_OCEN, oznaka_predmeta
+from app.strani import daj_predloge, neveljavna_zahteva, ni_dovoljeno, ni_najdeno
+from app.subjects import (
+    BARVA_NEZNANEGA,
+    OZNAKE_OCEN,
+    PREDMETI,
+    barva_predmeta,
+    oznaka_predmeta,
+)
 
 #: Predpona poti sestavljalnika. Pod `/admin`, torej brez ključa (`ADR-006`).
 PREDPONA = "/admin/quizzes"
@@ -73,6 +97,22 @@ SPOROCILO_BREZ_OTROKA = (
 
 #: Isto besedilo za tujega in za neobstoječega otroka (`ADR-038`).
 SPOROCILO_NEZNAN_OTROK = "Tega otroka v tvoji družini ni."
+
+#: Tri stanja kviza, v vrstnem redu zavihkov na `/admin/quizzes` (V5-R01).
+#: Vrednosti so hkrati vrednosti parametra `?stanje=`.
+STANJE_CAKA = "cakajo"
+STANJE_RESEN = "reseni"
+STANJE_PREKLICAN = "preklicani"
+STANJA = (STANJE_CAKA, STANJE_RESEN, STANJE_PREKLICAN)
+OZNAKE_STANJ = {
+    STANJE_CAKA: "Čakajo",
+    STANJE_RESEN: "Rešeni",
+    STANJE_PREKLICAN: "Preklicani",
+}
+SPOROCILO_NEZNANO_STANJE = (
+    "Tega stanja kvizov ne poznam. Izberi enega od zavihkov na strani Kvizi: "
+    "Vsi, Čakajo, Rešeni ali Preklicani."
+)
 
 #: Objava brez naslovljenca. Kviz je vedno nekomu namenjen, zato je tih
 #: privzetek tu napačen: kviz bi nastal za otroka, ki ga ni nihče izbral.
@@ -743,6 +783,11 @@ def _pogled_kviza(kviz: Quiz, postavk: int, imena: dict[str, str]) -> dict[str, 
         "ime": kviz.name,
         "otrok": imena.get(kviz.child_id),
         "koda": kviz.subject or VSI_PREDMETI,
+        # Barva čipa; kviz čez več predmetov svoje nima (V5-R01).
+        "barva": barva_predmeta(kviz.subject) if kviz.subject else BARVA_NEZNANEGA,
+        "stanje": stanje_kviza(kviz),
+        "nastal_kratko": kratek_datum(kviz.created_at),
+        "resen_kratko": kratek_datum(kviz.solved_at) if kviz.solved_at is not None else None,
         "nastal": cas(kviz.created_at),
         # Sam datum za seznam: tam je ura odveč, predmet in datum pa sta
         # kriterij — ime je prepisljivo in ju ob prepisu ne nosi več.
@@ -759,16 +804,181 @@ def _pogled_kviza(kviz: Quiz, postavk: int, imena: dict[str, str]) -> dict[str, 
     }
 
 
+def stanje_kviza(kviz: Quiz) -> str:
+    """V katerem od treh stanj je kviz; vsak pade v natanko eno.
+
+    Preklic ima prednost pred rešenostjo (`ADR-019` C): preklican kviz, ki ga
+    je telefon vseeno rešil, je preklican. To pravilo je bilo do V5-R01 v
+    predlogi; odkar po stanju filtrira tudi stran `/admin/quizzes`, je tu.
+    """
+    if kviz.canceled_at is not None:
+        return STANJE_PREKLICAN
+    if kviz.solved_at is not None:
+        return STANJE_RESEN
+    return STANJE_CAKA
+
+
 def seznam_kvizov(
-    repozitorij: KviziRepository, otroci: list[ClanDruzine]
+    repozitorij: KviziRepository, otroci: list[ClanDruzine], *, najvec: int | None = None
 ) -> list[dict[str, Any]]:
     """Kvizi za razdelek na `/admin`, najnovejši prvi.
 
     Živi tu in ne v `admin.py`, ker je oblika kviza stvar tega modula; `admin`
-    jo samo pokliče in preda predlogi.
+    jo samo pokliče in preda predlogi. `najvec` je za Predmete, ki pokažejo
+    zadnje štiri in povezavo na vse (`ADR-056` G).
     """
     imena = _imena(otroci)
-    return [_pogled_kviza(kviz, postavk, imena) for kviz, postavk in repozitorij.seznam()]
+    vsi = repozitorij.seznam()
+    if najvec is not None:
+        vsi = vsi[:najvec]
+    return [_pogled_kviza(kviz, postavk, imena) for kviz, postavk in vsi]
+
+
+def predmeti_za_izbiro(kode_s_slikami: Iterable[str]) -> list[dict[str, str]]:
+    """Predmeti za izbirnik v obrazcu „Nov kviz".
+
+    Deset predmetov v vrstnem redu urnika, nato kode, ki so v bazi in jih na
+    seznamu ni — predmet zunaj seznama ostane povsod viden (`subjects.py`),
+    in kviz iz njega je bilo mogoče sestaviti že na `/admin`.
+    """
+    znane = {predmet.koda for predmet in PREDMETI}
+    return [
+        *({"koda": predmet.koda, "oznaka": predmet.oznaka} for predmet in PREDMETI),
+        *(
+            {"koda": koda, "oznaka": "predmet ni na seznamu"}
+            for koda in sorted(set(kode_s_slikami) - znane)
+        ),
+    ]
+
+
+def _po_mesecih(izbrani: list[tuple[Quiz, int]], imena: dict[str, str]) -> list[dict[str, Any]]:
+    """Kvizi v skupinah po mesecu objave, v domačem pasu; vrstni red ostane.
+
+    Seznam je že urejen od najnovejšega, zato je nova skupina vsaka menjava
+    meseca. Razvrščanje je v Pythonu iz istega razloga kot pri statistiki:
+    izraz za lokalni mesec v SQL ni prenosljiv med SQLite in Postgresom.
+    """
+    skupine: list[dict[str, Any]] = []
+    zadnji: tuple[int, int] | None = None
+    for kviz, postavk in izbrani:
+        kljuc = mesec(kviz.created_at)
+        if kljuc != zadnji:
+            oznaka = oznaka_meseca(*kljuc)
+            skupine.append({"oznaka": oznaka[0].upper() + oznaka[1:], "kvizi": []})
+            zadnji = kljuc
+        skupine[-1]["kvizi"].append(_pogled_kviza(kviz, postavk, imena))
+    return skupine
+
+
+def _naslov_seznama(stanje: str | None, otrok: str | None) -> str:
+    """Naslov strani z izbranima filtroma; oba potujeta skupaj.
+
+    Zavihek stanja mora nositi izbranega otroka in obratno, sicer bi menjava
+    enega tiho ponastavila drugega (isto pravilo kot `?leto=` in `?otrok=` na
+    statistiki).
+    """
+    deli = []
+    if stanje:
+        deli.append(f"stanje={quote(stanje, safe='')}")
+    if otrok:
+        deli.append(f"otrok={quote(otrok, safe='')}")
+    return PREDPONA + ("?" + "&".join(deli) if deli else "")
+
+
+@router.get("")
+def vsi_kvizi(
+    request: Request,
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    repozitorij: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov)],
+    clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
+    snovi: Annotated[MaterialsRepository, Depends(daj_repozitorij)],
+    stanje: str | None = None,
+    otrok: str | None = None,
+) -> Response:
+    """Vsi kvizi družine s filtroma po stanju in otroku (V5-R01, `ADR-056` G).
+
+    Brez parametrov pokaže vse. **Neznano stanje je 400** in ne tih padec na
+    „vsi": filter, ki ne filtrira, bi bil videti, kot da filtrira. **Tuj ali
+    neznan otrok je 404** z istim besedilom kot povsod (`ADR-039` B).
+    Prazen niz šteje pri obeh kot „brez filtra".
+    """
+    stanje = stanje or None
+    otrok = otrok or None
+    if stanje is not None and stanje not in STANJA:
+        return neveljavna_zahteva(predloge, request, SPOROCILO_NEZNANO_STANJE)
+
+    otroci = clani.otroci()
+    # Tudi deaktivirani: njihovi kvizi ostanejo (`ADR-039` F2).
+    if otrok is not None and otrok not in {clan.user_id for clan in otroci}:
+        return ni_najdeno(predloge, request, SPOROCILO_NEZNAN_OTROK)
+
+    vsi = [
+        (kviz, postavk)
+        for kviz, postavk in repozitorij.seznam()
+        if otrok is None or kviz.child_id == otrok
+    ]
+    # Števila v zavihkih stanja veljajo za izbranega otroka.
+    koliko = dict.fromkeys(STANJA, 0)
+    for kviz, _postavk in vsi:
+        koliko[stanje_kviza(kviz)] += 1
+    izbrani = [
+        (kviz, postavk)
+        for kviz, postavk in vsi
+        if stanje is None or stanje_kviza(kviz) == stanje
+    ]
+
+    zavihki_stanja = [
+        {
+            "oznaka": "Vsi",
+            "stevilo": len(vsi),
+            "href": _naslov_seznama(None, otrok),
+            "izbran": stanje is None,
+        },
+        *(
+            {
+                "oznaka": OZNAKE_STANJ[kljuc],
+                "stevilo": koliko[kljuc],
+                "href": _naslov_seznama(kljuc, otrok),
+                "izbran": stanje == kljuc,
+            }
+            for kljuc in STANJA
+        ),
+    ]
+    # Zavihki otrok samo pri več kot enem otroku (`ADR-039` B).
+    zavihki_otrok: list[dict[str, Any]] = []
+    if len(otroci) > 1:
+        zavihki_otrok = [
+            {
+                "oznaka": "Oba" if len(otroci) == 2 else "Vsi",
+                "href": _naslov_seznama(stanje, None),
+                "izbran": otrok is None,
+            },
+            *(
+                {
+                    "oznaka": clan.display_name,
+                    "href": _naslov_seznama(stanje, clan.user_id),
+                    "izbran": otrok == clan.user_id,
+                }
+                for clan in otroci
+            ),
+        ]
+
+    imena = _imena(otroci)
+    return predloge.TemplateResponse(
+        request,
+        "kvizi.html",
+        {
+            "meseci": _po_mesecih(izbrani, imena),
+            "zavihki_stanja": zavihki_stanja,
+            "zavihki_otrok": zavihki_otrok,
+            "je_filter": stanje is not None or otrok is not None,
+            "je_stolpec_otrok": bool(imena),
+            "predmeti_za_kviz": predmeti_za_izbiro(snovi.stej_po_predmetih()),
+            # Kviz mora imeti naslovljenca (`ADR-039` A): brez aktivnega
+            # otroka obrazca ni, isto pravilo kot na Predmetih.
+            "ima_otroka": any(clan.is_active for clan in otroci),
+        },
+    )
 
 
 def _skupine(

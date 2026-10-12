@@ -81,6 +81,24 @@ def datum(trenutek: datetime) -> str:
     return datum_dneva(v_domacem(trenutek).date())
 
 
+def kratek_datum(trenutek: datetime) -> str:
+    """Dan in mesec brez leta (`8. 10.`), v domačem pasu.
+
+    Za mesta, kjer leto že pove okolica: seznam kvizov pod glavo meseca in
+    oznaka „rešen 7. 10." (V5-R01).
+    """
+    lokalni = v_domacem(trenutek)
+    return f"{lokalni.day}. {lokalni.month}."
+
+
+def dan_z_imenom(dan: date) -> str:
+    """Koledarski dan z imenom dneva in meseca (`četrtek, 8. oktober`).
+
+    Za kartico „Danes" (V5-R01). Oboje v imenovalniku, kot v `cas_z_mesecem`.
+    """
+    return f"{IMENA_DNI[dan.weekday()]}, {dan.day}. {MESECI[dan.month - 1]}"
+
+
 def cas(trenutek: datetime) -> str:
     """Trenutek iz baze v berljiv lokalni zapis, z uro."""
     lokalni = v_domacem(trenutek)

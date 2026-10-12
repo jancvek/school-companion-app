@@ -1,0 +1,50 @@
+{# Tabela kvizov (V5-R01): skupna Predmetom (zadnji štirje) in strani Kvizi
+   (vsi, po mesecih). Vključi se z `skupine` — seznam `{oznaka, kvizi}`;
+   skupina brez oznake nima vrstice meseca — in z `je_stolpec_otrok`.
+
+   Stolpec z otrokom je samo pri več kot enem otroku in ime je vrednost
+   polja, nikoli del povedi (`docs/odlocitve/ADR-039` F3). Na telefonu se
+   vrstica zloži (razred `zlozi` v slogu). #}
+<div class="tabela-ovoj">
+  <table class="tabela zlozi kvizi-tabela">
+    <thead>
+      <tr>
+        <th scope="col">Kviz</th>
+        <th scope="col">Predmet</th>
+        {% if je_stolpec_otrok %}<th scope="col">Otrok</th>{% endif %}
+        <th scope="col">{{ glava_datuma }}</th>
+        <th scope="col">Stanje</th>
+        <th scope="col" class="st">Vprašanj</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for skupina in skupine %}
+        {% if skupina.oznaka %}
+          <tr class="mesec"><td colspan="{{ 6 if je_stolpec_otrok else 5 }}">{{ skupina.oznaka }}</td></tr>
+        {% endif %}
+        {% for kviz in skupina.kvizi %}
+          <tr>
+            <td class="glavna"><a href="/admin/quizzes/{{ kviz.id }}">{{ kviz.ime }}</a></td>
+            {# Predmet in datum sta kriterij in ne okras: ime je prepisljivo,
+               zato ju ob prepisanem imenu ne nosi nič. #}
+            <td><span class="cip" style="--barva: {{ kviz.barva }}">{{ kviz.koda }}</span></td>
+            {% if je_stolpec_otrok %}<td>{{ kviz.otrok or "" }}</td>{% endif %}
+            <td>{{ kviz.nastal_kratko if skupina.oznaka else kviz.nastal_datum }}</td>
+            <td class="kviz-stanje">
+              {# Preklic ima prednost pred rešenostjo (`ADR-019` C); odloči
+                 `stanje_kviza`, ne predloga. #}
+              {% if kviz.stanje == "preklicani" %}
+                <span class="oznaka precrtana">preklican</span>
+              {% elif kviz.stanje == "reseni" %}
+                <span class="oznaka ok">rešen {{ kviz.resen_kratko }}</span>
+              {% else %}
+                <span class="oznaka caka">objavljen</span>
+              {% endif %}
+            </td>
+            <td class="st">{{ kviz.vprasanj }}</td>
+          </tr>
+        {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

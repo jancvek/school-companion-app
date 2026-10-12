@@ -214,11 +214,11 @@ body.brez-menija main { margin: 0 auto; }
 .drobtine [aria-current] { color: var(--zamolklo); font-weight: 400; }
 
 /* Kartica. */
-.kartica {
+.kartica, .danes {
   background: var(--ploskev); border: 1px solid var(--rob); border-radius: var(--kartica);
   box-shadow: var(--senca); padding: 1.25rem 1.4rem; margin: 0 0 1.5rem;
 }
-.kartica > :last-child { margin-bottom: 0; }
+.kartica > :last-child, .danes > :last-child { margin-bottom: 0; }
 .kartica-glava { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.5rem 1rem; margin-bottom: 0.75rem; }
 .kartica-glava h2, .kartica-glava h3 { margin: 0; }
 .razdelek-glava { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.5rem 1rem; margin: 2rem 0 0.75rem; }
@@ -377,6 +377,69 @@ dl.vrstice dt, dl.vrstice dd { margin: 0; font-size: 0.95rem; }
 .pas-2 { background: var(--ocena-2); }
 .pas-3 { background: var(--ocena-3); }
 
+/* ---------- Predmeti ---------- */
+.naslov-kartice { font-size: clamp(1.75rem, 1.4rem + 1.4vw, 2.25rem); font-weight: 800; line-height: 1.15; }
+.razdelek-glava h1 { font-size: 1.25rem; font-weight: 700; line-height: 1.3; margin: 0; }
+.razdelek-glava p { margin: 0; }
+.z-odmikom { margin-left: 1rem; }
+.danes-vrstice { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+.danes-vrstice a {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem;
+  padding: 0.8rem 1rem; border-radius: var(--gumb);
+  background: var(--ploskev-2); color: var(--besedilo); text-decoration: none;
+}
+.danes-vrstice a:hover { background: var(--poudarek-mehko); }
+.danes-ime { font-weight: 700; font-size: 1.05rem; }
+.cipi { display: inline-flex; flex-wrap: wrap; gap: 0.35rem; margin-left: auto; }
+
+/* Polica zvezkov: platnica v barvi predmeta, temnejsi rob vezave levo. */
+.predmeti { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); }
+.zvezek {
+  display: flex; flex-direction: column; gap: 0.75rem; min-height: 12.25rem;
+  padding: 0.75rem 0.85rem 0.9rem 1.25rem; border-radius: 6px 10px 10px 6px;
+  background: var(--barva); color: #fff; text-decoration: none;
+  box-shadow: inset 0.45rem 0 0 rgba(0, 0, 0, 0.2), var(--senca);
+}
+.zvezek:hover { filter: brightness(1.08); }
+.zvezek-koda { font-size: 2rem; font-weight: 800; line-height: 1.1; letter-spacing: 0.01em; }
+.zvezek-nalepka {
+  min-height: 2.9rem; padding: 0.4rem 0.5rem; border-radius: 3px;
+  background: var(--nalepka); color: #17202b; font-size: 0.875rem; font-weight: 500; line-height: 1.25;
+}
+.zvezek-stevilo { margin-top: auto; font-weight: 700; font-size: 0.95rem; }
+/* Predmet brez slik ostane na polici kot crtkan obris. */
+.zvezek.prazen {
+  background: var(--ploskev); color: var(--zamolklo); box-shadow: none;
+  border: 1px dashed color-mix(in srgb, var(--barva) 55%, var(--rob));
+}
+.zvezek.prazen .zvezek-koda { color: var(--barva); }
+.zvezek.prazen .zvezek-nalepka { background: var(--ploskev-2); color: var(--zamolklo); }
+
+/* Nov kviz: predmet in dva gumba v vrsti, na telefonu drug pod drugim. */
+.nov-kviz { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.75rem 1rem; }
+.nov-kviz .polje { flex: 1 1 16rem; max-width: 28rem; margin: 0; }
+.nov-kviz select { width: 100%; }
+.kartica-telo { padding: 1.25rem 1.4rem; border-bottom: 1px solid var(--rob); }
+.kartica-telo > :last-child { margin-bottom: 0; }
+.kartica-noga { margin: 0; padding: 0.9rem 1.4rem; border-top: 1px solid var(--rob); font-weight: 700; }
+.kartica-noga a { text-decoration: none; }
+.kartica-noga a:hover { text-decoration: underline; }
+.kvizi-tabela td:first-child, .kvizi-tabela th:first-child { padding-left: 1.4rem; }
+.kvizi-tabela td:last-child, .kvizi-tabela th:last-child { padding-right: 1.4rem; }
+@media (max-width: 860px) {
+  .predmeti { grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 0.75rem; }
+  .nov-kviz { flex-direction: column; align-items: stretch; }
+  .nov-kviz .polje { flex: none; max-width: none; }
+  .nov-kviz .gumb { align-self: flex-start; }
+  .cipi { margin-left: 0; flex-basis: 100%; }
+  /* Zlozena vrstica kviza: ime in stanje zgoraj, cip, otrok in datum spodaj. */
+  .kvizi-tabela.zlozi tr { position: relative; padding-right: 7.5rem; }
+  .kvizi-tabela.zlozi td:first-child { padding-left: 0; }
+  .kvizi-tabela.zlozi .kviz-stanje { position: absolute; top: 0.75rem; right: 1rem; }
+  .kvizi-tabela.zlozi .st { display: none; }
+  .kvizi-tabela.zlozi tr.mesec { padding: 0.9rem 1rem 0.25rem; border-bottom: 0; }
+}
+
 /* ---------- Strani pred prenovo ----------
    Razredi starih predlog. Vsak korak prenove jih nekaj odvzame; kar ostane
    po zadnjem, se izbrise. */
@@ -384,21 +447,8 @@ dl.vrstice dt, dl.vrstice dd { margin: 0; font-size: 0.95rem; }
 .prijava { display: flex; flex-direction: column; gap: 0.35rem; max-width: 26rem; }
 .prijava label { margin-top: 0.8rem; }
 .prijava .gumb { align-self: flex-start; }
-.predmeti { list-style: none; margin: 0; padding: 0; }
-.predmeti li { border-bottom: 1px solid var(--rob); }
-.predmeti a { display: flex; justify-content: space-between; gap: 1rem; padding: 0.85rem 0.25rem; text-decoration: none; color: var(--besedilo); }
-.predmeti a.prazen { color: var(--zamolklo); }
-.predmeti a:hover { background: var(--ploskev); }
 .koda { font-weight: 700; }
 .stevec { color: var(--zamolklo); }
-.danes { border: 1px solid var(--rob); border-radius: var(--kartica); background: var(--ploskev); padding: 0.25rem 1rem; margin: 0 0 2rem; }
-.danes p { margin: 0.75rem 0; }
-.danes ul { list-style: none; margin: 0; padding: 0; }
-.danes li + li { border-top: 1px solid var(--rob); }
-.danes a { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem 0.75rem; padding: 0.75rem 0; text-decoration: none; color: var(--besedilo); }
-.danes .znak { color: var(--zamolklo); width: 1em; text-align: center; }
-.danes .znak.poslikano { color: var(--poudarek); font-weight: 700; }
-.danes .stevec { margin-left: auto; }
 .mreza { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); list-style: none; margin: 0; padding: 0; }
 .mreza a { display: block; text-decoration: none; color: inherit; border: 1px solid var(--rob); border-radius: var(--gumb); overflow: hidden; background: var(--ploskev); }
 .mreza a:hover { border-color: var(--poudarek); }

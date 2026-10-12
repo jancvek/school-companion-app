@@ -32,6 +32,7 @@ from tests.conftest import (
     OTROK_ID,
     TUJ_OTROK_ID,
     PrijavljenOdjemalec,
+    meni_strani,
     ustvari_otroka,
 )
 from tests.test_admin import UUID_DVA, UUID_ENA, arhiviraj, zapisi
@@ -529,7 +530,11 @@ class TestPregled:
 
 class TestPovezave:
     def test_pregled_admina_vodi_na_shranjene_teste(self, odjemalec: PrijavljenOdjemalec) -> None:
-        assert '<a href="/admin/assessments">Shranjeni testi</a>' in odjemalec.get("/admin").text
+        # Od V5-R01 je povezava postavka „Testi" v stalnem meniju
+        # (`ADR-056` G) in ne razdelek na dnu strani.
+        meni = meni_strani(odjemalec.get("/admin").text)
+
+        assert re.search(r'<a href="/admin/assessments"[^>]*>\s*<span>Testi</span>', meni)
 
     def test_stran_matematike_pove_koliko_testov_je_shranjenih(
         self, odjemalec: PrijavljenOdjemalec, motor: Engine, slike: Path, stars: str

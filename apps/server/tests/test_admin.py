@@ -279,9 +279,11 @@ class TestSeznamPredmetov:
 
         besedilo = odjemalec.get("/admin").text
 
-        assert ">2</span>" in vrstica_predmeta(besedilo, "MAT")
-        assert ">0</span>" in vrstica_predmeta(besedilo, "GEO")
-        assert ">1</span>" not in vrstica_predmeta(besedilo, "MAT")
+        # Od V5-R01 je števec na zvezku sklonjen niz in ne golo število;
+        # prazen zvezek pove „še ni slik" (`POC-02`, gradnik Zvezek).
+        assert ">2 sliki</span>" in vrstica_predmeta(besedilo, "MAT")
+        assert ">še ni slik</span>" in vrstica_predmeta(besedilo, "GEO")
+        assert ">1 slika</span>" not in vrstica_predmeta(besedilo, "MAT")
 
     def test_predmet_brez_slik_je_viden_in_dosegljiv(self, odjemalec: TestClient) -> None:
         # Povezava mora biti tudi pri praznem predmetu, sicer je stran s
@@ -306,9 +308,18 @@ class TestSeznamPredmetov:
     def test_vrstni_red_predmetov_je_urnik_in_ne_abeceda(self, odjemalec: TestClient) -> None:
         besedilo = odjemalec.get("/admin").text
 
-        assert besedilo.index("NAR") < besedilo.index("MAT") < besedilo.index("TJA")
+        # Samo polica predmetov (V5-R01, `ADR-060` H): nad njo so od V5-R01
+        # čipi v kartici „Danes", pod njo tabela kvizov — oboje nosi kode v
+        # svojem vrstnem redu in bi trditev naredilo zeleno ali rdečo iz
+        # napačnega razloga.
+        najdeno = re.search(r'<ul class="predmeti">.*?</ul>', besedilo, re.S)
+        assert najdeno is not None
+        polica = najdeno.group(0)
+
+        assert polica.index(">NAR<") < polica.index(">MAT<") < polica.index(">TJA<")
         # Abecedni vrstni red bi DKE postavil predenj; urnik ga postavi za TIT.
-        assert besedilo.index("TIT") < besedilo.index("DKE")
+        assert polica.index(">TIT<") < polica.index(">DKE<")
+        assert polica.count("<li>") == 10
 
 
 class TestSeznamPredmeta:
@@ -606,8 +617,8 @@ class TestArhiviranje:
 
         besedilo = odjemalec.get("/admin").text
 
-        assert ">1<" in vrstica_predmeta(besedilo, "MAT")
-        assert "V arhivu 1." in besedilo
+        assert ">1 slika<" in vrstica_predmeta(besedilo, "MAT")
+        assert ">1 v arhivu</a>" in besedilo
 
     def test_ponovno_arhiviranje_ne_premakne_casa(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -1254,6 +1265,10 @@ class TestPakiranje:
             "preizkus-ogled.html",
             "_preizkus-izris.html",
             "_preizkus-slog.html",
+            # V5-R01: stran z vsemi kvizi ter dela, ki si ju delita s Predmeti.
+            "kvizi.html",
+            "_kvizi-tabela.html",
+            "_kviz-nov.html",
         }
 
 
@@ -2616,7 +2631,7 @@ class TestSlovenskaStevila:
 
         besedilo = odjemalec.get("/admin").text
 
-        assert "Skupaj 2 sliki v uporabi" in besedilo
+        assert "2 sliki v uporabi" in besedilo
         assert "2 slik " not in besedilo
 
     def test_pregled_pri_eni_sliki(
@@ -2624,7 +2639,7 @@ class TestSlovenskaStevila:
     ) -> None:
         zapisi(motor, slike, UUID_ENA)
 
-        assert "Skupaj 1 slika v uporabi" in odjemalec.get("/admin").text
+        assert "1 slika v uporabi" in odjemalec.get("/admin").text
 
     @pytest.mark.parametrize(
         ("koliko", "pricakovano"),

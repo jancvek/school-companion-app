@@ -29,7 +29,7 @@ from starlette.responses import Response
 
 from app import preizkus, sistem
 from app.besedilo import SLIKE, ZNAKI, stevilo_z_besedo
-from app.casi import cas, cas_ali_prazno, danes, dnevi_od_do, v_domacem
+from app.casi import cas, cas_ali_prazno, dan_z_imenom, danes, dnevi_od_do, v_domacem
 from app.danes import je_vikend, sestavi_kartico
 from app.db import (
     ClaniRepository,
@@ -50,10 +50,21 @@ from app.routers.kvizi import seznam_kvizov
 from app.settings import Settings
 from app.storage import je_znotraj, mapa_druzine, pobrisi_sliko, velikost_slike
 from app.strani import daj_predloge, neveljavna_zahteva, ni_dovoljeno, ni_najdeno
-from app.subjects import PREDMETI, oznaka_predmeta, oznaka_statusa, poisci_predmet
+from app.subjects import (
+    BARVA_NEZNANEGA,
+    PREDMETI,
+    barva_predmeta,
+    oznaka_predmeta,
+    oznaka_statusa,
+    poisci_predmet,
+)
 
 #: Predpona vseh poti operaterske strani.
 PREDPONA = "/admin"
+
+#: Koliko zadnjih kvizov pokažejo Predmeti; vsi so na `/admin/quizzes`
+#: (V5-R01, `docs/odlocitve/ADR-056` G).
+KVIZOV_NA_PREDMETIH = 4
 
 router = APIRouter(prefix=PREDPONA)
 
@@ -317,17 +328,26 @@ def pregled(
             for otrok in aktivni
         }
 
-    vrstice = [
-        {"koda": predmet.koda, "oznaka": predmet.oznaka, "koliko": steviloma.get(predmet.koda, 0)}
-        for predmet in PREDMETI
-    ]
+    def zvezek(koda: str, oznaka: str) -> dict[str, object]:
+        koliko = steviloma.get(koda, 0)
+        return {
+            "koda": koda,
+            "oznaka": oznaka,
+            "koliko": koliko,
+            # Gotov niz: predloga ne sklanja. Prazen zvezek pove „še ni slik"
+            # in ne „0 slik" (`POC-02`, gradnik Zvezek).
+            "koliko_opis": stevilo_z_besedo(koliko, SLIKE) if koliko else "še ni slik",
+            "barva": barva_predmeta(koda),
+        }
+
+    vrstice = [zvezek(predmet.koda, predmet.oznaka) for predmet in PREDMETI]
 
     # Predmet, ki je v bazi, a ga na seznamu desetih ni, se pokaže pod svojo
     # kodo. Sicer bi se ob preimenovanju kode na telefonu slike tiho izgubile
     # iz pregleda — odločitev 3 v `docs/plan/V1-R04.md`.
     znane = {predmet.koda for predmet in PREDMETI}
     for koda in sorted(steviloma.keys() - znane):
-        vrstice.append({"koda": koda, "oznaka": "predmet ni na seznamu", "koliko": steviloma[koda]})
+        vrstice.append(zvezek(koda, "predmet ni na seznamu"))
 
     return predloge.TemplateResponse(
         request,
@@ -341,7 +361,19 @@ def pregled(
             # Kviz je svoja os in ne del pregleda predmetov, zato svoj ključ in
             # svoj razdelek. Oblika ene vrstice je last `routers/kvizi.py` —
             # ta stran jo samo pokaže.
-            "kvizi": seznam_kvizov(kvizi, otroci),
+            # Zadnji štirje; vsi so na `/admin/quizzes` (V5-R01, `ADR-056` G).
+            "kvizi": seznam_kvizov(kvizi, otroci, najvec=KVIZOV_NA_PREDMETIH),
+            "je_stolpec_otrok": len(otroci) > 1,
+            # Izbirnik predmeta za nov kviz: isti predmeti kot na polici,
+            # tudi tisti zunaj seznama desetih.
+            "predmeti_za_kviz": [
+                {"koda": vrstica["koda"], "oznaka": vrstica["oznaka"]} for vrstica in vrstice
+            ],
+            "danes_datum": dan_z_imenom(dan),
+            # Barve čipov v kartici „danes": vrednost iz `subjects.py`, nikoli
+            # iz baze (`ADR-056` E).
+            "barve": {predmet.koda: predmet.barva for predmet in PREDMETI},
+            "barva_neznanega": BARVA_NEZNANEGA,
             # Kviz mora imeti naslovljenca (`docs/odlocitve/ADR-039` A), zato
             # družina brez aktivnega otroka vstopov v sestavljalnik sploh ne
             # dobi. Isto pravilo jih tudi zavrne s `409` — gumb, ki ga stran

@@ -1,0 +1,59 @@
+{% extends "osnova.html" %}
+
+{% block naslov %}Kvizi{% endblock %}
+
+{# Vsi kvizi družine (V5-R01, `docs/odlocitve/ADR-056` G). Do V5-R01 je bil
+   seznam razdelek na `/admin`; tam ostanejo zadnji štirje. #}
+{% block vsebina %}
+  <h1>Kvizi</h1>
+  <p class="pod">Kviz je vedno za enega otroka. Reši ga na telefonu; tu vidiš, kako je šlo.</p>
+
+  <section class="kartica">
+    <div class="kartica-glava">
+      <h2>Nov kviz</h2>
+      {% if ima_otroka %}
+        <a href="/admin/quizzes/new?vstop=danes">Kaj smo se danes učili</a>
+      {% endif %}
+    </div>
+    {% include "_kviz-nov.html" %}
+  </section>
+
+  {# Filtra sta povezave in ne obrazec: vsak zavihek nosi tudi izbiro drugega,
+     zato menjava enega drugega ne ponastavi. #}
+  <div class="orodja">
+    <ul class="zavihki" aria-label="Stanje">
+      {% for zavihek in zavihki_stanja %}
+        <li>
+          <a href="{{ zavihek.href }}"{% if zavihek.izbran %} aria-current="true"{% endif %}>
+            {{ zavihek.oznaka }} <span>{{ zavihek.stevilo }}</span>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+    {% if zavihki_otrok %}
+      <ul class="zavihki" aria-label="Otrok">
+        {% for zavihek in zavihki_otrok %}
+          <li>
+            <a href="{{ zavihek.href }}"{% if zavihek.izbran %} aria-current="true"{% endif %}>{{ zavihek.oznaka }}</a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+
+  {% if meseci %}
+    <section class="kartica brez-roba" aria-label="Seznam kvizov">
+      {% with skupine = meseci, glava_datuma = "Objavljen" %}
+        {% include "_kvizi-tabela.html" %}
+      {% endwith %}
+    </section>
+  {% elif je_filter %}
+    <p class="obvestilo tiho">
+      <span>Pri tej izbiri ni nobenega kviza. <a href="/admin/quizzes">Pokaži vse kvize</a>.</span>
+    </p>
+  {% else %}
+    <p class="obvestilo tiho">
+      <span>Objavljenega kviza še ni. Prvega sestaviš v kartici zgoraj.</span>
+    </p>
+  {% endif %}
+{% endblock %}

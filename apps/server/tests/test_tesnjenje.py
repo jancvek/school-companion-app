@@ -613,6 +613,9 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
         OK,
         (a.akt,),
     ),
+    # V5-R01: vsi kvizi družine. Tuj otrok v filtru je 404 z istim besedilom
+    # kot neobstoječ (`ADR-039` B) in je v svojem testu; tu seznam sam.
+    ("GET", "/admin/quizzes"): lambda o, a: (o.get("/admin/quizzes"), OK, ()),
     ("POST", "/admin/quizzes"): lambda o, a: (
         o.post(
             "/admin/quizzes",
@@ -1002,7 +1005,7 @@ def test_kartica_danes_ne_steje_slik_tuje_druzine(
 
     besedilo = odjemalec.get("/admin").text
 
-    assert vrstice_danes(besedilo) == ["✓ Danes že poslikano MAT 1"]
+    assert vrstice_danes(besedilo) == ["✓ poslikano MAT 1"]
     assert "ZGO" not in kartica_danes(besedilo)
 
 

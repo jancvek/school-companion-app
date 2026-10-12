@@ -157,7 +157,12 @@ def kartica(besedilo: str) -> str:
 
 
 def vrstice(besedilo: str) -> list[str]:
-    """Besedilo vrstic kartice, s stisnjenimi presledki."""
+    """Besedilo vrstic kartice, s stisnjenimi presledki.
+
+    Od V5-R01 je vrstica po posnetku `POC-02`: ime (samo pri več otrocih),
+    oznaka stanja in čip na predmet — `Maša ✓ poslikano MAT 2 GEO 1`. Poved iz
+    `VrsticaOtroka.stanje` je ostala kot `aria-label` povezave.
+    """
     return [
         " ".join(re.sub(r"<[^>]+>", " ", vrstica).split())
         for vrstica in re.findall(r"<li>.*?</li>", kartica(besedilo), re.S)
@@ -181,7 +186,7 @@ class TestStran:
     def test_brez_slik(
         self, odjemalec: TestClient, otrok: str, dan: list[date]
     ) -> None:
-        assert vrstice(odjemalec.get("/admin").text) == ["○ Danes še ni slik"]
+        assert vrstice(odjemalec.get("/admin").text) == ["○ še ni slik"]
 
     def test_s_slikami(
         self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str, dan: list[date]
@@ -191,7 +196,7 @@ class TestStran:
         zapisi(motor, slike, "mat-2", subject="MAT", taken_at=lokalno(PONEDELJEK, 10))
 
         assert vrstice(odjemalec.get("/admin").text) == [
-            "✓ Danes že poslikano NAR 1 · MAT 2"
+            "✓ poslikano NAR 1 MAT 2"
         ]
 
     @pytest.mark.parametrize("vikend", [SOBOTA, NEDELJA], ids=["sobota", "nedelja"])
@@ -209,7 +214,7 @@ class TestStran:
 
         vsebina = kartica(odjemalec.get("/admin").text)
 
-        assert "Danes je vikend." in vsebina
+        assert "Vikend je. Nove slike pričakujemo v ponedeljek." in vsebina
         assert "<li>" not in vsebina
         assert "MAT" not in vsebina
 
@@ -223,10 +228,10 @@ class TestStran:
         zapisi(motor, slike, "pozno", subject="MAT", taken_at=pozno)
         zapisi(motor, slike, "polnoc", subject="SLJ", taken_at=polnoc)
 
-        assert vrstice(odjemalec.get("/admin").text) == ["✓ Danes že poslikano MAT 1"]
+        assert vrstice(odjemalec.get("/admin").text) == ["✓ poslikano MAT 1"]
 
         dan[0] = TOREK
-        assert vrstice(odjemalec.get("/admin").text) == ["✓ Danes že poslikano SLJ 1"]
+        assert vrstice(odjemalec.get("/admin").text) == ["✓ poslikano SLJ 1"]
 
     def test_vcerajsnja_in_arhivirana_ne_stejeta(
         self, odjemalec: TestClient, motor: Engine, slike: Path, otrok: str, dan: list[date]
@@ -241,7 +246,7 @@ class TestStran:
             arhivirano=datetime(2026, 9, 7, 12, tzinfo=UTC),
         )
 
-        assert vrstice(odjemalec.get("/admin").text) == ["○ Danes še ni slik"]
+        assert vrstice(odjemalec.get("/admin").text) == ["○ še ni slik"]
 
     def test_dva_otroka(
         self,
@@ -259,8 +264,8 @@ class TestStran:
         besedilo = odjemalec.get("/admin").text
 
         assert vrstice(besedilo) == [
-            "✓ Maša — danes že poslikano MAT 1",
-            "✓ Nejc — danes že poslikano SLJ 2",
+            "Maša ✓ poslikano MAT 1",
+            "Nejc ✓ poslikano SLJ 2",
         ]
         assert f'href="/admin/days?dan=2026-09-07&amp;otrok={otrok}"' in kartica(besedilo)
         assert f'href="/admin/days?dan=2026-09-07&amp;otrok={brat}"' in kartica(besedilo)
@@ -288,7 +293,7 @@ class TestStran:
 
         # Ime je vidno: družina ima dva otroka, kot ju šteje izbirnik
         # (`ADR-039` F3 in B), čeprav je aktiven samo eden.
-        assert vrstice(besedilo) == ["○ Maša — danes še ni slik"]
+        assert vrstice(besedilo) == ["Maša ○ še ni slik"]
         # Izbirnik na `/admin/days` šteje tudi deaktiviranega, zato brez
         # `?otrok=` povezava ne bi pripeljala do Maše, ampak do privzetka —
         # Ane, ki je po abecedi prva.
@@ -308,7 +313,7 @@ class TestStran:
         besedilo = odjemalec.get("/admin").text
 
         assert kartica(besedilo) == ""
-        assert "Danes je vikend." not in besedilo
+        assert "Vikend je." not in besedilo
 
     def test_kartica_je_nad_predmeti(
         self, odjemalec: TestClient, otrok: str, dan: list[date]
@@ -358,7 +363,7 @@ class TestStran:
         (masina, _) = vrstice(odjemalec.get("/admin").text)
         dnevi = odjemalec.get(f"/admin/days?dan=2026-09-07&otrok={otrok}").text
 
-        assert masina == "✓ Maša — danes že poslikano MAT 2 · GEO 1"
+        assert masina == "Maša ✓ poslikano MAT 2 GEO 1"
         assert "3 slike" in dnevi
         assert re.search(r"MAT — Matematika\s*<span>2 sliki</span>", dnevi)
         assert re.search(r"GEO — Geografija\s*<span>1 slika</span>", dnevi)
