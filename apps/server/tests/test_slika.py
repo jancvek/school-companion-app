@@ -100,7 +100,7 @@ class TestListanjeNaStrani:
         assert "2 od 3" in vrstica
         # Novejša levo, starejša desno — in **brez** sidra povečave: te
         # povezave peljejo na stran sosede, ne v njen povečan prikaz.
-        assert re.findall(r'<a class="gumb majhen" href="([^"]+)">', vrstica) == [
+        assert re.findall(r'<a class="gumb obrobljen majhen" href="([^"]+)">', vrstica) == [
             f"/admin/materials/{UUID_TRI}",
             f"/admin/materials/{UUID_ENA}",
         ]
@@ -116,8 +116,11 @@ class TestListanjeNaStrani:
 
         assert "1 od 3" in najnovejsa
         assert re.findall(r'href="([^"]+)"', najnovejsa) == [f"/admin/materials/{UUID_DVA}"]
-        assert re.search(r'<span class="gumb majhen onemogocen" aria-disabled="true">.*?Novejša',
-                         najnovejsa, re.S)
+        assert re.search(
+            r'<span class="gumb obrobljen majhen onemogocen" aria-disabled="true">.*?Novejša',
+            najnovejsa,
+            re.S,
+        )
         assert "3 od 3" in najstarejsa
         assert re.findall(r'href="([^"]+)"', najstarejsa) == [f"/admin/materials/{UUID_DVA}"]
 
@@ -319,6 +322,6 @@ class TestVsebinaInUpravljanje:
         povezave = re.findall(r'<a class="([^"]+)" href="([^"]+)" data-povecava>', besedilo)
         assert povezave == [
             ("povecaj", f"/admin/materials/{UUID_ENA}/image"),
-            ("gumb majhen", f"/admin/materials/{UUID_ENA}/image"),
+            ("gumb obrobljen majhen", f"/admin/materials/{UUID_ENA}/image"),
         ]
         assert 'querySelectorAll("a[data-povecava]")' in besedilo

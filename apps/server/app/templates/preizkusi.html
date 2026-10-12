@@ -11,24 +11,26 @@
 
   {# Filter po predmetu (kriterij `V4-R08`): povezave in ne obrazec, ker je
      možnosti toliko, kolikor predmetov ima shranjen test. #}
+  {# Filter po predmetu kot zavihki (V5-R01, `POC-02`, *Strani po pravilih*).
+     Izbrani je besedilo in ne povezava, kot prej. #}
   {% if filtri %}
-    <p>
-      Predmet:
-      {% if izbran %}<a href="{{ pot_vseh }}">vsi</a>{% else %}<strong>vsi</strong>{% endif %}
+    <ul class="zavihki" aria-label="Predmet">
+      <li>{% if izbran %}<a href="{{ pot_vseh }}">vsi</a>{% else %}<strong aria-current="true">vsi</strong>{% endif %}</li>
       {% for filter in filtri %}
-        ·
-        {% if filter.koda == izbran %}
-          <strong>{{ filter.koda }}</strong>
-        {% else %}
-          <a href="{{ filter.pot }}">{{ filter.koda }}</a>
-        {% endif %}
+        <li>
+          {% if filter.koda == izbran %}
+            <strong aria-current="true">{{ filter.koda }}</strong>
+          {% else %}
+            <a href="{{ filter.pot }}">{{ filter.koda }}</a>
+          {% endif %}
+        </li>
       {% endfor %}
-    </p>
+    </ul>
   {% endif %}
 
   {% if vrstice %}
-    <div class="tabela-ovoj">
-    <table class="tabela">
+    <div class="kartica brez-roba tabela-ovoj">
+    <table class="tabela testi-tabela">
       <thead>
         <tr>
           <th>Shranjeno</th>
@@ -42,7 +44,7 @@
         {% for vrstica in vrstice %}
           <tr>
             <td>{{ vrstica.cas }}</td>
-            <td>{{ vrstica.koda }}</td>
+            <td><span class="cip" style="--barva: {{ vrstica.barva }}">{{ vrstica.koda }}</span></td>
             <td><a href="{{ vrstica.pot }}">{{ vrstica.naslov }}</a></td>
             {% if ima_imena %}<td>{{ vrstica.otrok or "" }}</td>{% endif %}
           </tr>
@@ -51,16 +53,18 @@
     </table>
     </div>
   {% elif izbran %}
-    <p class="opozorilo">
-      Pri predmetu {{ izbran }} ni shranjenega testa.
-      <a href="{{ pot_vseh }}">Pokaži vse.</a>
+    <p class="obvestilo tiho">
+      <span>
+        Pri predmetu {{ izbran }} ni shranjenega testa.
+        <a href="{{ pot_vseh }}">Pokaži vse.</a>
+      </span>
     </p>
   {% else %}
-    <p class="opozorilo">
-      Shranjenega testa še ni. Na strani predmeta izberi slike snovi, pritisni
-      „Kreiraj test", in ko je test končan, „Shrani".
+    <p class="obvestilo tiho">
+      <span>
+        Shranjenega testa še ni. Na strani predmeta izberi slike snovi, pritisni
+        „Kreiraj test", in ko je test končan, „Shrani".
+      </span>
     </p>
   {% endif %}
-
-  <a class="nazaj" href="/admin">← Nazaj na pregled</a>
 {% endblock %}

@@ -117,7 +117,9 @@ main { overflow-wrap: anywhere; }
 }
 
 /* ---------- Ogrodje ---------- */
-body.z-menijem { display: flex; align-items: flex-start; min-height: 100vh; }
+@media screen {
+  body.z-menijem { display: flex; align-items: flex-start; min-height: 100vh; }
+}
 main { flex: 1 1 auto; padding: 2rem 3rem 4rem; max-width: 76rem; }
 body.brez-menija main { margin: 0 auto; }
 
@@ -308,7 +310,7 @@ body.brez-menija main { margin: 0 auto; }
 }
 .zavihki a:hover { background: var(--ploskev-2); }
 .zavihki a[aria-current] { background: var(--poudarek-mehko); color: var(--poudarek); font-weight: 700; }
-.orodja { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin: 0 0 1rem; }
+.orodna-vrstica { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin: 0 0 1rem; }
 
 /* Polja obrazcev. */
 label { font-weight: 700; font-size: 0.9rem; }
@@ -442,7 +444,7 @@ dl.vrstice dt, dl.vrstice dd { margin: 0; font-size: 0.95rem; }
 
 /* ---------- Predmet po tednih ---------- */
 .povezave-izbora { display: flex; gap: 1.25rem; margin: 0; }
-.orodja > p { margin: 0; }
+.orodna-vrstica > p { margin: 0; }
 .teden {
   background: var(--ploskev); border: 1px solid var(--rob); border-radius: var(--kartica);
   box-shadow: var(--senca); margin: 0 0 1.75rem; overflow: hidden;
@@ -468,20 +470,20 @@ dl.vrstice dt, dl.vrstice dd { margin: 0; font-size: 0.95rem; }
   background: repeating-linear-gradient(135deg, transparent 0 9px, color-mix(in srgb, var(--rob) 45%, transparent) 9px 10px);
 }
 .dan.manjka .razlog { color: var(--nevarno); font-weight: 500; }
-.slicice { list-style: none; margin: 0 0 0.5rem; padding: 0; display: grid; gap: 0.5rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.slicice li { position: relative; }
-.slicice a { display: block; color: var(--besedilo); text-decoration: none; position: relative; }
-.slicice img, .slicice .brez-slike {
+.slike-dneva { list-style: none; margin: 0 0 0.5rem; padding: 0; display: grid; gap: 0.5rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.slike-dneva li { position: relative; }
+.slike-dneva a { display: block; color: var(--besedilo); text-decoration: none; position: relative; }
+.slike-dneva img, .slike-dneva .brez-slike {
   display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover;
   border: 1px solid var(--rob); border-radius: 5px; background: var(--ploskev-2);
 }
-.slicice .brez-slike { display: flex; align-items: center; justify-content: center; padding: 0.25rem; color: var(--zamolklo); font-size: 0.75rem; text-align: center; }
-.slicice a:hover img { border-color: var(--poudarek); }
-.slicice .opis { display: flex; justify-content: space-between; gap: 0.25rem; padding-top: 0.2rem; font-size: 0.8rem; }
-.slicice .cas { font-weight: 700; }
-.slicice .otrok { color: var(--zamolklo); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slike-dneva .brez-slike { display: flex; align-items: center; justify-content: center; padding: 0.25rem; color: var(--zamolklo); font-size: 0.75rem; text-align: center; }
+.slike-dneva a:hover img { border-color: var(--poudarek); }
+.slike-dneva .opis { display: flex; justify-content: space-between; gap: 0.25rem; padding-top: 0.2rem; font-size: 0.8rem; }
+.slike-dneva .cas { font-weight: 700; }
+.slike-dneva .otrok { color: var(--zamolklo); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Kljukica lezi cez vogal slicice, a je sosed povezave in ne njen otrok. */
-.slicice .kljukica { position: absolute; top: 0.4rem; left: 0.4rem; z-index: 1; margin: 0; width: 1.25rem; height: 1.25rem; cursor: pointer; }
+.slike-dneva .kljukica { position: absolute; top: 0.4rem; left: 0.4rem; z-index: 1; margin: 0; width: 1.25rem; height: 1.25rem; cursor: pointer; }
 .znacka {
   position: absolute; left: 0.3rem; right: 0.3rem; bottom: 1.75rem; padding: 0.05rem 0.3rem;
   border-radius: 4px; font-size: 0.7rem; font-weight: 700; text-align: center;
@@ -518,7 +520,7 @@ input[name="snov"]:checked { counter-increment: izbranih; }
   .dan:first-child { border-top: 0; }
   /* Dan, ki nima ne slik ne sporocila, na telefonu samo zaseda prostor. */
   .dan.ni-na-urniku, .dan.brez-razloga { display: none; }
-  .slicice { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .slike-dneva { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .dan.se-pride, .dan.manjka { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 1.5rem; }
   .dan.se-pride .dan-glava, .dan.manjka .dan-glava { margin: 0; }
   .vrstica-izbora { bottom: 0.5rem; }
@@ -696,8 +698,8 @@ a.nevarno { color: var(--nevarno); }
 .z-napako input { border-color: var(--nevarno); }
 
 /* Kartica potrditve: kdo zgoraj, vprasanje, posledice, gumba. */
-.potrditev { max-width: 34rem; margin: 1rem auto; padding: 1.75rem; }
-.potrditev h1 { font-size: 1.5rem; margin: 1.1rem 0 0.75rem; }
+.kartica-potrditve { max-width: 34rem; margin: 1rem auto; padding: 1.75rem; }
+.kartica-potrditve h1 { font-size: 1.5rem; margin: 1.1rem 0 0.75rem; }
 .potrditev-kdo { font-size: 1.05rem; }
 .posledice { list-style: none; margin: 0 0 1.25rem; padding: 0; display: grid; gap: 0.6rem; }
 .posledice li { position: relative; padding-left: 1.8rem; }
@@ -705,14 +707,14 @@ a.nevarno { color: var(--nevarno); }
 .posledice .takoj::before { content: "!"; color: var(--nevarno); }
 .posledice .tece::before { content: "\2022"; color: var(--zamolklo); }
 .posledice .ostane::before { content: "\2713"; color: var(--poudarek); left: 0.2rem; }
-.potrditev form { margin: 0; }
+.kartica-potrditve form { margin: 0; }
 @media (max-width: 860px) {
   .polji-v-vrsti { grid-template-columns: minmax(0, 1fr); }
-  .potrditev { padding: 1.25rem; margin: 0 0 1rem; }
+  .kartica-potrditve { padding: 1.25rem; margin: 0 0 1rem; }
 }
 
 /* ---------- Po dnevih ---------- */
-.orodja.na-levo { justify-content: flex-start; }
+.orodna-vrstica.na-levo { justify-content: flex-start; }
 .pod-orodji { margin: 0 0 1.25rem; }
 .dan-kartica { margin-bottom: 1rem; }
 .dan-kartica-glava { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 0.9rem; padding: 0.8rem 1.25rem; border-bottom: 1px solid var(--rob); }
@@ -724,8 +726,8 @@ a.nevarno { color: var(--nevarno); }
 .dan-predmeti { display: flex; flex-wrap: wrap; gap: 1rem 2rem; padding: 1rem 1.25rem 1.1rem; }
 .dan-predmet h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.45rem; margin: 0 0 0.6rem; font-size: 1rem; }
 .dan-predmet h3 .zamolklo { font-weight: 400; font-size: 0.85rem; }
-.slicice.v-vrsti { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0; }
-.slicice.v-vrsti li { width: 5.25rem; }
+.slike-dneva.v-vrsti { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0; }
+.slike-dneva.v-vrsti li { width: 5.25rem; }
 .dan-prazen {
   display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 1rem; margin: 0 0 1rem; padding: 0.6rem 1.25rem;
   border: 1px dashed var(--rob); border-radius: var(--kartica); color: var(--zamolklo);
@@ -805,7 +807,7 @@ a.nevarno { color: var(--nevarno); }
 
 /* ---------- Statistika ---------- */
 .zavihki strong { display: inline-flex; padding: 0.4rem 0.9rem; border-radius: 7px; background: var(--poudarek-mehko); color: var(--poudarek); font-weight: 700; white-space: nowrap; }
-.orodja .legenda-ocen { margin: 0; }
+.orodna-vrstica .legenda-ocen { margin: 0; }
 .razporeditev.prazna { background: repeating-linear-gradient(135deg, var(--ploskev-2) 0 5px, var(--rob) 5px 6px); }
 .statistika-skupaj .stevila { display: flex; flex-wrap: wrap; gap: 0.5rem 2.5rem; margin-bottom: 0.9rem; }
 .stevila dt { margin: 0; color: var(--zamolklo); font-size: 0.875rem; }
@@ -867,38 +869,54 @@ body.brez-menija:has(.prijavna-stran) main { max-width: none; padding: 0; margin
   .prijava-obrazec { width: auto; justify-self: stretch; padding: 1.5rem 1rem 3rem; }
 }
 
-/* ---------- Strani pred prenovo ----------
-   Razredi starih predlog. Vsak korak prenove jih nekaj odvzame; kar ostane
-   po zadnjem, se izbrise. */
-.kdo .zamolklo { color: var(--zamolklo); }
-.koda { font-weight: 700; }
-.stevec { color: var(--zamolklo); }
-.mreza { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); list-style: none; margin: 0; padding: 0; }
-.mreza a { display: block; text-decoration: none; color: inherit; border: 1px solid var(--rob); border-radius: var(--gumb); overflow: hidden; background: var(--ploskev); }
-.mreza a:hover { border-color: var(--poudarek); }
-.mreza img { display: block; width: 100%; height: 165px; object-fit: cover; background: #000; }
-.mreza .brez-slike { display: flex; align-items: center; justify-content: center; height: 165px; background: var(--ozadje); color: var(--zamolklo); font-size: 0.85rem; text-align: center; }
-.mreza .opis { display: block; padding: 0.6rem 0.7rem; font-size: 0.9rem; }
-.mreza .cas { display: block; }
-.mreza .stanje { color: var(--zamolklo); }
-.mreza .kljukica { display: flex; align-items: center; gap: 0.4rem; padding: 0 0.25rem 0.35rem; cursor: pointer; font-size: 0.85rem; font-weight: 400; color: var(--zamolklo); }
-.izbor { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem; margin: 1rem 0; }
-.izbor .drobno { margin: 0; }
-.prepisi { display: block; width: 100%; padding: 0.75rem; border: 1px solid var(--rob); border-radius: var(--gumb); background: var(--ploskev); color: var(--besedilo); font-size: 0.85rem; line-height: 1.5; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical; }
-.opozorilo { padding: 1rem; border: 1px solid var(--rob); border-radius: var(--kartica); background: var(--ploskev); color: var(--zamolklo); }
-.nazaj { display: inline-block; margin-top: 1.5rem; color: var(--poudarek); }
-/* Gumb brez dodatnega razreda je bil v starih predlogah unicujoce dejanje. */
-[class="gumb"] { border-color: var(--nevarno); color: var(--nevarno); margin-top: 1.5rem; }
+/* ---------- Strani po pravilih: arhiv, potrditve, sistem, testi ---------- */
+.arhiv { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); }
+.arhiv a { display: block; color: var(--besedilo); text-decoration: none; }
+.arhiv img, .arhiv .brez-slike {
+  display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover;
+  border: 1px solid var(--rob); border-radius: 6px; background: var(--ploskev-2);
+}
+.arhiv .brez-slike { display: flex; align-items: center; justify-content: center; color: var(--zamolklo); font-size: 0.85rem; text-align: center; }
+.arhiv a:hover img { border-color: var(--poudarek); }
+.arhiv .opis { display: grid; gap: 0.15rem; justify-items: start; padding-top: 0.4rem; font-size: 0.875rem; }
+.arhiv .cas { font-weight: 700; }
+.arhiv .stanje { color: var(--zamolklo); }
+.potrditev-slika { flex: none; width: 4.5rem; height: 6rem; object-fit: cover; border: 1px solid var(--rob); border-radius: 5px; }
+.kartica-potrditve .polji-v-vrsti { margin-bottom: 0.25rem; }
+.ime-kartice { margin: 0; font-size: 1.1rem; }
+.ime-kartice a { color: var(--besedilo); text-decoration: none; }
+.ime-kartice a:hover { text-decoration: underline; }
+.nova-druzina { max-width: 40rem; margin-top: 1.75rem; }
+.nova-druzina form { margin-top: 0.75rem; }
+.izbor-ocen { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1.5rem; }
+.izbor-ocen label { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 400; font-size: 1rem; }
+.racun-tabela form { margin: 0; }
+.racun-tabela td:first-child, .racun-tabela th:first-child,
+.testi-tabela td:first-child, .testi-tabela th:first-child { padding-left: 1.4rem; }
+.zavihki + .kartica, .zavihki + .obvestilo { margin-top: 1rem; }
+
+/* ---------- Prepisi izbranih ---------- */
+/* Polje s prepisi je blok prepisa kot na strani slike, le da ga je mogoce
+   oznaciti in kopirati. */
+.prepisi {
+  display: block; width: 100%; padding: 1rem 1.1rem; border: 1px solid var(--rob); border-radius: var(--kartica);
+  background: var(--ploskev); color: var(--besedilo); font-size: 0.875rem; line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical;
+}
+.drobtine .nazaj { display: inline; margin: 0; }
+
+/* ---------- Urejevalnik in ogled preizkusa ----------
+   Predlogi preizkus.html in preizkus-ogled.html s skripto ostaneta, kot sta
+   (ADR-054, ADR-055); dobita ogrodje in barve. Razredi spodaj so njuni:
+   gumb brez dodatnega razreda je tam unicujoce dejanje, gumb-obdelava
+   navadno. Druge predloge teh razredov ne uporabljajo. */
+[class="gumb"] { border-color: var(--nevarno); color: var(--nevarno); }
 [class="gumb"]:hover { background: var(--nevarno-mehko); }
-.gumb.gumb-obdelava { margin-top: 1.5rem; }
-.izbor .gumb, .vstopi .gumb, .kdo .gumb-povezava { margin-top: 0; }
 .gumb-obdelava { border-color: var(--poudarek); color: var(--poudarek); }
-.izid { margin-top: 2.5rem; padding-top: 1.5rem; border-top: 1px solid var(--rob); }
-.izid h2 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
-.izid h2:first-child { margin-top: 0; }
-.napaka { padding: 1rem; border: 1px solid var(--nevarno); border-radius: var(--kartica); background: var(--nevarno-mehko); color: var(--nevarno); }
-.vstopi { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-bottom: 0.5rem; }
-.vstopi form { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin: 0; }
+.opozorilo, .napaka:not(.obvestilo) { padding: 0.9rem 1.25rem; border: 1px solid var(--rob); border-radius: var(--kartica); background: var(--ploskev); }
+.opozorilo { color: var(--zamolklo); }
+.napaka:not(.obvestilo) { border-color: color-mix(in srgb, var(--nevarno) 35%, transparent); background: var(--nevarno-mehko); color: var(--nevarno); }
+.nazaj { display: inline-block; margin-top: 1.5rem; }
 
 /* Povecan prikaz slike (V2-R08). Prikaz je v izrisu skrit z atributom
    hidden; display: grid bi ga prevladal, zato ga to pravilo vrne. */

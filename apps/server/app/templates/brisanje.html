@@ -2,42 +2,42 @@
 
 {% block naslov %}Izbrisati dokončno?{% endblock %}
 
+{# Kartica potrditve (V5-R01, `docs/poc/POC-02.md`, *Strani po pravilih*).
+   Dokončno brisanje je **nepovratno**, zato je gumb polno rdeč — eden od dveh
+   takih na vsem pregledu. #}
 {% block vsebina %}
-  <h1>Izbrisati to snov dokončno?</h1>
-  <p class="pod">{{ snov.koda }} — {{ snov.oznaka }}, {{ snov.cas }}</p>
-
-  <div class="snov">
-    <div>
+  <section class="kartica kartica-potrditve">
+    <div class="clan-glava">
       {% if snov.velikost is not none %}
-        <img src="/admin/materials/{{ snov.id }}/image" alt="Posneta snov">
-      {% else %}
-        <p class="opozorilo">Slike na disku ni; izbrisan bo samo zapis v bazi.</p>
+        <img class="potrditev-slika" src="/admin/materials/{{ snov.id }}/image" alt="Posneta snov">
       {% endif %}
+      <div>
+        <p class="potrditev-kdo"><strong>{{ snov.koda }} — {{ snov.oznaka }}</strong></p>
+        <p class="zamolklo">{{ snov.cas }}</p>
+      </div>
     </div>
 
-    <div>
-      <p class="opozorilo">
+    <h1>Izbrisati to snov dokončno?</h1>
+    {% if snov.velikost is none %}
+      <p class="obvestilo tiho"><span>Slike na disku ni; izbrisan bo samo zapis v bazi.</span></p>
+    {% endif %}
+    <ul class="posledice">
+      <li class="takoj">
         Šla bosta <strong>slika in prepis</strong>. Telefon je to snov pri sebi
         že pobrisal ({{ snov.potrjeno_ob }}), zato brisanje tu ne pusti ničesar
         za sabo.
-      </p>
-
+      </li>
       {# Vprašanja material preživijo (`docs/odlocitve/ADR-012`). Brez tega
          stavka bi bilo brisanje videti nevarnejše, kot je — in po V2 bi
-         operater mislil, da z njim briše tudi statistiko. #}
-      {# Obe števili, ne samo veljavna: poved je o tem, kaj brisanje **pusti**,
-         in po `ADR-012` ostane oboje. Samo veljavna bi bila tu podcenjena
-         številka in operater bi mislil, da briše več, kot briše. #}
-      {# Števili sta za dvopičjem in ne pred samostalnikom, ker slovenščina za
-         1, 2, 3–4 in 5+ zahteva štiri različne oblike („1 veljavno", „2
-         veljavni", „3 veljavna", „5 veljavnih"). „{{ n }} veljavnih" bi bilo
-         pri enem vprašanju napačno.
+         operater mislil, da z njim briše tudi statistiko.
 
-         Prvotna utemeljitev je bila, da je sklanjatev v predlogi več kode kot
-         vrednosti. To od V2-R01 ne drži več — `app/besedilo.py` to zna in je
-         preizkušen. Oblika z dvopičjem vseeno **ostane**: pravilna je pri
-         vsakem številu, menjava bi bila okus in ne popravek. #}
-      <p class="drobno">
+         Obe števili, ne samo veljavna: poved je o tem, kaj brisanje **pusti**,
+         in po `ADR-012` ostane oboje.
+
+         Števili sta za dvopičjem in ne pred samostalnikom, ker slovenščina za
+         1, 2, 3–4 in 5+ zahteva štiri različne oblike. Oblika z dvopičjem je
+         pravilna pri vsakem številu; menjava bi bila okus in ne popravek. #}
+      <li class="ostane">
         {% if snov.stevilo_vprasanj or snov.stevilo_upokojenih %}
           Vprašanja ostanejo — veljavnih: {{ snov.stevilo_vprasanj }},
           upokojenih: {{ snov.stevilo_upokojenih }}. Ohranijo predmet in
@@ -45,16 +45,15 @@
         {% else %}
           Ta snov nima vprašanj.
         {% endif %}
-      </p>
+      </li>
+    </ul>
 
-      {# Brisanje je POST in nikoli navadna povezava: brskalniki povezave
-         prednalagajo, in en napačen klik je nepovraten. #}
-      <form method="post" action="/admin/materials/{{ snov.id }}/delete">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <button class="gumb" type="submit">Da, izbriši dokončno</button>
-      </form>
-
-      <a class="nazaj" href="/admin/materials/{{ snov.id }}">← Ne, vrni se</a>
-    </div>
-  </div>
+    {# Brisanje je POST in nikoli navadna povezava: brskalniki povezave
+       prednalagajo, in en napačen klik je nepovraten. #}
+    <form method="post" action="/admin/materials/{{ snov.id }}/delete" class="vrstica-gumbov">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="gumb nepovraten" type="submit">Da, izbriši dokončno</button>
+      <a class="gumb obrobljen" href="/admin/materials/{{ snov.id }}">Prekliči</a>
+    </form>
+  </section>
 {% endblock %}

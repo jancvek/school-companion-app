@@ -3,13 +3,16 @@
 {% block naslov %}Prepisi izbranih{% endblock %}
 
 {% block vsebina %}
+  {# Pot nazaj na predmet je od V5-R01 nad naslovom, kot drobtine drugod. #}
+  <p class="drobtine"><a class="nazaj" href="{{ pot_nazaj }}">← Nazaj</a></p>
+
   <h1>Prepisi izbranih</h1>
 
   {% if besedilo is none %}
     {# Prazen izbor ni napaka strežnika, ampak nedokončano dejanje, zato
        `opozorilo` in ne `napaka`. Polja tu ni — prazno polje bi bilo videti
        kot izgubljeno besedilo. #}
-    <p class="opozorilo">
+    <p class="obvestilo caka">
       Izberi vsaj eno sliko. Na strani predmeta obkljukaj slike, katerih
       prepise potrebuješ, in znova pritisni „Prepisi izbranih".
     </p>
@@ -28,8 +31,8 @@
     {# Gumb je `hidden` in ga odkrije skripta. Izrisan gumb, ki bi bil brez
        skripte mrtev, bi bil ravno tisto, kar `ADR-048` C prepoveduje ob
        neuspehu — tiho neuspešen gumb je huje kot gumba nič. #}
-    <p class="izbor">
-      <button id="kopiraj" class="gumb gumb-obdelava" type="button" hidden>
+    <p class="vrstica-gumbov">
+      <button id="kopiraj" class="gumb obrobljen" type="button" hidden>
         Kopiraj v odložišče
       </button>
       <span id="izid-kopiranja" class="drobno" role="status"></span>
@@ -38,8 +41,6 @@
       Brez gumba: klikni v polje, označi vse s Ctrl+A in kopiraj s Ctrl+C.
     </p>
   {% endif %}
-
-  <a class="nazaj" href="{{ pot_nazaj }}">← Nazaj</a>
 
   {% if besedilo is not none %}
     {#

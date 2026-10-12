@@ -510,15 +510,9 @@ def _izrisi_izbirnik(
             "stevilo": stevilo,
             "najmanj": NAJMANJ_VPRASANJ,
             "najvec": NAJVEC_VPRASANJ,
-            "snovi": vrstice,
             "izbirnih": sum(1 for vrstica in vrstice if vrstica["izbirna"]),
             "sporocilo": sporocilo,
             "naslovljenec": naslovljenec.izbrani.user_id,
-            "naslovljenec_ime": naslovljenec.ime_za_prikaz,
-            "je_izbirnik_otrok": naslovljenec.je_izbirnik,
-            "otroci": [
-                {"id": kdo.user_id, "ime": kdo.display_name} for kdo in naslovljenec.vsi
-            ],
         },
     )
 

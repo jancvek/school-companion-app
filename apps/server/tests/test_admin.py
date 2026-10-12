@@ -3350,7 +3350,7 @@ class TestSkriptaPrepisov:
         # meja 3 prepoveduje. Namesto njega je navodilo za Ctrl+A in Ctrl+C.
         besedilo = self.stran(odjemalec, motor, slike)
 
-        assert 'id="kopiraj" class="gumb gumb-obdelava" type="button" hidden' in besedilo
+        assert 'id="kopiraj" class="gumb obrobljen" type="button" hidden' in besedilo
         assert "gumb.hidden = false;" in skripta(besedilo)
         assert "Ctrl+A" in besedilo
 

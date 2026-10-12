@@ -17,18 +17,20 @@
   <p class="pod">{{ pogled.ime }} — {{ pogled.identifikator }}</p>
 
   {% if pogled.sporocilo %}
-    <p class="opozorilo">{{ pogled.sporocilo }}</p>
+    <p class="obvestilo caka"><span>{{ pogled.sporocilo }}</span></p>
   {% endif %}
 
   <h2>Načini prijave</h2>
 
-  <div class="tabela-ovoj">
-    <table class="tabela">
+  {# Od V5-R01 v kartici, kot člani na strani Družina (`POC-02`, *Strani po
+     pravilih*). Obrazca, poti in polja so, kot so bili. #}
+  <div class="kartica brez-roba tabela-ovoj">
+    <table class="tabela zlozi racun-tabela">
       <thead>
         <tr>
-          <th>Način</th>
-          <th>Stanje</th>
-          <th>Dejanja</th>
+          <th scope="col">Način</th>
+          <th scope="col">Stanje</th>
+          <th scope="col">Dejanja</th>
         </tr>
       </thead>
       <tbody>
@@ -66,12 +68,12 @@
             {% if not pogled.google_povezan %}
               <form method="post" action="/admin/racun/google">
                 <input type="hidden" name="csrf" value="{{ csrf }}">
-                <button class="gumb gumb-obdelava" type="submit">Poveži Google račun</button>
+                <button class="gumb majhen polni" type="submit">Poveži Google račun</button>
               </form>
             {% elif pogled.sme_odstraniti %}
               <form method="post" action="/admin/racun/google/odstrani">
                 <input type="hidden" name="csrf" value="{{ csrf }}">
-                <button class="gumb" type="submit">Odstrani povezavo</button>
+                <button class="gumb majhen nevaren" type="submit">Odstrani povezavo</button>
               </form>
             {% else %}
               {# Gumba ni — in stran pove, zakaj ga ni. Skrit gumb brez razlage
@@ -89,6 +91,4 @@
     prijaviš v račun, ki v tej namestitvi že obstaja. Nov račun odpre starš
     svojemu otroku na strani Družina, novo družino pa lastnik sistema.
   </p>
-
-  <a class="nazaj" href="/admin">Nazaj na pregled</a>
 {% endblock %}

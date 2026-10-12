@@ -2,8 +2,12 @@
 
 {% block naslov %}{{ naslov|default("Ni najdeno") }}{% endblock %}
 
+{# Stran z napako (404, 400, 403, 409): kartica z enim sporočilom, kaj se je
+   zgodilo, in povezavo nazaj na Predmete (V5-R01, *Strani po pravilih*). #}
 {% block vsebina %}
-  <h1>{{ naslov|default("Tega ni") }}</h1>
-  <p class="opozorilo">{{ sporocilo }}</p>
-  <a class="nazaj" href="/admin">← Nazaj na predmete</a>
+  <section class="kartica kartica-potrditve">
+    <h1>{{ naslov|default("Tega ni") }}</h1>
+    <p>{{ sporocilo }}</p>
+    <p class="vrstica-gumbov"><a class="gumb obrobljen" href="/admin">Nazaj na Predmete</a></p>
+  </section>
 {% endblock %}

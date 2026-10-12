@@ -468,8 +468,9 @@ class TestPregled:
         # Domači čas: 16:05 UTC je oktobra 18:05.
         assert "3. 10. 2026" in besedilo
         assert "18:05" in besedilo
-        assert "<td>MAT</td>" in besedilo
-        assert "<td>SLJ</td>" in besedilo
+        # Od V5-R01 je predmet čip v barvi predmeta (`POC-02`, *Strani po pravilih*).
+        assert '<td><span class="cip" style="--barva: #2d5a8e">MAT</span></td>' in besedilo
+        assert '<td><span class="cip" style="--barva: #a63f3b">SLJ</span></td>' in besedilo
 
     def test_filter_po_predmetu(
         self, odjemalec: PrijavljenOdjemalec, motor: Engine, stars: str
@@ -486,7 +487,8 @@ class TestPregled:
         assert 'href="/admin/assessments?predmet=SLJ"' in vsi_testi
         assert "Ulomki" in samo_mat
         assert "Slovnica" not in samo_mat
-        assert "<strong>MAT</strong>" in samo_mat
+        # Od V5-R01 so filtri zavihki; izbrani je označen tudi za bralnik.
+        assert '<strong aria-current="true">MAT</strong>' in samo_mat
         assert "Ulomki" in prazen
         assert "Slovnica" in prazen
         # Neznana koda ni napaka: prazen seznam in pot nazaj.

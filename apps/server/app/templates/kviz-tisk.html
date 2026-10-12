@@ -7,13 +7,18 @@
      Obrazec je `GET`, ker nič ne spremeni; `izbor` loči prvi prihod od
      obrazca, v katerem je vse odkljukano (`docs/plan/V2-R03.md`, odl. 7). #}
   <div class="ne-tiskaj">
+    <ol class="drobtine">
+      <li><a href="/admin/quizzes">Kvizi</a></li>
+      <li><a href="/admin/quizzes/{{ kviz.id }}">{{ kviz.ime }}</a></li>
+      <li aria-current="page">Tisk</li>
+    </ol>
     <h1>Tisk: {{ kviz.ime }}</h1>
     <p class="pod">
       Izberi ocene, ki naj pridejo na papir. Najprej so vprašanja brez
       odgovorov, na novi strani pa ključ z istimi številkami.
     </p>
 
-    <form method="get" action="/admin/quizzes/{{ kviz.id }}/print" class="vstopi">
+    <form method="get" action="/admin/quizzes/{{ kviz.id }}/print" class="kartica izbor-ocen">
       <input type="hidden" name="izbor" value="1">
       {% for ocena in ocene %}
         <label>
@@ -21,7 +26,7 @@
           {{ ocena.oznaka }} ({{ ocena.stevilo_opis }})
         </label>
       {% endfor %}
-      <button class="gumb gumb-obdelava" type="submit">Pokaži za tisk</button>
+      <button class="gumb polni" type="submit">Pokaži za tisk</button>
     </form>
 
     {% if vprasanja %}
@@ -30,12 +35,13 @@
         izbor in povezave se na papir ne natisnejo.
       </p>
     {% else %}
-      <p class="opozorilo">
-        Izbranim ocenam ne ustreza nobeno vprašanje, zato ni kaj natisniti.
-        Obkljukaj še kakšno oceno in klikni „Pokaži za tisk".
+      <p class="obvestilo caka">
+        <span>
+          Izbranim ocenam ne ustreza nobeno vprašanje, zato ni kaj natisniti.
+          Obkljukaj še kakšno oceno in klikni „Pokaži za tisk".
+        </span>
       </p>
     {% endif %}
-    <a class="nazaj" href="/admin/quizzes/{{ kviz.id }}">← Nazaj na rezultat</a>
   </div>
 
   {% if vprasanja %}

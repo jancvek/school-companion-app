@@ -64,7 +64,7 @@ from app.routers import admin
 from app.settings import Settings
 from app.storage import je_znotraj, mapa_druzine, velikost_slike
 from app.strani import daj_predloge, ni_najdeno
-from app.subjects import poisci_predmet
+from app.subjects import barva_predmeta, poisci_predmet
 from app.vision import KlicalecPreizkusa, NapakaObdelave
 
 #: Dnevnik porabe: ena vrstica na klic modela (kriterij `V4-R07`). Da vrstica
@@ -219,6 +219,7 @@ def _vrstica(zapis: Preizkus, imena: dict[str, str]) -> dict[str, Any]:
         "pot": pot_preizkusa(zapis.id),
         "cas": cas(zapis.saved_at),
         "koda": zapis.subject,
+        "barva": barva_predmeta(zapis.subject),
         "naslov": zapis.title,
         "otrok": imena.get(zapis.child_id),
     }

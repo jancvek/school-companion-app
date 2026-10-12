@@ -314,7 +314,7 @@ class TestPotrditev:
         self, odjemalec: TestClient, ana: str
     ) -> None:
         besedilo = odjemalec.get(f"{POT}/members/{ana}/deactivate").text
-        zacetek = besedilo.index('<section class="kartica potrditev">')
+        zacetek = besedilo.index('<section class="kartica kartica-potrditve">')
         kartica_potrditve = besedilo[zacetek : besedilo.index("</section>", zacetek)]
 
         # Kdo zgoraj, naslov kot vprašanje brez imena v povedi.
@@ -361,5 +361,5 @@ def test_lastnikova_potrditev_uporablja_isto_kartico(
         odgovor = odjemalec.get(f"/admin/system/families/{CVEK_ID}/parents/{ana}/deactivate")
 
     assert odgovor.status_code == 200
-    assert '<section class="kartica potrditev">' in odgovor.text
+    assert '<section class="kartica kartica-potrditve">' in odgovor.text
     assert f'href="/admin/system/families/{CVEK_ID}">Prekliči</a>' in odgovor.text

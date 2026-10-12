@@ -37,7 +37,7 @@
      stran ničesar ne spremeni, zato mora biti dosegljiva z osvežitvijo in iz
      zgodovine brskalnika. Skrito polje `obdobje=dan` poskrbi, da iz vmesnika
      nikoli ne nastane kombinacija „teden in poljuben dan", ki je 400. #}
-  <div class="orodja na-levo">
+  <div class="orodna-vrstica na-levo">
     <ul class="zavihki" aria-label="Obdobje">
       {% for zavihek in zavihki_obdobja %}
         <li>
@@ -94,7 +94,7 @@
                 {% if predmet.oznaka %}{{ predmet.oznaka }}{% endif %}
                 <span class="zamolklo">{{ predmet.koliko_opis }}</span>
               </h3>
-              <ul class="slicice v-vrsti">
+              <ul class="slike-dneva v-vrsti">
                 {% for slika in predmet.slike %}
                   <li>
                     <a href="/admin/materials/{{ slika.id }}">

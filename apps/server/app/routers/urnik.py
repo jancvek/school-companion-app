@@ -392,7 +392,6 @@ def _kontekst(
     slika_potrjenega: str | None = None,
 ) -> dict[str, Any]:
     """Kontekst predloge. Predloga ne računa in ne sestavlja naslovov."""
-    otrok_prvi = _parameter_otroka(izbira)
     je_predlog = slika_id is not None
     # Sliko pokaže kartica „Prebrana slika": pri predlogu pravkar naloženo,
     # sicer tisto, iz katere je nastal potrjeni urnik (`ADR-060` G).
@@ -431,8 +430,6 @@ def _kontekst(
         "sporocilo": sporocilo,
         "napaka": napaka,
         "nepreslikane": nepreslikane,
-        "je_izbirnik_otrok": izbira.je_izbirnik,
-        "otrok_prvi": otrok_prvi,
         "izbrani_otrok": izbira.izbrani.user_id if izbira.izbrani is not None else None,
         "najvecja_slika_mb": NAJVECJA_SLIKA // (1024 * 1024),
         # Brez kljuca za OpenAI obrazca za nalaganje ni; mreza pa ostane
