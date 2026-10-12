@@ -503,10 +503,11 @@ class TestGumbNaStraniPredmeta:
         zacetek = besedilo.index('<form method="post" action="/admin/transcripts">')
         obrazec = besedilo[zacetek : besedilo.index("</form>", zacetek)]
 
-        # Nad seznamom in pod njim, kot „Prepisi izbranih"; oba v obrazcu
-        # izbora, da pošljeta iste kljukice in isti CSRF žeton.
-        assert obrazec.count('formaction="/admin/assessments/compose">Kreiraj test') == 2
-        assert besedilo.count("Kreiraj test") == 2
+        # V vrstici izbora ob „Prepisi izbranih" (od V5-R01 en gumb in ne
+        # dva; glej `test_gumb_je_v_vrstici_izbora_ki_ostane_na_zaslonu`), v
+        # obrazcu izbora, da pošlje iste kljukice in isti CSRF žeton.
+        assert obrazec.count('formaction="/admin/assessments/compose">Kreiraj test') == 1
+        assert besedilo.count("Kreiraj test") == 1
 
     def test_drug_predmet_gumba_nima(
         self, odjemalec: PrijavljenOdjemalec, motor: Engine, slike: Path
@@ -531,8 +532,11 @@ class TestGumbNaStraniPredmeta:
         besedilo = odjemalec.get("/admin/subjects/MAT").text
 
         assert besedilo.count('action="/admin/transcripts"') == 1
-        gumb = '<button class="gumb gumb-obdelava" type="submit">Prepisi izbranih</button>'
-        assert gumb in besedilo
+        # Razred gumba se je z V5-R01 spremenil; trditev je, da je navaden
+        # `submit` **brez** `formaction`.
+        [gumb] = re.findall(r"<button[^>]*>Prepisi izbranih</button>", besedilo)
+        assert 'type="submit"' in gumb
+        assert "formaction" not in gumb
         polje = polje_prepisov(prepisi(odjemalec, "MAT", UUID_ENA).text)
         assert polje.startswith("## MAT — 4. september 2026, 09:30\n\n### Povzetek\n")
         assert "### Prepis\nUlomke seštevamo.\n" in polje

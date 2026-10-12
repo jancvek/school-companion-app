@@ -1425,7 +1425,18 @@ def _poskus(postavka: str) -> PoskusZaZapis:
 #: njem natanko stvari B — ne le, da ni A.
 Preverba = Callable[[Session, Druzina, Druzina], bool]
 
+#: Obdobje, ki zajame vse, kar testi zgradijo.
+OD_NEKDAJ = datetime(2000, 1, 1, tzinfo=UTC)
+DO_NEKOC = datetime(2100, 1, 1, tzinfo=UTC)
+
 PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
+    # V5-R01: dnevi slikanja za prazne dni na strani predmeta. Nabor so vsi
+    # predmeti in vsi otroci **te** družine; tuj otrok v njem bi na tuji
+    # strani predmeta prižgal ali ugasnil rdeč dan.
+    ("MaterialsRepository", "trenutki_slikanja"): lambda s, a, b: (
+        {otrok for otrok, _ in _m(s, b).trenutki_slikanja(OD_NEKDAJ, DO_NEKOC)} == {b.otrok_id}
+        and len(_m(s, b).trenutki_slikanja(OD_NEKDAJ, DO_NEKOC)) == 3
+    ),
     # MeniRepository (V5-R01). Števci so na **vsaki** strani, zato bi uhajanje
     # tu pomenilo tuje število na vsaki strani. Obe družini sta zgrajeni enako
     # (tri slike v uporabi, en odprt kviz, en test, dve arhivirani), zato bi
@@ -1509,6 +1520,13 @@ PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
     ),
     ("MaterialsRepository", "seznam_za_brisanje"): lambda s, a, b: (
         _m(s, b).seznam_za_brisanje() == [b.za_brisanje]
+    ),
+    # V5-R01: mesto slike v predmetu („3 od 24"). Tuja snov v naboru te
+    # družine ne stoji nikjer — niti kot „1 od 1".
+    ("MaterialsRepository", "polozaj_v_predmetu"): lambda s, a, b: (
+        _m(s, b).polozaj_v_predmetu(_nalozi(s, Material, a.akt)) is None
+        and (svoj := _m(s, b).polozaj_v_predmetu(_nalozi(s, Material, b.akt))) is not None
+        and svoj.vseh == 3
     ),
     ("MaterialsRepository", "sosedi_v_predmetu"): lambda s, a, b: (
         _m(s, b).sosedi_v_predmetu(_nalozi(s, Material, a.akt)) == (None, None)

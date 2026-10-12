@@ -328,12 +328,16 @@ class TestSeznamPredmeta:
     def test_najnovejsa_slika_je_prva(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
+        # Od V5-R01 je stran po tednih (`ADR-060` E): „najnovejša prva" velja
+        # za **tedne**, znotraj tedna pa dnevi tečejo od ponedeljka naprej
+        # (glej `TestPredmetPoTednih`). Zapisa sta zato v različnih tednih.
         zapisi(motor, slike, UUID_ENA, taken_at="2026-09-01T07:00:00+00:00")
-        zapisi(motor, slike, UUID_DVA, taken_at="2026-09-04T07:00:00+00:00")
+        zapisi(motor, slike, UUID_DVA, taken_at="2026-09-08T07:00:00+00:00")
 
         besedilo = odjemalec.get("/admin/subjects/MAT").text
 
-        # Dva zapisa z različnim `taken_at`: obrnjen `ORDER BY` ta test podre.
+        # Dva zapisa z različnim `taken_at`: obrnjen vrstni red tednov ta test
+        # podre.
         assert besedilo.index(UUID_DVA) < besedilo.index(UUID_ENA)
 
     def test_slika_v_seznamu_vodi_na_podrobnosti(
@@ -1415,9 +1419,15 @@ class TestPovecava:
         prikaz = del_povecave(besedilo)
 
         assert re.findall(r'src="([^"]*)"', prikaz) == [f"/admin/materials/{UUID_ENA}/image"]
-        # `max-height: 78vh` velja za `.snov img`. Prikaz stoji za zadnjim
-        # elementom `.snov` (povezava nazaj), torej zunaj njega.
-        assert besedilo.index('<div class="prekritje"') > besedilo.index('class="nazaj"')
+        # Omejitev višine velja za sliko v stolpcu `.snov-slika` (od V5-R01
+        # `max-height: 72vh`). Prikaz stoji za zadnjim elementom `.snov`
+        # (tehnični podatki), torej zunaj njega, in sam višine ne omejuje.
+        assert besedilo.index('<div class="prekritje"') > besedilo.index(
+            '<details class="kartica tehnicno">'
+        )
+        slog = slog_admina()
+        assert re.search(r"\.snov-slika img \{[^}]*max-height: 72vh", slog)
+        assert ".prekritje-sredina img { max-width: 100%; max-height: 100%; }" in slog
 
     def test_prikaz_ima_gumb_za_zapiranje(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -1582,7 +1592,10 @@ class TestPovecava:
 
         assert f'id="prekritje-naslednja" href="/admin/materials/{UUID_ENA}#povecano"' in prva
         assert f'id="prekritje-prejsnja" href="/admin/materials/{UUID_DVA}#povecano"' in druga
-        assert predmet.index(UUID_DVA) < predmet.index(UUID_ENA)
+        # Od V5-R01 so slike **znotraj dneva** od najstarejše naprej, torej v
+        # obratni smeri kot listanje — in ob enakem času odloči isti `id`,
+        # le obrnjeno. Vrstni red ostane določen: nobena slika ne preskoči.
+        assert predmet.index(UUID_ENA) < predmet.index(UUID_DVA)
 
     # --- Meje `ADR-024` ---
 
@@ -2643,7 +2656,7 @@ class TestSlovenskaStevila:
 
     @pytest.mark.parametrize(
         ("koliko", "pricakovano"),
-        [(1, "1 slika,"), (2, "2 sliki,"), (3, "3 slike,"), (5, "5 slik,")],
+        [(1, "1 slika"), (2, "2 sliki"), (3, "3 slike"), (5, "5 slik")],
     )
     def test_seznam_predmeta_sklanja(
         self,
@@ -2660,7 +2673,8 @@ class TestSlovenskaStevila:
 
         besedilo = odjemalec.get("/admin/subjects/MAT").text
 
-        assert f"{pricakovano} najnovejša prva." in besedilo
+        # Vse slike so v istem tednu; od V5-R01 stavek šteje tudi tedne.
+        assert f"{pricakovano} v 1 tednu, najnovejši teden zgoraj." in besedilo
 
     def test_arhiv_sklanja(
         self, odjemalec: TestClient, motor: Engine, slike: Path
@@ -2785,18 +2799,25 @@ class TestKljukiceNaStraniPredmeta:
         assert 'name="csrf"' in obrazec_izbora(besedilo)
         assert '<input type="hidden" name="subject" value="MAT">' in besedilo
 
-    def test_gumb_stoji_nad_seznamom_in_pod_njim(
+    def test_gumb_je_v_vrstici_izbora_ki_ostane_na_zaslonu(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
         # Predmet nosi čez leto nekaj sto slik; en sam gumb na dnu bi pomenil
-        # drsenje čez cel predmet po vsakem izboru na vrhu.
+        # drsenje čez cel predmet po vsakem izboru na vrhu. Do V5-R01 sta to
+        # reševala dva gumba, nad seznamom in pod njim; odtlej je gumb eden, v
+        # vrstici izbora, ki je **prilepljena** na dno zaslona (`POC-02`,
+        # stran Predmet). Kar test varuje, ostane: gumb je dosegljiv brez
+        # drsenja in je v obrazcu izbora.
         zapisi(motor, slike)
 
         besedilo = odjemalec.get("/admin/subjects/MAT").text
+        obrazec = obrazec_izbora(besedilo)
 
-        assert besedilo.count("Prepisi izbranih") == 2
-        # Oba **v istem obrazcu**: gumb zunaj njega ne bi poslal ničesar.
-        assert obrazec_izbora(besedilo).count("Prepisi izbranih") == 2
+        assert besedilo.count("Prepisi izbranih") == 1
+        # **V obrazcu**: gumb zunaj njega ne bi poslal ničesar.
+        vrstica = obrazec[obrazec.index('<div class="vrstica-izbora">') :]
+        assert "Prepisi izbranih" in vrstica
+        assert re.search(r"\.vrstica-izbora \{[^}]*position: sticky; bottom:", slog_admina())
 
     def test_izberi_vse_obkljuka_vse(
         self, odjemalec: TestClient, motor: Engine, slike: Path

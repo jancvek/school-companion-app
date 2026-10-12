@@ -91,6 +91,17 @@ def kratek_datum(trenutek: datetime) -> str:
     return f"{lokalni.day}. {lokalni.month}."
 
 
+def cas_z_imenom_dneva(trenutek: datetime) -> str:
+    """Trenutek kot naslov strani slike (`Četrtek, 8. oktober ob 10:41`).
+
+    Brez leta: stran nosi poln datum v podatkih ob sliki. Prva črka je velika,
+    ker niz stoji kot naslov.
+    """
+    lokalni = v_domacem(trenutek)
+    dan = dan_z_imenom(lokalni.date())
+    return f"{dan[0].upper()}{dan[1:]} ob {lokalni:%H:%M}"
+
+
 def dan_z_imenom(dan: date) -> str:
     """Koledarski dan z imenom dneva in meseca (`četrtek, 8. oktober`).
 

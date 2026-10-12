@@ -181,3 +181,46 @@ pokriva (nista testa zgradbe). Lastnik je 12. 10. 2026 odobril dvig:
 `test_rezultat_je_sest_poizvedb` s 6 na 7. Lastnost, ki jo varujeta — stalno
 število ne glede na dolžino seznama — ostane; imeni testov ostaneta, ker ju
 navajajo starejši zapisi.
+
+### C1 — vrstni red pravil praznega dne: urnik pred koledarjem
+
+C našteje „današnji in prihodnji dan → še pride" kot **prvo** pravilo.
+Izvedba ga da na **tretje** mesto, za „nihče nima urnika" in „predmeta ta dan
+ni na urniku": prihodnja sreda, ko matematike ni na urniku, je „Ni na urniku"
+in ne „Še pride", družina brez urnika pa na prihodnjih dneh ne dobi nobenega
+razloga. „Še pride" bi v obeh primerih obljubil sliko, ki je urnik ne
+predvideva. Za dan, ko predmet **je** na urniku, velja C nespremenjeno —
+tudi današnji dan je ves dan „še pride".
+
+To je odstopanje od zapisanega vrstnega reda in ga lastnik potrdi ali zavrne
+ob sprejemu; obrat je ena vrstica v `urnik.prazen_dan_predmeta`.
+
+### E1 — en gumb v vrstici izbora namesto dveh
+
+`V3-R11` je „Prepisi izbranih" (in `V4-R07` „Kreiraj test") postavil nad
+seznam **in** pod njega, da po izboru na vrhu ni treba drseti čez cel predmet.
+`POC-02` (posnetek 03) ima namesto tega **vrstico izbora**, prilepljeno na dno
+zaslona. Gumb je zato eden; namen kriterija — dosegljiv brez drsenja — ostane.
+Brskalnik brez `:has()` vrstico kaže ves čas, prav tako prilepljeno.
+
+Števec v vrstici se glasi „Izbrano: 3" in ne „3 izbranih" kot na posnetku:
+število izpiše CSS števec, ki besede ne zna sklanjati, oblika z dvopičjem pa
+je pravilna pri vsakem številu (`docs/01-arhitektura.md`, „Slovenske oblike
+števil").
+
+Besedilo rdečega dne je „Po urniku je bil ta predmet, slik ni." in ne „…je
+bila matematika…": glagol se mora ujemati s spolom imena predmeta, ki ga ta
+projekt ne sklanja.
+
+### I1 — povečava ostane skripta V2-R08, brez `:target`
+
+`POC-02` omenja povečavo s CSS `:target` na sidru `#povecano`; faza 1 je to
+predvidela kot pot brez skripte. Izvedba je **ne** doda: skripta ob zaprtju
+sidro odstrani s `history.replaceState`, to pa stanja `:target` v brskalnikih
+ne posodobi — prikaz bi po zaprtju ostal odprt. Pot brez skripte ostane tista
+iz `ADR-024` (meja 3): povezava odpre izvirnik.
+
+Posnetek 04 ima pod sliko gumb „Povečaj". Ta je druga povezava
+`a[data-povecava]` na isti izvirnik, zato skripta klik prestreže na **vseh**
+takih povezavah (`querySelectorAll` namesto `querySelector`). To je edina
+sprememba skripte; njene meje ostanejo.

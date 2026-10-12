@@ -3,7 +3,19 @@
 {% block naslov %}{{ koda }}{% endblock %}
 
 {% block vsebina %}
-  <h1>{{ koda }} — {{ oznaka }}</h1>
+  <ol class="drobtine">
+    <li><a href="/admin">Predmeti</a></li>
+  </ol>
+
+  <div class="naslov-s-platnico">
+    <span class="platnica" style="--barva: {{ barva }}" aria-hidden="true">{{ koda }}</span>
+    <div>
+      <h1><span class="skrito">{{ koda }} — </span>{{ oznaka }}</h1>
+      {% if tedni %}
+        <p class="pod">{{ koliko_opis }} v {{ tednov_opis }}, najnovejši teden zgoraj.</p>
+      {% endif %}
+    </div>
+  </div>
 
   {# Shranjeni testi tega predmeta (V4-R08): samo povezava s številom, seznam
      je na svoji strani (`docs/odlocitve/ADR-055` A). Izriše se tudi pri
@@ -14,9 +26,7 @@
     </p>
   {% endif %}
 
-  {% if snovi %}
-    <p class="pod">{{ koliko_opis }}, najnovejša prva.</p>
-
+  {% if tedni %}
     {# Celoten seznam je en obrazec: izbor gre s `POST` in ne z `GET`, ker bi
        tristo identifikatorjev dalo naslov, ki odpove prav pri največjem
        izboru (`docs/odlocitve/ADR-048` B). Brez JavaScripta je to navaden
@@ -25,85 +35,114 @@
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="subject" value="{{ koda }}">
 
-      {# Gumb stoji nad seznamom **in** pod njim. Predmet nosi čez šolsko leto
-         nekaj sto slik; en sam gumb na dnu bi pomenil, da se po odkljukanju
-         treh slik na vrhu odvrtiš čez vse ostale. Oba sta v istem obrazcu in
-         delata isto. #}
-      <p class="izbor">
-        <button class="gumb gumb-obdelava" type="submit">Prepisi izbranih</button>
+      <div class="orodja">
+        <p class="zamolklo">Izberi slike za prepis{% if kreiraj_test %} ali test{% endif %}.</p>
+        {# „Izberi vse" je povezava in ne skripta (`ADR-048` G); „Počisti
+           izbor" je ista stran brez parametra. Privzeto ni obkljukana
+           nobena. Enako „Izberi teden" in „Izberi dan" spodaj (`ADR-060` E). #}
+        <p class="povezave-izbora">
+          <a href="{{ pot_predmeta }}?vse=1">Izberi vse</a>
+          <a href="{{ pot_predmeta }}">Počisti izbor</a>
+        </p>
+      </div>
+
+      {% for teden in tedni %}
+        <section class="teden">
+          <header class="teden-glava">
+            <h2>{{ teden.razpon }}</h2>
+            {% if teden.oznaka %}
+              <span class="oznaka{% if loop.first %} ok{% endif %}">{{ teden.oznaka }}</span>
+            {% endif %}
+            <span class="zamolklo">{{ teden.stevilo_opis }}</span>
+            <a class="izberi" href="{{ teden.href_izberi }}">Izberi teden</a>
+          </header>
+
+          <div class="teden-dnevi" style="--stolpcev: {{ teden.stolpcev }}">
+            {% for dan in teden.dnevi %}
+              <div class="dan{% if dan.je_danes %} danes-dan{% endif %}{% if dan.prazen %} prazen-dan {{ dan.prazen.stanje }}{% endif %}">
+                <h3 class="dan-glava">
+                  {{ dan.ime }} <span class="zamolklo">{{ dan.datum }}</span>
+                  {% if dan.je_danes %}<span class="oznaka polna">danes</span>{% endif %}
+                </h3>
+
+                {% if dan.snovi %}
+                  <ul class="slicice">
+                    {% for snov in dan.snovi %}
+                      <li>
+                        {# Kljukica je **sosed** povezave in ne njen otrok:
+                           klik nanjo ne sme odpreti podrobnosti (kriterij
+                           V3-R11). `aria-label` nosi cel čas, ker vidne
+                           besede ob okencu ni: bralnik zaslona bi sicer
+                           prebral dvajset enakih okenc brez podatka, katero
+                           sliko izbira. #}
+                        <input class="kljukica" type="checkbox" name="snov" value="{{ snov.id }}"
+                               aria-label="Izberi sliko {{ snov.cas }}"
+                               {% if snov.obkljukana %}checked{% endif %}>
+
+                        <a href="/admin/materials/{{ snov.id }}">
+                          {% if snov.velikost is not none %}
+                            {# `loading="lazy"` je edino, kar ta seznam drži
+                               hiter: brskalnik naloži samo slike, ki so na
+                               zaslonu. Brez tega bi stran z dvesto posnetki
+                               prenesla ~80 MB (odločitev iz faze 1). #}
+                            <img src="/admin/materials/{{ snov.id }}/image" alt="" loading="lazy">
+                          {% else %}
+                            {# Brez tega bi brskalnik na tem mestu narisal
+                               ikono pokvarjene slike — kar je videti kot
+                               napaka strani, ne kot podatek o manjkajoči
+                               datoteki. #}
+                            <span class="brez-slike">slike na disku ni</span>
+                          {% endif %}
+                          {# Stanje samo, kadar ni „obdelano" (`POC-02`). #}
+                          {% if snov.znacka %}
+                            <span class="znacka {{ snov.znacka.razred }}" title="{{ snov.znacka.polno }}">{{ snov.znacka.besedilo }}</span>
+                          {% endif %}
+                          <span class="opis">
+                            <span class="cas">{{ snov.ura }}</span>
+                            {% if snov.otrok %}<span class="otrok">{{ snov.otrok }}</span>{% endif %}
+                          </span>
+                        </a>
+                      </li>
+                    {% endfor %}
+                  </ul>
+                  <a class="izberi" href="{{ dan.href_izberi }}">Izberi dan</a>
+                {% elif dan.prazen and dan.prazen.besedilo %}
+                  <p class="razlog">{{ dan.prazen.besedilo }}</p>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        </section>
+      {% endfor %}
+
+      {# Vrstica izbora. Kjer brskalnik pozna `:has()`, se pokaže šele ob
+         prvi kljukici in šteje izbrane s CSS števcem — brez skripte
+         (`ADR-056` F). Brez `:has()` je vidna ves čas; gumba delata enako. #}
+      <div class="vrstica-izbora">
+        <span class="izbranih">Izbrano: <span class="stevilo-izbranih"></span></span>
+        <button class="gumb" type="submit">Prepisi izbranih</button>
         {# Drugi gumb istega obrazca (V4-R07): `formaction` pošlje **isti**
            izbor na drug naslov, brez skripte — ta stran ostane brez nje
            (`docs/odlocitve/ADR-054`, meja 3). Samo pri predmetu, za katerega
            znamo sestaviti test. #}
         {% if kreiraj_test %}
-          <button class="gumb gumb-obdelava" type="submit"
+          <button class="gumb polni" type="submit"
                   formaction="/admin/assessments/compose">Kreiraj test</button>
         {% endif %}
-        {# „Izberi vse" je povezava in ne skripta (`ADR-048` G); „Počisti
-           izbor" je ista stran brez parametra. Privzeto ni obkljukana
-           nobena. #}
-        <a href="{{ pot_predmeta }}?vse=1">Izberi vse</a>
-        <a href="{{ pot_predmeta }}">Počisti izbor</a>
-      </p>
-
-      <ul class="mreza">
-        {% for snov in snovi %}
-          <li>
-            {# Kljukica je **sosed** povezave in ne njen otrok: klik nanjo ne
-               sme odpreti podrobnosti (kriterij V3-R11). Zato svoja `label`,
-               ki zajame tudi čas — zadetna površina je večja od okvirčka,
-               povezava pa ostane cela. #}
-            <label class="kljukica">
-              {# `aria-label` na vnosu, ker je vidna beseda pri vseh enaka:
-                 bralnik zaslona bi sicer prebral dvajset enakih „Izberi" brez
-                 podatka, katero sliko izbira. Čas je isti niz kot v opisu
-                 spodaj. #}
-              <input type="checkbox" name="snov" value="{{ snov.id }}"
-                     aria-label="Izberi sliko {{ snov.cas }}"
-                     {% if vse_obkljukano %}checked{% endif %}>
-              Izberi
-            </label>
-
-            <a href="/admin/materials/{{ snov.id }}">
-              {% if snov.velikost is not none %}
-                {# `loading="lazy"` je edino, kar ta seznam drži hiter: brskalnik
-                   naloži samo slike, ki so na zaslonu. Brez tega bi stran z dvesto
-                   posnetki prenesla ~80 MB (odločitev iz faze 1). #}
-                <img src="/admin/materials/{{ snov.id }}/image" alt="" loading="lazy">
-              {% else %}
-                {# Brez tega bi brskalnik na tem mestu narisal ikono pokvarjene
-                   slike — kar je videti kot napaka strani, ne kot podatek o
-                   manjkajoči datoteki. #}
-                <span class="brez-slike">slike na disku ni</span>
-              {% endif %}
-              <span class="opis">
-                <span class="cas">{{ snov.cas }}{% if snov.otrok %} · {{ snov.otrok }}{% endif %}</span>
-                <span class="stanje">{{ snov.stanje }}</span>
-              </span>
-            </a>
-          </li>
-        {% endfor %}
-      </ul>
-
-      <p class="izbor">
-        <button class="gumb gumb-obdelava" type="submit">Prepisi izbranih</button>
-        {% if kreiraj_test %}
-          <button class="gumb gumb-obdelava" type="submit"
-                  formaction="/admin/assessments/compose">Kreiraj test</button>
-        {% endif %}
-        <span class="drobno">
-          Prepisi označenih slik se izpišejo v enem polju, od najstarejše
-          naprej. Nič se ne shrani.
-        </span>
+        <a href="{{ pot_predmeta }}">Počisti</a>
+      </div>
+      <p class="drobno">
+        Prepisi označenih slik se izpišejo v enem polju, od najstarejše
+        naprej. Nič se ne shrani.
       </p>
     </form>
   {% else %}
-    <p class="opozorilo">
-      Za ta predmet na strežniku še ni nobene slike. Če je bila slika
-      posneta danes, morda še čaka na prenos — to je vidno v aplikaciji na
-      telefonu, ne tukaj.
+    <p class="obvestilo tiho">
+      <span>
+        Za ta predmet na strežniku še ni nobene slike. Če je bila slika
+        posneta danes, morda še čaka na prenos — to je vidno v aplikaciji na
+        telefonu, ne tukaj.
+      </span>
     </p>
   {% endif %}
-
-  <a class="nazaj" href="/admin">← Nazaj na predmete</a>
 {% endblock %}

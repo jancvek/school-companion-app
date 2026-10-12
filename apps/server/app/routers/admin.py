@@ -15,6 +15,7 @@ vrne v vrsto; ker to zavrže prejšnji rezultat, je `POST` in ne povezava
 import math
 import re
 from collections.abc import Iterable, Sequence
+from datetime import date
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -28,14 +29,26 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from app import preizkus, sistem
-from app.besedilo import SLIKE, ZNAKI, stevilo_z_besedo
-from app.casi import cas, cas_ali_prazno, dan_z_imenom, danes, dnevi_od_do, v_domacem
+from app.besedilo import SLIKE, VPRASANJA, ZNAKI, stevilo_z_besedo
+from app.casi import (
+    cas,
+    cas_ali_prazno,
+    cas_z_imenom_dneva,
+    dan_z_imenom,
+    danes,
+    dnevi_od_do,
+    ura,
+    v_domacem,
+)
 from app.danes import je_vikend, sestavi_kartico
 from app.db import (
+    ClanDruzine,
     ClaniRepository,
     KviziRepository,
     MaterialsRepository,
+    PolozajVPredmetu,
     PreizkusiRepository,
+    ScheduleRepository,
 )
 from app.dependencies import (
     daj_nastavitve,
@@ -43,6 +56,7 @@ from app.dependencies import (
     daj_repozitorij_clanov,
     daj_repozitorij_kvizov,
     daj_repozitorij_preizkusov,
+    daj_repozitorij_urnikov,
 )
 from app.models import STATUS_V_OBDELAVI, Material, Question
 from app.prepisi import Prepisi, SnovZaPrepis, VprasanjeZaPrepis, izbrane, sestavi
@@ -57,6 +71,14 @@ from app.subjects import (
     oznaka_predmeta,
     oznaka_statusa,
     poisci_predmet,
+)
+from app.tedni import Teden, razvrsti_po_tednih, v_tednih
+from app.urnik import (
+    PRAZEN_BREZ_RAZLOGA,
+    PRAZEN_MANJKA,
+    PRAZEN_NI_NA_URNIKU,
+    PRAZEN_SE_PRIDE,
+    prazen_dan_predmeta,
 )
 
 #: Predpona vseh poti operaterske strani.
@@ -253,24 +275,38 @@ def _povezava_povecave(material_id: str | None) -> str | None:
     return f"{PREDPONA}/materials/{material_id}{OZNAKA_POVECAVE}"
 
 
-def _pogled_povecave(
-    material: Material, repozitorij: MaterialsRepository
-) -> dict[str, Any]:
+def _pogled_povecave(material: Material, polozaj: PolozajVPredmetu | None) -> dict[str, Any]:
     """Kar potrebuje povečan prikaz na strani s podrobnostmi (V2-R08).
 
     Puščic arhivirana snov nima, ker je v naboru predmeta ni; `listanje` to
     pove predlogi, da ji ni treba sklepati iz dveh praznih sosedov — tudi
     edina slika predmeta ima oba prazna, a puščici ima, le neaktivni.
     """
-    prejsnji, naslednji = repozitorij.sosedi_v_predmetu(material)
     return {
         # Isto sidro kot v povezavah na soseda. Iz ene konstante, sicer bi se
         # skripta in povezave razšli po tihem in prikaz ob prihodu ne bi odprl.
         "oznaka": OZNAKA_POVECAVE,
         "ime_prenosa": _ime_prenosa(material),
         "listanje": material.archived_at is None,
-        "prejsnja": _povezava_povecave(prejsnji),
-        "naslednja": _povezava_povecave(naslednji),
+        "prejsnja": _povezava_povecave(polozaj.prejsnji if polozaj else None),
+        "naslednja": _povezava_povecave(polozaj.naslednji if polozaj else None),
+    }
+
+
+def _pogled_listanja(polozaj: PolozajVPredmetu | None) -> dict[str, Any] | None:
+    """Listanje na strani slike: novejša, „3 od 24", starejša (V5-R01).
+
+    Isti nabor in vrstni red kot puščici povečanega prikaza, le brez sidra:
+    te povezave peljejo na stran sosede, ne v njen povečan prikaz. `None` za
+    arhivirano snov, ki je v naboru predmeta ni.
+    """
+    if polozaj is None:
+        return None
+    return {
+        "novejsa": f"{PREDPONA}/materials/{polozaj.prejsnji}" if polozaj.prejsnji else None,
+        "starejsa": f"{PREDPONA}/materials/{polozaj.naslednji}" if polozaj.naslednji else None,
+        "mesto": polozaj.mesto,
+        "vseh": polozaj.vseh,
     }
 
 
@@ -429,14 +465,21 @@ def predmet(
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
     shranjeni: Annotated[PreizkusiRepository, Depends(daj_repozitorij_preizkusov)],
+    urniki: Annotated[ScheduleRepository, Depends(daj_repozitorij_urnikov)],
     vse: str | None = None,
+    teden: str | None = None,
+    dan: str | None = None,
 ) -> Response:
-    """Slike enega predmeta, najnovejša prva.
+    """Slike enega predmeta po tednih, najnovejši teden prvi (V5-R01).
 
     `?vse=1` izriše isto stran z vsemi kljukicami (V3-R11). Povezava in ne
     skripta: „Izberi vse" mora delati tudi brez nje (`docs/odlocitve/ADR-048`
     G). Parameter se primerja točno z `1` — vrednost, ki je ne izriše nobena
     naša povezava, ne sme po tihem obkljukati celega predmeta.
+
+    `?teden=<ponedeljek>` in `?dan=<dan>` (oba `YYYY-MM-DD`) obkljukata slike
+    enega tedna oziroma dneva, po istem vzorcu (`ADR-060` E). Vrednost, ki ni
+    datum prikazanega tedna ali dneva, ne obkljuka ničesar.
     """
     # Pretvornik `:path` požre tudi končno poševnico, zato `MAT/` ne bi bil
     # `MAT`. Starlette bi to sicer preusmeril sam, a pri `:path` pot obstaja
@@ -451,13 +494,15 @@ def predmet(
             predloge, request, f"Predmeta s kodo „{koda}“ ni ne na seznamu ne v bazi."
         )
 
-    # Imena **pred** zanko in ne v njej: znotraj izpeljanega seznama bi bila
+    # Otroci **pred** zanko in ne v njej: znotraj izpeljanega seznama bi bila
     # to ena poizvedba na sliko, seznam predmeta pa bo čez šolsko leto dolg
     # nekaj sto vrstic (`docs/odlocitve/ADR-017` A). Arhiv ima isto potezo.
-    imena = imena_otrok(clani)
+    otroci = clani.otroci()
+    imena = _imena_iz(otroci)
     mapa_slik = mapa_druzine(nastavitve.images_dir, repozitorij.family_id)
 
     kreiraj_test = preizkus.navodilo_za(koda) is not None
+    tedni = razvrsti_po_tednih((v_domacem(snov.taken_at).date(), snov) for snov in snovi)
 
     return predloge.TemplateResponse(
         request,
@@ -465,13 +510,25 @@ def predmet(
         {
             "koda": koda,
             "oznaka": oznaka_predmeta(koda),
+            "barva": barva_predmeta(koda),
             "koliko_opis": stevilo_z_besedo(len(snovi), SLIKE),
-            "snovi": [_pogled(snov, mapa_slik, imena) for snov in snovi],
+            "tednov_opis": v_tednih(len(tedni)),
+            "tedni": _pogled_tednov(
+                tedni,
+                koda=koda,
+                otroci=otroci,
+                repozitorij=repozitorij,
+                urniki=urniki,
+                mapa_slik=mapa_slik,
+                imena=imena,
+                obkljukaj_vse=vse == "1",
+                obkljukaj_teden=teden,
+                obkljukaj_dan=dan,
+            ),
             # Pot je tu in ne v predlogi, ker mora skozi `quote`: koda s
             # poševnico ali vprašajem bi sicer povezavo razbila (isti razlog
             # kot pri `_po_umiku`).
             "pot_predmeta": pot_predmeta(koda),
-            "vse_obkljukano": vse == "1",
             # Gumb „Kreiraj test" (V4-R07) samo pri predmetu, ki ima navodilo
             # za model — danes matematika (`ADR-053` D).
             "kreiraj_test": kreiraj_test,
@@ -487,6 +544,139 @@ def predmet(
             ),
         },
     )
+
+
+#: Kratka oznaka stanja na sličici, in njen razred. Obdelana in berljiva slika
+#: oznake nima — stanje se pokaže samo, kadar ni „obdelano" (`POC-02`).
+_ZNACKE_STANJA: dict[str, tuple[str, str]] = {
+    "new": ("čaka", "caka"),
+    STATUS_V_OBDELAVI: ("v obdelavi", "caka"),
+    "failed": ("napaka", "napaka"),
+}
+
+
+def _razred_stanja(material: Material) -> str:
+    """Razred oznake stanja na strani slike: `ok`, `caka` ali `napaka`."""
+    if material.status == "ready":
+        return "napaka" if material.readable is False else "ok"
+    return "napaka" if material.status == "failed" else "caka"
+
+
+def _znacka(material: Material) -> dict[str, str] | None:
+    """Oznaka na sličici ali `None`; polno stanje gre v `title`."""
+    polno = oznaka_statusa(material.status, material.readable)
+    if material.status == "ready":
+        if material.readable is False:
+            return {"besedilo": "ni berljiva", "razred": "napaka", "polno": polno}
+        return None
+    besedilo, razred = _ZNACKE_STANJA.get(material.status, (polno, "caka"))
+    return {"besedilo": besedilo, "razred": razred, "polno": polno}
+
+
+#: Besedilo praznega dne po stanju (`ADR-060` C). „Brez razloga" besedila
+#: nima. Glagol se ujema s samostalnikom „predmet" in ne z imenom predmeta —
+#: „je bila matematika" bi pri naravoslovju zahtevalo drug spol.
+_BESEDILA_PRAZNEGA_DNE = {
+    PRAZEN_NI_NA_URNIKU: "Ni na urniku.",
+    PRAZEN_SE_PRIDE: "Še pride.",
+    PRAZEN_MANJKA: "Po urniku je bil ta predmet, slik ni.",
+    PRAZEN_BREZ_RAZLOGA: "",
+}
+
+
+def _imena_iz(otroci: Sequence[ClanDruzine]) -> dict[str, str]:
+    """Kot `imena_otrok`, iz že prebranega seznama otrok."""
+    if len(otroci) < 2:
+        return {}
+    return {otrok.user_id: otrok.display_name for otrok in otroci}
+
+
+def _pogled_tednov(
+    tedni: Sequence[Teden[Material]],
+    *,
+    koda: str,
+    otroci: Sequence[ClanDruzine],
+    repozitorij: MaterialsRepository,
+    urniki: ScheduleRepository,
+    mapa_slik: Path,
+    imena: dict[str, str],
+    obkljukaj_vse: bool,
+    obkljukaj_teden: str | None,
+    obkljukaj_dan: str | None,
+) -> list[dict[str, Any]]:
+    """Tedni, pripravljeni za predlogo: slike, kljukice in razlogi praznih dni.
+
+    Poizvedb je stalno število ne glede na dolžino seznama: po ena na otroka
+    za njegov urnik in **ena** za vse dni slikanja v prikazanem obdobju.
+    Predmet brez slik ne bere ne urnikov ne dni.
+    """
+    if not tedni:
+        return []
+
+    zdaj = danes()
+    veljavni = {
+        otrok.user_id: urnik
+        for otrok in otroci
+        if (urnik := urniki.urnik(otrok.user_id)) is not None
+    }
+    # Kdo je kateri lokalni dan slikal *karkoli*: brez tega bi bil vsak
+    # praznik rdeč (`ADR-028` E2). Brez urnikov podatka ne potrebujemo.
+    slikali: dict[date, set[str]] = {}
+    if veljavni:
+        od, do = dnevi_od_do(tedni[-1].ponedeljek, zdaj)
+        for otrok_id, trenutek in repozitorij.trenutki_slikanja(od, do):
+            slikali.setdefault(v_domacem(trenutek).date(), set()).add(otrok_id)
+
+    pot = pot_predmeta(koda)
+    pogledi = []
+    for teden in tedni:
+        ponedeljek = teden.ponedeljek.isoformat()
+        cel_teden = obkljukaj_vse or obkljukaj_teden == ponedeljek
+        dnevi = []
+        for dan in teden.dnevi:
+            iso = dan.datum.isoformat()
+            obkljukan = cel_teden or obkljukaj_dan == iso
+            prazen = None
+            if not dan.snovi and not dan.je_vikend:
+                razlog = prazen_dan_predmeta(
+                    koda, dan.datum, zdaj, veljavni, slikali.get(dan.datum, ())
+                )
+                besedilo = _BESEDILA_PRAZNEGA_DNE[razlog.stanje]
+                # Ime je vrednost pred besedilom, nikoli del povedi, in samo
+                # pri več kot enem otroku (`ADR-039` F3).
+                kdo = ", ".join(imena[otrok] for otrok in razlog.komu_manjka if otrok in imena)
+                if kdo:
+                    besedilo = f"{kdo} · {besedilo[0].lower()}{besedilo[1:]}"
+                prazen = {"stanje": razlog.stanje, "besedilo": besedilo}
+            dnevi.append(
+                {
+                    "ime": dan.ime,
+                    "datum": dan.datum_kratko,
+                    "je_danes": dan.datum == zdaj,
+                    "href_izberi": f"{pot}?dan={iso}",
+                    "prazen": prazen,
+                    "snovi": [
+                        {
+                            **_pogled(snov, mapa_slik, imena),
+                            "ura": ura(snov.taken_at),
+                            "znacka": _znacka(snov),
+                            "obkljukana": obkljukan,
+                        }
+                        for snov in dan.snovi
+                    ],
+                }
+            )
+        pogledi.append(
+            {
+                "razpon": teden.razpon,
+                "oznaka": teden.oznaka(zdaj),
+                "stevilo_opis": stevilo_z_besedo(teden.stevilo, SLIKE),
+                "href_izberi": f"{pot}?teden={ponedeljek}",
+                "stolpcev": len(teden.dnevi),
+                "dnevi": dnevi,
+            }
+        )
+    return pogledi
 
 
 def pot_predmeta(koda: str) -> str:
@@ -670,11 +860,12 @@ def snov(
 
     mapa_slik = mapa_druzine(nastavitve.images_dir, repozitorij.family_id)
     pogled = _pogled_podrobno(material, mapa_slik, imena_otrok(clani))
-    # Snov brez datoteke povečanega prikaza nima, zato tudi poizvedbe po
-    # sosedih ne plača.
-    povecava = (
-        _pogled_povecave(material, repozitorij) if pogled["velikost"] is not None else None
-    )
+    # Ena poizvedba za oboje: listanje na strani (V5-R01) in puščici
+    # povečanega prikaza (V2-R08). Arhivirana snov je ne plača.
+    polozaj = repozitorij.polozaj_v_predmetu(material)
+    # Snov brez datoteke povečanega prikaza nima.
+    povecava = _pogled_povecave(material, polozaj) if pogled["velikost"] is not None else None
+    teden = razvrsti_po_tednih([(v_domacem(material.taken_at).date(), material)])[0]
 
     return predloge.TemplateResponse(
         request,
@@ -684,7 +875,18 @@ def snov(
         # snov z neznano kodo spravi nazaj med deset. Da taka snov v izbiri
         # nima tihega privzetka, poskrbi `koda_znana` in vodilna možnost v
         # predlogi.
-        {"snov": pogled, "povecava": povecava, "predmeti": PREDMETI},
+        {
+            "snov": pogled,
+            "povecava": povecava,
+            "listanje": _pogled_listanja(polozaj),
+            "predmeti": PREDMETI,
+            "naslov_strani": cas_z_imenom_dneva(material.taken_at),
+            "razred_stanja": _razred_stanja(material),
+            "stevilo_vprasanj_opis": stevilo_z_besedo(pogled["stevilo_vprasanj"], VPRASANJA),
+            "barva": barva_predmeta(material.subject),
+            # Tretja drobtina: teden, v katerem je slika na strani predmeta.
+            "teden": teden.razpon,
+        },
     )
 
 
