@@ -134,11 +134,12 @@ class TestPot:
         assert "app.dependencies" not in izvor
         assert "request.state" not in izvor
 
-    def test_head_odgovori_kot_get_brez_telesa(self, obiskovalec: PrijavljenOdjemalec) -> None:
+    def test_head_odgovori_kot_get(self, obiskovalec: PrijavljenOdjemalec) -> None:
+        """`curl -I` in nadzor živosti ne smeta videti napake. Telo odreže
+        strežnik, ne aplikacija, zato ga ta test ne presoja."""
         odgovor = obiskovalec.head(predstavitev.POT)
 
         assert odgovor.status_code == 200
-        assert odgovor.content == b""
         assert "set-cookie" not in odgovor.headers
 
     @pytest.mark.parametrize("metoda", ["POST", "PUT", "DELETE"])
@@ -186,6 +187,8 @@ class TestBrezSkripteInTujihVirov:
         for naslov in naslovi:
             assert naslov.startswith(("/", "#")), naslov
             assert not naslov.startswith("//"), naslov
+            # Brskalnik „/\" bere kot „//".
+            assert "\\" not in naslov, naslov
         assert "<form" not in stran
         assert "<img" not in stran
         assert "<iframe" not in stran
@@ -342,6 +345,47 @@ class TestVsebina:
         # Potrjeno ob planu: opombe „se zatikajo" v prikazu statistike ni.
         assert "kandidat" not in besedilo
         assert "Ulomki se zatikajo" not in besedilo
+        # G11: kviz se sestavi iz snovi, ne iz posameznih vprašanj.
+        assert "Ti izbereš snov in koliko vprašanj gre v kviz" in besedilo
+        assert "Vprašanj na sliko" in besedilo
+        for niz in ("izbereš vprašanja", "katera gredo v kviz", "vprašanja izbrana"):
+            assert niz not in besedilo.lower(), niz
+        # G12: prikaz telefona nosi oznake aplikacije in nič drugega.
+        assert "Vprašanje 2 od 4" in besedilo
+        for niz in ("Kako ti je šlo?", "2 / 4", "Odgovor "):
+            assert niz not in besedilo, niz
+        # G14.
+        assert "Nobena poizvedba" not in besedilo
+
+    def test_tocke_na_listu_se_sestejejo_v_glavo(self, stran: str) -> None:
+        """`ADR-063` G13: list v uvodu ima 14 točk, v urejevalniku 17."""
+        listi = stran.split('<div class="papir">')[1:]
+
+        assert len(listi) == 2
+        for papir, pricakovano in zip(listi, (14, 17), strict=True):
+            papir = papir.split("</ol>")[0]
+            glava = re.search(r"/ (\d+)</p>", papir)
+            assert glava is not None
+            tocke = [int(t) for t in re.findall(r'<span class="tocke">\((\d+) t\)</span>', papir)]
+            assert int(glava.group(1)) == sum(tocke) == pricakovano
+
+    def test_stevila_v_prikazu_kviza_se_ujemajo(self, stran: str) -> None:
+        """Predogled našteje toliko vprašanj, kot jih napove, in telefon šteje do istega."""
+        predogled = re.search(
+            r"Predogled · (\d+) vprašanja</p>\s*<ol class=\"predogled-vprasanj\">(.*?)</ol>",
+            stran,
+            re.S,
+        )
+        assert predogled is not None
+        stevilo = int(predogled.group(1))
+
+        assert predogled.group(2).count("<li>") == stevilo
+        assert f"Vprašanje 2 od {stevilo}" in stran
+        # Dve izbrani sliki po dve vprašanji.
+        na_sliko = re.search(r'<span class="lazno-polje ozko">(\d+)</span>', stran)
+        assert na_sliko is not None
+        assert stran.count('<p class="vprasanje izbrano">') * int(na_sliko.group(1)) == stevilo
+        assert f"{stran.count('<p class=\"vprasanje izbrano\">')} sliki izbrani" in stran
 
     def test_stran_ne_obljublja_cesar_ni(self, stran: str) -> None:
         besedilo = _besedilo(stran).lower()

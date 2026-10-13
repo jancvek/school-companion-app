@@ -1,4 +1,4 @@
-"""Javna predstavitvena stran na `GET /` (V6-R03).
+"""Javna predstavitvena stran na `/` (V6-R03); `GET` in `HEAD`.
 
 Edini usmerjevalnik, ki streže HTML zunaj `/admin`. **Nima odvisnosti s sejo,
 družino ali bazo** in jih ne sme dobiti (`docs/odlocitve/ADR-059` A): stran je

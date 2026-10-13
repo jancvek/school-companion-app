@@ -270,7 +270,7 @@ main * { min-width: 0; }
 .ulomek { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; font-size: 0.85em; line-height: 1.1; margin: 0 0.1em; }
 .ulomek span:first-child { border-bottom: 1px solid currentColor; padding: 0 0.15em; }
 
-/* Kvizi: izbor vprasanj, telefon, statistika. */
+/* Kvizi: izbor snovi s predogledom, telefon, statistika. */
 .kvizi-mreza { display: grid; grid-template-columns: minmax(0, 10fr) auto minmax(0, 9fr); gap: 1.5rem; align-items: center; margin-top: 2rem; }
 .kvizi-mreza .prikaz { margin-top: 0; padding: 1.25rem; }
 .vprasanje { display: flex; align-items: center; gap: 0.7rem; margin: 0 0 0.25rem; padding: 0.55rem 0.7rem; border-radius: 6px; font-size: 0.9rem; }

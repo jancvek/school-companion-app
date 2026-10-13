@@ -654,15 +654,17 @@ ugotovil, da prijava ne velja. Izvzeti so `GET /health`, `POST /auth/link`,
 
 #### Predstavitvena stran (V6-R03)
 
-`GET /` vrne javno stran, za vsakogar isto — tudi za prijavljenega starša
+`GET /` (in `HEAD`) vrne javno stran, za vsakogar isto — tudi za prijavljenega starša
 (`ADR-063` A). Ne bere ne seje ne baze in ne postavi piškotka; v njej ni
 skripte in nobenega naslova tujega strežnika (`ADR-059` B). Gumbi registracije
 so zato **povezave** na `/admin/register`, ne obrazci, in jih na namestitvi
 brez Googla ni.
 
-Stran je obljuba javnosti: kar trdi, mora `main` znati. Imena, ki jih navaja
-iz vmesnika (štiri ocene, predmeti, imena gumbov), bere iz istih virov kot
-vmesnik ali jih s temi viri primerja test (`tests/test_predstavitev.py`).
+Stran je obljuba javnosti: kar trdi, mora `main` znati. Štiri ocene in
+predmete bere iz istih virov kot vmesnik; imena gumbov urejevalnika in objave
+s predlogami pregleda primerja test (`tests/test_predstavitev.py`). Ostale
+oznake v prikazih („Vprašanj na sliko", „Vprašanje 2 od 4", „Prepisi") so
+prepisane v predlogo in jih ne varuje nič razen pregleda.
 **Kdor spremeni funkcijo, ki jo stran omenja, popravi tudi stran.** Besedilo o
 zunanji storitvi je `sistem.BESEDILO_ZASEBNOST_JAVNO`, isto kot ob soglasju.
 

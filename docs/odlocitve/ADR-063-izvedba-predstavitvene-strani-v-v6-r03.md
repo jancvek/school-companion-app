@@ -73,7 +73,7 @@ računa" ponudi samo Prijavo — okno registracije tam ne more ničesar.
 
 ### F — prikazi so HTML in CSS
 
-Urejevalnik, list A4, telefon, izbor vprašanj in pas statistike so narisani s
+Urejevalnik, list A4, telefon, izbor snovi za kviz in pas statistike so narisani s
 HTML in CSS (`ADR-059` D), brez slik in brez KaTeX; ulomki so števec nad
 imenovalcem. Edine slike na strani so vgrajeni SVG znaki.
 
@@ -116,7 +116,7 @@ govorita različno, velja aplikacija:
     pregledu). Posnetek kaže kljukico ob vsakem vprašanju in „4 vprašanja
     izbrana"; aplikacija izbira **slike** in število „Vprašanj na sliko"
     (vzame se prvih toliko), vprašanja pa pokaže v predogledu pred objavo.
-    Prikaz zato riše polje „Vprašanj na sliko", tri snovi s kljukico in
+    Prikaz zato riše polje „Vprašanj na sliko", tri snovi (dve s kljukico) in
     predogled štirih vprašanj; besedila pravijo „izbereš snov", ne „izbereš
     vprašanja". Plan ima v tabeli trditev (vrstica 12) še staro besedilo;
     velja ta točka.
