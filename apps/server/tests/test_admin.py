@@ -1298,6 +1298,8 @@ class TestPakiranje:
             "racun-izbris.html",
             "dobrodosli.html",
             "sistem-odobritev.html",
+            # V6-R03: javna predstavitvena stran na `/` (`ADR-063`).
+            "predstavitev.html",
         }
 
 

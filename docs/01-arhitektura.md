@@ -83,6 +83,9 @@ logika testljiva brez naprave.
 | `app/routers/sistem.py` | stran lastnika sistema pod `/admin/system`: družine, odpiranje nove, stanje družine in dejanja nad starši (V3-R05) |
 | `app/routers/racun.py` | nastavitve prijavljenega starša pod `/admin/racun`: načini prijave, povezava in odstranitev Googla (V3-R08); „Moj račun" neodobrene družine in izbris zavrnjenega računa (V6-R02) |
 | `app/registracija.py` | registracija z Googlom: meji javnega obrazca, sporočila, podpisan piškotek z istovetnostjo (V6-R02). Brez FastAPI in brez baze |
+| `app/routers/javno.py` | javna predstavitvena stran na `GET /` (V6-R03): edina pot zunaj `/admin`, ki vrne HTML. Brez seje, brez baze, brez piškotkov |
+| `app/predstavitev.py` | pot, sidra in izmišljeni podatki prikazov predstavitvene strani (V6-R03). Brez FastAPI in brez baze |
+| `app/static/javno/slog.css` | slog predstavitvene strani; žetoni barv prepisani iz sloga pregleda (V6-R03, `ADR-063` B) |
 | `app/google.py` | Google prijava: poti, naslovi, vezivo stanja, razsodbe in **edini modul, ki govori z Googlom** (V3-R08). Brez FastAPI in brez baze |
 | `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository`, `StatistikaRepository` (V2-R04, samo bere), `ClaniRepository` (V3-R06), `ScheduleRepository` (V3-R09) in `PreizkusiRepository` (V4-R08) — vsak z obvezno družino (V3-R01) — ter `DruzineRepository` (od V3-R05 tudi pregled čez družine) in `PrijavaRepository` (V3-R03), edina brez družine; edina pot do baze |
 | `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03); `link_tokens` (V6-R01); `child_id` na snovi, kvizu in poskusu (V3-R07); `schedules` in `schedule_entries` (V3-R09); `credentials.label` (V3-R08); `preizkusi` (V4-R08) |
@@ -645,9 +648,28 @@ spremeniti samo od sebe.
 odvisnost endpointa: FastAPI telo zahteve prebere pred razreševanjem
 odvisnosti, zato bi strežnik večmegabajtno sliko najprej prebral in šele nato
 ugotovil, da prijava ne velja. Izvzeti so `GET /health`, `POST /auth/link`,
-škrbina `POST /auth/login`, obe Googlovi poti brez seje in celotna predpona
-`/admin`; odjava telefona izvzeta **ni**. Popis je pribit v
-`tests/test_security.py`.
+škrbina `POST /auth/login`, obe Googlovi poti brez seje, predstavitvena stran
+`/` (točna pot, V6-R03) in celotna predpona `/admin`; odjava telefona izvzeta
+**ni**. Popis je pribit v `tests/test_security.py`.
+
+#### Predstavitvena stran (V6-R03)
+
+`GET /` (in `HEAD`) vrne javno stran, za vsakogar isto — tudi za prijavljenega starša
+(`ADR-063` A). Ne bere ne seje ne baze in ne postavi piškotka; v njej ni
+skripte in nobenega naslova tujega strežnika (`ADR-059` B). Gumbi registracije
+so zato **povezave** na `/admin/register`, ne obrazci, in jih na namestitvi
+brez Googla ni.
+
+Stran je obljuba javnosti: kar trdi, mora `main` znati. Štiri ocene in
+predmete bere iz istih virov kot vmesnik; imena gumbov urejevalnika in objave
+s predlogami pregleda primerja test (`tests/test_predstavitev.py`). Ostale
+oznake v prikazih („Vprašanj na sliko", „Vprašanje 2 od 4", „Prepisi") so
+prepisane v predlogo in jih ne varuje nič razen pregleda.
+**Kdor spremeni funkcijo, ki jo stran omenja, popravi tudi stran.** Besedilo o
+zunanji storitvi je `sistem.BESEDILO_ZASEBNOST_JAVNO`, isto kot ob soglasju.
+
+Prikazi (urejevalnik, list A4, telefon, statistika) so HTML in CSS z
+izmišljenimi podatki in so bralniku zaslona skriti.
 
 Do V3-R04 je bil tu en sam vgrajen `API_KEY` za vse družine. Odpadel je ostro,
 ne postopno (`ADR-027` C2, `ADR-036`): strežnik ne sprejema obojega.
@@ -780,8 +802,9 @@ posnetkov `docs/poc/POC-02/`).
   za papir nima.
 - **Pisava** je z lastnega strežnika; nobena stran ne naloži ničesar od
   zunaj. `main.py` tip `font/woff2` vpiše sam.
-- **Pet datotek je dosegljivih brez seje** (`JAVNE_DATOTEKE` v `main.py`:
-  slog in štirje rezi pisave), ker jih potrebuje že prijavna stran. Izvzete
+- **Šest datotek je dosegljivih brez seje** (`JAVNE_DATOTEKE` v `main.py`:
+  slog pregleda, slog predstavitvene strani in štirje rezi pisave), ker jih
+  potrebujeta prijavna in predstavitvena stran. Izvzete
   so kot **točne poti** in samo za `GET`/`HEAD`; vse ostalo pod
   `/admin/static` ostane za sejo.
 - **Meni** je na vsaki strani s sejo odobrene družine (`app/meni.py`), razen
@@ -1352,8 +1375,8 @@ končne poševnice, ker Google ujemanje zahteva znak za znak.
 Aplikacija je v načinu **Testing** in zahteva samo `openid`, `email` in
 `profile`. Po `ADR-057` H (Googlova dokumentacija, *Manage App Audience*) se v
 tem načinu lahko prijavi in registrira tudi račun, ki **ni** na seznamu
-preizkusnih uporabnikov. **To na tej namestitvi še ni preverjeno**; preizkus s
-takim računom je pogoj pred mergem `V6-R02`. Če pade (`403: access_denied`),
+preizkusnih uporabnikov; na tej namestitvi je to preverjeno (13. 10. 2026). Če
+bi Google to spremenil (`403: access_denied`),
 registracija deluje samo za ročno vpisane račune, dokler se aplikacija pri
 Googlu ne objavi.
 
@@ -1427,8 +1450,9 @@ sistema ne odobri ali zavrne. Odločitve so v `ADR-057` (kaj) in `ADR-062`
   sta lahko preseženi za nekaj vrstic.
 - **Čakajoč zahtevek starš ne more umakniti**; izbris je samo za zavrnjene.
 - **Staršu, registriranemu z Googlom, gesla ni mogoče nastaviti.**
-- **Povezav na predstavitveno stran in pravila zasebnosti ni** do `V6-R03`;
-  soglasje pokaže celotno besedilo ob potrditvenem polju.
+- **Pravnega besedila pravil zasebnosti ni**; „pravila zasebnosti" ob
+  soglasju vodi na razdelek predstavitvene strani (`/#zasebnost`), celotno
+  besedilo pa ostane tudi ob potrditvenem polju.
 - **Sočasnost izbrisa in odobritve ni dokazana s testom nad Postgresom**;
   utemeljena je z zasnovo stavka (prvi stavek transakcije zaklene vrstico).
 - **Zavrnjene družine ostanejo v bazi**, dokler jih starš ne izbriše sam.

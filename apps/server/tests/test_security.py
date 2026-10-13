@@ -71,10 +71,12 @@ def test_izvzete_so_natanko_te_poti_in_ena_predpona() -> None:
     Zapisan na roko: vsaka pot na tem seznamu je pot brez žetona, zato mora
     nova — ali predpona namesto točne poti — ta test podreti, da se nekdo
     vpraša, ali je bila dogovorjena. `/auth/link` je tu od `V6-R01`: na njej
-    telefon žeton seje šele dobi.
+    telefon žeton seje šele dobi. `/` je tu od `V6-R03` — javna predstavitvena
+    stran (`ADR-063` A), kot **točna pot**.
     """
     assert frozenset(
         {
+            "/",
             "/health",
             "/auth/login",
             "/auth/link",
@@ -84,7 +86,16 @@ def test_izvzete_so_natanko_te_poti_in_ena_predpona() -> None:
     ) == main.IZVZETE_POTI
     assert frozenset({"/admin"}) == main.IZVZETE_PREDPONE
     # Odjava telefona in poti s podatki niso in ne smejo biti izvzete.
-    for pot in ("/auth/logout", "/auth", "/auth/link/", "/materials", "/quizzes/pending"):
+    for pot in (
+        "/auth/logout",
+        "/auth",
+        "/auth/link/",
+        "/materials",
+        "/quizzes/pending",
+        # `/` ni predpona: nič, kar se z njo samo začne, ni izvzeto.
+        "//",
+        "/x",
+    ):
         assert not je_izvzeta(pot, main.IZVZETE_POTI, main.IZVZETE_PREDPONE), pot
 
 

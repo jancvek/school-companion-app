@@ -901,7 +901,11 @@ body.prijavna main { max-width: none; padding: 0; margin: 0; }
 .okno-koristi .ikona { flex: none; box-sizing: content-box; padding: 0.45rem; border-radius: 8px; background: rgba(255, 255, 255, 0.9); color: #2f5d50; }
 .okno-koristi strong { display: block; }
 .okno-koristi span { font-size: 0.95rem; }
-.okno-ovoj { display: flex; align-items: center; justify-content: center; padding: 2rem 1.5rem; }
+.okno-ovoj { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.6rem; padding: 2rem 1.5rem; }
+/* Povezava na predstavitveno stran nad oknom (V6-R03); poravnana z njegovim levim robom. */
+.okno-domov { width: min(100%, 30rem); margin: 0; }
+.okno-domov a { font-weight: 700; text-decoration: none; }
+.okno-domov a:hover { text-decoration: underline; }
 .okno { width: min(100%, 30rem); background: var(--ploskev); border: 1px solid var(--rob); border-radius: 14px; box-shadow: 0 0 0 0.9rem color-mix(in srgb, var(--rob) 35%, transparent), var(--senca); overflow: hidden; }
 .okno-telo { padding: 1.5rem 1.75rem 1.75rem; }
 .okno-telo h1 { margin: 0.5rem 0 0.35rem; font-size: 1.85rem; }
@@ -968,7 +972,7 @@ body.prijavna main { max-width: none; padding: 0; margin: 0; }
   .okno-uvod { display: none; }
 }
 @media (max-width: 860px) {
-  .okno-ovoj { padding: 1.25rem 1rem 3rem; align-items: flex-start; }
+  .okno-ovoj { padding: 1.25rem 1rem 3rem; justify-content: flex-start; gap: 1rem; }
   .okno { box-shadow: var(--senca); }
   .okno-telo { padding: 1.25rem 1.1rem 1.5rem; }
   .koraki { padding: 0.8rem 1.1rem; font-size: 0.82rem; gap: 0.25rem; }

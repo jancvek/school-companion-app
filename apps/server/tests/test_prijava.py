@@ -313,10 +313,12 @@ class TestJavneDatoteke:
             "/admin/static/pisave/atkinson-hyperlegible-next/AtkinsonHyperlegibleNext-Medium.woff2",
             "/admin/static/pisave/atkinson-hyperlegible-next/AtkinsonHyperlegibleNext-Bold.woff2",
             "/admin/static/pisave/atkinson-hyperlegible-next/AtkinsonHyperlegibleNext-ExtraBold.woff2",
+            # Slog javne predstavitvene strani (V6-R03, `ADR-063` B).
+            "/admin/static/javno/slog.css",
         }
     )
 
-    def test_nabor_je_natanko_slog_in_stiri_pisave(self) -> None:
+    def test_nabor_je_natanko_dva_sloga_in_stiri_pisave(self) -> None:
         assert main.JAVNE_DATOTEKE == self.PRICAKOVANE
 
     @pytest.mark.parametrize("pot", sorted(PRICAKOVANE))
@@ -341,6 +343,9 @@ class TestJavneDatoteke:
             "/admin/static/pisave/atkinson-hyperlegible-next/OFL.txt",
             # Sosed izvzete poti, ki ga ni: brez seje ne sme povedati niti tega.
             "/admin/static/admin/drugo.css",
+            "/admin/static/javno/drugo.css",
+            "/admin/static/javno",
+            "/admin/static/javno/slog.css/",
             # Točna pot, ne predpona.
             "/admin/static/admin/slog.css/",
             "/admin/static/admin/slog.css.map",

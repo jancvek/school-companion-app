@@ -21,6 +21,7 @@
     {{ plosca() }}
 
     <div class="okno-ovoj">
+      <p class="okno-domov"><a href="{{ pot_domov }}">← Domača stran</a></p>
       <div class="okno">
         {% if istovetnost %}
           {{ koraki("opravljen", "tekoc", "") }}
@@ -78,12 +79,14 @@
                     Razumem, da se slike zvezkov za prepis in sestavljanje
                     vprašanj pošiljajo v OpenAI.
                   </p>
-                  {# Celotno besedilo je tu in ne za povezavo: stran s pravili
-                     nastane z `V6-R03` (`ADR-062` B). #}
+                  {# Celotno besedilo ostane tudi tu, ne samo za povezavo:
+                     soglasje naj bo berljivo tam, kjer se da
+                     (`docs/odlocitve/ADR-063` C). #}
                   <details>
                     <summary>Kako ravnamo s slikami</summary>
                     <p>{{ besedilo_zasebnost }}</p>
                   </details>
+                  <p class="drobno">Več: <a href="{{ pot_zasebnosti }}">pravila zasebnosti</a>.</p>
                 </div>
               </div>
 

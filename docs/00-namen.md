@@ -70,11 +70,12 @@ samopreverjanje iz dejanske snovi, ki jo je Maša tisti dan imela pri pouku.
 
 ## Kaj aplikacija namenoma NI
 
-- Ni odprta platforma. Več družin je od `docs/odlocitve/ADR-025` podprtih, a
-  **registracije ni**: družino in prvega starša v njej odpre lastnik sistema.
-  Krog uporabnikov so njegovi znanci, zato ni pogojev uporabe, ni politike
-  zasebnosti in ni izvoza podatkov. Če se krog razširi čez znance, je to nova
-  verzija, ne popravek.
+- Ni storitev brez vratarja. Starš se registrira sam, z Google računom, a
+  vsako novo družino lastnik sistema odobri ali zavrne, preden dobi dostop do
+  česar koli (`docs/odlocitve/ADR-057`); družino lahko odpre tudi sam. Javna
+  predstavitvena stran pove, kaj aplikacija zna in kam gredo slike
+  (`docs/odlocitve/ADR-059`). Pogojev uporabe, pravnega besedila pravil
+  zasebnosti in izvoza podatkov ni.
 - Ni objavljena na Google Play — distribucija samo prek EAS Build APK.
 - Ni orodje za poročanje šoli ali tretjim. Pregled ocen čez kvize (V2-R04) je
   lastnikov delovni pripomoček za pogovor z Mašo — brez izvoza, brez PDF in

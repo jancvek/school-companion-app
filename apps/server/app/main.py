@@ -18,7 +18,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import RedirectResponse, Response
 from starlette.staticfiles import StaticFiles
 
-from app import google, prijava, registracija, strani
+from app import google, predstavitev, prijava, registracija, strani
 from app.db import naredi_motor, naredi_tovarno_sej
 from app.dependencies import NeodobrenaDruzina, zahtevaj_odobreno_druzino
 from app.google import OdjemalecGoogla, naredi_odjemalca
@@ -26,6 +26,7 @@ from app.routers import (
     admin,
     clani,
     dnevi,
+    javno,
     kvizi,
     materials,
     preizkusi,
@@ -64,6 +65,10 @@ dnevnik = logging.getLogger(__name__)
 #: `POST /auth/google/login` in `GET /auth/google/callback` sta tu z `V3-R08`
 #: (`docs/odlocitve/ADR-046` B). Sta **točni poti**, ne predpona.
 #:
+#: `/` je tu z `V6-R03` (`docs/odlocitve/ADR-063` A): javna predstavitvena
+#: stran, ki ne bere ne seje ne baze. **Točna pot** — nič, kar se z `/` samo
+#: začne, s tem ni izvzeto.
+#:
 #: Izvzeti sta iz **žetona telefona**, ne iz seje: govori ju brskalnik, ki
 #: žetona v glavi nikoli ne nosi. To ne pomeni, da sta odprti — prvo varuje
 #: dvojno oddan CSRF žeton prijavnega obrazca, drugo vezivo stanja. Povratni
@@ -74,6 +79,7 @@ dnevnik = logging.getLogger(__name__)
 IZVZETE_POTI = frozenset(
     {
         "/health",
+        predstavitev.POT,
         prijava.POT_PRIJAVE_TELEFONA,
         prijava.POT_POVEZAVE_TELEFONA,
         google.POT_PRIJAVE,
@@ -158,6 +164,8 @@ JAVNE_DATOTEKE = frozenset(
         f"{POT_PISAVE}/AtkinsonHyperlegibleNext-Medium.woff2",
         f"{POT_PISAVE}/AtkinsonHyperlegibleNext-Bold.woff2",
         f"{POT_PISAVE}/AtkinsonHyperlegibleNext-ExtraBold.woff2",
+        # Slog predstavitvene strani (V6-R03, `ADR-063` B).
+        predstavitev.POT_SLOGA,
     }
 )
 
@@ -325,6 +333,9 @@ def create_app(
     # usmerjevalniki pod `/admin`, ker `/admin/login` ne sme zaiti v ujemalnik
     # `/admin/materials/{id}`.
     app.include_router(vstop.router)
+    # Javna predstavitvena stran na `/` (V6-R03). Brez zapore in brez seje:
+    # ni pod `/admin` in ne bere ničesar (`docs/odlocitve/ADR-059` A).
+    app.include_router(javno.router)
     app.include_router(materials.router)
     # Poti telefona za kvize (V2-R02). Niso pod `/admin`, zato zahtevajo žeton.
     app.include_router(resevanje.router)
@@ -371,8 +382,8 @@ def create_app(
     # prepisana v repozitorij (`docs/odlocitve/ADR-054`, meja 2). **Pod
     # `/admin` in ne pod `/static`**: predpono varuje `SejaMiddleware`, zato
     # so datoteke za sejo kot vse ostalo in `IZVZETE_PREDPONE` ostane
-    # enočlanska. Brez seje je dosegljivih samo pet datotek iz
-    # `JAVNE_DATOTEKE` (V5-R01). Priklop je za usmerjevalniki, da nobene njihove poti ne
+    # enočlanska. Brez seje je dosegljivih samo šest datotek iz
+    # `JAVNE_DATOTEKE` (V5-R01, V6-R03). Priklop je za usmerjevalniki, da nobene njihove poti ne
     # zasenči.
     app.mount(POT_STATICNIH, StaticFiles(directory=MAPA_STATICNIH), name="static")
 
