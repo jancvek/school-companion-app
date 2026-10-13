@@ -49,6 +49,7 @@ from app.models import (
     STATUS_V_OBDELAVI,
     VLOGA_OTROK,
     VLOGA_STARS,
+    Base,
     Credential,
     Family,
     LinkToken,
@@ -113,6 +114,24 @@ def naredi_motor(database_url: str) -> Engine:
 def naredi_tovarno_sej(motor: Engine) -> sessionmaker[Session]:
     """Tovarna sej za dani motor."""
     return sessionmaker(bind=motor, autoflush=False, expire_on_commit=False)
+
+
+def _vstavi_po_vrsti(session: Session, *vrstice: Base) -> None:
+    """Vstavi vrstice v **podanem** vrstnem redu: starš tujega ključa prvi.
+
+    Vrstni red `INSERT` znotraj enega `flush()` SQLAlchemy izpelje iz
+    `relationship()`, ne iz tujih ključev. Med `Family`, `User` in `Credential`
+    zveze ni, zato je poverilnico vstavil pred uporabnika in Postgres je
+    registracijo zavrnil (`fk_credentials_user_id`). SQLite v testih ključev
+    privzeto ne preverja; to varuje `tests/test_vrstni_red_vstavljanja.py`.
+
+    `flush()` ni `commit()`: transakcija ostane ena in klicateljev `rollback()`
+    odnese vse. Kršitev integritete zato pade **tu** in ne šele ob `commit()` —
+    klic sodi v klicateljev `try`.
+    """
+    for vrstica in vrstice:
+        session.add(vrstica)
+        session.flush()
 
 
 def _nabor_predmeta(family_id: str, subject: str) -> tuple[ColumnElement[bool], ...]:
@@ -310,38 +329,33 @@ class DruzineRepository:
         user_id = str(uuid4())
         # `approved` izrecno in ne po privzetku stolpca: družina, ki jo odpre
         # lastnik, je sprejeta (`ADR-057` I), in to naj piše tu, kjer nastane.
-        self._session.add(
-            Family(
-                id=family_id,
-                name=ime_druzine,
-                is_active=True,
-                status=STANJE_ODOBRENA,
-                created_at=ko,
-            )
+        druzina = Family(
+            id=family_id,
+            name=ime_druzine,
+            is_active=True,
+            status=STANJE_ODOBRENA,
+            created_at=ko,
         )
-        self._session.add(
-            User(
-                id=user_id,
-                family_id=family_id,
-                role=VLOGA_STARS,
-                display_name=prikazno_ime,
-                is_system_owner=False,
-                is_active=True,
-                created_at=ko,
-            )
+        stars = User(
+            id=user_id,
+            family_id=family_id,
+            role=VLOGA_STARS,
+            display_name=prikazno_ime,
+            is_system_owner=False,
+            is_active=True,
+            created_at=ko,
         )
-        self._session.add(
-            Credential(
-                id=str(uuid4()),
-                user_id=user_id,
-                kind=POVERILNICA_GESLO,
-                identifier=identifier,
-                secret_hash=secret_hash,
-                created_at=ko,
-                updated_at=ko,
-            )
+        poverilnica = Credential(
+            id=str(uuid4()),
+            user_id=user_id,
+            kind=POVERILNICA_GESLO,
+            identifier=identifier,
+            secret_hash=secret_hash,
+            created_at=ko,
+            updated_at=ko,
         )
         try:
+            _vstavi_po_vrsti(self._session, druzina, stars, poverilnica)
             self._session.commit()
         except IntegrityError as izjema:
             self._session.rollback()
@@ -2369,45 +2383,39 @@ class PrijavaRepository:
         family_id = str(uuid4())
         user_id = str(uuid4())
         credential_id = str(uuid4())
-        self._session.add(
-            Family(
-                id=family_id,
-                name=ime_druzine,
-                is_active=True,
-                status=STANJE_CAKA,
-                consent_at=ko,
-                created_at=ko,
-            )
+        druzina = Family(
+            id=family_id,
+            name=ime_druzine,
+            is_active=True,
+            status=STANJE_CAKA,
+            consent_at=ko,
+            created_at=ko,
         )
-        self._session.add(
-            User(
-                id=user_id,
-                family_id=family_id,
-                role=VLOGA_STARS,
-                display_name=prikazno_ime,
-                is_system_owner=False,
-                is_active=True,
-                created_at=ko,
-            )
+        stars = User(
+            id=user_id,
+            family_id=family_id,
+            role=VLOGA_STARS,
+            display_name=prikazno_ime,
+            is_system_owner=False,
+            is_active=True,
+            created_at=ko,
         )
-        self._session.add(
-            Credential(
-                id=credential_id,
-                user_id=user_id,
-                kind=POVERILNICA_GOOGLE,
-                identifier=sub,
-                secret_hash=None,
-                label=email,
-                created_at=ko,
-                updated_at=ko,
-            )
+        poverilnica = Credential(
+            id=credential_id,
+            user_id=user_id,
+            kind=POVERILNICA_GOOGLE,
+            identifier=sub,
+            secret_hash=None,
+            label=email,
+            created_at=ko,
+            updated_at=ko,
         )
-        self._session.add(
-            LoginAttempt(
-                id=str(uuid4()), identifier=oznaka_poskusa, ip_address=ip_address, created_at=ko
-            )
+        poskus = LoginAttempt(
+            id=str(uuid4()), identifier=oznaka_poskusa, ip_address=ip_address, created_at=ko
         )
         try:
+            # `login_attempts` tujega ključa nima; njegovo mesto v vrsti ni pomembno.
+            _vstavi_po_vrsti(self._session, druzina, stars, poverilnica, poskus)
             self._session.commit()
         except IntegrityError as izjema:
             self._session.rollback()
@@ -2928,29 +2936,26 @@ class ClaniRepository(_RepozitorijDruzine):
         isto ime vpiše kdo drug.
         """
         user_id = str(uuid4())
-        self._session.add(
-            User(
-                id=user_id,
-                family_id=self._family_id,
-                role=role,
-                display_name=display_name,
-                is_system_owner=False,
-                is_active=True,
-                created_at=ko,
-            )
+        oseba = User(
+            id=user_id,
+            family_id=self._family_id,
+            role=role,
+            display_name=display_name,
+            is_system_owner=False,
+            is_active=True,
+            created_at=ko,
         )
-        self._session.add(
-            Credential(
-                id=str(uuid4()),
-                user_id=user_id,
-                kind=POVERILNICA_GESLO,
-                identifier=identifier,
-                secret_hash=secret_hash,
-                created_at=ko,
-                updated_at=ko,
-            )
+        poverilnica = Credential(
+            id=str(uuid4()),
+            user_id=user_id,
+            kind=POVERILNICA_GESLO,
+            identifier=identifier,
+            secret_hash=secret_hash,
+            created_at=ko,
+            updated_at=ko,
         )
         try:
+            _vstavi_po_vrsti(self._session, oseba, poverilnica)
             self._session.commit()
         except IntegrityError as izjema:
             self._session.rollback()

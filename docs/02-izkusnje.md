@@ -151,6 +151,23 @@ naj v tem času ne poganja verify. Rdeč izid, ki mu ne ustreza noben commit,
 je treba prepoznati in zavreči, ne popravljati — sicer se popravlja napaka,
 ki je ni.
 
+## Registracija (V6-R02)
+
+### Vrstni red `INSERT` brez `relationship()`
+**Kaj:** oddaja obrazca registracije je na produkciji vrnila 500
+(`ForeignKeyViolation ... fk_credentials_user_id`), zbirka pa je bila zelena.
+**Zakaj:** SQLAlchemy vrstni red vstavljanja znotraj enega `flush()` izpelje iz
+`relationship()`, ne iz tujih ključev. Med `Family`, `User` in `Credential`
+zveze ni, zato je `credentials` vstavil pred `users` — vrstni red je bil po
+abecedi tabel, ne po naključju. SQLite brez `PRAGMA foreign_keys=ON` ključev
+ne preverja, Postgres jih ob vsakem stavku. Isti vzorec sta imeli
+`ustvari_z_prvim_starsem` (V3-R05) in `ustvari_clana` (V3-R06).
+**Kako:** kadar ena transakcija ustvari vrstico in njenega otroka brez zveze v
+ORM, gre vstavljanje skozi `_vstavi_po_vrsti` (`app/db.py`) — `flush()` po
+vsaki vrstici, starš prvi. Novo tako pot dodaj v
+`tests/test_vrstni_red_vstavljanja.py`, ki teče nad motorjem z vklopljenimi
+ključi in bere zaporedje stavkov.
+
 ## Orodja na tem stroju
 
 - **`scripts/` je del ograje** in agentu ni dovoljena za pisanje. Nove skripte
