@@ -203,6 +203,8 @@ main * { min-width: 0; }
 /* ---------- Prikazi (HTML in CSS, izmisljeni podatki) ---------- */
 .prikaz { box-shadow: var(--senca); overflow: hidden; margin-top: 2rem; }
 .prikaz-naslov { margin: 0; font-weight: 700; font-size: 1.05rem; }
+.mala-glava.z-desnim { display: flex; justify-content: space-between; gap: 1rem; }
+.lazna-povezava { color: var(--poudarek); text-decoration: underline; text-transform: none; letter-spacing: 0; font-size: 0.85rem; }
 .prikaz-glava { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: 0.9rem; font-size: 0.85rem; }
 .mala-glava { margin: 0.9rem 0 0.4rem; color: var(--zamolklo); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 .lazni-gumbi { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0; }
@@ -219,6 +221,9 @@ main * { min-width: 0; }
 .urejevalnik-snov { padding: 0.25rem 1rem 1rem; border-bottom: 1px solid var(--rob); }
 .klepet { display: flex; flex-direction: column; gap: 0.75rem; padding: 1rem; flex: 1; }
 .klepet-vnos { display: flex; gap: 0.5rem; align-items: center; margin: 0; padding: 0.8rem 1rem; border-top: 1px solid var(--rob); }
+.lazno-polje.ozko { flex: none; min-width: 3rem; text-align: center; color: var(--besedilo); }
+.vrstica-polja { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin: 0 0 0.75rem; font-size: 0.9rem; font-weight: 700; }
+.predogled-vprasanj { list-style: decimal; margin: 0; padding-left: 1.4rem; font-size: 0.9rem; display: grid; gap: 0.35rem; }
 .lazno-polje { flex: 1; padding: 0.4rem 0.7rem; border: 1px solid var(--rob); border-radius: var(--gumb); color: var(--zamolklo); font-size: 0.9rem; }
 .urejevalnik-desno { background: var(--ploskev-2); padding: 1.5rem; display: grid; justify-items: center; }
 .urejevalnik-desno .papir { width: min(100%, 27rem); }
@@ -281,13 +286,11 @@ main * { min-width: 0; }
 .telefon { width: 15rem; padding: 0.65rem; border-radius: 2rem; background: #10151b; box-shadow: var(--senca); }
 .telefon-zaslon { display: flex; flex-direction: column; gap: 0.5rem; padding: 1rem 0.6rem; border-radius: 1.45rem; background: #1b232c; color: #e6ebf0; font-size: 0.8rem; }
 .telefon-zaslon p { margin: 0; }
-.telefon-glava { display: flex; justify-content: space-between; font-weight: 700; font-size: 0.72rem; }
-.telefon-napredek { height: 3px; border-radius: 2px; background: linear-gradient(90deg, #7cc0a8 50%, #36424e 50%); }
-.telefon-kartica { background: #ffffff; color: #17202b; border-radius: 10px; padding: 0.8rem; display: grid; gap: 0.6rem; }
+.telefon-glava { font-weight: 700; font-size: 0.8rem; text-align: center; }
+.telefon-kartica { background: #ffffff; color: #17202b; border-radius: 10px; padding: 0.8rem; display: grid; gap: 0.6rem; margin-bottom: 0.4rem; }
+.telefon-kartica .zamolklo { color: #586474; font-size: 0.72rem; }
 .telefon-vprasanje { font-weight: 700; font-size: 0.95rem; }
 .telefon-odgovor { background: #eef1f4; border-radius: 6px; padding: 0.5rem 0.6rem; }
-.telefon-odgovor .mala-glava { display: block; margin: 0 0 0.2rem; color: #586474; }
-.telefon-kako { text-align: center; font-weight: 700; margin-top: 0.3rem !important; }
 .telefon-ocena { display: block; padding: 0.5rem; border-radius: 6px; text-align: center; font-weight: 700; color: #ffffff; }
 .o0 { background: var(--o0); }
 .o1 { background: var(--o1); }

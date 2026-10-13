@@ -27,7 +27,9 @@
 {%- endmacro %}
 
 {# List A4 kot prikaz. Papir je bel tudi v temni temi. #}
-{% macro list_a4(tock, ime) %}
+{# `kratek` izpusti nalogo s tremi točkami: list v uvodu ima štiri naloge in
+   14 točk, list v urejevalniku pet in 17. Vsota mora ustrezati glavi. #}
+{% macro list_a4(tock, ime, kratek=false) %}
   <div class="papir">
     <div class="papir-glava">
       <div>
@@ -54,10 +56,12 @@
         <p class="izraz">{{ ul(6, 8) }} = &emsp; {{ ul(10, 15) }} =</p>
         <span class="prostor"></span>
       </li>
+      {% if not kratek %}
       <li>
         <p><span>Zapiši kot mešano število.</span> <span class="tocke">(3 t)</span></p>
         <p class="izraz">{{ ul(7, 4) }} = &emsp; {{ ul(11, 3) }} = &emsp; {{ ul(9, 2) }} =</p>
       </li>
+      {% endif %}
       <li>
         <p><span>Nik je v ponedeljek prebral {{ ul(2, 5) }} knjige, v torek pa {{ ul(1, 4) }}. Kolikšen del knjige je prebral v obeh dneh skupaj?</span> <span class="tocke">(5 t)</span></p>
         <span class="prostor"></span>
@@ -120,7 +124,7 @@
         </div>
 
         <div class="uvod-prikaz" aria-hidden="true">
-          {{ list_a4(14, "Ime") }}
+          {{ list_a4(14, "Ime", kratek=true) }}
           <div class="oblacek ti"><span class="oblacek-kdo">Ti</span>Tretja naloga naj bo lažja.</div>
           <div class="oblacek pomocnik"><span class="oblacek-kdo">Pomočnik</span>Pri 3. nalogi sem zmanjšal števila.</div>
           <div class="snov-kartica">
@@ -150,7 +154,7 @@
           besedami, dokler ni pravi.
         </p>
 
-        <div class="prikaz urejevalnik" aria-hidden="true">
+        <div class="prikaz" aria-hidden="true">
           <div class="urejevalnik-vrstica">
             <p class="prikaz-naslov">Kreiraj test <span class="znacka-predmeta" style="--barva: {{ barve.MAT }}">MAT</span></p>
             <p class="lazni-gumbi">
@@ -163,7 +167,7 @@
           <div class="urejevalnik-telo">
             <div class="urejevalnik-levo">
               <div class="urejevalnik-snov">
-                <p class="mala-glava">Snov · 3 slike</p>
+                <p class="mala-glava z-desnim"><span>Snov · 3 slike</span> <span class="lazna-povezava">Prepisi</span></p>
                 <span class="slicice velike"><span></span><span></span><span></span></span>
               </div>
               <div class="klepet">
@@ -173,7 +177,7 @@
                 <p class="oblacek pomocnik">Pri 3. nalogi sem zmanjšal števila.</p>
               </div>
               <p class="klepet-vnos">
-                <span class="lazno-polje">Napiši, kaj naj spremeni…</span>
+                <span class="lazno-polje">Napiši, kakšen test želiš…</span>
                 <span class="lazni-gumb poln">Posodobi test</span>
               </p>
             </div>
@@ -199,34 +203,36 @@
         <p><span class="oznaka">Ponavljanje</span></p>
         <h2>Kvizi, ki jih otrok reši na telefonu</h2>
         <p class="uvodno ozko">
-          Iz vsake snovi nastane 5–10 vprašanj z odgovori. Ti izbereš, katera
-          gredo v kviz, in ga objaviš. Otrok odgovarja na telefonu in pri vsakem
-          vprašanju pove, kako mu je šlo.
+          Iz vsake snovi nastane 5–10 vprašanj z odgovori. Ti izbereš snov in
+          koliko vprašanj gre v kviz, jih pregledaš in kviz objaviš. Otrok
+          odgovarja na telefonu in pri vsakem vprašanju pove, kako mu je šlo.
         </p>
 
         <div class="kvizi-mreza" aria-hidden="true">
           <div class="prikaz">
             <p class="prikaz-glava"><span class="prikaz-naslov">Nov kviz <span class="znacka-predmeta" style="--barva: {{ barve.MAT }}">MAT</span></span> <span class="zamolklo">2 snovi</span></p>
-            <p class="mala-glava">Seštevanje ulomkov · tor 7. 10.</p>
-            <p class="vprasanje izbrano"><span class="kvadratek"></span> Kako seštejemo ulomka z različnima imenovalcema?</p>
-            <p class="vprasanje izbrano"><span class="kvadratek"></span> <span>Koliko je {{ ul(3, 4) }} + {{ ul(1, 8) }}?</span></p>
-            <p class="vprasanje"><span class="kvadratek"></span> Kaj je skupni imenovalec?</p>
-            <p class="mala-glava">Krajšanje ulomkov · čet 9. 10.</p>
-            <p class="vprasanje izbrano"><span class="kvadratek"></span> <span>Okrajšaj ulomek {{ ul(6, 8) }}.</span></p>
-            <p class="vprasanje izbrano"><span class="kvadratek"></span> Kdaj je ulomek okrajšan do konca?</p>
-            <p class="vprasanje"><span class="kvadratek"></span> <span>Ali sta {{ ul(2, 4) }} in {{ ul(1, 2) }} enaka?</span></p>
-            <p class="izbor-noga"><span class="zamolklo">4 vprašanja izbrana</span> <span class="lazni-gumb poln">Objavi</span></p>
+            <p class="vrstica-polja"><span>Vprašanj na sliko</span> <span class="lazno-polje ozko">2</span></p>
+            <p class="vprasanje izbrano"><span class="kvadratek"></span> <span>tor 7. 10. <span class="zamolklo">· 6 vprašanj</span></span></p>
+            <p class="vprasanje izbrano"><span class="kvadratek"></span> <span>čet 9. 10. <span class="zamolklo">· 5 vprašanj</span></span></p>
+            <p class="vprasanje"><span class="kvadratek"></span> <span>pet 10. 10. <span class="zamolklo">· 7 vprašanj</span></span></p>
+            <p class="mala-glava">Predogled · 4 vprašanja</p>
+            <ol class="predogled-vprasanj">
+              <li>Kako seštejemo ulomka z različnima imenovalcema?</li>
+              <li>Koliko je {{ ul(3, 4) }} + {{ ul(1, 8) }}?</li>
+              <li>Okrajšaj ulomek {{ ul(6, 8) }}.</li>
+              <li>Kdaj je ulomek okrajšan do konca?</li>
+            </ol>
+            <p class="izbor-noga"><span class="zamolklo">2 sliki izbrani</span> <span class="lazni-gumb poln">Objavi</span></p>
           </div>
 
           <div class="telefon">
             <div class="telefon-zaslon">
-              <p class="telefon-glava"><span>Kviz · MAT</span> <span>2 / 4</span></p>
-              <span class="telefon-napredek"></span>
+              <p class="telefon-glava">MAT — 9. 10. 2026</p>
               <div class="telefon-kartica">
+                <p class="zamolklo">Vprašanje 2 od 4</p>
                 <p class="telefon-vprasanje">Koliko je {{ ul(3, 4) }} + {{ ul(1, 8) }}?</p>
-                <p class="telefon-odgovor"><span class="mala-glava">Odgovor</span>{{ ul(7, 8) }} — oba ulomka zapišemo v osminah.</p>
+                <p class="telefon-odgovor">{{ ul(7, 8) }} — oba ulomka zapišemo v osminah.</p>
               </div>
-              <p class="telefon-kako">Kako ti je šlo?</p>
               {% for ocena in ocene %}
                 <span class="telefon-ocena o{{ loop.index0 }}">{{ ocena }}</span>
               {% endfor %}
@@ -255,7 +261,7 @@
         </div>
 
         <ul class="lastnosti">
-          <li><h3>Vprašanja nastanejo sama</h3><p>Ko je snov prepisana, ima že pripravljena vprašanja z odgovori. Ti samo izbereš.</p></li>
+          <li><h3>Vprašanja nastanejo sama</h3><p>Ko je snov prepisana, ima že pripravljena vprašanja z odgovori. Ti samo izbereš snov.</p></li>
           <li><h3>Kviz sestaviš ti</h3><p>Iz ene ali več snovi, za predmet ali za ponavljanje pred testom. Pred objavo vidiš predogled.</p></li>
           <li><h3>Samoocena v štirih stopnjah</h3><p>Otrok po razkritju odgovora pove, ali je vedel in kako težko je bilo. Iskreno, brez ocen.</p></li>
           <li><h3>Vidiš, kje se zatika</h3><p>Statistika po predmetih in po snovi pokaže, kaj gre dobro in kaj je vredno ponoviti.</p></li>
@@ -304,7 +310,7 @@
             <p class="zamolklo">Spletni pregled v brskalniku.</p>
             <ul class="kljukice">
               <li>{{ kljukica() }}<div><strong class="poudarjeno">Testi za tisk</strong><p>V klepetu sestaviš test s točkami za A4, z rešitvami na svojem listu. <a href="#{{ sidro.testi }}">Poglej urejevalnik</a></p></div></li>
-              <li>{{ kljukica() }}<div><strong class="poudarjeno">Kvizi</strong><p>Izbereš vprašanja iz snovi in kviz objaviš otroku. <a href="#{{ sidro.kvizi }}">Poglej kvize</a></p></div></li>
+              <li>{{ kljukica() }}<div><strong class="poudarjeno">Kvizi</strong><p>Izbereš snov, pregledaš vprašanja in kviz objaviš otroku. <a href="#{{ sidro.kvizi }}">Poglej kvize</a></p></div></li>
               <li>{{ kljukica() }}<div><strong>Po dnevih in predmetih</strong><p>Kaj je bilo poslikano, s prepisom in povzetkom vsake snovi.</p></div></li>
               <li>{{ kljukica() }}<div><strong>Urnik in manjkajoče slike</strong><p>Poslikaš urnik, sistem ga predlaga, ti potrdiš. Nato vidiš, kateri predmet tisti dan nima slike.</p></div></li>
               <li>{{ kljukica() }}<div><strong>Statistika</strong><p>Kaj gre dobro in kje se zatika, po predmetih.</p></div></li>
@@ -323,7 +329,7 @@
         <h2>Kako ravnamo s podatki</h2>
         <p class="uvodno ozko">Gre za zvezke otrok, zato naravnost povemo, kaj se s slikami zgodi.</p>
         <ul class="lastnosti">
-          <li><h3>Podatki so družinski</h3><p>Vsaka družina vidi izključno svoje podatke. Nobena poizvedba ne prestopi meje družine. Skrbnik sistema vidi ime družine, imena in e-naslove staršev ter število otrok.</p></li>
+          <li><h3>Podatki so družinski</h3><p>Vsaka družina vidi izključno svoje podatke. Skrbnik sistema vidi ime družine, imena in e-naslove staršev ter število otrok.</p></li>
           <li class="opozorilna"><h3>Slike gredo v zunanji model</h3><p>{{ besedilo_zasebnost }}</p></li>
           <li><h3>Umaknjeno gre v arhiv</h3><p>Umaknjena snov gre v arhiv. Prepis in vprašanja ostanejo, tudi ko slike na telefonu ni več.</p></li>
           <li><h3>Dopolnjuje zvezek</h3><p>Šolski pomočnik ne nadomešča pisanja na papir in ne poroča šoli ali komurkoli drugemu.</p></li>

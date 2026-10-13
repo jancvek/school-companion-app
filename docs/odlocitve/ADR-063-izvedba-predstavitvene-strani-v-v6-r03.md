@@ -112,6 +112,24 @@ govorita različno, velja aplikacija:
     testi" odpade „po predmetih" (preizkus je samo matematika). Drugi oblaček
     pomočnika v prikazu je zato brez „Ostale naloge so ostale enake".
 
+11. **Kviz se sestavi iz snovi, ne iz posameznih vprašanj** (najdeno v
+    pregledu). Posnetek kaže kljukico ob vsakem vprašanju in „4 vprašanja
+    izbrana"; aplikacija izbira **slike** in število „Vprašanj na sliko"
+    (vzame se prvih toliko), vprašanja pa pokaže v predogledu pred objavo.
+    Prikaz zato riše polje „Vprašanj na sliko", tri snovi s kljukico in
+    predogled štirih vprašanj; besedila pravijo „izbereš snov", ne „izbereš
+    vprašanja". Plan ima v tabeli trditev (vrstica 12) še staro besedilo;
+    velja ta točka.
+12. Prikaz telefona nosi oznake aplikacije: ime kviza v glavi in „Vprašanje 2
+    od 4"; nalepke „Odgovor", vprašanja „Kako ti je šlo?" in črte napredka
+    aplikacija nima, zato jih ni. Polje klepeta v prikazu urejevalnika nosi
+    začetek pravega besedila polja; glava snovi ima „Prepisi", kot urejevalnik.
+13. List A4 v uvodu ima štiri naloge in 14 točk (brez naloge „Zapiši kot
+    mešano število"), list v urejevalniku pet in 17 — vsota ustreza glavi.
+14. Iz kartice „Podatki so družinski" odpade „Nobena poizvedba ne prestopi
+    meje družine": lastnikov pregled družin je poizvedba čez družine, in stavek
+    za njim to sam pove.
+
 ### H — `docs/00-namen.md` in stavek o načinu Testing
 
 `00-namen.md` ne trdi več „ni odprta platforma" in „registracije ni";

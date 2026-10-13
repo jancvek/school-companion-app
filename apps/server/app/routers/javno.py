@@ -20,7 +20,8 @@ from app.subjects import PREDMETI
 router = APIRouter(tags=["javno"])
 
 
-@router.get(predstavitev.POT, include_in_schema=False)
+# `HEAD` poleg `GET`: `curl -I` in nadzor živosti naj ne vidita napake.
+@router.api_route(predstavitev.POT, methods=["GET", "HEAD"], include_in_schema=False)
 def stran(
     request: Request,
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],

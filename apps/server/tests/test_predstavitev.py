@@ -22,13 +22,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, event
 
 from app import main, predstavitev, prijava, registracija, sistem
+from app.google import RacunGoogla
 from app.main import create_app
 from app.models import STANJE_CAKA, STANJE_ZAVRNJENA
 from app.routers import javno, vstop
 from app.subjects import OZNAKE_OCEN, PREDMETI
 from tests.conftest import PrijavljenOdjemalec, prijavi
-from tests.test_racun import _nastavitve_z_googlom
-from tests.test_registracija import _odjemalec_za, ustvari_registrirano
+from tests.test_racun import EMAIL, SUB, PonarejenGoogle, _nastavitve_z_googlom
+from tests.test_registracija import _do_obrazca, _odjemalec_za, ustvari_registrirano
 
 KOREN = Path(__file__).resolve().parents[3]
 SLOG = main.MAPA_STATICNIH / "javno" / "slog.css"
@@ -38,7 +39,10 @@ PREDLOGE = main.MAPA_STATICNIH.parent / "templates"
 @pytest.fixture
 def aplikacija_g(slike: Any, motor: Engine) -> FastAPI:
     """Namestitev z Googlom — samo taka ponuja registracijo."""
-    return create_app(nastavitve=_nastavitve_z_googlom(slike), motor=motor)
+    google = PonarejenGoogle(RacunGoogla(sub=SUB, email=EMAIL, email_verified=True, name="Ana"))
+    return create_app(
+        nastavitve=_nastavitve_z_googlom(slike), motor=motor, odjemalec_googla=google
+    )
 
 
 @pytest.fixture
@@ -130,6 +134,13 @@ class TestPot:
         assert "app.dependencies" not in izvor
         assert "request.state" not in izvor
 
+    def test_head_odgovori_kot_get_brez_telesa(self, obiskovalec: PrijavljenOdjemalec) -> None:
+        odgovor = obiskovalec.head(predstavitev.POT)
+
+        assert odgovor.status_code == 200
+        assert odgovor.content == b""
+        assert "set-cookie" not in odgovor.headers
+
     @pytest.mark.parametrize("metoda", ["POST", "PUT", "DELETE"])
     def test_druga_metoda_je_405(self, obiskovalec: PrijavljenOdjemalec, metoda: str) -> None:
         assert obiskovalec.request(metoda, predstavitev.POT).status_code == 405
@@ -148,6 +159,25 @@ class TestBrezSkripteInTujihVirov:
         assert "<script" not in stran.lower()
         assert re.search(r"\son[a-z]+\s*=", stran) is None
         assert "javascript:" not in stran.lower()
+
+    def test_v_strani_ni_nobenega_naslova_s_shemo(self, stran: str) -> None:
+        """Tuj vir se lahko skrije tudi zunaj `href` in `src`: v atributu
+        `style`, v `<style>`, v `<meta http-equiv>`. Stran zato ne sme nositi
+        nobenega naslova s shemo ali z dvojno poševnico, kjerkoli."""
+        nizko = stran.lower()
+
+        assert "://" not in nizko
+        assert re.search(r"[\"'(=\s]//", nizko) is None
+        assert "url(" not in nizko
+        assert "@import" not in nizko
+        assert "<style" not in nizko
+        assert "http-equiv" not in nizko
+        # Edini atributi `style` nosijo barvo predmeta ali delež pasu.
+        for vrednost in re.findall(r'style="([^"]*)"', stran):
+            assert re.fullmatch(r"--barva: #[0-9a-f]{6}|flex-grow: \d+", vrednost), vrednost
+
+    def test_jezik_strani_je_slovenscina(self, stran: str) -> None:
+        assert '<html lang="sl">' in stran
 
     def test_vsak_naslov_v_strani_je_lokalen(self, stran: str) -> None:
         naslovi = re.findall(r'(?:href|src|action)="([^"]*)"', stran)
@@ -270,11 +300,20 @@ class TestVsebina:
         ogled = (PREDLOGE / "preizkus-ogled.html").read_text(encoding="utf-8")
         predogled = (PREDLOGE / "kvizi-predogled.html").read_text(encoding="utf-8")
 
-        for ime in ("↶ Razveljavi", "↷ Uveljavi", "Natisni / PDF", "Shrani", "Kreiraj test"):
+        lazni = re.findall(r'<span class="lazni-gumb[^"]*">([^<]+)</span>', stran)
+        assert lazni == [
+            "↶ Razveljavi",
+            "↷ Uveljavi",
+            "Natisni / PDF",
+            "Shrani",
+            "Posodobi test",
+            "Objavi",
+        ]
+        for ime in lazni[:4]:
             assert f">{ime}</button>" in urejevalnik, ime
-            assert ime in stran, ime
         assert '"Posodobi test"' in urejevalnik
-        assert "Posodobi test" in stran
+        assert ">Kreiraj test</button>" in urejevalnik
+        assert '<p class="prikaz-naslov">Kreiraj test ' in stran
         assert ">Nov test na tej osnovi</a>" in ogled
         assert "»Nov test na tej osnovi«" in stran
         assert ">Objavi</button>" in predogled
@@ -316,7 +355,7 @@ class TestVsebina:
             assert znacka not in stran, znacka
         for zacetek in (
             '<div class="uvod-prikaz" aria-hidden="true">',
-            '<div class="prikaz urejevalnik" aria-hidden="true">',
+            '<div class="prikaz" aria-hidden="true">',
             '<div class="kvizi-mreza" aria-hidden="true">',
         ):
             assert stran.count(zacetek) == 1, zacetek
@@ -331,7 +370,10 @@ class TestSlog:
 
         assert "@media (prefers-color-scheme: dark)" in slog
         assert "color-scheme: light dark" in slog
-        assert ":focus-visible" in slog
+        # Splošno pravilo z vidnim obrisom, kot v slogu pregleda — ne le niz.
+        assert re.search(r"\n:focus-visible \{[^}]*outline: 3px solid", slog)
+        # „Preskoči na vsebino" se ob fokusu pokaže.
+        assert re.search(r"\.preskoci:focus \{[^}]*left: 0", slog)
         assert "@media (max-width: 960px)" in slog
         assert "@media (max-width: 560px)" in slog
         # Brez `outline: none`, ki bi fokus skril.
@@ -342,7 +384,7 @@ class TestSlog:
         slog = SLOG.read_text(encoding="utf-8")
         razredi = {r for skupina in re.findall(r'class="([^"]+)"', stran) for r in skupina.split()}
 
-        brez_pravila = {r for r in razredi if f".{r}" not in slog}
+        brez_pravila = {r for r in razredi if not re.search(rf"\.{re.escape(r)}(?![\w-])", slog)}
         assert brez_pravila == set()
 
 
@@ -354,13 +396,16 @@ class TestPovezaveNazaj:
 
         assert f'<a href="{predstavitev.POT}">← Domača stran</a>' in stran
 
-    def test_soglasje_kaze_na_pravila_zasebnosti(self) -> None:
-        izvor = (PREDLOGE / "registracija.html").read_text(encoding="utf-8")
+    def test_soglasje_kaze_na_pravila_zasebnosti(self, obiskovalec: PrijavljenOdjemalec) -> None:
+        """Izrisan obrazec zahtevka, ne izvor predloge: prazen `href` bi šel mimo."""
+        obrazec = _do_obrazca(obiskovalec).text
 
-        assert '<a href="{{ pot_zasebnosti }}">pravila zasebnosti</a>' in izvor
+        assert '<a href="/#zasebnost">pravila zasebnosti</a>' in obrazec
         assert predstavitev.POT_ZASEBNOSTI == "/#zasebnost"
         # Celotno besedilo ostane ob polju, ne samo za povezavo.
-        assert "<details>" in izvor
+        assert f"<p>{html.escape(sistem.BESEDILO_ZASEBNOST_JAVNO)}</p>" in obrazec
+        # Sidro, na katero kaže, na strani obstaja.
+        assert 'id="zasebnost"' in obiskovalec.get(predstavitev.POT).text
 
     def test_moj_racun_ima_pot_na_domaco_stran(self, neodobreni: PrijavljenOdjemalec) -> None:
         stran = neodobreni.get(registracija.POT_RACUNA).text

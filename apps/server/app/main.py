@@ -382,8 +382,8 @@ def create_app(
     # prepisana v repozitorij (`docs/odlocitve/ADR-054`, meja 2). **Pod
     # `/admin` in ne pod `/static`**: predpono varuje `SejaMiddleware`, zato
     # so datoteke za sejo kot vse ostalo in `IZVZETE_PREDPONE` ostane
-    # enočlanska. Brez seje je dosegljivih samo pet datotek iz
-    # `JAVNE_DATOTEKE` (V5-R01). Priklop je za usmerjevalniki, da nobene njihove poti ne
+    # enočlanska. Brez seje je dosegljivih samo šest datotek iz
+    # `JAVNE_DATOTEKE` (V5-R01, V6-R03). Priklop je za usmerjevalniki, da nobene njihove poti ne
     # zasenči.
     app.mount(POT_STATICNIH, StaticFiles(directory=MAPA_STATICNIH), name="static")
 

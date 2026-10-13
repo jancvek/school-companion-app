@@ -1448,8 +1448,9 @@ sistema ne odobri ali zavrne. Odločitve so v `ADR-057` (kaj) in `ADR-062`
   sta lahko preseženi za nekaj vrstic.
 - **Čakajoč zahtevek starš ne more umakniti**; izbris je samo za zavrnjene.
 - **Staršu, registriranemu z Googlom, gesla ni mogoče nastaviti.**
-- **Povezav na predstavitveno stran in pravila zasebnosti ni** do `V6-R03`;
-  soglasje pokaže celotno besedilo ob potrditvenem polju.
+- **Pravnega besedila pravil zasebnosti ni**; „pravila zasebnosti" ob
+  soglasju vodi na razdelek predstavitvene strani (`/#zasebnost`), celotno
+  besedilo pa ostane tudi ob potrditvenem polju.
 - **Sočasnost izbrisa in odobritve ni dokazana s testom nad Postgresom**;
   utemeljena je z zasnovo stavka (prvi stavek transakcije zaklene vrstico).
 - **Zavrnjene družine ostanejo v bazi**, dokler jih starš ne izbriše sam.
