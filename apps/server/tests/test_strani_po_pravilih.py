@@ -95,6 +95,11 @@ class TestNobenaStranVStaremSlogu:
         for pot in self.predloge():
             if pot.name.startswith("_") or pot.name == "osnova.html":
                 continue
+            # Javna predstavitvena stran namenoma ne stoji na ogrodju pregleda:
+            # to nosi meni in slog admina (V6-R03, `ADR-063` B). Vsa druga
+            # pravila tega razreda zanjo veljajo.
+            if pot.name == "predstavitev.html":
+                continue
             assert '{% extends "osnova.html" %}' in pot.read_text(encoding="utf-8"), pot.name
 
     def test_slog_nima_vec_prehodnega_razdelka(self) -> None:

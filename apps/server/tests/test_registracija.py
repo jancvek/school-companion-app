@@ -403,9 +403,9 @@ class TestOkno:
         assert "Iz Google računa vzamemo" in stran.text
         assert f'href="{prijava.POT_PRIJAVE}"' in stran.text
         assert 'name="namen" value="registracija"' in stran.text
-        # Brez menija in brez povezav na strani, ki jih še ni (`ADR-062` B).
+        # Brez menija. Povezavo „Domača stran" je `ADR-062` B odložil do
+        # `V6-R03`; da zdaj je, preverja `tests/test_predstavitev.py`.
         assert '<nav class="meni' not in stran.text
-        assert "Domača stran" not in stran.text
 
     def test_brez_googla_strani_ni(self, aplikacija: FastAPI) -> None:
         """Registracija je samo z Googlom (`ADR-057` A)."""
