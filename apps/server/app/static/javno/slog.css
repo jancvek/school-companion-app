@@ -115,6 +115,7 @@ main * { min-width: 0; }
   font-weight: 700; line-height: 1.3; text-decoration: none;
 }
 .gumb:hover { background: var(--poudarek-mehko); }
+.gumb.obrobljen { background: var(--ploskev); }
 .gumb.polni { background: var(--poudarek); color: var(--na-poudarku); }
 .gumb.polni:hover { filter: brightness(1.1); }
 .gumb.velik { padding: 0.85rem 1.4rem; }
@@ -134,7 +135,7 @@ main * { min-width: 0; }
   background: var(--poudarek-mehko); color: var(--poudarek); font-size: 0.85rem; font-weight: 700;
 }
 .oznake { color: var(--zamolklo); font-size: 0.9rem; }
-.predmet {
+.znacka-predmeta {
   display: inline-block; padding: 0 0.45rem; border-radius: 4px; background: var(--barva);
   color: #ffffff; font-size: 0.75rem; font-weight: 800; letter-spacing: 0.03em; vertical-align: 0.1em;
 }
@@ -295,7 +296,7 @@ main * { min-width: 0; }
 .telefon-ocena.o1, .telefon-ocena.o2 { color: #17202b; }
 
 .pas-vrstica { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr) 1.6rem; align-items: center; gap: 0.75rem; margin: 0 0 0.6rem; font-size: 0.8rem; text-align: right; }
-.pas-vrstica .predmet { text-align: center; }
+.pas-vrstica .znacka-predmeta { text-align: center; }
 .pas { display: flex; gap: 2px; height: 0.7rem; }
 .pas span { border-radius: 2px; flex-basis: 0; }
 .legenda { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; margin: 0.9rem 0 0; color: var(--zamolklo); font-size: 0.8rem; }

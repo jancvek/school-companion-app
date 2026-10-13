@@ -23,7 +23,7 @@
 {# Gumb registracije je povezava, ne obrazec: stran ne postavlja piškotkov,
    torej tudi CSRF žetona ne (`ADR-063` E). #}
 {% macro gumb_registracije(razred) -%}
-  <a class="gumb {{ razred }}" href="{{ pot_registracije }}"><span class="g-znak" aria-hidden="true">G</span> Registriraj se z Googlom</a>
+  <a class="gumb polni {{ razred }}" href="{{ pot_registracije }}"><span class="g-znak" aria-hidden="true">G</span> Registriraj se z Googlom</a>
 {%- endmacro %}
 
 {# List A4 kot prikaz. Papir je bel tudi v temni temi. #}
@@ -87,7 +87,7 @@
         {% endfor %}
       </nav>
       <div class="glava-gumbi">
-        <a class="gumb" href="{{ pot_prijave }}">Prijava</a>
+        <a class="gumb obrobljen" href="{{ pot_prijave }}">Prijava</a>
         {% if google_na_voljo %}
           <a class="gumb polni" href="{{ pot_registracije }}">Registracija</a>
         {% endif %}
@@ -109,8 +109,8 @@
             ki ga otrok reši na telefonu.
           </p>
           <div class="vrstica-gumbov">
-            {% if google_na_voljo %}{{ gumb_registracije("polni velik") }}{% endif %}
-            <a class="gumb velik" href="#{{ sidro.testi }}">Kako nastane test</a>
+            {% if google_na_voljo %}{{ gumb_registracije("velik") }}{% endif %}
+            <a class="gumb obrobljen velik" href="#{{ sidro.testi }}">Kako nastane test</a>
           </div>
           <p class="oznake">
             <span class="oznaka">Testi</span> za matematiko, drugi predmeti sledijo
@@ -125,7 +125,7 @@
           <div class="oblacek pomocnik"><span class="oblacek-kdo">Pomočnik</span>Pri 3. nalogi sem zmanjšal števila.</div>
           <div class="snov-kartica">
             <span class="slicice"><span></span><span></span><span></span></span>
-            <span><strong>Snov: 3 slike</strong><br><span class="predmet" style="--barva: {{ barve.MAT }}">MAT</span> tor 7. 10.</span>
+            <span><strong>Snov: 3 slike</strong><br><span class="znacka-predmeta" style="--barva: {{ barve.MAT }}">MAT</span> tor 7. 10.</span>
           </div>
         </div>
       </div>
@@ -152,7 +152,7 @@
 
         <div class="prikaz urejevalnik" aria-hidden="true">
           <div class="urejevalnik-vrstica">
-            <p class="prikaz-naslov">Kreiraj test <span class="predmet" style="--barva: {{ barve.MAT }}">MAT</span></p>
+            <p class="prikaz-naslov">Kreiraj test <span class="znacka-predmeta" style="--barva: {{ barve.MAT }}">MAT</span></p>
             <p class="lazni-gumbi">
               <span class="lazni-gumb tih">↶ Razveljavi</span>
               <span class="lazni-gumb tih">↷ Uveljavi</span>
@@ -205,8 +205,8 @@
         </p>
 
         <div class="kvizi-mreza" aria-hidden="true">
-          <div class="prikaz izbor">
-            <p class="prikaz-glava"><span class="prikaz-naslov">Nov kviz <span class="predmet" style="--barva: {{ barve.MAT }}">MAT</span></span> <span class="zamolklo">2 snovi</span></p>
+          <div class="prikaz">
+            <p class="prikaz-glava"><span class="prikaz-naslov">Nov kviz <span class="znacka-predmeta" style="--barva: {{ barve.MAT }}">MAT</span></span> <span class="zamolklo">2 snovi</span></p>
             <p class="mala-glava">Seštevanje ulomkov · tor 7. 10.</p>
             <p class="vprasanje izbrano"><span class="kvadratek"></span> Kako seštejemo ulomka z različnima imenovalcema?</p>
             <p class="vprasanje izbrano"><span class="kvadratek"></span> <span>Koliko je {{ ul(3, 4) }} + {{ ul(1, 8) }}?</span></p>
@@ -237,7 +237,7 @@
             <p class="prikaz-glava"><span class="prikaz-naslov">Statistika</span> <span class="zamolklo">rešeni kvizi</span></p>
             {% for vrstica in statistika %}
               <p class="pas-vrstica">
-                <span class="predmet" style="--barva: {{ barve[vrstica.koda] }}">{{ vrstica.koda }}</span>
+                <span class="znacka-predmeta" style="--barva: {{ barve[vrstica.koda] }}">{{ vrstica.koda }}</span>
                 <span class="pas">
                   {%- for delez in vrstica.delezi -%}
                     <span class="o{{ loop.index0 }}" style="flex-grow: {{ delez }}"></span>
@@ -340,8 +340,8 @@
               <h2>Kako do računa</h2>
               <p>Registracija vzame minuto. Gesla ne potrebuješ — prijaviš se z Google računom.</p>
               <div class="vrstica-gumbov">
-                {{ gumb_registracije("svetel velik") }}
-                <a class="gumb na-plosci velik" href="{{ pot_prijave }}">Prijava</a>
+                {{ gumb_registracije("velik svetel") }}
+                <a class="gumb obrobljen na-plosci velik" href="{{ pot_prijave }}">Prijava</a>
               </div>
             </div>
             <ol class="racun-koraki">
@@ -355,7 +355,7 @@
               <h2>Kako do računa</h2>
               <p>Na tem strežniku račun odpre skrbnik sistema. Ko ga imaš, se prijaviš tukaj.</p>
               <div class="vrstica-gumbov">
-                <a class="gumb svetel velik" href="{{ pot_prijave }}">Prijava</a>
+                <a class="gumb polni svetel velik" href="{{ pot_prijave }}">Prijava</a>
               </div>
             </div>
           {% endif %}
