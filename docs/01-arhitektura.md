@@ -807,8 +807,8 @@ posnetkov `docs/poc/POC-02/`).
   potrebujeta prijavna in predstavitvena stran. Izvzete
   so kot **točne poti** in samo za `GET`/`HEAD`; vse ostalo pod
   `/admin/static` ostane za sejo.
-- **Meni** je na vsaki strani s sejo odobrene družine (`app/meni.py`), razen
-  na prvi strani po odobritvi (V6-R02): Predmeti, Po dnevih,
+- **Meni** je na vsaki strani s sejo odobrene družine (`app/meni.py`):
+  Predmeti, Po dnevih,
   Kvizi, Statistika, Testi, Arhiv; pod ločilom Urnik, Družina in — samo
   lastniku sistema — Sistem. Števci (slike v obdelavi in napake, čakajoči
   kvizi, arhiv) so **ena poizvedba na stran** (`MeniRepository.stevci`);
@@ -829,7 +829,7 @@ posnetkov `docs/poc/POC-02/`).
 
 | Pot | Metoda | Kaj |
 |---|---|---|
-| `/admin` | GET | vseh deset predmetov s števci; predmet iz baze, ki ga na seznamu ni, je viden pod svojo kodo; nad njimi kartica „danes" (V3-R13). Družina **brez otroka** dobi namesto tega stran s tremi naslednjimi koraki, brez menija; lastnik sistema ne (V6-R02) |
+| `/admin` | GET | vseh deset predmetov s števci; predmet iz baze, ki ga na seznamu ni, je viden pod svojo kodo; nad njimi kartica „danes" (V3-R13). Družina **brez otroka** dobi namesto tega tri naslednje korake, z menijem kot vsaka stran; lastnik sistema ne (V6-R02, V6-R04) |
 | `/admin/subjects/{koda}` | GET | slike predmeta po tednih, najnovejši teden prvi, lena naložitev (V5-R01); kljukice za izbor, `?vse=1` obkljuka vse (V3-R11), `?teden=<ponedeljek>` in `?dan=<dan>` obkljukata teden oziroma dan (V5-R01); pri `MAT` drugi gumb „Kreiraj test" (V4-R07) in povezava „Shranjeni testi (N)" (V4-R08) |
 | `/admin/transcripts` | GET | 303 na pregled; obstaja zato, da pot ni videti kot 405 (V3-R11) |
 | `/admin/transcripts` | POST | povzetki, prepisi in vprašanja izbranih slik enega predmeta v enem polju; **ničesar ne shrani** (V3-R11, V3-R12) |

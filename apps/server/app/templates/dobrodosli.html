@@ -1,77 +1,50 @@
-{# Prva stran po odobritvi (V6-R02, `docs/poc/POC-03`, posnetek 08).
+{# `/admin` za družino brez otroka (V6-R04, `docs/odlocitve/ADR-064`).
 
-   Izriše jo `/admin`, dokler družina nima nobenega otroka
-   (`docs/odlocitve/ADR-062` E): pregled brez otroka nima česa pokazati.
+   Namesto police predmetov trije naslednji koraki — v običajni postavitvi z
+   menijem, ker postavka „Predmeti" vodi sem. Za vse družine enaka: zgodbe o
+   registraciji (koraki, „Odobreno") tu ni.
 
-   Dve odstopanji od posnetka, obe v `ADR-062`:
-   - pozdrav ne ugiba spola („Pozdravljeni", ne „Dobrodošla") — D;
-   - stran ima „Odjava", ker je brez menija — E. #}
+   Pozdrav ne ugiba spola („Pozdravljeni", ne „Dobrodošla") — `ADR-062` D. #}
 {% extends "osnova.html" %}
-{% from "_okno.html" import plosca, koraki, ikona with context %}
+{% from "_okno.html" import ikona %}
 
-{% block naslov %}Pozdravljeni{% endblock %}
-{% block razred_telesa %} prijavna{% endblock %}
-{% block brez_menija %}1{% endblock %}
+{% block naslov %}Predmeti{% endblock %}
 
 {% block vsebina %}
-  <div class="prijavna-stran">
-    {{ plosca() }}
+  <h1>Pozdravljeni{% if ime %}, {{ ime }}{% endif %}</h1>
+  <p class="pod">
+    {{ druzina }} še nima otroka.
+    Najprej dodaj otroka, potem lahko začne fotografirati.
+  </p>
 
-    <div class="okno-ovoj">
-      <div class="okno">
-        {# Koraki in „Odobreno" samo staršu, ki se je registriral sam; družina,
-           ki jo je odprl lastnik, te poti ni prehodila. #}
-        {% if registriran %}{{ koraki("opravljen", "opravljen", "opravljen") }}{% endif %}
-        <div class="okno-telo">
-          {% if registriran %}
-            <p class="okno-kljukica" aria-hidden="true">✓</p>
-            <p><span class="oznaka ok">Odobreno</span></p>
-          {% endif %}
-          <h1>Pozdravljeni{% if ime %}, {{ ime }}{% endif %}</h1>
-          <p class="pod">
-            {# Ime družine je tu v obeh oblikah: stran nima menija, ki ga sicer
-               pove, in kdor jo gleda, mora vedeti, čigavo družino ureja. #}
-            {% if registriran %}{{ druzina }} je odobrena.{% else %}{{ druzina }} še nima otroka.{% endif %}
-            Najprej dodaj otroka, potem lahko začne fotografirati.
-          </p>
-
-          <ul class="naslednji-koraki">
-            <li>
-              <a href="/admin/family?dodaj=otrok">
-                {{ ikona("oseba") }}
-                <span><strong>Dodaj otroka</strong> Samo ime; telefon povežeš s QR kodo.</span>
-              </a>
-            </li>
-            <li>
-              {% if apk_url %}
-                <a href="{{ apk_url }}" rel="noopener">
-                  {{ ikona("namesti") }}
-                  <span><strong>Namesti aplikacijo na otrokov telefon</strong> Android, prenos APK.</span>
-                </a>
-              {% else %}
-                <div>
-                  {{ ikona("namesti") }}
-                  <span>
-                    <strong>Namesti aplikacijo na otrokov telefon</strong>
-                    Android. Povezavo za prenos dobiš od skrbnika sistema.
-                  </span>
-                </div>
-              {% endif %}
-            </li>
-            <li>
-              <a href="/admin/schedule">
-                {{ ikona("koledar") }}
-                <span><strong>Poslikaj urnik</strong> Neobvezno — da vidiš, kje manjka slika.</span>
-              </a>
-            </li>
-          </ul>
-
-          <form method="post" action="{{ pot_odjave }}" class="vrstica-gumbov">
-            <input type="hidden" name="csrf" value="{{ csrf }}">
-            <button class="gumb obrobljen" type="submit">Odjava</button>
-          </form>
+  <ul class="naslednji-koraki">
+    <li>
+      <a href="/admin/family?dodaj=otrok">
+        {{ ikona("oseba") }}
+        <span><strong>Dodaj otroka</strong> Samo ime; telefon povežeš s QR kodo.</span>
+      </a>
+    </li>
+    <li>
+      {% if apk_url %}
+        <a href="{{ apk_url }}" rel="noopener">
+          {{ ikona("namesti") }}
+          <span><strong>Namesti aplikacijo na otrokov telefon</strong> Android, prenos APK.</span>
+        </a>
+      {% else %}
+        <div>
+          {{ ikona("namesti") }}
+          <span>
+            <strong>Namesti aplikacijo na otrokov telefon</strong>
+            Android. Povezavo za prenos dobiš od skrbnika sistema.
+          </span>
         </div>
-      </div>
-    </div>
-  </div>
+      {% endif %}
+    </li>
+    <li>
+      <a href="/admin/schedule">
+        {{ ikona("koledar") }}
+        <span><strong>Poslikaj urnik</strong> Neobvezno — da vidiš, kje manjka slika.</span>
+      </a>
+    </li>
+  </ul>
 {% endblock %}

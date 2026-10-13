@@ -28,7 +28,7 @@ from starlette.datastructures import FormData
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
-from app import preizkus, prijava, sistem
+from app import preizkus, sistem
 from app.besedilo import SLIKE, VPRASANJA, ZNAKI, stevilo_z_besedo
 from app.casi import (
     cas,
@@ -353,33 +353,25 @@ def pregled(
 ) -> Response:
     """Vsi predmeti s številom slik in seznam kvizov (V2-R01).
 
-    Družina **brez otrok** dobi namesto pregleda prvo stran po odobritvi
-    (V6-R02, posnetek 08): trije naslednji koraki. Brez stolpca „že videno" —
-    pregled brez otroka nima česa pokazati, zato je pravilo kar stanje samo
-    (`docs/odlocitve/ADR-062` E).
+    Družina **brez otrok** dobi namesto police predmetov tri naslednje korake
+    — v običajni postavitvi z menijem, za vse družine enako (V6-R04,
+    `docs/odlocitve/ADR-064`). Brez stolpca „že videno": pregled brez otroka
+    nima česa pokazati, zato je pravilo kar stanje samo.
 
-    **Lastnik sistema te strani ne dobi**: je brez menija, on pa prav v meniju
-    vidi „Sistem" in število zahtevkov, ki čakajo nanj. Koraki „Google,
-    Zahtevek, Odobritev" in oznaka „Odobreno" se izrišejo samo staršu, ki se
-    je res registriral z Googlom — družini, ki jo je odprl lastnik, bi
-    pripovedovali o poti, ki je ni prehodila.
+    **Lastnik sistema te strani ne dobi**: upravlja sistem, ne družine, in
+    ostane pri običajnem pregledu.
     """
     otroci = clani.otroci()
     if not otroci and not seja.is_system_owner:
         imena = seja.display_name.split()
-        jaz = clani.clan(seja.user_id)
         return predloge.TemplateResponse(
             request,
             "dobrodosli.html",
             {
-                # Samo prvo ime, kot na posnetku: pozdrav, ne naslov.
+                # Samo prvo ime: pozdrav, ne naslov.
                 "ime": imena[0] if imena else "",
                 "druzina": ime_druzine(seja.family_name),
-                # Starš brez geselne poverilnice in z Googlom: tako nastane
-                # samo z registracijo (`ADR-057` A).
-                "registriran": jaz is not None and jaz.identifier is None and jaz.google_povezan,
                 "apk_url": nastavitve.apk_url,
-                "pot_odjave": prijava.POT_ODJAVE,
             },
         )
     steviloma = repozitorij.stej_po_predmetih()
