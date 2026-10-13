@@ -22,7 +22,7 @@
 {# Brez seje — na prijavni strani — menija ni in stran je ena sama ploskev.
    Menija ni tudi za sejo neodobrene družine (`meni` je takrat prazen) in na
    straneh v postavitvi registracije, ki blok `brez_menija` napolnijo
-   (V6-R02, `docs/odlocitve/ADR-062` E in J). #}
+   (V6-R02, `docs/odlocitve/ADR-062` J). #}
 {% set z_menijem = prijava and meni and not self.brez_menija() %}
 <body class="{% if z_menijem %}z-menijem{% else %}brez-menija{% endif %}{% block razred_telesa %}{% endblock %}">
   {% if z_menijem %}
