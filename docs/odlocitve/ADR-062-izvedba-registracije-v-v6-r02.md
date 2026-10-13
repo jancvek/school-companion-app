@@ -81,6 +81,11 @@ Stran je v postavitvi registracije, brez menija, kot na posnetku — zato dobi
 gumb **„Odjava"** (kot 07 in 09), ki ga posnetek 08 nima; stran brez menija in
 brez odjave bi bila slepa ulica.
 
+> **Delno razveljavljeno z `ADR-064` (13. 10. 2026):** stran je odslej v
+> običajni postavitvi z menijem, brez gumba „Odjava", korakov in oznake
+> „Odobreno" — za vse družine enaka. Pravilo „brez otroka", izjema za
+> lastnika sistema in povezave korakov veljajo naprej.
+
 Koraki: „Dodaj otroka" → `/admin/family?dodaj=otrok`; „Poslikaj urnik" →
 `/admin/schedule`; „Namesti aplikacijo na otrokov telefon" → naslov iz nove,
 neobvezne nastavitve okolja `APK_URL`. Brez nje se ta vrstica izriše brez

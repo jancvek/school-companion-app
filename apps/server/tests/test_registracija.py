@@ -56,7 +56,6 @@ from tests.test_racun import (
     SUB,
     PonarejenGoogle,
     _nastavitve_z_googlom,
-    _povezi_google,
     _povratek,
     _stanje_iz,
     _zacni_prijavo,
@@ -1462,25 +1461,26 @@ class TestStevecCakajocih:
 
 
 class TestPoOdobritvi:
-    """`ADR-062` E: `/admin` za družino brez otroka (posnetek 08)."""
+    """`ADR-064`: `/admin` za družino brez otroka — trije koraki, z menijem."""
 
     def test_registrirana_druzina_brez_otroka(self, aplikacija: FastAPI, motor: Engine) -> None:
-        """Starš, ki se je registriral z Googlom in bil odobren: koraki in „Odobreno"."""
+        """Starš, registriran z Googlom, dobi isto stran kot vsi: brez zgodbe registracije."""
         _, user_id = ustvari_registrirano(motor, STANJE_ODOBRENA)
 
         with _odjemalec_za(aplikacija, motor, user_id) as odjemalec:
             stran = odjemalec.get("/admin").text
 
         assert "Pozdravljeni, Ana" in stran
-        assert "Družina Kovačevi je odobrena" in stran
-        assert ">Odobreno</span>" in stran
-        assert 'class="koraki"' in stran
-        assert '<nav class="meni' not in stran
+        assert "Družina Kovačevi še nima otroka" in stran
+        assert "je odobrena" not in stran
+        assert ">Odobreno</span>" not in stran
+        assert 'class="koraki"' not in stran
+        assert '<nav class="meni' in stran
 
     def test_lastnik_sistema_brez_otroka_ohrani_pregled_in_meni(
         self, lastnikov: PrijavljenOdjemalec, motor: Engine
     ) -> None:
-        """Stran brez menija bi lastniku skrila „Sistem" in število čakajočih."""
+        """Lastnik upravlja sistem, ne družine: ostane pri običajnem pregledu."""
         ustvari_registrirano(motor, STANJE_CAKA)
 
         stran = lastnikov.get("/admin").text
@@ -1489,43 +1489,11 @@ class TestPoOdobritvi:
         assert "Matematika" in stran
         assert stevec(stran, "Sistem") == "1"
 
-    def test_stars_z_geslom_in_googlom_ni_registriran(
-        self, aplikacija: FastAPI, motor: Engine, stars: str
-    ) -> None:
-        """Starš ročno odprte družine, ki je Google povezal pozneje, se ni registriral."""
-        _povezi_google(motor, stars)
-
-        with _odjemalec_za(aplikacija, motor, stars) as odjemalec:
-            stran = odjemalec.get("/admin").text
-
-        assert "Družina Cvek še nima otroka" in stran
-        assert 'class="koraki"' not in stran
-        assert ">Odobreno</span>" not in stran
-
-    def test_stars_brez_vsake_poverilnice_ni_registriran(
-        self, aplikacija: FastAPI, motor: Engine
-    ) -> None:
-        """Brez gesla še ne pomeni „registriran z Googlom" — Google mora biti."""
-        _, user_id = ustvari_registrirano(motor, STANJE_ODOBRENA)
-        with Session(motor) as seja:
-            for poverilnica in seja.scalars(
-                select(Credential).where(Credential.user_id == user_id)
-            ):
-                seja.delete(poverilnica)
-            seja.commit()
-
-        with _odjemalec_za(aplikacija, motor, user_id) as odjemalec:
-            stran = odjemalec.get("/admin").text
-
-        assert "Družina Kovačevi še nima otroka" in stran
-        assert 'class="koraki"' not in stran
-
     def test_druzina_brez_otroka(self, odjemalec: PrijavljenOdjemalec) -> None:
-        """Družina, ki jo je odprl lastnik: isti koraki naprej, brez zgodbe o registraciji."""
+        """Trije koraki namesto police predmetov, v običajni postavitvi z menijem."""
         stran = odjemalec.get("/admin").text
 
-        assert "Pozdravljeni, Dejan" in stran
-        # Stran nima menija, zato sama pove, čigava družina je to.
+        assert "<h1>Pozdravljeni, Dejan</h1>" in stran
         assert "Družina Cvek še nima otroka" in stran
         assert "je odobrena" not in stran
         assert 'class="koraki"' not in stran
@@ -1534,9 +1502,23 @@ class TestPoOdobritvi:
         assert 'href="/admin/schedule"' in stran
         assert "Namesti aplikacijo na otrokov telefon" in stran
         assert "dobiš od skrbnika" in stran
-        assert f'action="{prijava.POT_ODJAVE}"' in stran
-        assert '<nav class="meni' not in stran
         assert "Dobrodošla" not in stran, "pozdrav ne ugiba spola (`ADR-062` D)"
+        # Police predmetov ni — samo koraki.
+        assert "Matematika" not in stran
+        # Običajna postavitev, ne postavitev registracije.
+        assert "prijavna-stran" not in stran
+        assert 'class="z-menijem"' in stran
+        assert "<title>Predmeti — Šolski pomočnik</title>" in stran
+        # Odjava je samo v meniju; svojega gumba stran nima več.
+        assert stran.count(f'action="{prijava.POT_ODJAVE}"') == 1
+        assert f'action="{prijava.POT_ODJAVE}"' in meni_strani(stran)
+
+    def test_v_meniju_je_izbrana_postavka_predmeti(self, odjemalec: PrijavljenOdjemalec) -> None:
+        """Klik na „Predmeti" starša brez otroka ne sme pustiti brez menija."""
+        meni = meni_strani(odjemalec.get("/admin").text)
+
+        assert re.search(r'<a href="/admin" aria-current="page">\s*<span>Predmeti</span>', meni)
+        assert meni.count('aria-current="page"') == 1
 
     def test_povezava_za_apk_iz_nastavitve(
         self, slike: Path, motor: Engine, stars: str

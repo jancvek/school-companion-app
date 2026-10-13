@@ -55,7 +55,7 @@ def kontekst_prijave(request: Request) -> dict[str, object]:
     # Hrbti zvezkov na strani brez menija (V5-R01): koda in barva vsakega
     # predmeta. Podatek predmeta, ne družine — brez seje ga smemo dati. Od
     # V6-R02 ga dobi vsaka stran: postavitev registracije jo imajo tudi strani
-    # s sejo („Moj račun" neodobrene družine, prva stran po odobritvi).
+    # s sejo („Moj račun" neodobrene družine).
     hrbti = [{"koda": predmet.koda, "barva": predmet.barva} for predmet in PREDMETI]
     skupno: dict[str, object] = {
         "google_na_voljo": nastavitve.google_je_nastavljen,
