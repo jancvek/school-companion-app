@@ -19,9 +19,13 @@
      ga pustijo praznega. #}
   {% block glava %}{% endblock %}
 </head>
-{# Brez seje — na prijavni strani — menija ni in stran je ena sama ploskev. #}
-<body class="{% if prijava %}z-menijem{% else %}brez-menija{% endif %}{% block razred_telesa %}{% endblock %}">
-  {% if prijava %}
+{# Brez seje — na prijavni strani — menija ni in stran je ena sama ploskev.
+   Menija ni tudi za sejo neodobrene družine (`meni` je takrat prazen) in na
+   straneh v postavitvi registracije, ki blok `brez_menija` napolnijo
+   (V6-R02, `docs/odlocitve/ADR-062` E in J). #}
+{% set z_menijem = prijava and meni and not self.brez_menija() %}
+<body class="{% if z_menijem %}z-menijem{% else %}brez-menija{% endif %}{% block razred_telesa %}{% endblock %}">
+  {% if z_menijem %}
     {# Stalni meni (`ADR-056` G). Razred `ne-tiskaj` ga umakne s papirja po
        istem pravilu kot obrazce — pravila za tisk se zato niso spremenila. #}
     <nav class="meni ne-tiskaj" aria-label="Glavni meni">
@@ -73,6 +77,9 @@
       </div>
     </nav>
   {% endif %}
+  {# Blok se ne izriše nikoli; obstaja, da ga stran lahko napolni in s tem
+     pove „brez menija" (glej `z_menijem` zgoraj). #}
+  {% if false %}{% block brez_menija %}{% endblock %}{% endif %}
   <main>{% block vsebina %}{% endblock %}</main>
 </body>
 </html>

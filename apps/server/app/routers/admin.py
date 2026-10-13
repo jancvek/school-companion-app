@@ -28,7 +28,7 @@ from starlette.datastructures import FormData
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
-from app import preizkus, sistem
+from app import preizkus, prijava, sistem
 from app.besedilo import SLIKE, VPRASANJA, ZNAKI, stevilo_z_besedo
 from app.casi import (
     cas,
@@ -49,15 +49,18 @@ from app.db import (
     PolozajVPredmetu,
     PreizkusiRepository,
     ScheduleRepository,
+    SejaUporabnika,
 )
 from app.dependencies import (
     daj_nastavitve,
+    daj_prijavo,
     daj_repozitorij,
     daj_repozitorij_clanov,
     daj_repozitorij_kvizov,
     daj_repozitorij_preizkusov,
     daj_repozitorij_urnikov,
 )
+from app.meni import ime_druzine
 from app.models import STATUS_V_OBDELAVI, Material, Question
 from app.prepisi import Prepisi, SnovZaPrepis, VprasanjeZaPrepis, izbrane, sestavi
 from app.routers.kvizi import predmeti_za_izbiro, seznam_kvizov
@@ -345,10 +348,41 @@ def pregled(
     kvizi: Annotated[KviziRepository, Depends(daj_repozitorij_kvizov)],
     clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    nastavitve: Annotated[Settings, Depends(daj_nastavitve)],
+    seja: Annotated[SejaUporabnika, Depends(daj_prijavo)],
 ) -> Response:
-    """Vsi predmeti s številom slik in seznam kvizov (V2-R01)."""
-    steviloma = repozitorij.stej_po_predmetih()
+    """Vsi predmeti s številom slik in seznam kvizov (V2-R01).
+
+    Družina **brez otrok** dobi namesto pregleda prvo stran po odobritvi
+    (V6-R02, posnetek 08): trije naslednji koraki. Brez stolpca „že videno" —
+    pregled brez otroka nima česa pokazati, zato je pravilo kar stanje samo
+    (`docs/odlocitve/ADR-062` E).
+
+    **Lastnik sistema te strani ne dobi**: je brez menija, on pa prav v meniju
+    vidi „Sistem" in število zahtevkov, ki čakajo nanj. Koraki „Google,
+    Zahtevek, Odobritev" in oznaka „Odobreno" se izrišejo samo staršu, ki se
+    je res registriral z Googlom — družini, ki jo je odprl lastnik, bi
+    pripovedovali o poti, ki je ni prehodila.
+    """
     otroci = clani.otroci()
+    if not otroci and not seja.is_system_owner:
+        imena = seja.display_name.split()
+        jaz = clani.clan(seja.user_id)
+        return predloge.TemplateResponse(
+            request,
+            "dobrodosli.html",
+            {
+                # Samo prvo ime, kot na posnetku: pozdrav, ne naslov.
+                "ime": imena[0] if imena else "",
+                "druzina": ime_druzine(seja.family_name),
+                # Starš brez geselne poverilnice in z Googlom: tako nastane
+                # samo z registracijo (`ADR-057` A).
+                "registriran": jaz is not None and jaz.identifier is None and jaz.google_povezan,
+                "apk_url": nastavitve.apk_url,
+                "pot_odjave": prijava.POT_ODJAVE,
+            },
+        )
+    steviloma = repozitorij.stej_po_predmetih()
 
     # Kartica „danes" (V3-R13). `danes` je ime v tem modulu, da ga test strani
     # zamenja z `monkeypatch` in ne bere ure stroja. Nabor je isti klic z

@@ -1,0 +1,129 @@
+{# Okno registracije (V6-R02, `docs/poc/POC-03`, posnetki 02, 04, 05, 06).
+
+   Dve obliki iste strani:
+   - brez istovetnosti: začetek z gumbom „Nadaljuj z Googlom" (02, z napako 05);
+   - z istovetnostjo iz podpisanega piškotka: obrazec zahtevka (04, zaprt 06).
+
+   Stran je izvzeta iz seje, zato oba obrazca nosita dvojno oddani žeton
+   `csrf_prijava`, kot prijavna stran (`docs/odlocitve/ADR-062` I).
+
+   Gumb za Google je obrazec in ne povezava, iz istega razloga kot na prijavni
+   strani: `GET` bi pomenil, da tok lahko sproži tuja stran (`ADR-046` B). #}
+{% extends "osnova.html" %}
+{% from "_okno.html" import plosca, koraki with context %}
+
+{% block naslov %}Registracija{% endblock %}
+{% block razred_telesa %} prijavna{% endblock %}
+{% block brez_menija %}1{% endblock %}
+
+{% block vsebina %}
+  <div class="prijavna-stran">
+    {{ plosca() }}
+
+    <div class="okno-ovoj">
+      <div class="okno">
+        {% if istovetnost %}
+          {{ koraki("opravljen", "tekoc", "") }}
+          <div class="okno-telo">
+            <h1>Še en korak</h1>
+            <p class="pod">Preveri podatke in oddaj zahtevek skrbniku.</p>
+
+            <div class="okno-racun">
+              <span class="krozec velik" aria-hidden="true">{{ zacetnici }}</span>
+              <div>
+                <p class="okno-racun-naslov">Prijava z Googlom</p>
+                <p class="zamolklo">{{ istovetnost.email }}</p>
+              </div>
+              {# „Drug račun" je isti začetek toka; Google ob njem ponudi izbiro
+                 računa (`prompt=select_account`). #}
+              <form method="post" action="{{ pot_googla }}">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <input type="hidden" name="namen" value="{{ namen_registracija }}">
+                <button class="gumb-povezava" type="submit">Drug račun</button>
+              </form>
+            </div>
+
+            {% if opozorilo %}
+              <p class="obvestilo caka"><span>{{ opozorilo }}</span></p>
+            {% endif %}
+            {% if sporocilo %}
+              <p class="obvestilo napaka"><span>{{ sporocilo }}</span></p>
+            {% endif %}
+
+            <form method="post" action="{{ pot_registracije }}" class="zahtevek">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+
+              <div class="polje">
+                <label for="ime-druzine">Ime družine</label>
+                <input type="text" id="ime-druzine" name="ime_druzine" required
+                       value="{{ vnos.ime_druzine }}" autocomplete="family-name">
+                <span class="drobno">
+                  Z registracijo nastane nova družina s tem imenom. V meniju bo
+                  vidno tebi, skrbniku pa ob odobritvi.
+                </span>
+              </div>
+
+              <div class="polje">
+                <label for="ime">Tvoje ime</label>
+                <input type="text" id="ime" name="ime" required
+                       value="{{ vnos.ime }}" autocomplete="name">
+                <span class="drobno">Iz Google računa; lahko ga popraviš.</span>
+              </div>
+
+              <div class="soglasje">
+                <input type="checkbox" id="soglasje" name="soglasje" value="da" required>
+                <div>
+                  <label for="soglasje">Soglasje za obdelavo slik</label>
+                  <p>
+                    Razumem, da se slike zvezkov za prepis in sestavljanje
+                    vprašanj pošiljajo v OpenAI.
+                  </p>
+                  {# Celotno besedilo je tu in ne za povezavo: stran s pravili
+                     nastane z `V6-R03` (`ADR-062` B). #}
+                  <details>
+                    <summary>Kako ravnamo s slikami</summary>
+                    <p>{{ besedilo_zasebnost }}</p>
+                  </details>
+                </div>
+              </div>
+
+              <button class="gumb polni sirok" type="submit"{% if opozorilo %} disabled{% endif %}>Oddaj zahtevek</button>
+            </form>
+
+            <p class="drobno">
+              Zahtevek ne poteče. Čaka, dokler ga skrbnik ne odobri ali zavrne.
+            </p>
+          </div>
+        {% else %}
+          {{ koraki("tekoc", "", "") }}
+          <div class="okno-telo">
+            <h1>Registracija</h1>
+            <p class="pod">Za starše. Otrok dobi dostop pozneje, prek QR kode.</p>
+
+            {% if sporocilo %}
+              <p class="obvestilo napaka"><span>{{ sporocilo }}</span></p>
+            {% endif %}
+
+            <form method="post" action="{{ pot_googla }}">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <input type="hidden" name="namen" value="{{ namen_registracija }}">
+              <button class="gumb polni sirok" type="submit">Nadaljuj z Googlom</button>
+            </form>
+
+            <div class="okvir-vzamemo">
+              <p class="okvir-naslov">Iz Google računa vzamemo</p>
+              <ul>
+                <li class="da">ime in priimek</li>
+                <li class="da">e-naslov za prijavo</li>
+                <li class="ne">nič drugega — ne beremo pošte, datotek ali stikov</li>
+              </ul>
+            </div>
+
+            <p class="locilo-ali"><span>že imaš račun?</span></p>
+            <p><a class="gumb obrobljen sirok" href="{{ pot_prijave }}">Prijava</a></p>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endblock %}

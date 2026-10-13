@@ -245,6 +245,9 @@ class TestSeznam:
         assert f"vsaj {prijava.NAJKRAJSE_GESLO[VLOGA_STARS]} znakov" in besedilo
         assert VLOGA_OTROK not in prijava.NAJKRAJSE_GESLO
 
+    # V6-R02: družina brez otroka dobi na `/admin` prvo stran po odobritvi
+    # (`ADR-062` E); ta test govori o pregledu, zato otrok obstaja.
+    @pytest.mark.usefixtures("otrok")
     def test_povezava_je_na_pregledu(self, odjemalec: PrijavljenOdjemalec) -> None:
         """Brez vhoda s `/admin` je stran dosegljiva samo z vtipkanim naslovom."""
         assert f'href="{POT}"' in odjemalec.get("/admin").text
@@ -583,6 +586,33 @@ class TestPonastavitevGesla:
 
         odgovor = odjemalec.post(
             pot_clana(brez, "password"),
+            data={"geslo": "novo-geslo-tukaj", "geslo_znova": "novo-geslo-tukaj"},
+            follow_redirects=False,
+        )
+
+        # Od V6-R02 (`ADR-062` O) je to pravilo in ne izid pisanja: starš brez
+        # geselne poverilnice — tak je vsak, ki se registrira z Googlom — dobi
+        # `403` z razlago, še preden se karkoli poskusi zapisati.
+        assert odgovor.status_code == 403
+        assert clani.SPOROCILO_STARS_BREZ_GESLA in odgovor.text
+
+    def test_pisanje_ki_ni_spremenilo_nicesar_dobi_razlago(
+        self,
+        odjemalec: PrijavljenOdjemalec,
+        stars: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Veja, ki jo je do V6-R02 dosegel test zgoraj: zapis ne spremeni ničesar.
+
+        Odkar starša brez geselne poverilnice ustavi pravilo, jo doseže samo še
+        tekma (poverilnica izgine med preverbo in zapisom). Zato jo test izzove
+        na repozitoriju: izid pisanja, ki ga usmerjevalnik ne bi pogledal, bi
+        bil tiha preusmeritev na seznam, kot da je geslo zamenjano.
+        """
+        monkeypatch.setattr(ClaniRepository, "ponastavi_geslo", lambda *_a, **_k: False)
+
+        odgovor = odjemalec.post(
+            pot_clana(stars, "password"),
             data={"geslo": "novo-geslo-tukaj", "geslo_znova": "novo-geslo-tukaj"},
             follow_redirects=False,
         )

@@ -90,6 +90,13 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
 
+    #: Naslov, s katerega starš prenese aplikacijo za otrokov telefon (V6-R02,
+    #: `ADR-062` E). Neobvezno: prazna vrednost pomeni, da korak „Namesti
+    #: aplikacijo" na prvi strani po odobritvi nima povezave in pove, naj starš
+    #: povezavo dobi od skrbnika. Ni skrivnost, a je odvisen od gradnje (EAS),
+    #: zato ne sodi v kodo.
+    apk_url: str = ""
+
     @property
     def google_je_nastavljen(self) -> bool:
         """Ali je Google prijava v tej namestitvi sploh na voljo.

@@ -887,6 +887,93 @@ body.prijavna main { max-width: none; padding: 0; margin: 0; }
   .prijava-obrazec { width: auto; justify-self: stretch; padding: 1.5rem 1rem 3rem; }
 }
 
+/* ---------- Registracija in Moj racun (V6-R02, docs/poc/POC-03) ----------
+   Ista dvodelna postavitev kot prijava; desno okno s koraki na vrhu. */
+.samo-bralnik { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.okno-plosca { justify-content: flex-start; }
+.okno-plosca .hrbti { margin-top: auto; }
+.okno-uvod { display: grid; gap: 0.9rem; max-width: 26rem; margin-top: 2rem; }
+.okno-naslov { font-size: 2.1rem; font-weight: 800; line-height: 1.15; }
+.okno-podnaslov { font-size: 1.05rem; opacity: 0.9; }
+.okno-koristi { list-style: none; margin: 1rem 0 0; padding: 0; display: grid; gap: 0.75rem; }
+.okno-koristi li { display: flex; gap: 0.85rem; align-items: flex-start; padding: 0.9rem 1rem; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: var(--kartica); background: rgba(255, 255, 255, 0.07); }
+.okno-koristi li.poudarjena { background: rgba(255, 255, 255, 0.16); border-color: rgba(255, 255, 255, 0.32); }
+.okno-koristi .ikona { flex: none; box-sizing: content-box; padding: 0.45rem; border-radius: 8px; background: rgba(255, 255, 255, 0.9); color: #2f5d50; }
+.okno-koristi strong { display: block; }
+.okno-koristi span { font-size: 0.95rem; }
+.okno-ovoj { display: flex; align-items: center; justify-content: center; padding: 2rem 1.5rem; }
+.okno { width: min(100%, 30rem); background: var(--ploskev); border: 1px solid var(--rob); border-radius: 14px; box-shadow: 0 0 0 0.9rem color-mix(in srgb, var(--rob) 35%, transparent), var(--senca); overflow: hidden; }
+.okno-telo { padding: 1.5rem 1.75rem 1.75rem; }
+.okno-telo h1 { margin: 0.5rem 0 0.35rem; font-size: 1.85rem; }
+.okno-telo .pod { margin-bottom: 1.1rem; }
+.okno-telo form { margin: 0; }
+.okno-telo .gumb.sirok { width: 100%; }
+.okno-telo .obvestilo { margin: 0 0 1rem; }
+.okno-kljukica { display: inline-flex; align-items: center; justify-content: center; width: 3.2rem; height: 3.2rem; margin: 0 0 0.9rem; border-radius: 50%; background: var(--poudarek-mehko); color: var(--poudarek); font-size: 1.4rem; font-weight: 800; }
+.nadnaslov { margin: 0 0 0.6rem; color: var(--zamolklo); font-size: 0.8rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.koraki { list-style: none; display: flex; gap: 0.5rem; justify-content: space-between; margin: 0; padding: 0.9rem 1.75rem; border-bottom: 1px solid var(--rob); color: var(--zamolklo); font-size: 0.9rem; font-weight: 700; }
+.koraki li { display: flex; align-items: center; gap: 0.5rem; }
+.korak-krog { display: inline-flex; align-items: center; justify-content: center; width: 1.7rem; height: 1.7rem; border: 1px solid var(--rob); border-radius: 50%; font-size: 0.8rem; }
+.koraki .tekoc { color: var(--besedilo); }
+.koraki .tekoc .korak-krog { border-color: var(--poudarek); box-shadow: 0 0 0 3px var(--poudarek-mehko); }
+.koraki .opravljen .korak-krog { background: var(--poudarek); border-color: var(--poudarek); color: var(--na-poudarku); }
+.koraki .caka .korak-krog { background: var(--opozorilo-mehko); border-color: var(--opozorilo); color: var(--opozorilo); }
+.koraki .zavrnjen .korak-krog { background: var(--nevarno-mehko); border-color: var(--nevarno); color: var(--nevarno); }
+.okvir-vzamemo { margin: 1.1rem 0 0; padding: 0.9rem 1rem; border: 1px solid var(--rob); border-radius: var(--kartica); }
+.okvir-naslov { margin: 0 0 0.5rem; color: var(--zamolklo); font-size: 0.8rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.okvir-vzamemo ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; font-size: 0.95rem; }
+.okvir-vzamemo li { padding-left: 1.4rem; position: relative; }
+.okvir-vzamemo li::before { position: absolute; left: 0; font-weight: 800; }
+.okvir-vzamemo .da::before { content: "\2713"; color: var(--poudarek); }
+.okvir-vzamemo .ne { color: var(--zamolklo); }
+.okvir-vzamemo .ne::before { content: "\2715"; }
+.okno-racun { display: flex; align-items: center; gap: 0.75rem; margin: 0 0 1rem; padding: 0.75rem 0.9rem; border: 1px solid var(--rob); border-radius: var(--kartica); }
+.okno-racun > div { flex: 1; min-width: 0; }
+.okno-racun p { margin: 0; overflow-wrap: anywhere; }
+.okno-racun-naslov { font-weight: 700; }
+.soglasje { display: flex; gap: 0.75rem; align-items: flex-start; margin: 0 0 1.1rem; padding: 0.9rem 1rem; border: 1px solid color-mix(in srgb, var(--opozorilo) 35%, transparent); border-radius: var(--kartica); background: var(--opozorilo-mehko); }
+.soglasje input { margin-top: 0.25rem; width: 1.1rem; height: 1.1rem; flex: none; }
+.soglasje label { font-weight: 700; }
+.soglasje p { margin: 0.2rem 0 0; font-size: 0.95rem; }
+.soglasje details { margin-top: 0.4rem; font-size: 0.9rem; }
+/* Gumb je do potrditve videti onemogocen; da brez soglasja nic ne nastane,
+   poskrbita `required` in strežnik. Brez :has() je gumb samo videti omogocen. */
+.zahtevek:has(#soglasje:not(:checked)) button[type="submit"] { opacity: 0.5; }
+.okno-podatki { display: grid; grid-template-columns: auto 1fr; gap: 0.4rem 1.25rem; margin: 0 0 1.1rem; padding: 0.9rem 1rem; border: 1px solid var(--rob); border-radius: var(--kartica); }
+.okno-podatki dt { color: var(--zamolklo); }
+.okno-podatki dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+.casovnica { list-style: none; margin: 0 0 1.1rem; padding: 0; display: grid; gap: 0.9rem; }
+.casovnica li { position: relative; padding-left: 2.4rem; display: grid; }
+.casovnica li::before { position: absolute; left: 0; top: 0; display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; font-size: 0.75rem; font-weight: 800; }
+.casovnica li + li::after { content: ""; position: absolute; left: 0.72rem; top: -0.9rem; height: 0.9rem; border-left: 1px solid var(--rob); }
+.casovnica .opravljen::before { content: "\2713"; background: var(--poudarek); color: var(--na-poudarku); }
+.casovnica .caka::before { content: "\2026"; background: var(--opozorilo-mehko); color: var(--opozorilo); border: 1px solid var(--opozorilo); }
+.casovnica .zavrnjen::before { content: "\2715"; background: var(--nevarno-mehko); color: var(--nevarno); border: 1px solid var(--nevarno); }
+.okno-razdelek { margin-top: 1.1rem; padding-top: 1.1rem; border-top: 1px solid var(--rob); }
+.okno-razdelek h2 { margin: 0 0 0.3rem; font-size: 1.05rem; }
+.okno-razdelek .vrstica-gumbov { margin-top: 0.9rem; }
+.naslednji-koraki { list-style: none; margin: 0 0 1.25rem; padding: 0; display: grid; gap: 0.65rem; }
+.naslednji-koraki a, .naslednji-koraki div { display: flex; align-items: center; gap: 0.85rem; padding: 0.85rem 1rem; border: 1px solid var(--rob); border-radius: var(--kartica); color: var(--besedilo); text-decoration: none; }
+.naslednji-koraki a::after { content: "\2192"; margin-left: auto; color: var(--poudarek); font-weight: 800; }
+.naslednji-koraki a:hover { border-color: var(--poudarek); background: var(--poudarek-mehko); }
+.naslednji-koraki .ikona { flex: none; box-sizing: content-box; padding: 0.45rem; border-radius: 8px; background: var(--poudarek-mehko); color: var(--poudarek); }
+.naslednji-koraki strong { display: block; }
+.naslednji-koraki span { font-size: 0.92rem; color: var(--zamolklo); }
+.naslednji-koraki span strong { color: var(--besedilo); font-size: 1rem; }
+.cakajoce { margin-bottom: 1.5rem; border-color: color-mix(in srgb, var(--opozorilo) 35%, transparent); }
+.cakajoce h2 { margin-top: 0; }
+.uporabniki { margin: 2rem 0; }
+@media (max-width: 960px) {
+  /* Pod to sirino se plosca skrci na znak in polico (POC-03). */
+  .okno-uvod { display: none; }
+}
+@media (max-width: 860px) {
+  .okno-ovoj { padding: 1.25rem 1rem 3rem; align-items: flex-start; }
+  .okno { box-shadow: var(--senca); }
+  .okno-telo { padding: 1.25rem 1.1rem 1.5rem; }
+  .koraki { padding: 0.8rem 1.1rem; font-size: 0.82rem; gap: 0.25rem; }
+}
+
 /* ---------- Strani po pravilih: arhiv, potrditve, sistem, testi ---------- */
 .arhiv { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); }
 .arhiv a { display: block; color: var(--besedilo); text-decoration: none; }

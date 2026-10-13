@@ -282,6 +282,22 @@ class TestPotiOstanejo:
         }
     )
 
+    #: Pari, ki jih je dodala `V6-R02` (`docs/odlocitve/ADR-062` I, K, L), s
+    #: soglasjem lastnika: okno registracije, izbris zavrnjenega računa ter
+    #: lastnikova odobritev in zavrnitev.
+    V6_R02 = frozenset(
+        {
+            ("GET", "/admin/register"),
+            ("POST", "/admin/register"),
+            ("GET", "/admin/racun/izbrisi"),
+            ("POST", "/admin/racun/izbrisi"),
+            ("GET", "/admin/system/families/{family_id}/approve"),
+            ("POST", "/admin/system/families/{family_id}/approve"),
+            ("GET", "/admin/system/families/{family_id}/reject"),
+            ("POST", "/admin/system/families/{family_id}/reject"),
+        }
+    )
+
     def test_dodani_sta_natanko_dve_poti_get(self, aplikacija: FastAPI) -> None:
         pari = {
             (metoda.upper(), pot)
@@ -291,6 +307,9 @@ class TestPotiOstanejo:
 
         assert pari >= self.NOVI
         assert pari >= self.V6_R01
-        assert len(pari) == self.PRED_V5_R01 + len(self.NOVI) + len(self.V6_R01)
+        assert pari >= self.V6_R02
+        assert len(pari) == (
+            self.PRED_V5_R01 + len(self.NOVI) + len(self.V6_R01) + len(self.V6_R02)
+        )
         # Slika urnika se samo bere.
         assert ("POST", "/admin/schedule/image/{slika_id}") not in pari

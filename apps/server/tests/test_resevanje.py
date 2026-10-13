@@ -459,6 +459,9 @@ class TestAdmin:
         # („rešen 7. 10."): leto nosi stolpec z datumom nastanka.
         assert re.fullmatch(r"rešen \d{1,2}\. \d{1,2}\.", stanje)
 
+    # V6-R02: družina brez otroka dobi na `/admin` prvo stran po odobritvi
+    # (`ADR-062` E); ta test govori o pregledu, zato otrok obstaja.
+    @pytest.mark.usefixtures("otrok")
     def test_neresen_kviz_ostane_objavljen(self, odjemalec: TestClient, motor: Engine) -> None:
         kviz(motor)
 

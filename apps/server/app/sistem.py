@@ -18,6 +18,7 @@ lastnika pred samim sabo.
 """
 
 from app.clani import NAJDALJSE_IME
+from app.models import STANJE_CAKA, STANJE_ZAVRNJENA
 
 #: Predpona poti lastnika sistema.
 #:
@@ -87,9 +88,57 @@ BESEDILO_ZASEBNOST = (
     "dobro. Slike torej ne ostanejo samo doma.\n\n"
     "Kar nastane iz njih — prepis, vprašanja, kvizi in odgovori — ostane na tem "
     "strežniku in ga vidi samo vaša družina. Nihče drug, tudi druge družine na "
-    "istem strežniku ne. Aplikacija ni objavljena in ni namenjena širšemu krogu; "
-    "če ti to ne ustreza, družine ne odpiram."
+    "istem strežniku ne. Če ti to ne ustreza, družine ne odpiram."
 )
+
+#: Isto, povedano staršu, ki se registrira sam (V6-R02, `ADR-062` C).
+#:
+#: Stoji ob potrditvenem polju soglasja; brez potrditve registracija ne nastane
+#: (`ADR-057` D). Z `V6-R03` je to tudi vir razdelka „Kako ravnamo s podatki"
+#: na predstavitveni strani — eno besedilo, da si strani ne moreta nasprotovati.
+BESEDILO_ZASEBNOST_JAVNO = (
+    "Slike zvezkov, ki jih otrok posname v aplikaciji, se prenesejo na naš "
+    "strežnik, od tam pa v zunanjo storitev (OpenAI), ki jih prepiše in iz njih "
+    "sestavi vprašanja. Brez tega aplikacija ne deluje. Kar nastane iz slik — "
+    "prepisi, vprašanja, kvizi, testi in odgovori — ostane na strežniku in ga "
+    "vidi samo tvoja družina."
+)
+
+# --- Odobritev družine (V6-R02) --------------------------------------------
+
+SPOROCILO_NI_ZA_ODOBRITEV = "Ta družina je že odobrena."
+SPOROCILO_NI_ZA_ZAVRNITEV = (
+    "Zavrniti je mogoče samo družino, ki še čaka. Odobreno družino lahko "
+    "deaktiviraš; njeni podatki pri tem ostanejo."
+)
+
+
+def stanja_za_odobritev() -> tuple[str, ...]:
+    """Iz katerih stanj sme družina v `approved` (`ADR-062` K).
+
+    Čakajoča in zavrnjena: odločitev je obrnljiva (`ADR-057` E).
+    """
+    return (STANJE_CAKA, STANJE_ZAVRNJENA)
+
+
+def stanja_za_zavrnitev() -> tuple[str, ...]:
+    """Iz katerih stanj sme družina v `rejected` — **samo iz čakajočega**.
+
+    Odobrene ni mogoče zavrniti: zavrnjeni starš sme svojo družino izbrisati
+    (`ADR-057` G), in ta izbris sloni na tem, da zavrnjena družina nima
+    vsebine. Odobrena jo lahko ima.
+    """
+    return (STANJE_CAKA,)
+
+
+def zakaj_ne_sme_odobriti(stanje: str) -> str | None:
+    """Razlog, zakaj te družine ni mogoče odobriti, ali `None`."""
+    return None if stanje in stanja_za_odobritev() else SPOROCILO_NI_ZA_ODOBRITEV
+
+
+def zakaj_ne_sme_zavrniti(stanje: str) -> str | None:
+    """Razlog, zakaj te družine ni mogoče zavrniti, ali `None`."""
+    return None if stanje in stanja_za_zavrnitev() else SPOROCILO_NI_ZA_ZAVRNITEV
 
 
 def je_skrita_pot(pot: str) -> bool:

@@ -255,6 +255,9 @@ def vrstica_predmeta(besedilo: str, koda: str) -> str:
     raise AssertionError(f"predmeta {koda} ni na seznamu")
 
 
+# V6-R02: družina brez otroka dobi na `/admin` prvo stran po odobritvi
+# (`ADR-062` E); ta test govori o pregledu, zato otrok obstaja.
+@pytest.mark.usefixtures("otrok")
 class TestSeznamPredmetov:
     """`GET /admin`."""
 
@@ -612,6 +615,9 @@ class TestArhiviranje:
         assert UUID_ENA not in besedilo
         assert UUID_DVA in besedilo
 
+    # V6-R02: družina brez otroka dobi na `/admin` prvo stran po odobritvi
+    # (`ADR-062` E); ta test govori o pregledu, zato otrok obstaja.
+    @pytest.mark.usefixtures("otrok")
     def test_arhivirana_slika_ne_steje_v_pregledu(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
@@ -1058,6 +1064,9 @@ class TestUbezanje:
     #: ostala zelena tudi z izklopljenim ubežanjem.
     NAPAD = "<img src=x onerror=alert(1)>"
 
+    # V6-R02: družina brez otroka dobi na `/admin` prvo stran po odobritvi
+    # (`ADR-062` E); ta test govori o pregledu, zato otrok obstaja.
+    @pytest.mark.usefixtures("otrok")
     def test_predmet_na_seznamu_je_ubezan(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
@@ -1139,6 +1148,9 @@ class TestNeznanePoti:
         assert odgovor.status_code == 200
         assert UUID_ENA in odgovor.text
 
+    # V6-R02: družina brez otroka dobi na `/admin` prvo stran po odobritvi
+    # (`ADR-062` E); ta test govori o pregledu, zato otrok obstaja.
+    @pytest.mark.usefixtures("otrok")
     def test_koda_z_vprasajem_je_dosegljiva_s_povezave(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
@@ -1277,6 +1289,15 @@ class TestPakiranje:
             # pred preklicem otrokovih prijav (`ADR-061` D).
             "clani-povezava.html",
             "clani-preklic.html",
+            # V6-R02: okno registracije in gradniki njegove postavitve, „Moj
+            # račun" neodobrene družine, izbris zavrnjenega računa, prva
+            # stran po odobritvi in lastnikova vmesna stran (`ADR-062`).
+            "_okno.html",
+            "registracija.html",
+            "racun-zahtevek.html",
+            "racun-izbris.html",
+            "dobrodosli.html",
+            "sistem-odobritev.html",
         }
 
 
@@ -2642,6 +2663,9 @@ class TestSlovenskaStevila:
     in je ni ujel noben test — nobena trditev se besedila ni dotaknila.
     """
 
+    # V6-R02: družina brez otroka dobi na `/admin` prvo stran po odobritvi
+    # (`ADR-062` E); ta test govori o pregledu, zato otrok obstaja.
+    @pytest.mark.usefixtures("otrok")
     def test_pregled_sesteje_cez_predmete(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:
@@ -2653,6 +2677,9 @@ class TestSlovenskaStevila:
         assert "2 sliki v uporabi" in besedilo
         assert "2 slik " not in besedilo
 
+    # V6-R02: družina brez otroka dobi na `/admin` prvo stran po odobritvi
+    # (`ADR-062` E); ta test govori o pregledu, zato otrok obstaja.
+    @pytest.mark.usefixtures("otrok")
     def test_pregled_pri_eni_sliki(
         self, odjemalec: TestClient, motor: Engine, slike: Path
     ) -> None:

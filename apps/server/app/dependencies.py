@@ -21,6 +21,7 @@ from app.db import (
     SejaUporabnika,
     StatistikaRepository,
 )
+from app.models import STANJE_ODOBRENA
 from app.settings import Settings
 from app.vision import KlicalecPreizkusa, KlicalecUrnika
 
@@ -142,6 +143,33 @@ def zahtevaj_lastnika_sistema(
     if not seja.is_system_owner:
         raise HTTPException(status_code=404)
     return seja
+
+
+class NeodobrenaDruzina(Exception):
+    """Seja družine, ki je lastnik sistema (še) ni odobril (V6-R02).
+
+    Svoja izjema in ne `HTTPException(303)`: prestreznik napak pod `/admin`
+    riše strani z napako, to pa ni napaka, ampak preusmeritev na edino stran,
+    ki jo taka družina ima. Prevede jo `main.na_moj_racun`.
+    """
+
+
+def zahtevaj_odobreno_druzino(
+    seja: Annotated[SejaUporabnika, Depends(daj_prijavo)],
+) -> None:
+    """Spusti samo sejo **odobrene** družine; ostale gredo na „Moj račun".
+
+    Pripeta je ob priklopu vsakega usmerjevalnika pod `/admin`
+    (`main.USMERJEVALNIKI_ZA_ODOBRENE`), ne v posameznem endpointu — pot,
+    dodana jutri, je zaprta sama od sebe, usmerjevalnik, dodan mimo seznama,
+    pa ujame test, generiran iz poti aplikacije (`ADR-057` C, `ADR-062` J).
+    Isto sklepanje kot pri `zahtevaj_lastnika_sistema`.
+
+    Primerja z `approved` in ne z naštetima `pending` in `rejected`: stanje, ki
+    ga ta koda ne pozna, naj bo zaprto, ne odprto.
+    """
+    if seja.family_status != STANJE_ODOBRENA:
+        raise NeodobrenaDruzina
 
 
 def daj_repozitorij_druzin(request: Request) -> Iterator[DruzineRepository]:

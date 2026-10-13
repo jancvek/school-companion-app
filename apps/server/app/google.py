@@ -87,15 +87,14 @@ OMEJITEV_SEKUND = 15.0
 
 # --- Sporočila -------------------------------------------------------------
 
-#: Eno samo sporočilo za vsak neuspeh, ki bi sicer izdal, ali račun obstaja.
+#: Eno samo sporočilo za deaktiviran račun in za ugasnjeno družino.
 #:
-#: Isto načelo kot `prijava.SPOROCILO_NEUSPELA_PRIJAVA`: neznan Google račun,
-#: deaktiviran račun in ugasnjena družina dajo isto besedilo. Pove, kaj naj
-#: uporabnica naredi (prijavi se z geslom in poveži), ne da bi povedala, v
-#: katerem od teh stanj je.
+#: Isto načelo kot `prijava.SPOROCILO_NEUSPELA_PRIJAVA`: besedilo ne pove, v
+#: katerem od obeh stanj je račun. **Neznan Google račun sem od `V6-R02` ne
+#: sodi več** — ta dobi obrazec registracije (`ADR-057` A, `ADR-062` H).
 SPOROCILO_NEPOVEZAN = (
-    "S tem Google računom prijava ni mogoča. Google račun poveže starš sam, "
-    "v nastavitvah svojega računa, potem ko se prijavi z geslom."
+    "S tem Google računom prijava trenutno ni mogoča. Če imaš geslo, se prijavi "
+    "z njim; sicer se obrni na skrbnika sistema."
 )
 
 SPOROCILO_STANJE = (
@@ -163,8 +162,15 @@ OZNAKA_STANJE = "stanje"
 OZNAKA_NEDOSEGLJIV = "nedosegljiv"
 OZNAKA_NEPOVEZAN = "nepovezan"
 OZNAKA_ZAVRNJENO = "zavrnjeno"
+#: Zavrnjeni starš je pravkar izbrisal svoj račun (V6-R02, `ADR-062` L).
+OZNAKA_IZBRISAN = "izbrisan"
+
+SPOROCILO_IZBRISAN = (
+    "Račun je izbrisan. Če želiš, se lahko z istim Google računom registriraš znova."
+)
 
 SPOROCILA_PRIJAVE: dict[str, str] = {
+    OZNAKA_IZBRISAN: SPOROCILO_IZBRISAN,
     OZNAKA_STANJE: SPOROCILO_STANJE,
     OZNAKA_NEDOSEGLJIV: SPOROCILO_NEDOSEGLJIV,
     OZNAKA_NEPOVEZAN: SPOROCILO_NEPOVEZAN,
@@ -220,6 +226,10 @@ class Namen(Enum):
 
     PRIJAVA = "prijava"
     POVEZAVA = "povezava"
+    #: Tok, začet v oknu registracije (V6-R02). **Izida ne spremeni** — tega
+    #: odloči `sub` (`ADR-062` H) —, pove samo, na kateri strani se pokaže
+    #: napaka: v oknu registracije namesto na prijavni strani.
+    REGISTRACIJA = "registracija"
 
 
 #: Ime piškotka, v katerem živi stanje med odhodom h Googlu in povratkom.
@@ -358,8 +368,8 @@ def naslov_privolitve(*, client_id: str, domena: str, stanje: Stanje) -> str:
 class RacunGoogla:
     """Kar o računu potrebujemo, in nič več.
 
-    Ime, slika in vse ostalo, kar `userinfo` vrne, se zavrže: podatek, ki ga
-    ne potrebujemo, je podatek, ki ga ne hranimo.
+    Slika in vse ostalo, kar `userinfo` vrne, se zavrže: podatek, ki ga ne
+    potrebujemo, je podatek, ki ga ne hranimo.
     """
 
     #: Stabilen Googlov identifikator. Gre v `credentials.identifier`.
@@ -368,6 +378,9 @@ class RacunGoogla:
     email: str | None
     #: Ali je Google naslov potrdil. Nepotrjen naslov ni dokaz o ničemer.
     email_verified: bool
+    #: Ime iz profila (V6-R02): predlog za polje „Tvoje ime" v obrazcu
+    #: registracije in nič drugega. Ne hrani se (`ADR-062` R).
+    name: str = ""
 
 
 #: Kaj naredi odjemalec: iz kode dobi račun. Vse ostalo (naslovi, stanje,
@@ -432,12 +445,14 @@ def naredi_odjemalca(
                 dnevnik.warning("Google ni vrnil sub: %s", sorted(odgovor))
                 raise NapakaGoogla(SPOROCILO_NEDOSEGLJIV)
             email = odgovor.get("email")
+            name = odgovor.get("name")
             return RacunGoogla(
                 sub=sub,
                 email=email if isinstance(email, str) and email else None,
                 # Privzetek je `False` in ne `True`: manjkajoče polje je
                 # odsotnost potrdila, ne potrdilo.
                 email_verified=odgovor.get("email_verified") is True,
+                name=name.strip() if isinstance(name, str) else "",
             )
 
         @staticmethod

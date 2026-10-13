@@ -1,0 +1,77 @@
+{# Gradniki postavitve registracije (V6-R02, `docs/poc/POC-03`, posnetki 02 in
+   04–09): barvna plošča levo, okno s koraki desno. Uporabljajo jih okno
+   registracije, „Moj račun" neodobrene družine in prva stran po odobritvi.
+
+   Uvozi se `with context`: plošča riše polico iz `hrbti`, ki jih da
+   obdelovalec konteksta (`app/strani.py`).
+
+   Brez skripte in brez zunanjih virov; ikone so vrisane kot SVG. Povezave
+   „Domača stran" tu ni — predstavitvena stran nastane z `V6-R03`
+   (`docs/odlocitve/ADR-062` B). #}
+
+{% macro ikona(ime) -%}
+  <svg class="ikona" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+       stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    {%- if ime == "list" -%}
+      <path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M10 13h6M10 17h6"/>
+    {%- elif ime == "telefon" -%}
+      <rect x="7" y="3" width="10" height="18" rx="2"/><path d="M10.5 9.5a1.5 1.5 0 1 1 2.2 1.3c-.5.3-.7.6-.7 1.2M12 15h.01"/>
+    {%- elif ime == "koledar" -%}
+      <rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M8 3v4M16 3v4"/>
+    {%- elif ime == "oseba" -%}
+      <circle cx="12" cy="8" r="3.5"/><path d="M5 20c1-4 4-5.5 7-5.5s6 1.5 7 5.5"/>
+    {%- elif ime == "namesti" -%}
+      <rect x="7" y="3" width="10" height="18" rx="2"/><path d="M12 8v6M9.5 11.5 12 14l2.5-2.5"/>
+    {%- endif -%}
+  </svg>
+{%- endmacro %}
+
+{% macro plosca() %}
+  <div class="prijava-plosca okno-plosca" aria-hidden="true">
+    <p class="prijava-znamka"><span class="meni-znak"></span> Šolski pomočnik</p>
+    <div class="okno-uvod">
+      <p class="okno-naslov">Kar se otrok uči, na enem mestu.</p>
+      <p class="okno-podnaslov">
+        Za starše osnovnošolcev. Registracija vzame minuto, gesla ne potrebuješ.
+      </p>
+      <ul class="okno-koristi">
+        <li class="poudarjena">
+          {{ ikona("list") }}
+          <span><strong>Testi za tisk</strong> Iz snovi v klepetu sestaviš test s točkami na A4.</span>
+        </li>
+        <li class="poudarjena">
+          {{ ikona("telefon") }}
+          <span><strong>Kvizi na telefonu</strong> Otrok odgovarja in pove, kako mu je šlo.</span>
+        </li>
+        <li>
+          {{ ikona("koledar") }}
+          <span><strong>Pregled po dnevih</strong> Kaj je bilo pri pouku in kje manjka slika.</span>
+        </li>
+      </ul>
+    </div>
+    <ul class="hrbti">
+      {% for hrbet in hrbti %}
+        <li style="--barva: {{ hrbet.barva }}"><span>{{ hrbet.koda }}</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endmacro %}
+
+{# Trije koraki na vrhu okna. Vsak je eno od: `tekoc`, `opravljen`, `caka`,
+   `zavrnjen` ali prazno (še ni na vrsti). Stanje pove tudi besedilo za
+   bralnik zaslona, ne samo barva in znak. #}
+{% macro koraki(google, zahtevek, odobritev) %}
+  <ol class="koraki">
+    {% for oznaka, stanje in [("Google", google), ("Zahtevek", zahtevek), ("Odobritev", odobritev)] %}
+      <li class="{{ stanje }}"{% if stanje == "tekoc" %} aria-current="step"{% endif %}>
+        <span class="korak-krog" aria-hidden="true">
+          {%- if stanje == "opravljen" %}✓{% elif stanje == "caka" %}…{% elif stanje == "zavrnjen" %}✕{% else %}{{ loop.index }}{% endif -%}
+        </span>
+        <span>{{ oznaka }}</span>
+        {% if stanje == "opravljen" %}<span class="samo-bralnik"> — opravljeno</span>
+        {% elif stanje == "caka" %}<span class="samo-bralnik"> — čaka</span>
+        {% elif stanje == "zavrnjen" %}<span class="samo-bralnik"> — zavrnjeno</span>{% endif %}
+      </li>
+    {% endfor %}
+  </ol>
+{% endmacro %}

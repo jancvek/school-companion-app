@@ -1,0 +1,44 @@
+{# Vmesna stran pred izbrisom zavrnjenega računa (V6-R02,
+   `docs/odlocitve/ADR-057` G, `ADR-062` L).
+
+   Edino dejanje v aplikaciji, ki družino izbriše, zato pove natanko, kaj
+   izgine, in da se da registrirati znova. V postavitvi registracije, brez
+   menija — zavrnjena družina ga nima. #}
+{% extends "osnova.html" %}
+{% from "_okno.html" import plosca, koraki with context %}
+
+{% block naslov %}Izbrisati račun?{% endblock %}
+{% block razred_telesa %} prijavna{% endblock %}
+{% block brez_menija %}1{% endblock %}
+
+{% block vsebina %}
+  <div class="prijavna-stran">
+    {{ plosca() }}
+
+    <div class="okno-ovoj">
+      <div class="okno">
+        {{ koraki("opravljen", "opravljen", "zavrnjen") }}
+        <div class="okno-telo">
+          <p class="nadnaslov">Moj račun</p>
+          <h1>Izbrisati račun?</h1>
+
+          <ul class="posledice">
+            <li class="takoj">
+              Izbrišemo <strong>{{ druzina }}</strong>, račun <strong>{{ ime }}</strong>
+              in vse prijave. Tega ni mogoče razveljaviti.
+            </li>
+            <li class="ostane">
+              Z istim Google računom se lahko pozneje <strong>registriraš znova</strong>.
+            </li>
+          </ul>
+
+          <form method="post" action="{{ pot_izbrisa }}" class="vrstica-gumbov">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="gumb nepovraten" type="submit">Da, izbriši moj račun</button>
+            <a class="gumb obrobljen" href="{{ pot_nazaj }}">Ne, nazaj</a>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

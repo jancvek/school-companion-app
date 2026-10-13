@@ -18,6 +18,42 @@
   <h1>Družine</h1>
   <p class="pod">Skupaj {{ skupaj_opis }}.</p>
 
+  {# Zahtevki staršev, ki so se registrirali sami (V6-R02, `ADR-057` E).
+     Najstarejši prvi. „Odobri" in „Zavrni" sta povezavi na vmesno stran; sam
+     klik ne spremeni ničesar (`ADR-038` F). Razdelka ni, kadar nihče ne čaka. #}
+  {% if cakajoce %}
+    <section class="kartica cakajoce">
+      <h2>Čaka na odobritev</h2>
+      <div class="tabela-ovoj">
+        <table class="tabela zlozi">
+          <thead>
+            <tr>
+              <th scope="col">Družina</th>
+              <th scope="col">Starš</th>
+              <th scope="col">Googlov e-naslov</th>
+              <th scope="col">Oddano</th>
+              <th scope="col">Dejanja</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for zahtevek in cakajoce %}
+              <tr>
+                <td><strong>{{ zahtevek.druzina }}</strong></td>
+                <td>{{ zahtevek.stars }}</td>
+                <td>{{ zahtevek.enaslov }}</td>
+                <td>{{ zahtevek.oddan }}</td>
+                <td class="vrstica-gumbov">
+                  <a class="gumb majhen polni" href="{{ predpona }}/families/{{ zahtevek.id }}/approve">Odobri</a>
+                  <a class="gumb majhen nevaren" href="{{ predpona }}/families/{{ zahtevek.id }}/reject">Zavrni</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
+
   <ul class="clani">
     {% for druzina in druzine %}
       <li class="clan{{ '' if druzina.aktivna else ' deaktiviran' }}">
@@ -30,10 +66,16 @@
         </div>
         <p class="clan-oznake">
           {% if druzina.moja %}<span class="oznaka ok">tvoja družina</span>{% endif %}
+          <span class="oznaka {{ druzina.odobritev_razred }}">{{ druzina.odobritev }}</span>
           <span class="oznaka">{{ druzina.stanje }}</span>
           <span class="oznaka">nastala {{ druzina.nastala }}</span>
         </p>
         <p class="clan-dejanja">
+          {# Zavrnjeno družino je mogoče pozneje odobriti (`ADR-057` E);
+             čakajoče so v razdelku zgoraj. #}
+          {% if druzina.sme_odobritev and not druzina.sme_zavrnitev %}
+            <a href="/admin/system/families/{{ druzina.id }}/approve">Odobri</a>
+          {% endif %}
           {% if druzina.sme_aktivacijo %}
             <a href="/admin/system/families/{{ druzina.id }}/activate">Aktiviraj znova</a>
           {% endif %}
@@ -44,6 +86,42 @@
       </li>
     {% endfor %}
   </ul>
+
+  {# Starši vseh družin (V6-R02, `ADR-062` P). **Otrok tu ni** — lastnik jih
+     vidi samo kot število ob družini (`ADR-044` B). #}
+  <section class="uporabniki">
+    <h2>Uporabniki</h2>
+    <p class="zamolklo">Starši vseh družin. Otroci so samo število ob svoji družini.</p>
+    <div class="kartica brez-roba tabela-ovoj">
+      <table class="tabela zlozi">
+        <thead>
+          <tr>
+            <th scope="col">Ime</th>
+            <th scope="col">E-naslov</th>
+            <th scope="col">Družina</th>
+            <th scope="col">Prijava</th>
+            <th scope="col">Stanje</th>
+            <th scope="col">Nastal</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for uporabnik in uporabniki %}
+            <tr>
+              <td>{{ uporabnik.ime }}</td>
+              <td>{{ uporabnik.enaslov }}</td>
+              <td><a href="{{ predpona }}/families/{{ uporabnik.druzina_id }}">{{ uporabnik.druzina }}</a></td>
+              <td>{{ uporabnik.nacin }}</td>
+              <td>
+                <span class="oznaka {{ uporabnik.odobritev_razred }}">{{ uporabnik.odobritev }}</span>
+                {% if uporabnik.deaktivirano %}<span class="oznaka">{{ uporabnik.deaktivirano }}</span>{% endif %}
+              </td>
+              <td>{{ uporabnik.nastal }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
 
   {# Vmesne potrditve ni, iz istega razloga kot pri dodajanju člana: ta bi
      začetno geslo spravila v skrito polje druge strani in v zgodovino
@@ -100,7 +178,8 @@
     </form>
     <p class="drobno">
       Ostale starše in otroke doda ta starš sam, v razdelku Družina na svoji
-      strani.
+      strani. Družina, ki jo odpreš tu, je odobrena takoj; starš z Google
+      računom se lahko registrira tudi sam in počaka na tvojo odobritev.
     </p>
   </section>
 {% endblock %}

@@ -22,9 +22,23 @@
   <h1>{{ druzina.ime }}</h1>
   <p class="pod">
     {{ druzina.clanov_opis }} ({{ druzina.starsev_opis }}, {{ druzina.otrok_opis }})
-    &middot; nastala {{ druzina.nastala }} &middot; {{ druzina.stanje }}
+    &middot; nastala {{ druzina.nastala }} &middot; {{ druzina.odobritev }}
+    &middot; {{ druzina.stanje }}
     {%- if druzina.moja %} &middot; tvoja družina{% endif %}
   </p>
+
+  {# Odobritev (V6-R02). Dokler družina ni odobrena, njen starš vidi samo
+     „Moj račun" (`ADR-057` C). #}
+  {% if druzina.sme_odobritev %}
+    <p class="obvestilo caka">
+      <span>
+        Ta družina {{ "čaka na tvojo odločitev" if druzina.sme_zavrnitev else "je bila zavrnjena" }}.
+        <a href="{{ predpona }}/families/{{ druzina.id }}/approve">Odobri</a>
+        {%- if druzina.sme_zavrnitev %} ali
+          <a href="{{ predpona }}/families/{{ druzina.id }}/reject">zavrni</a>{% endif %}.
+      </span>
+    </p>
+  {% endif %}
 
   {% if not druzina.aktivna %}
     <p class="obvestilo caka">

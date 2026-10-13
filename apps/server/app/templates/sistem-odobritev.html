@@ -1,0 +1,60 @@
+{# Vmesna stran pred odobritvijo ali zavrnitvijo družine (V6-R02,
+   `docs/odlocitve/ADR-057` E, `ADR-062` K). Ista kartica potrditve kot pri
+   deaktivaciji družine: kdo zgoraj, vprašanje, posledice, gumba. #}
+{% extends "osnova.html" %}
+
+{% block naslov %}{% if odobrimo %}Odobriti družino?{% else %}Zavrniti družino?{% endif %}{% endblock %}
+
+{% block vsebina %}
+  <section class="kartica kartica-potrditve">
+    <div class="clan-glava">
+      <span class="krozec velik" aria-hidden="true">{{ druzina.ime[:1]|upper }}</span>
+      <div>
+        <p class="potrditev-kdo"><strong>{{ druzina.ime }}</strong></p>
+        <p class="zamolklo">{{ druzina.odobritev }} &middot; zahtevek oddan {{ druzina.nastala }}</p>
+      </div>
+    </div>
+
+    {% if odobrimo %}
+      <h1>Odobriti družino?</h1>
+      <ul class="posledice">
+        <li class="takoj">
+          Starš dobi dostop do vsega: doda otroke, poveže telefon in začne
+          uporabljati pregled. Ob naslednjem obisku se mu odpre njegova družina.
+        </li>
+        <li class="tece">
+          Slike njegovih otrok bodo šle v obdelavo pri zunanji storitvi; starš je
+          soglasje za to potrdil ob registraciji.
+        </li>
+        <li class="ostane">
+          Odobrene družine ni mogoče zavrniti, lahko pa jo pozneje deaktiviraš.
+        </li>
+      </ul>
+    {% else %}
+      <h1>Zavrniti družino?</h1>
+      <ul class="posledice">
+        <li class="takoj">
+          Starš bo na svoji strani videl samo, da je bil zahtevek zavrnjen. Do
+          ničesar drugega nima dostopa.
+        </li>
+        <li class="tece">
+          Svoj račun lahko nato izbriše sam in se z istim Google računom
+          registrira znova.
+        </li>
+        <li class="ostane">
+          Odločitev lahko spremeniš: zavrnjeno družino lahko pozneje odobriš.
+        </li>
+      </ul>
+    {% endif %}
+
+    <form method="post" action="{{ pot_dejanja }}" class="vrstica-gumbov">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% if odobrimo %}
+        <button class="gumb polni" type="submit">Da, odobri družino</button>
+      {% else %}
+        <button class="gumb nepovraten" type="submit">Da, zavrni družino</button>
+      {% endif %}
+      <a class="gumb obrobljen" href="{{ pot_nazaj }}">Prekliči</a>
+    </form>
+  </section>
+{% endblock %}

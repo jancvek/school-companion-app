@@ -42,19 +42,21 @@ from app import clani, prijava, sistem
 from app.besedilo import CLANI, DRUZINE, OTROCI, STARSI, stevilo_z_besedo
 from app.casi import datum
 from app.db import (
+    CakajocaDruzina,
     ClanDruzine,
     ClaniRepository,
     DruzinaZaPregled,
     DruzineRepository,
     IdentifikatorZaseden,
     SejaUporabnika,
+    StarsZaPregled,
 )
 from app.dependencies import (
     daj_repozitorij_clanov_ciljne_druzine,
     daj_repozitorij_druzin,
     zahtevaj_lastnika_sistema,
 )
-from app.models import VLOGA_STARS
+from app.models import STANJE_CAKA, STANJE_ODOBRENA, STANJE_ZAVRNJENA, VLOGA_STARS
 from app.strani import daj_predloge, ni_dovoljeno, ni_najdeno, zavrnjeno
 
 #: Predpona poti. Pod `/admin`, torej za sejo in s CSRF žetonom (`ADR-035`).
@@ -66,6 +68,16 @@ router = APIRouter(prefix=PREDPONA, dependencies=[Depends(zahtevaj_lastnika_sist
 
 OZNAKA_PRIZGANA = "aktivna"
 OZNAKA_UGASNJENA = "deaktivirana"
+
+#: Stanje odobritve, kot ga pove vmesnik (V6-R02). Neznano stanje se izpiše
+#: dobesedno — bolje čudna oznaka kot napačna.
+OZNAKE_ODOBRITVE = {
+    STANJE_CAKA: "čaka na odobritev",
+    STANJE_ODOBRENA: "odobrena",
+    STANJE_ZAVRNJENA: "zavrnjena",
+}
+#: Razred oznake v `slog.css` za vsako stanje odobritve.
+RAZREDI_ODOBRITVE = {STANJE_CAKA: "caka", STANJE_ODOBRENA: "ok", STANJE_ZAVRNJENA: "napaka"}
 
 SPOROCILO_NI_STARSA = (
     "Tega starša v tej družini ni. Morda je bil naslov napačno prepisan; "
@@ -99,6 +111,77 @@ class PogledDruzine:
     #: tudi zavrne** — isti vzorec kot pri članih (`app/routers/clani.py`).
     sme_deaktivacijo: bool
     sme_aktivacijo: bool
+    #: Stanje odobritve (V6-R02) kot beseda in razred oznake, ter dejanji, ki
+    #: ju isto pravilo dovoli (`sistem.zakaj_ne_sme_odobriti`, `…_zavrniti`).
+    odobritev: str = OZNAKE_ODOBRITVE[STANJE_ODOBRENA]
+    odobritev_razred: str = RAZREDI_ODOBRITVE[STANJE_ODOBRENA]
+    sme_odobritev: bool = False
+    sme_zavrnitev: bool = False
+
+
+@dataclass(frozen=True)
+class PogledZahtevka:
+    """Ena vrstica seznama „Čaka na odobritev" (`ADR-057` E)."""
+
+    id: str
+    druzina: str
+    stars: str
+    enaslov: str
+    oddan: str
+
+
+@dataclass(frozen=True)
+class PogledUporabnika:
+    """Ena vrstica tabele uporabnikov (`ADR-062` P). Samo starši."""
+
+    ime: str
+    enaslov: str
+    druzina_id: str
+    druzina: str
+    nacin: str
+    odobritev: str
+    odobritev_razred: str
+    #: `None`, kadar sta oseba in družina aktivni; sicer kaj je deaktivirano.
+    deaktivirano: str | None
+    nastal: str
+
+
+def _pogled_zahtevka(zahtevek: CakajocaDruzina) -> PogledZahtevka:
+    return PogledZahtevka(
+        id=zahtevek.id,
+        druzina=zahtevek.name,
+        stars=zahtevek.stars,
+        enaslov=zahtevek.enaslov or "—",
+        oddan=datum(zahtevek.created_at),
+    )
+
+
+def _pogled_uporabnika(stars: StarsZaPregled) -> PogledUporabnika:
+    if stars.ima_geslo and stars.ima_google:
+        nacin = "geslo in Google"
+    elif stars.ima_google:
+        nacin = "Google"
+    elif stars.ima_geslo:
+        nacin = "geslo"
+    else:
+        nacin = "—"
+    if not stars.is_active:
+        deaktivirano = "deaktiviran račun"
+    elif not stars.family_is_active:
+        deaktivirano = "deaktivirana družina"
+    else:
+        deaktivirano = None
+    return PogledUporabnika(
+        ime=stars.display_name,
+        enaslov=stars.enaslov or "—",
+        druzina_id=stars.family_id,
+        druzina=stars.family_name,
+        nacin=nacin,
+        odobritev=OZNAKE_ODOBRITVE.get(stars.family_status, stars.family_status),
+        odobritev_razred=RAZREDI_ODOBRITVE.get(stars.family_status, ""),
+        deaktivirano=deaktivirano,
+        nastal=datum(stars.created_at),
+    )
 
 
 def _pogled_druzine(druzina: DruzinaZaPregled, *, seja: SejaUporabnika) -> PogledDruzine:
@@ -117,6 +200,10 @@ def _pogled_druzine(druzina: DruzinaZaPregled, *, seja: SejaUporabnika) -> Pogle
         moja=druzina.id == seja.family_id,
         sme_deaktivacijo=druzina.is_active and zavrnitev is None,
         sme_aktivacijo=not druzina.is_active,
+        odobritev=OZNAKE_ODOBRITVE.get(druzina.status, druzina.status),
+        odobritev_razred=RAZREDI_ODOBRITVE.get(druzina.status, ""),
+        sme_odobritev=sistem.zakaj_ne_sme_odobriti(druzina.status) is None,
+        sme_zavrnitev=sistem.zakaj_ne_sme_zavrniti(druzina.status) is None,
     )
 
 
@@ -171,6 +258,9 @@ def _zavrnitev_gesla(clan: ClanDruzine, seja: SejaUporabnika) -> str | None:
         clan_id=clan.user_id,
         clan_vloga=clan.role,
         clan_je_lastnik_sistema=clan.is_system_owner,
+        # Starš brez vrstice `kind='password'` — registriran z Googlom
+        # (`ADR-062` O). Otrok je tudi nima, a zanj odloči pravilo pred tem.
+        clan_ima_geselno_poverilnico=clan.identifier is not None,
     )
 
 
@@ -227,6 +317,12 @@ def _stran_seznama(
         "sistem.html",
         {
             "druzine": vrstice,
+            # Zahtevki, ki čakajo na odločitev, in starši vseh družin (V6-R02).
+            # Oboje iz `DruzineRepository`: imena staršev in e-naslovi, otroci
+            # samo kot število ob družini (`ADR-044` B, `ADR-062` P).
+            "cakajoce": [_pogled_zahtevka(z) for z in repo.cakajoce()],
+            "uporabniki": [_pogled_uporabnika(s) for s in repo.starsi()],
+            "predpona": PREDPONA,
             "skupaj_opis": stevilo_z_besedo(len(vrstice), DRUZINE),
             "napaka": napaka,
             "vnos": vnos or {},
@@ -512,6 +608,114 @@ def aktiviraj_druzino(
     return _stanje_druzine(
         request, family_id, predloge, repo, seja, aktiviramo=True, izvedi=True
     )
+
+
+# --- Odobritev družine (V6-R02) --------------------------------------------
+
+
+def _odobritev(
+    request: Request,
+    family_id: str,
+    predloge: Jinja2Templates,
+    repo: DruzineRepository,
+    seja: SejaUporabnika,
+    *,
+    odobrimo: bool,
+    izvedi: bool,
+) -> Response:
+    """Skupno telo štirih poti: vmesni strani ter „Odobri" in „Zavrni".
+
+    Vmesna stran in `POST` s CSRF žetonom, po vzoru deaktivacije (`ADR-038` F).
+    Kateri prehod je dovoljen, pove `app/sistem.py` — iz `approved` v
+    `rejected` ni poti (`ADR-062` K). Da se med vmesno stranjo in klikom
+    stanje ni spremenilo, preveri pogojni `UPDATE` v repozitoriju.
+
+    **Sej se ne dotakne.** Odobrenemu staršu se ob naslednji zahtevi odpre
+    ves `/admin`; zavrnjeni mora še videti „Moj račun".
+    """
+    druzina = repo.poisci(family_id)
+    if druzina is None:
+        return ni_najdeno(predloge, request, sistem.SPOROCILO_NI_DRUZINE)
+
+    ovira = (
+        sistem.zakaj_ne_sme_odobriti(druzina.status)
+        if odobrimo
+        else sistem.zakaj_ne_sme_zavrniti(druzina.status)
+    )
+    if ovira is not None:
+        return ni_dovoljeno(predloge, request, ovira)
+
+    if not izvedi:
+        return predloge.TemplateResponse(
+            request,
+            "sistem-odobritev.html",
+            {
+                "druzina": _pogled_druzine(druzina, seja=seja),
+                "odobrimo": odobrimo,
+                "pot_dejanja": (
+                    f"{PREDPONA}/families/{druzina.id}/{'approve' if odobrimo else 'reject'}"
+                ),
+                "pot_nazaj": PREDPONA,
+            },
+        )
+
+    uspelo = repo.nastavi_stanje(
+        family_id,
+        iz=sistem.stanja_za_odobritev() if odobrimo else sistem.stanja_za_zavrnitev(),
+        v=STANJE_ODOBRENA if odobrimo else STANJE_ZAVRNJENA,
+        ko=datetime.now(UTC),
+    )
+    if not uspelo:
+        return ni_dovoljeno(predloge, request, sistem.SPOROCILO_NI_SPREMENJENO)
+    return _nazaj()
+
+
+@router.get("/families/{family_id}/approve")
+def potrdi_odobritev(
+    request: Request,
+    family_id: str,
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    repo: Annotated[DruzineRepository, Depends(daj_repozitorij_druzin)],
+    seja: Annotated[SejaUporabnika, Depends(zahtevaj_lastnika_sistema)],
+) -> Response:
+    """Vmesna stran pred odobritvijo."""
+    return _odobritev(request, family_id, predloge, repo, seja, odobrimo=True, izvedi=False)
+
+
+@router.post("/families/{family_id}/approve")
+def odobri(
+    request: Request,
+    family_id: str,
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    repo: Annotated[DruzineRepository, Depends(daj_repozitorij_druzin)],
+    seja: Annotated[SejaUporabnika, Depends(zahtevaj_lastnika_sistema)],
+) -> Response:
+    """Odobri čakajočo ali prej zavrnjeno družino (`ADR-057` E)."""
+    return _odobritev(request, family_id, predloge, repo, seja, odobrimo=True, izvedi=True)
+
+
+@router.get("/families/{family_id}/reject")
+def potrdi_zavrnitev(
+    request: Request,
+    family_id: str,
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    repo: Annotated[DruzineRepository, Depends(daj_repozitorij_druzin)],
+    seja: Annotated[SejaUporabnika, Depends(zahtevaj_lastnika_sistema)],
+) -> Response:
+    """Vmesna stran pred zavrnitvijo."""
+    return _odobritev(request, family_id, predloge, repo, seja, odobrimo=False, izvedi=False)
+
+
+@router.post("/families/{family_id}/reject")
+def zavrni(
+    request: Request,
+    family_id: str,
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+    repo: Annotated[DruzineRepository, Depends(daj_repozitorij_druzin)],
+    seja: Annotated[SejaUporabnika, Depends(zahtevaj_lastnika_sistema)],
+) -> Response:
+    """Zavrne čakajočo družino. Odobrene ni mogoče zavrniti (`ADR-062` K)."""
+    return _odobritev(request, family_id, predloge, repo, seja, odobrimo=False, izvedi=True)
 
 
 # --- Starši ene družine ----------------------------------------------------

@@ -1,0 +1,110 @@
+{# „Moj račun" neodobrene družine (V6-R02, `docs/poc/POC-03`, posnetka 07 in 09).
+
+   Edina stran pod `/admin`, ki jo vidi starš, čigar zahtevek čaka ali je bil
+   zavrnjen (`docs/odlocitve/ADR-057` C). Menija ni: vsaka njegova postavka bi
+   pripeljala nazaj sem.
+
+   - čaka: kdo si, kje v postopku je zahtevek in da e-pošte ne pošiljamo;
+   - zavrnjena: samo to, da je bil zahtevek zavrnjen, in „Izbriši moj račun".
+
+   Povezave na domačo stran tu ni do `V6-R03` (`ADR-062` B). #}
+{% extends "osnova.html" %}
+{% from "_okno.html" import plosca, koraki with context %}
+
+{% block naslov %}Moj račun{% endblock %}
+{% block razred_telesa %} prijavna{% endblock %}
+{% block brez_menija %}1{% endblock %}
+
+{% block vsebina %}
+  <div class="prijavna-stran">
+    {{ plosca() }}
+
+    <div class="okno-ovoj">
+      <div class="okno">
+        {% if zavrnjena %}
+          {{ koraki("opravljen", "opravljen", "zavrnjen") }}
+          <div class="okno-telo">
+            <p class="nadnaslov">Moj račun</p>
+            <p><span class="oznaka napaka">Zavrnjeno</span></p>
+            <h1>Zahtevek ni bil sprejet</h1>
+            <p class="pod">
+              Skrbnik sistema je tvoj zahtevek zavrnil. Šolski pomočnik je
+              zaenkrat namenjen omejenemu krogu družin.
+            </p>
+
+            <ol class="casovnica">
+              <li class="opravljen">
+                <strong>Zahtevek oddan</strong>
+                <span class="zamolklo">{{ oddan }}</span>
+              </li>
+              <li class="zavrnjen">
+                <strong>Zavrnjeno</strong>
+                {% if odlocen %}<span class="zamolklo">{{ odlocen }}</span>{% endif %}
+              </li>
+            </ol>
+
+            <section class="okno-razdelek">
+              <h2>Izbriši moj račun</h2>
+              <p class="drobno">
+                Izbrišemo družino {{ druzina }}, tvoj račun in prijave. Z istim
+                Google računom se lahko nato registriraš znova. Pred izbrisom te
+                še enkrat vprašamo.
+              </p>
+              <div class="vrstica-gumbov">
+                <a class="gumb nevaren" href="{{ pot_izbrisa }}">Izbriši moj račun</a>
+                <form method="post" action="{{ pot_odjave }}">
+                  <input type="hidden" name="csrf" value="{{ csrf }}">
+                  <button class="gumb obrobljen" type="submit">Odjava</button>
+                </form>
+              </div>
+            </section>
+          </div>
+        {% else %}
+          {{ koraki("opravljen", "opravljen", "caka") }}
+          <div class="okno-telo">
+            <p class="nadnaslov">Moj račun</p>
+            <p><span class="oznaka caka">Čaka na odobritev</span></p>
+            <h1>Zahtevek je oddan</h1>
+            <p class="pod">
+              Račun mora odobriti skrbnik sistema. Do takrat vidiš samo to stran.
+            </p>
+
+            <dl class="okno-podatki">
+              <dt>Ime</dt><dd>{{ ime }}</dd>
+              <dt>E-naslov</dt><dd>{{ enaslov }}</dd>
+              <dt>Družina</dt><dd>{{ druzina }}</dd>
+            </dl>
+
+            <ol class="casovnica">
+              <li class="opravljen">
+                <strong>Prijava z Googlom</strong>
+                <span class="zamolklo">E-naslov potrdi Google</span>
+              </li>
+              <li class="opravljen">
+                <strong>Zahtevek oddan</strong>
+                <span class="zamolklo">{{ oddan }}</span>
+              </li>
+              <li class="caka">
+                <strong>Odobritev skrbnika</strong>
+                <span class="zamolklo">Čaka. Zahtevek ne poteče.</span>
+              </li>
+            </ol>
+
+            <p class="obvestilo tiho">
+              <span>
+                <strong>E-pošte ne pošiljamo.</strong> Ko te skrbnik sprejme, se
+                ob naslednji prijavi tukaj odpre tvoja družina. Stran lahko mirno
+                zapreš.
+              </span>
+            </p>
+
+            <form method="post" action="{{ pot_odjave }}" class="vrstica-gumbov">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="gumb obrobljen" type="submit">Odjava</button>
+            </form>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endblock %}
