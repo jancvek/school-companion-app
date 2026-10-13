@@ -91,11 +91,11 @@ def _stetje(motor: Engine) -> tuple[int, int, int, int]:
         )
 
 
-def _registriraj(seja: Session, *, sub: str = "sub-1") -> None:
+def _registriraj(seja: Session, oznaka: str = "sub-1") -> None:
     PrijavaRepository(seja).registriraj(
         ime_druzine="Kovačevi",
         prikazno_ime="Ana",
-        sub=sub,
+        sub=oznaka,
         email="ana@primer.test",
         oznaka_poskusa="registracija",
         ip_address=None,
@@ -103,21 +103,21 @@ def _registriraj(seja: Session, *, sub: str = "sub-1") -> None:
     )
 
 
-def _odpri_druzino(seja: Session, *, identifier: str = "ana@primer.test") -> None:
+def _odpri_druzino(seja: Session, oznaka: str = "ana@primer.test") -> None:
     DruzineRepository(seja).ustvari_z_prvim_starsem(
         ime_druzine="Kovačevi",
         prikazno_ime="Ana",
-        identifier=identifier,
+        identifier=oznaka,
         secret_hash="zgostitev",
         ko=KO,
     )
 
 
-def _dodaj_clana(seja: Session, *, identifier: str = "ana@primer.test") -> None:
+def _dodaj_clana(seja: Session, oznaka: str = "ana@primer.test") -> None:
     ClaniRepository(seja, CVEK_ID).ustvari_clana(
         role=VLOGA_STARS,
         display_name="Ana",
-        identifier=identifier,
+        identifier=oznaka,
         secret_hash="zgostitev",
         ko=KO,
     )
@@ -165,7 +165,7 @@ class TestVrstniRed:
         self,
         motor_s_kljuci: Engine,
         vstavljanja: list[str],
-        pot: Callable[[Session], None],
+        pot: Callable[..., None],
         red: list[str],
         dodano: tuple[int, int, int, int],
     ) -> None:
@@ -184,17 +184,23 @@ class TestVrstniRed:
     def test_zaseden_identifikator_ne_pusti_nicesar(
         self,
         motor_s_kljuci: Engine,
-        pot: Callable[[Session], None],
+        pot: Callable[..., None],
         red: list[str],
         dodano: tuple[int, int, int, int],
     ) -> None:
         """Izrecen `flush()` ne sme načeti „ene transakcije": družina in starš,
-        vstavljena pred poverilnico, ki pade na enoličnosti, morata izginiti."""
+        vstavljena pred poverilnico, ki pade na enoličnosti, morata izginiti.
+
+        Naslednji klic teče v **isti seji**: brez `rollback()` v repozitoriju bi
+        že vstavljeni vrstici padlega poskusa šli v bazo z njim."""
         with _seja(motor_s_kljuci) as seja:
             pot(seja)
         po_prvi = _stetje(motor_s_kljuci)
 
-        with _seja(motor_s_kljuci) as seja, pytest.raises(IdentifikatorZaseden):
-            pot(seja)
+        with _seja(motor_s_kljuci) as seja:
+            with pytest.raises(IdentifikatorZaseden):
+                pot(seja)
+            pot(seja, "druga-oznaka")
 
-        assert _stetje(motor_s_kljuci) == po_prvi
+        po_drugi = _stetje(motor_s_kljuci)
+        assert tuple(b - a for a, b in zip(po_prvi, po_drugi, strict=True)) == dodano

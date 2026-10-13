@@ -158,8 +158,10 @@ ki je ni.
 (`ForeignKeyViolation ... fk_credentials_user_id`), zbirka pa je bila zelena.
 **Zakaj:** SQLAlchemy vrstni red vstavljanja znotraj enega `flush()` izpelje iz
 `relationship()`, ne iz tujih ključev. Med `Family`, `User` in `Credential`
-zveze ni, zato je `credentials` vstavil pred `users`. SQLite brez
-`PRAGMA foreign_keys=ON` ključev ne preverja, Postgres jih ob vsakem stavku.
+zveze ni, zato je `credentials` vstavil pred `users` — vrstni red je bil po
+abecedi tabel, ne po naključju. SQLite brez `PRAGMA foreign_keys=ON` ključev
+ne preverja, Postgres jih ob vsakem stavku. Isti vzorec sta imeli
+`ustvari_z_prvim_starsem` (V3-R05) in `ustvari_clana` (V3-R06).
 **Kako:** kadar ena transakcija ustvari vrstico in njenega otroka brez zveze v
 ORM, gre vstavljanje skozi `_vstavi_po_vrsti` (`app/db.py`) — `flush()` po
 vsaki vrstici, starš prvi. Novo tako pot dodaj v
