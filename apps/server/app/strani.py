@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import Response
 
-from app import meni
+from app import meni, predstavitev
 from app.db import DruzineRepository, MeniRepository, SejaUporabnika
 from app.models import STANJE_ODOBRENA
 from app.settings import Settings
@@ -60,6 +60,10 @@ def kontekst_prijave(request: Request) -> dict[str, object]:
     skupno: dict[str, object] = {
         "google_na_voljo": nastavitve.google_je_nastavljen,
         "hrbti": hrbti,
+        # Povezavi na predstavitveno stran (V6-R03): nosijo ju okno
+        # registracije, „Moj račun" neodobrene družine in stran sama.
+        "pot_domov": predstavitev.POT,
+        "pot_zasebnosti": predstavitev.POT_ZASEBNOSTI,
     }
     seja: SejaUporabnika | None = getattr(request.state, "prijava", None)
     if seja is None:

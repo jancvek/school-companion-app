@@ -97,6 +97,21 @@ govorita različno, velja aplikacija:
    pride do obrazca in registracija na produkciji dela (preverjeno
    13. 10. 2026).
 
+7. Opomba v prikazu statistike („Ulomki se zatikajo … Dober kandidat za
+   naslednji test") odpade: statistika take opombe ne izpiše. Isti poudarek
+   nosi kartica „Vidiš, kje se zatika" pod prikazom. *(Potrjeno ob planu,
+   13. 10. 2026.)*
+8. Ocena je „Nisem vedela", kot v aplikaciji in pregledu; stran jo bere iz
+   `OZNAKE_OCEN`. *(Potrjeno ob planu.)*
+9. Gumb v prikazu sestavljanja kviza je „Objavi", kot v pregledu.
+   *(Potrjeno ob planu.)*
+10. Tri manjše omilitve besedil kartic, najdene med izvedbo, po istem
+    pravilu: „Spremeni se, kar želiš, ostalo ostane" → „Poveš, kaj naj se
+    spremeni" (da ostalo ostane nespremenjeno, odloča model in tega nič ne
+    jamči); iz „Pripravljen za tisk" odpade „slovenski zapis"; iz „Shranjeni
+    testi" odpade „po predmetih" (preizkus je samo matematika). Drugi oblaček
+    pomočnika v prikazu je zato brez „Ostale naloge so ostale enake".
+
 ### H — `docs/00-namen.md` in stavek o načinu Testing
 
 `00-namen.md` ne trdi več „ni odprta platforma" in „registracije ni";

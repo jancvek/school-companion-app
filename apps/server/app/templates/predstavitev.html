@@ -1,0 +1,378 @@
+{# Javna predstavitvena stran na `/` (V6-R03, `docs/poc/POC-03`, posnetki 01).
+
+   Ne razširja `osnova.html`: ta nosi meni in slog pregleda. Brez skripte, brez
+   piškotkov in brez virov tretjih strani (`docs/odlocitve/ADR-059` B) — slog
+   in pisava sta z lastnega strežnika, ikone so vrisan SVG.
+
+   Prikazi (urejevalnik, list A4, telefon, statistika) so narisani s HTML in
+   CSS z izmišljenimi podatki (`ADR-059` D). Bralnik zaslona jih preskoči:
+   kar kažejo, pove besedilo ob njih. V njih ni ničesar, kar bi se dalo
+   klikniti ali izbrati s tipkovnico.
+
+   Vsaka trditev na tej strani ima vrstico v `docs/plan/V6-R03.md`. Kdor
+   spremeni funkcijo, ki jo stran omenja, popravi tudi stran (`ADR-059`). #}
+{% macro ul(stevec, imenovalec) -%}
+  <span class="ulomek"><span>{{ stevec }}</span><span>{{ imenovalec }}</span></span>
+{%- endmacro %}
+
+{% macro kljukica() -%}
+  <svg class="kljukica" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+       stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12.5l4 4 8-9"/></svg>
+{%- endmacro %}
+
+{# Gumb registracije je povezava, ne obrazec: stran ne postavlja piškotkov,
+   torej tudi CSRF žetona ne (`ADR-063` E). #}
+{% macro gumb_registracije(razred) -%}
+  <a class="gumb {{ razred }}" href="{{ pot_registracije }}"><span class="g-znak" aria-hidden="true">G</span> Registriraj se z Googlom</a>
+{%- endmacro %}
+
+{# List A4 kot prikaz. Papir je bel tudi v temni temi. #}
+{% macro list_a4(tock, ime) %}
+  <div class="papir">
+    <div class="papir-glava">
+      <div>
+        <p class="papir-naslov">Ulomki</p>
+        <p class="papir-pod">Matematika · preverjanje znanja</p>
+      </div>
+      <div class="papir-desno">
+        <p>{{ ime }}: <span class="crta"></span></p>
+        <p>Točke: <span class="crta kratka"></span> / {{ tock }}</p>
+      </div>
+    </div>
+    <ol class="naloge">
+      <li>
+        <p><span>Izračunaj.</span> <span class="tocke">(4 t)</span></p>
+        <p class="izraz">a) {{ ul(3, 4) }} + {{ ul(1, 8) }} = &emsp; b) {{ ul(5, 6) }} − {{ ul(1, 3) }} =</p>
+        <span class="prostor"></span>
+      </li>
+      <li>
+        <p><span>Vstavi &lt;, &gt; ali =.</span> <span class="tocke">(3 t)</span></p>
+        <p class="izraz">{{ ul(2, 3) }} <span class="okence"></span> {{ ul(3, 5) }} &emsp; {{ ul(4, 8) }} <span class="okence"></span> {{ ul(1, 2) }} &emsp; {{ ul(7, 10) }} <span class="okence"></span> {{ ul(3, 4) }}</p>
+      </li>
+      <li class="spremenjena">
+        <p><span>Okrajšaj ulomka.</span> <span class="tocke">(2 t)</span></p>
+        <p class="izraz">{{ ul(6, 8) }} = &emsp; {{ ul(10, 15) }} =</p>
+        <span class="prostor"></span>
+      </li>
+      <li>
+        <p><span>Zapiši kot mešano število.</span> <span class="tocke">(3 t)</span></p>
+        <p class="izraz">{{ ul(7, 4) }} = &emsp; {{ ul(11, 3) }} = &emsp; {{ ul(9, 2) }} =</p>
+      </li>
+      <li>
+        <p><span>Nik je v ponedeljek prebral {{ ul(2, 5) }} knjige, v torek pa {{ ul(1, 4) }}. Kolikšen del knjige je prebral v obeh dneh skupaj?</span> <span class="tocke">(5 t)</span></p>
+        <span class="prostor"></span>
+        <span class="prostor"></span>
+      </li>
+    </ol>
+  </div>
+{% endmacro %}
+<!doctype html>
+<html lang="sl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Šolski pomočnik — test za tisk iz tega, kar se je otrok res učil</title>
+  <meta name="description" content="Otrok poslika snov v zvezku, Šolski pomočnik jo prepiše. Iz nje sestaviš test za tisk in kviz za telefon.">
+  <link rel="stylesheet" href="{{ pot_sloga }}">
+</head>
+<body>
+  <a class="preskoci" href="#vsebina">Preskoči na vsebino</a>
+
+  <header class="glava">
+    <div class="sirina glava-vrsta">
+      <a class="znamka" href="{{ pot_domov }}"><span class="znak" aria-hidden="true"></span> Šolski pomočnik</a>
+      <nav class="glava-meni" aria-label="Razdelki strani">
+        {% for id, oznaka in meni_strani %}
+          <a href="#{{ id }}">{{ oznaka }}</a>
+        {% endfor %}
+      </nav>
+      <div class="glava-gumbi">
+        <a class="gumb" href="{{ pot_prijave }}">Prijava</a>
+        {% if google_na_voljo %}
+          <a class="gumb polni" href="{{ pot_registracije }}">Registracija</a>
+        {% endif %}
+      </div>
+    </div>
+  </header>
+
+  <main id="vsebina">
+    {# ---------- Uvod ---------- #}
+    <section class="uvod">
+      <div class="sirina uvod-mreza">
+        <div>
+          <p class="nadnaslov">Za starše osnovnošolcev</p>
+          <h1>Test za tisk iz tega, kar se je otrok <em>res učil</em>.</h1>
+          <p class="uvodno">
+            Otrok poslika snov v zvezku, Šolski pomočnik jo prepiše. Ti izbereš
+            snov, v klepetu poveš, kakšen test želiš, in dobiš list A4 s točkami
+            in rešitvami, pripravljen za tisk. Iz iste snovi sestaviš tudi kviz,
+            ki ga otrok reši na telefonu.
+          </p>
+          <div class="vrstica-gumbov">
+            {% if google_na_voljo %}{{ gumb_registracije("polni velik") }}{% endif %}
+            <a class="gumb velik" href="#{{ sidro.testi }}">Kako nastane test</a>
+          </div>
+          <p class="oznake">
+            <span class="oznaka">Testi</span> za matematiko, drugi predmeti sledijo
+            <span aria-hidden="true">·</span>
+            <span class="oznaka">Kvizi</span> za vse predmete
+          </p>
+        </div>
+
+        <div class="uvod-prikaz" aria-hidden="true">
+          {{ list_a4(14, "Ime") }}
+          <div class="oblacek ti"><span class="oblacek-kdo">Ti</span>Tretja naloga naj bo lažja.</div>
+          <div class="oblacek pomocnik"><span class="oblacek-kdo">Pomočnik</span>Pri 3. nalogi sem zmanjšal števila.</div>
+          <div class="snov-kartica">
+            <span class="slicice"><span></span><span></span><span></span></span>
+            <span><strong>Snov: 3 slike</strong><br><span class="predmet" style="--barva: {{ barve.MAT }}">MAT</span> tor 7. 10.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sirina">
+        <ul class="polica" aria-hidden="true">
+          {% for hrbet in hrbti %}
+            <li style="--barva: {{ hrbet.barva }}"><span>{{ hrbet.koda }}</span></li>
+          {% endfor %}
+        </ul>
+      </div>
+    </section>
+
+    {# ---------- Sestavi test v pogovoru ---------- #}
+    <section class="razdelek svetel" id="{{ sidro.testi }}">
+      <div class="sirina">
+        <p><span class="oznaka">Glavno orodje</span></p>
+        <h2>Sestavi test v pogovoru</h2>
+        <p class="uvodno ozko">
+          Izbereš slike snovi in klikneš »Kreiraj test«. Na levi vidiš snov in
+          klepet, na desni list A4 tak, kot bo natisnjen. Test popravljaš z
+          besedami, dokler ni pravi.
+        </p>
+
+        <div class="prikaz urejevalnik" aria-hidden="true">
+          <div class="urejevalnik-vrstica">
+            <p class="prikaz-naslov">Kreiraj test <span class="predmet" style="--barva: {{ barve.MAT }}">MAT</span></p>
+            <p class="lazni-gumbi">
+              <span class="lazni-gumb tih">↶ Razveljavi</span>
+              <span class="lazni-gumb tih">↷ Uveljavi</span>
+              <span class="lazni-gumb">Natisni / PDF</span>
+              <span class="lazni-gumb poln">Shrani</span>
+            </p>
+          </div>
+          <div class="urejevalnik-telo">
+            <div class="urejevalnik-levo">
+              <div class="urejevalnik-snov">
+                <p class="mala-glava">Snov · 3 slike</p>
+                <span class="slicice velike"><span></span><span></span><span></span></span>
+              </div>
+              <div class="klepet">
+                <p class="oblacek ti">4. razred. Pet nalog iz ulomkov, zadnja naj bo besedilna.</p>
+                <p class="oblacek pomocnik">Sestavil sem test s 5 nalogami, skupaj 17 točk. Rešitve so na svojem listu.</p>
+                <p class="oblacek ti">Tretja naloga naj bo lažja.</p>
+                <p class="oblacek pomocnik">Pri 3. nalogi sem zmanjšal števila.</p>
+              </div>
+              <p class="klepet-vnos">
+                <span class="lazno-polje">Napiši, kaj naj spremeni…</span>
+                <span class="lazni-gumb poln">Posodobi test</span>
+              </p>
+            </div>
+            <div class="urejevalnik-desno">
+              {{ list_a4(17, "Ime in priimek") }}
+              <p class="papir-noga">Stran 1 od 1 &emsp; Rešitve: list 2</p>
+            </div>
+          </div>
+        </div>
+
+        <ul class="lastnosti">
+          <li><h3>Naloge iz prave snovi</h3><p>Test nastane iz prepisov slik, ki jih izbereš, ne iz splošne matematike razreda.</p></li>
+          <li><h3>Popravljaš z besedami</h3><p>»Tretja naloga lažja«, »skrajšaj na eno stran«. Poveš, kaj naj se spremeni; korak lahko razveljaviš.</p></li>
+          <li><h3>Pripravljen za tisk</h3><p>Pravilno izrisani ulomki in potence, prostor za računanje in točke. Rešitve so na svojem listu.</p></li>
+          <li><h3>Shranjeni testi</h3><p>Končan test shraniš k otroku. Shranjeni testi so na enem mestu, z gumbom »Nov test na tej osnovi«.</p></li>
+        </ul>
+      </div>
+    </section>
+
+    {# ---------- Kvizi ---------- #}
+    <section class="razdelek" id="{{ sidro.kvizi }}">
+      <div class="sirina">
+        <p><span class="oznaka">Ponavljanje</span></p>
+        <h2>Kvizi, ki jih otrok reši na telefonu</h2>
+        <p class="uvodno ozko">
+          Iz vsake snovi nastane 5–10 vprašanj z odgovori. Ti izbereš, katera
+          gredo v kviz, in ga objaviš. Otrok odgovarja na telefonu in pri vsakem
+          vprašanju pove, kako mu je šlo.
+        </p>
+
+        <div class="kvizi-mreza" aria-hidden="true">
+          <div class="prikaz izbor">
+            <p class="prikaz-glava"><span class="prikaz-naslov">Nov kviz <span class="predmet" style="--barva: {{ barve.MAT }}">MAT</span></span> <span class="zamolklo">2 snovi</span></p>
+            <p class="mala-glava">Seštevanje ulomkov · tor 7. 10.</p>
+            <p class="vprasanje izbrano"><span class="kvadratek"></span> Kako seštejemo ulomka z različnima imenovalcema?</p>
+            <p class="vprasanje izbrano"><span class="kvadratek"></span> <span>Koliko je {{ ul(3, 4) }} + {{ ul(1, 8) }}?</span></p>
+            <p class="vprasanje"><span class="kvadratek"></span> Kaj je skupni imenovalec?</p>
+            <p class="mala-glava">Krajšanje ulomkov · čet 9. 10.</p>
+            <p class="vprasanje izbrano"><span class="kvadratek"></span> <span>Okrajšaj ulomek {{ ul(6, 8) }}.</span></p>
+            <p class="vprasanje izbrano"><span class="kvadratek"></span> Kdaj je ulomek okrajšan do konca?</p>
+            <p class="vprasanje"><span class="kvadratek"></span> <span>Ali sta {{ ul(2, 4) }} in {{ ul(1, 2) }} enaka?</span></p>
+            <p class="izbor-noga"><span class="zamolklo">4 vprašanja izbrana</span> <span class="lazni-gumb poln">Objavi</span></p>
+          </div>
+
+          <div class="telefon">
+            <div class="telefon-zaslon">
+              <p class="telefon-glava"><span>Kviz · MAT</span> <span>2 / 4</span></p>
+              <span class="telefon-napredek"></span>
+              <div class="telefon-kartica">
+                <p class="telefon-vprasanje">Koliko je {{ ul(3, 4) }} + {{ ul(1, 8) }}?</p>
+                <p class="telefon-odgovor"><span class="mala-glava">Odgovor</span>{{ ul(7, 8) }} — oba ulomka zapišemo v osminah.</p>
+              </div>
+              <p class="telefon-kako">Kako ti je šlo?</p>
+              {% for ocena in ocene %}
+                <span class="telefon-ocena o{{ loop.index0 }}">{{ ocena }}</span>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div class="prikaz">
+            <p class="prikaz-glava"><span class="prikaz-naslov">Statistika</span> <span class="zamolklo">rešeni kvizi</span></p>
+            {% for vrstica in statistika %}
+              <p class="pas-vrstica">
+                <span class="predmet" style="--barva: {{ barve[vrstica.koda] }}">{{ vrstica.koda }}</span>
+                <span class="pas">
+                  {%- for delez in vrstica.delezi -%}
+                    <span class="o{{ loop.index0 }}" style="flex-grow: {{ delez }}"></span>
+                  {%- endfor -%}
+                </span>
+                <span class="zamolklo">{{ vrstica.odgovorov }}</span>
+              </p>
+            {% endfor %}
+            <p class="legenda">
+              {% for ocena in ocene %}
+                <span><span class="pika o{{ loop.index0 }}"></span> {{ ocena | lower }}</span>
+              {% endfor %}
+            </p>
+          </div>
+        </div>
+
+        <ul class="lastnosti">
+          <li><h3>Vprašanja nastanejo sama</h3><p>Ko je snov prepisana, ima že pripravljena vprašanja z odgovori. Ti samo izbereš.</p></li>
+          <li><h3>Kviz sestaviš ti</h3><p>Iz ene ali več snovi, za predmet ali za ponavljanje pred testom. Pred objavo vidiš predogled.</p></li>
+          <li><h3>Samoocena v štirih stopnjah</h3><p>Otrok po razkritju odgovora pove, ali je vedel in kako težko je bilo. Iskreno, brez ocen.</p></li>
+          <li><h3>Vidiš, kje se zatika</h3><p>Statistika po predmetih in po snovi pokaže, kaj gre dobro in kaj je vredno ponoviti.</p></li>
+        </ul>
+      </div>
+    </section>
+
+    {# ---------- Kako deluje ---------- #}
+    <section class="razdelek svetel" id="{{ sidro.kako }}">
+      <div class="sirina">
+        <h2>Kako deluje</h2>
+        <p class="uvodno ozko">Otrok naredi prvi korak, prepis se zgodi sam, test in kviz pa sestaviš ti.</p>
+        <ol class="koraki">
+          <li><h3>Fotografiraj</h3><p>Po pouku otrok poslika stran v zvezku in izbere predmet. Deluje tudi brez interneta — slika se prenese, ko je povezava spet tu.</p></li>
+          <li><h3>Prepis</h3><p>Model za branje slik prepiše tudi slovenski rokopis, napiše kratek povzetek in pove, če slika ni berljiva.</p></li>
+          <li><h3>Test za tisk</h3><p>Iz prepisov izbrane snovi v klepetu sestaviš test s točkami na A4 in ga natisneš. Otrok ga reši s svinčnikom.</p></li>
+          <li><h3>Kviz na telefonu</h3><p>Iz iste snovi nastanejo vprašanja. Otrok na telefonu odgovarja in oceni, kako mu je šlo; iz ocen nastane pregled.</p></li>
+        </ol>
+      </div>
+    </section>
+
+    {# ---------- Ena družina, dve orodji ---------- #}
+    <section class="razdelek" id="{{ sidro.druzina }}">
+      <div class="sirina">
+        <h2>Ena družina, dve orodji</h2>
+        <p class="uvodno ozko">Otrok dela samo v mobilni aplikaciji, starš samo v spletnem pregledu. Vsak vidi tisto, kar potrebuje.</p>
+        <div class="dve">
+          <div class="kartica">
+            <h3 class="z-ikono">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 17.5h2"/></svg>
+              Za otroka
+            </h3>
+            <p class="zamolklo">Mobilna aplikacija za Android.</p>
+            <ul class="kljukice">
+              <li>{{ kljukica() }}<div><strong>Prijava s QR kodo</strong><p>Brez uporabniškega imena in gesla. Kodo mu pokaže starš.</p></div></li>
+              <li>{{ kljukica() }}<div><strong>Fotografiranje brez čakanja</strong><p>Slika se shrani takoj; prenos teče v ozadju, ko je povezava.</p></div></li>
+              <li>{{ kljukica() }}<div><strong class="poudarjeno">Kvizi s samooceno</strong><p>Štiri stopnje: {{ ocene | map("lower") | join(", ") }}.</p></div></li>
+              <li>{{ kljukica() }}<div><strong>Zgodovina snovi</strong><p>Vsi posnetki po predmetih, najnovejši na vrhu.</p></div></li>
+            </ul>
+          </div>
+          <div class="kartica">
+            <h3 class="z-ikono">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/></svg>
+              Za starše
+            </h3>
+            <p class="zamolklo">Spletni pregled v brskalniku.</p>
+            <ul class="kljukice">
+              <li>{{ kljukica() }}<div><strong class="poudarjeno">Testi za tisk</strong><p>V klepetu sestaviš test s točkami za A4, z rešitvami na svojem listu. <a href="#{{ sidro.testi }}">Poglej urejevalnik</a></p></div></li>
+              <li>{{ kljukica() }}<div><strong class="poudarjeno">Kvizi</strong><p>Izbereš vprašanja iz snovi in kviz objaviš otroku. <a href="#{{ sidro.kvizi }}">Poglej kvize</a></p></div></li>
+              <li>{{ kljukica() }}<div><strong>Po dnevih in predmetih</strong><p>Kaj je bilo poslikano, s prepisom in povzetkom vsake snovi.</p></div></li>
+              <li>{{ kljukica() }}<div><strong>Urnik in manjkajoče slike</strong><p>Poslikaš urnik, sistem ga predlaga, ti potrdiš. Nato vidiš, kateri predmet tisti dan nima slike.</p></div></li>
+              <li>{{ kljukica() }}<div><strong>Statistika</strong><p>Kaj gre dobro in kje se zatika, po predmetih.</p></div></li>
+              <li>{{ kljukica() }}<div><strong>Družina</strong><p>Več staršev in več otrok v isti družini; računi otrok so v tvojih rokah.</p></div></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {# ---------- Kako ravnamo s podatki ----------
+       Poudarjena kartica izpiše isto besedilo kot soglasje ob registraciji
+       (`ADR-059` E, `ADR-063` D); v predlogo se ne prepisuje. #}
+    <section class="razdelek svetel" id="{{ sidro.zasebnost }}">
+      <div class="sirina">
+        <h2>Kako ravnamo s podatki</h2>
+        <p class="uvodno ozko">Gre za zvezke otrok, zato naravnost povemo, kaj se s slikami zgodi.</p>
+        <ul class="lastnosti">
+          <li><h3>Podatki so družinski</h3><p>Vsaka družina vidi izključno svoje podatke. Nobena poizvedba ne prestopi meje družine. Skrbnik sistema vidi ime družine, imena in e-naslove staršev ter število otrok.</p></li>
+          <li class="opozorilna"><h3>Slike gredo v zunanji model</h3><p>{{ besedilo_zasebnost }}</p></li>
+          <li><h3>Umaknjeno gre v arhiv</h3><p>Umaknjena snov gre v arhiv. Prepis in vprašanja ostanejo, tudi ko slike na telefonu ni več.</p></li>
+          <li><h3>Dopolnjuje zvezek</h3><p>Šolski pomočnik ne nadomešča pisanja na papir in ne poroča šoli ali komurkoli drugemu.</p></li>
+        </ul>
+      </div>
+    </section>
+
+    {# ---------- Kako do računa ---------- #}
+    <section class="razdelek" id="{{ sidro.racun }}">
+      <div class="sirina">
+        <div class="racun">
+          {% if google_na_voljo %}
+            <div>
+              <h2>Kako do računa</h2>
+              <p>Registracija vzame minuto. Gesla ne potrebuješ — prijaviš se z Google računom.</p>
+              <div class="vrstica-gumbov">
+                {{ gumb_registracije("svetel velik") }}
+                <a class="gumb na-plosci velik" href="{{ pot_prijave }}">Prijava</a>
+              </div>
+            </div>
+            <ol class="racun-koraki">
+              <li><div><strong>Registriraj se z Googlom</strong><p>Iz računa vzamemo le ime in e-naslov.</p></div></li>
+              <li><div><strong>Počakaj na odobritev</strong><p>Skrbnik sistema zahtevek sprejme ali zavrne.</p></div></li>
+              <li><div><strong>Dodaj otroka</strong><p>Otrok v aplikaciji skenira QR kodo in že fotografira.</p></div></li>
+            </ol>
+          {% else %}
+            {# Namestitev brez Googla: okno registracije ne more ničesar. #}
+            <div>
+              <h2>Kako do računa</h2>
+              <p>Na tem strežniku račun odpre skrbnik sistema. Ko ga imaš, se prijaviš tukaj.</p>
+              <div class="vrstica-gumbov">
+                <a class="gumb svetel velik" href="{{ pot_prijave }}">Prijava</a>
+              </div>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="noga">
+    <div class="sirina noga-vrsta">
+      <p class="znamka"><span class="znak" aria-hidden="true"></span> Šolski pomočnik</p>
+      <p class="noga-povezave">
+        <a href="#{{ sidro.zasebnost }}">Zasebnost</a>
+        <a href="{{ pot_prijave }}">Prijava</a>
+        <span>Aplikacija za Android</span>
+      </p>
+    </div>
+  </footer>
+</body>
+</html>
