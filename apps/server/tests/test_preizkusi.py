@@ -1223,6 +1223,42 @@ class TestSkriptaUrejevalnika:
         assert ".list .naloga { break-inside: avoid; page-break-inside: avoid; }" in stran
         assert "body:not(.z-resitvami) #list-resitve { display: none; }" in stran
 
+    def test_krepka_formula_z_ukazom_postane_boldsymbol(self, stran: str) -> None:
+        # V4-R09: `\textbf{\frac…}` je KaTeX napaka (rdeča koda). Varovalka je
+        # na vsaki formuli, pred `\dfrac`; spremeni samo `\textbf`, v katerem
+        # je ukaz, šteje oklepaje in neuravnoteženega izraza ne spremeni.
+        # Vedenje na primerih je preverjeno v brskalniku (ročni preizkus).
+        skripta = stran[stran.rindex("<script>") : stran.rindex("</script>")]
+
+        assert 'tex: odebeli(tex).replace(/\\\\frac(?![a-zA-Z])/g, "\\\\dfrac"),' in skripta
+        zacetek = skripta.index("function odebeli(tex)")
+        odebeli = skripta[zacetek : skripta.index("function pripravi(", zacetek)]
+        assert "var ukaz = /\\\\textbf\\s*\\{/g;" in odebeli
+        assert '/\\\\[a-zA-Z]/.test(vsebina) ? "\\\\boldsymbol{" : "\\\\textbf{"' in odebeli
+        assert "if (globina > 0) {\n              break;" in odebeli.replace("\r\n", "\n")
+        assert "mathbf" not in odebeli
+
+    def test_predogled_prelomi_nalogo_na_naslednjo_stran(self, stran: str) -> None:
+        # V4-R09: naloga, ki ne gre več na stran, dobi pred sabo prazen prostor;
+        # prejšnja meritev ga pobriše, preden izmeri znova.
+        skripta = stran[stran.rindex("<script>") : stran.rindex("</script>")]
+
+        assert 'list.querySelectorAll(".meja-strani, .razmik-strani")' in skripta
+        assert 'element.classList.contains("naloga")' in skripta
+        assert 'razmik.className = "razmik-strani";' in skripta
+        assert "vsebina.insertBefore(razmik, element);" in skripta
+        # Dolžina je izmerjena s praznimi prostori vred.
+        assert skripta.index("vsebina.insertBefore(razmik, element);") < skripta.index(
+            "var strani = vsebina.getBoundingClientRect().height / visina;"
+        )
+
+    def test_prazen_prostor_se_ne_natisne(self, stran: str) -> None:
+        tisk = stran[stran.index("@media print {") :]
+
+        assert ".meja-strani, .razmik-strani, .list .prazno { display: none; }" in tisk
+        # Tisk sam ostane, kakršen je bil: naloga se ne razdeli.
+        assert ".list .naloga { break-inside: avoid; page-break-inside: avoid; }" in stran
+
     def test_stran_predmeta_ostane_brez_skripte(
         self, odjemalec: PrijavljenOdjemalec, motor: Engine, slike: Path
     ) -> None:

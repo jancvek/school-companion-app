@@ -54,6 +54,45 @@
           return racun;
         }
 
+        // `\textbf{…}` je besedilni način: ulomek ali drug ukaz v njem KaTeX
+        // izpiše kot napako (rdeča koda). Kadar je v vsebini ukaz, postane
+        // `\boldsymbol{…}`, ki je matematični; `\textbf{0,5}` ostane. Oklepaji
+        // se štejejo, da gnezden ulomek ostane cel; od neuravnoteženega
+        // oklepaja naprej ostane formula, kakršna je (V4-R09, `ADR-066`).
+        // Spremeni se samo prikaz — besedilo testa in baza ostaneta.
+        function odebeli(tex) {
+          var izhod = "";
+          var konec = 0;
+          var ukaz = /\\textbf\s*\{/g;
+          var ujemanje;
+          while ((ujemanje = ukaz.exec(tex)) !== null) {
+            var zacetek = ukaz.lastIndex;
+            var globina = 1;
+            var i = zacetek;
+            while (i < tex.length && globina > 0) {
+              if (tex.charAt(i) === "\\") {
+                i += 2;
+                continue;
+              }
+              if (tex.charAt(i) === "{") {
+                globina += 1;
+              } else if (tex.charAt(i) === "}") {
+                globina -= 1;
+              }
+              i += 1;
+            }
+            if (globina > 0) {
+              break;
+            }
+            var vsebina = tex.slice(zacetek, i - 1);
+            var nov = /\\[a-zA-Z]/.test(vsebina) ? "\\boldsymbol{" : "\\textbf{";
+            izhod += tex.slice(konec, ujemanje.index) + nov + odebeli(vsebina) + "}";
+            konec = i;
+            ukaz.lastIndex = i;
+          }
+          return izhod + tex.slice(konec);
+        }
+
         // Markdown modela → vozlišča lista. **Niza HTML ne sestavlja**: kar
         // vrne `marked`, gre naravnost v `<template>`, se prečisti, in šele
         // nato se oznake zamenjajo z vozlišči — samo v besedilu, nikoli v
@@ -67,7 +106,7 @@
           // premajhen (`POC-01` Ugotovitve).
           function spravi(tex, samostojna) {
             formule.push({
-              tex: tex.replace(/\\frac(?![a-zA-Z])/g, "\\dfrac"),
+              tex: odebeli(tex).replace(/\\frac(?![a-zA-Z])/g, "\\dfrac"),
               samostojna: samostojna
             });
             return "" + (formule.length - 1) + "";
@@ -181,31 +220,86 @@
 
         // --- Dolžina in meje strani ---
 
+        // Odstrani meje in prazne prostore prejšnje meritve.
         function pocistiMeje(list) {
-          list.querySelectorAll(".meja-strani").forEach(function (meja) {
+          list.querySelectorAll(".meja-strani, .razmik-strani").forEach(function (meja) {
             meja.remove();
           });
         }
 
         // Izmeri vsebino lista, zapiše dolžino v `napis` in nariše meje strani.
+        //
+        // Predogled prelomi strani kot tisk (V4-R09): naloga, ki ne gre več
+        // na stran, se ob tisku ne razdeli (`.naloga`, `break-inside: avoid`)
+        // in se začne na naslednji. Pred njo pride prazen prostor, ki se ne
+        // natisne, tako da je njen naslov natanko na začetku naslednje strani.
+        // Zgornji rob naslova se pri tisku na vrhu strani odreže, zato je
+        // prostor krajši za ta rob in črta je na njegovem dnu — ne čez naslov.
+        // Naloga, daljša od cele strani, se tudi pri tisku razdeli: zanjo je
+        // črta tam, kjer se konča natisljiva višina.
         function izmeriList(list, vsebina, merilo, napis) {
           pocistiMeje(list);
           var pikNaMm = merilo.offsetHeight / 100;
           if (!pikNaMm) {
             return;
           }
-          var visinaMm = vsebina.offsetHeight / pikNaMm;
-          var strani = visinaMm / VISINA_STRANI_MM;
+          var visina = VISINA_STRANI_MM * pikNaMm;
+          var vrhLista = list.getBoundingClientRect().top;
+          var vrhVsebine = vsebina.getBoundingClientRect().top;
+
+          function vrh(element) {
+            return element.getBoundingClientRect().top - vrhVsebine;
+          }
+          function dno(element) {
+            return element.getBoundingClientRect().bottom - vrhVsebine;
+          }
+
+          // Položaji črt glede na vrh vsebine, v pikah.
+          var meje = [];
+          var konec = visina;
+          Array.prototype.slice.call(vsebina.children).forEach(function (element) {
+            while (vrh(element) >= konec) {
+              meje.push(konec);
+              konec += visina;
+            }
+            if (dno(element) <= konec) {
+              return;
+            }
+            var zacetekStrani = konec - visina;
+            if (
+              element.classList.contains("naloga") &&
+              dno(element) - vrh(element) <= visina &&
+              vrh(element) > zacetekStrani + 1
+            ) {
+              // Višina prostora je odvisna od robov sosedov; izmeri se z
+              // 1 piko in nato popravi, da je vrh naloge natanko na `konec`.
+              var razmik = document.createElement("div");
+              razmik.className = "razmik-strani";
+              razmik.style.height = "1px";
+              vsebina.insertBefore(razmik, element);
+              razmik.style.height = Math.max(1, 1 + konec - vrh(element)) + "px";
+              meje.push(dno(razmik));
+              konec += visina;
+            }
+            while (dno(element) > konec) {
+              meje.push(konec);
+              konec += visina;
+            }
+          });
+
+          // Dejanska dolžina: s praznimi prostori vred se vsaka stran začne na
+          // večkratniku natisljive višine.
+          var strani = vsebina.getBoundingClientRect().height / visina;
           napis.textContent = strani.toFixed(1).replace(".", ",") + " strani A4";
 
-          // Vidna meja strani: črta tam, kjer se konča natisljiva višina.
-          for (var stran = 1; stran < strani; stran += 1) {
+          var odmik = vrhVsebine - vrhLista;
+          meje.forEach(function (polozaj, indeks) {
             var meja = document.createElement("div");
             meja.className = "meja-strani";
-            meja.style.top = "calc(15mm + " + stran * VISINA_STRANI_MM + "mm)";
+            meja.style.top = odmik + polozaj + "px";
             var oznaka = document.createElement("span");
-            oznaka.textContent = "konec " + stran + ". strani";
+            oznaka.textContent = "konec " + (indeks + 1) + ". strani";
             meja.appendChild(oznaka);
             list.appendChild(meja);
-          }
+          });
         }

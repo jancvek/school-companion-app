@@ -643,6 +643,18 @@ class TestOgled:
         assert "body:not(.z-resitvami) #list-resitve { display: none; }" in besedilo
         assert 'id="z-resitvami"' in besedilo
 
+    def test_ogled_prelomi_in_odebeli_kot_urejevalnik(
+        self, odjemalec: PrijavljenOdjemalec, motor: Engine, stars: str
+    ) -> None:
+        # V4-R09 velja tudi za shranjene teste: isti izris, isti slog.
+        v_bazo(motor, stars)
+
+        besedilo = odjemalec.get(f"/admin/assessments/{OSNOVA_ID}").text
+
+        assert "tex: odebeli(tex).replace(" in besedilo
+        assert "vsebina.insertBefore(razmik, element);" in besedilo
+        assert ".meja-strani, .razmik-strani, .list .prazno { display: none; }" in besedilo
+
     @pytest.mark.parametrize("pripona", ["", "/compose"])
     def test_neznan_test_je_404(self, odjemalec: PrijavljenOdjemalec, pripona: str) -> None:
         odgovor = odjemalec.get(f"/admin/assessments/{NEZNAN_ID}{pripona}")
