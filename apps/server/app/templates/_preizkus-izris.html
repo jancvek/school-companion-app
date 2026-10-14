@@ -235,8 +235,9 @@
         // natisne, tako da je njen naslov natanko na začetku naslednje strani.
         // Zgornji rob naslova se pri tisku na vrhu strani odreže, zato je
         // prostor krajši za ta rob in črta je na njegovem dnu — ne čez naslov.
-        // Naloga, daljša od cele strani, se tudi pri tisku razdeli: zanjo je
-        // črta tam, kjer se konča natisljiva višina.
+        // Enako velja za nalogo, daljšo od cele strani: tisk (Chrome) jo prav
+        // tako začne na novi strani in jo razdeli šele tam; znotraj nje je
+        // črta tam, kjer se konča natisljiva višina (`ADR-067`).
         function izmeriList(list, vsebina, merilo, napis) {
           pocistiMeje(list);
           var pikNaMm = merilo.offsetHeight / 100;
@@ -268,7 +269,6 @@
             var zacetekStrani = konec - visina;
             if (
               element.classList.contains("naloga") &&
-              dno(element) - vrh(element) <= visina &&
               vrh(element) > zacetekStrani + 1
             ) {
               // Višina prostora je odvisna od robov sosedov; izmeri se z

@@ -1247,6 +1247,11 @@ class TestSkriptaUrejevalnika:
         assert 'element.classList.contains("naloga")' in skripta
         assert 'razmik.className = "razmik-strani";' in skripta
         assert "vsebina.insertBefore(razmik, element);" in skripta
+        # `ADR-067`: tudi naloga, daljša od strani, gre na novo stran kot v
+        # tisku — pogoja o dolžini naloge ni.
+        pogoj = skripta[skripta.index('element.classList.contains("naloga")') :]
+        pogoj = pogoj[: pogoj.index(") {")]
+        assert "visina" not in pogoj.replace("zacetekStrani", "")
         # Dolžina je izmerjena s praznimi prostori vred.
         assert skripta.index("vsebina.insertBefore(razmik, element);") < skripta.index(
             "var strani = vsebina.getBoundingClientRect().height / visina;"
