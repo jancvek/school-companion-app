@@ -82,7 +82,7 @@ def navodilo_iz_zapisa_poc() -> str:
 
 
 def navodilo_iz_adr() -> str:
-    """Navodilo, kot stoji v `docs/odlocitve/ADR-066.md` (izvirnik od V4-R09)."""
+    """Navodilo, kot stoji v `ADR-066` (izvirnik od V4-R09; ime datoteke spodaj)."""
     zapis = "ADR-066-navodilo-za-test-se-spreminja-z-zahtevo.md"
     besedilo = (KOREN_REPOZITORIJA / "docs" / "odlocitve" / zapis).read_text(encoding="utf-8")
     naslov = besedilo.index("## Navodilo za matematiko (izvirnik)")
@@ -1247,6 +1247,9 @@ class TestSkriptaUrejevalnika:
         assert 'element.classList.contains("naloga")' in skripta
         assert 'razmik.className = "razmik-strani";' in skripta
         assert "vsebina.insertBefore(razmik, element);" in skripta
+        # Naloga, ki je po vstavitvi prostora že čez mejo (sešteta robova),
+        # se vrne z negativnim spodnjim robom prostora (pregled V4-R09).
+        assert 'razmik.style.marginBottom = premik + "px";' in skripta
         # `ADR-067`: tudi naloga, daljša od strani, gre na novo stran kot v
         # tisku — pogoja o dolžini naloge ni.
         pogoj = skripta[skripta.index('element.classList.contains("naloga")') :]

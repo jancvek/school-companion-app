@@ -21,7 +21,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-#: Navodilo za matematiko, **dobesedno** iz `docs/odlocitve/ADR-066.md`
+#: Navodilo za matematiko, **dobesedno** iz
+#: `docs/odlocitve/ADR-066-navodilo-za-test-se-spreminja-z-zahtevo.md`
 #: (V4-R09). Tisti zapis je izvirnik in ta konstanta njegov prepis; razlika
 #: med njima je napaka. Prvotno besedilo je v `docs/poc/POC-01.md`
 #: *Ugotovitve*; vsaka nadaljnja sprememba je nov ADR s celotnim besedilom.

@@ -273,11 +273,20 @@
             ) {
               // Višina prostora je odvisna od robov sosedov; izmeri se z
               // 1 piko in nato popravi, da je vrh naloge natanko na `konec`.
+              // Prostor prekine sesedanje robov (spodnji rob prejšnjega in
+              // zgornji rob naslova se seštejeta), zato je naloga lahko že
+              // pri 1 piki čez `konec`: takrat jo vrne negativen spodnji rob
+              // prostora, ki se sesede z robom naslova.
               var razmik = document.createElement("div");
               razmik.className = "razmik-strani";
               razmik.style.height = "1px";
               vsebina.insertBefore(razmik, element);
-              razmik.style.height = Math.max(1, 1 + konec - vrh(element)) + "px";
+              var premik = konec - vrh(element);
+              if (premik >= 0) {
+                razmik.style.height = 1 + premik + "px";
+              } else {
+                razmik.style.marginBottom = premik + "px";
+              }
               meje.push(dno(razmik));
               konec += visina;
             }
