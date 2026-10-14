@@ -15,6 +15,7 @@ dokumentu, vprašaj — ne ugibaj.
 | `docs/plan/VN-Rxx.md` | Plan za posamezno zahtevo. Nastane v fazi 4, commita se. |
 | `docs/odlocitve/ADR-xxx.md` | Zapis vsake pomembnejše odločitve iz debate. |
 | `docs/poc/POC-xx.md` | Zapis POC-a: vprašanje, dogovorjeno, ugotovitve, sodba. Edini del POC-a, ki pride v `main` (§1d). |
+| `docs/backlog.md` | Ideje, o katerih še ni odločeno (`B-xx`). Ni podlaga za kodo; bere se samo, ko ga zahteva navaja pod **Podlaga** (`ADR-065`). |
 | `docs/02-izkusnje.md` | Pasti, ki so nas že stale časa (orodja, gradnja, okolje). Bere se ob potrebi, ne ob vsaki zahtevi. |
 
 **`01-arhitektura.md` pove samo, kako je zdaj** — stack, moduli, shema, pogodbe,
@@ -52,13 +53,20 @@ beseda. POC → §1d, zahteva → faza 1. Vprašanje odpade samo pri nadaljevanj
 dela, ki je že začeto na svoji veji (`feat/…`, `fix/…`, `poc/…`,
 `docs/poc-…`).
 
+Če delo izhaja iz vnosa v `docs/backlog.md`, ga preberi pred vprašanjem —
+*Česa se dotakne* in *Odprta vprašanja* sta vhod za POC ali fazo 1, *Predlog
+smeri* pa ni dogovor. Status vnosa spremeni v istem commitu, v katerem nastane
+`POC-xx` ali `VN-Rxx`. Zapis novega vnosa v backlog ni novo delo v tem smislu:
+faze 0 nima, gre na vejo `docs/backlog-…` iz svežega `main` (`ADR-065`).
+
 ### Faza 1 — Razumevanje 🛑
 
 Preberi zahtevo, `docs/00-namen.md`, `docs/01-arhitektura.md`,
 `docs/verzije/vN.md` tekoče verzije in ADR-je, ki jih zahteva navaja pod
 **Podlaga**. Ostale ADR-je preleti **po naslovih** (`ls docs/odlocitve`) in
 odpri le tiste, ki se zahteve očitno tičejo. Planov v `docs/plan/` ne beri —
-so zapis za človeka, ne vhod za model. Nato preveri, ali je zahteva enoumna.
+so zapis za človeka, ne vhod za model. Tudi `docs/backlog.md` ne beri, razen če
+ga zahteva navaja pod **Podlaga**. Nato preveri, ali je zahteva enoumna.
 
 Vprašaj me, če velja karkoli od tega:
 
@@ -278,6 +286,9 @@ koda. Tiho dodana koda je razraščanje obsega. Zaporedje:
 
 **Po sprejemu** (zahteva je mergeana) pogajanja ni več: sprememba je nova
 zahteva `VN-Rxx`.
+
+Če spremembe zdaj nočem ne v tekoči ne v novi zahtevi, jo na moj ukaz zapišeš
+v `docs/backlog.md` (`ADR-065`).
 
 ### Faza 10 — Merge (samo na moj izrecni ukaz)
 
