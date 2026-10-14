@@ -81,11 +81,39 @@ def navodilo_iz_zapisa_poc() -> str:
     )
 
 
+def navodilo_iz_adr() -> str:
+    """Navodilo, kot stoji v `docs/odlocitve/ADR-066.md` (izvirnik od V4-R09)."""
+    zapis = "ADR-066-navodilo-za-test-se-spreminja-z-zahtevo.md"
+    besedilo = (KOREN_REPOZITORIJA / "docs" / "odlocitve" / zapis).read_text(encoding="utf-8")
+    naslov = besedilo.index("## Navodilo za matematiko (izvirnik)")
+    zacetek = besedilo.index("```text\n", naslov) + len("```text\n")
+    return besedilo[zacetek : besedilo.index("\n```", zacetek)]
+
+
 class TestNavodilo:
-    def test_navodilo_za_matematiko_je_dobesedno_iz_zapisa_poc(self) -> None:
-        # Kriterij: besedilo navodila je iz `POC-01` *Ugotovitve*. Razlika je
+    def test_navodilo_za_matematiko_je_dobesedno_iz_adr(self) -> None:
+        # Kriterij V4-R09: besedilo navodila je iz `ADR-066`. Razlika je
         # napaka v enem od obeh — in tisti zapis je izvirnik.
-        assert navodilo_iz_zapisa_poc() == preizkus.NAVODILO_MAT
+        assert navodilo_iz_adr() == preizkus.NAVODILO_MAT
+
+    def test_navodilo_ohrani_vse_iz_zapisa_poc(self) -> None:
+        # `ADR-066` samo dodaja: vsaka vrstica navodila iz `POC-01` je še v
+        # navodilu, v istem vrstnem redu.
+        vrstice = iter(preizkus.NAVODILO_MAT.split("\n"))
+        manjkajoce = [
+            vrstica
+            for vrstica in navodilo_iz_zapisa_poc().split("\n")
+            if not any(vrstica == nova for nova in vrstice)
+        ]
+        assert manjkajoce == []
+
+    def test_navodilo_ima_pravili_o_vrstnem_redu_in_krepkem_zapisu(self) -> None:
+        navodilo = preizkus.NAVODILO_MAT
+
+        assert "\nVRSTNI RED POSTAVK " in navodilo
+        assert navodilo.index("VRSTNI RED POSTAVK") < navodilo.index("\nZAPIS ")
+        assert "Krepko piši samo zunaj matematike" in navodilo
+        assert "nikoli ne uporabljaj \\textbf, \\mathbf\n  ali \\bf." in navodilo
 
     def test_navodilo_se_poisce_po_predmetu(self) -> None:
         assert preizkus.navodilo_za("MAT") == preizkus.NAVODILO_MAT

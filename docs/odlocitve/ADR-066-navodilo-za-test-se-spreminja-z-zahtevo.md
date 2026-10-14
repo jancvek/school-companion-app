@@ -2,7 +2,7 @@
 
 - **Datum:** 2026-10-14
 - **Nastalo pri:** `V4-R09` (po preizkusu v lastnikovem `math-md-viewer`)
-- **Status:** Predlagano
+- **Status:** Sprejeto
 - **Spreminja:** `ADR-053` v delu „navodilo … dobesedno v `POC-01`
   *Ugotovitve*"; `app/preizkus.py` (`NAVODILO_MAT`); test
   `test_navodilo_za_matematiko_je_dobesedno_iz_zapisa_poc`
