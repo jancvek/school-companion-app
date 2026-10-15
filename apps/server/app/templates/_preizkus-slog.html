@@ -52,6 +52,11 @@
         color: var(--nevarno); background: #fff;
         font: 11px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
       }
+      /* Prazen prostor pred nalogo, ki se ob tisku začne na naslednji strani
+         (V4-R09). Na zaslonu je viden, natisne se ne. */
+      .razmik-strani {
+        background: repeating-linear-gradient(-45deg, transparent 0 2mm, #f2f2f2 2mm 4mm);
+      }
       .merilo { position: absolute; visibility: hidden; height: 100mm; width: 0; }
 
       /* --- Tisk: samo list, brez vmesnika --- */
@@ -63,7 +68,7 @@
           width: auto; min-height: 0; padding: 0; margin: 0; border: 0;
           font-size: 12pt;
         }
-        .meja-strani, .list .prazno { display: none; }
+        .meja-strani, .razmik-strani, .list .prazno { display: none; }
         /* Rešitve na svoji strani in samo, če je izbrano. */
         #list-resitve { break-before: page; page-break-before: always; }
         body:not(.z-resitvami) #list-resitve { display: none; }

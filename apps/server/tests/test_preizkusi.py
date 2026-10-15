@@ -81,11 +81,39 @@ def navodilo_iz_zapisa_poc() -> str:
     )
 
 
+def navodilo_iz_adr() -> str:
+    """Navodilo, kot stoji v `ADR-066` (izvirnik od V4-R09; ime datoteke spodaj)."""
+    zapis = "ADR-066-navodilo-za-test-se-spreminja-z-zahtevo.md"
+    besedilo = (KOREN_REPOZITORIJA / "docs" / "odlocitve" / zapis).read_text(encoding="utf-8")
+    naslov = besedilo.index("## Navodilo za matematiko (izvirnik)")
+    zacetek = besedilo.index("```text\n", naslov) + len("```text\n")
+    return besedilo[zacetek : besedilo.index("\n```", zacetek)]
+
+
 class TestNavodilo:
-    def test_navodilo_za_matematiko_je_dobesedno_iz_zapisa_poc(self) -> None:
-        # Kriterij: besedilo navodila je iz `POC-01` *Ugotovitve*. Razlika je
+    def test_navodilo_za_matematiko_je_dobesedno_iz_adr(self) -> None:
+        # Kriterij V4-R09: besedilo navodila je iz `ADR-066`. Razlika je
         # napaka v enem od obeh — in tisti zapis je izvirnik.
-        assert navodilo_iz_zapisa_poc() == preizkus.NAVODILO_MAT
+        assert navodilo_iz_adr() == preizkus.NAVODILO_MAT
+
+    def test_navodilo_ohrani_vse_iz_zapisa_poc(self) -> None:
+        # `ADR-066` samo dodaja: vsaka vrstica navodila iz `POC-01` je še v
+        # navodilu, v istem vrstnem redu.
+        vrstice = iter(preizkus.NAVODILO_MAT.split("\n"))
+        manjkajoce = [
+            vrstica
+            for vrstica in navodilo_iz_zapisa_poc().split("\n")
+            if not any(vrstica == nova for nova in vrstice)
+        ]
+        assert manjkajoce == []
+
+    def test_navodilo_ima_pravili_o_vrstnem_redu_in_krepkem_zapisu(self) -> None:
+        navodilo = preizkus.NAVODILO_MAT
+
+        assert "\nVRSTNI RED POSTAVK " in navodilo
+        assert navodilo.index("VRSTNI RED POSTAVK") < navodilo.index("\nZAPIS ")
+        assert "Krepko piši samo zunaj matematike" in navodilo
+        assert "nikoli ne uporabljaj \\textbf, \\mathbf\n  ali \\bf." in navodilo
 
     def test_navodilo_se_poisce_po_predmetu(self) -> None:
         assert preizkus.navodilo_za("MAT") == preizkus.NAVODILO_MAT
@@ -1194,6 +1222,50 @@ class TestSkriptaUrejevalnika:
         assert "@page { size: A4; margin: 15mm 18mm; }" in stran
         assert ".list .naloga { break-inside: avoid; page-break-inside: avoid; }" in stran
         assert "body:not(.z-resitvami) #list-resitve { display: none; }" in stran
+
+    def test_krepka_formula_z_ukazom_postane_boldsymbol(self, stran: str) -> None:
+        # V4-R09: `\textbf{\frac…}` je KaTeX napaka (rdeča koda). Varovalka je
+        # na vsaki formuli, pred `\dfrac`; spremeni samo `\textbf`, v katerem
+        # je ukaz, šteje oklepaje in neuravnoteženega izraza ne spremeni.
+        # Vedenje na primerih je preverjeno v brskalniku (ročni preizkus).
+        skripta = stran[stran.rindex("<script>") : stran.rindex("</script>")]
+
+        assert 'tex: odebeli(tex).replace(/\\\\frac(?![a-zA-Z])/g, "\\\\dfrac"),' in skripta
+        zacetek = skripta.index("function odebeli(tex)")
+        odebeli = skripta[zacetek : skripta.index("function pripravi(", zacetek)]
+        assert "var ukaz = /\\\\textbf\\s*\\{/g;" in odebeli
+        assert '/\\\\[a-zA-Z]/.test(vsebina) ? "\\\\boldsymbol{" : "\\\\textbf{"' in odebeli
+        assert "if (globina > 0) {\n              break;" in odebeli.replace("\r\n", "\n")
+        assert "mathbf" not in odebeli
+
+    def test_predogled_prelomi_nalogo_na_naslednjo_stran(self, stran: str) -> None:
+        # V4-R09: naloga, ki ne gre več na stran, dobi pred sabo prazen prostor;
+        # prejšnja meritev ga pobriše, preden izmeri znova.
+        skripta = stran[stran.rindex("<script>") : stran.rindex("</script>")]
+
+        assert 'list.querySelectorAll(".meja-strani, .razmik-strani")' in skripta
+        assert 'element.classList.contains("naloga")' in skripta
+        assert 'razmik.className = "razmik-strani";' in skripta
+        assert "vsebina.insertBefore(razmik, element);" in skripta
+        # Naloga, ki je po vstavitvi prostora že čez mejo (sešteta robova),
+        # se vrne z negativnim spodnjim robom prostora (pregled V4-R09).
+        assert 'razmik.style.marginBottom = premik + "px";' in skripta
+        # `ADR-067`: tudi naloga, daljša od strani, gre na novo stran kot v
+        # tisku — pogoja o dolžini naloge ni.
+        pogoj = skripta[skripta.index('element.classList.contains("naloga")') :]
+        pogoj = pogoj[: pogoj.index(") {")]
+        assert "visina" not in pogoj.replace("zacetekStrani", "")
+        # Dolžina je izmerjena s praznimi prostori vred.
+        assert skripta.index("vsebina.insertBefore(razmik, element);") < skripta.index(
+            "var strani = vsebina.getBoundingClientRect().height / visina;"
+        )
+
+    def test_prazen_prostor_se_ne_natisne(self, stran: str) -> None:
+        tisk = stran[stran.index("@media print {") :]
+
+        assert ".meja-strani, .razmik-strani, .list .prazno { display: none; }" in tisk
+        # Tisk sam ostane, kakršen je bil: naloga se ne razdeli.
+        assert ".list .naloga { break-inside: avoid; page-break-inside: avoid; }" in stran
 
     def test_stran_predmeta_ostane_brez_skripte(
         self, odjemalec: PrijavljenOdjemalec, motor: Engine, slike: Path

@@ -1798,8 +1798,9 @@ ima zato vsaka slika kljukico, celoten seznam pa je en obrazec
 
 Starš na strani matematike izbere slike in pritisne „Kreiraj test". V kodi
 `preizkus`, v vmesniku „test", poti brez besede `test` (`ADR-053` A).
-Odločitve so v `ADR-053` in `ADR-054`, oblika vhoda in navodilo v `POC-01`
-*Ugotovitve*.
+Odločitve so v `ADR-053` in `ADR-054`, oblika vhoda v `POC-01` *Ugotovitve*.
+Navodilo za matematiko je dobesedno iz `ADR-066` (V4-R09); vsaka sprememba
+navodila je nov ADR s celotnim besedilom.
 
 - **Gumb je drugi gumb obrazca izbora** (`formaction`), brez skripte; izriše
   se samo pri predmetu, ki ima navodilo v `preizkus.NAVODILA` (danes `MAT`).
@@ -1844,7 +1845,8 @@ Odločitve so v `ADR-053` in `ADR-054`, oblika vhoda in navodilo v `POC-01`
   Razveljavi/uveljavi (gumba, Ctrl+Z/Ctrl+Y zunaj polj) premika kazalec; nova
   želja zavrže korake za njim. Zapis nastane šele ob „Shrani" (spodaj).
 - **Izris**: `marked` + KaTeX (`auto-render`). Formule se pred `marked`
-  umaknejo iz besedila; `\frac` postane `\dfrac`. `[odgovor]`,
+  umaknejo iz besedila; `\frac` postane `\dfrac`, `\textbf{…}` z LaTeX
+  ukazom v vsebini postane `\boldsymbol{…}` (V4-R09; samo prikaz). `[odgovor]`,
   `[odgovor-kratek]`, `[odgovor-dolg]` so črte 30, 14 in 52 mm;
   `prostor: majhen|srednji|velik` je 2, 4 ali 7 črt po 8,5 mm.
 - **Besedilo modela je nezaupanja vreden vhod**: `&` in `<` se ubežita pred
@@ -1854,7 +1856,12 @@ Odločitve so v `ADR-053` in `ADR-054`, oblika vhoda in navodilo v `POC-01`
   odstranijo. Korak nastane šele po uspešnem izrisu.
 - **Tisk**: `@page` A4 z robom 15 mm / 18 mm; natisne se samo list; naloga
   (`##` do naslednjega `##`) se ne razdeli; rešitve na svoji strani in samo z
-  izbiro. Merilnik deli višino vsebine z 267 mm in riše meje strani.
+  izbiro.
+- **Predogled prelomi kot tisk** (V4-R09, `ADR-067`): naloga, ki seže čez
+  267 mm natisljive višine in se ne začne na vrhu strani, dobi pred sabo
+  prazen prostor `.razmik-strani` (se ne natisne), tudi če je daljša od strani.
+  Črta „konec strani" je na dnu prostora; dolžina je višina vsebine s prostori,
+  deljena z 267 mm.
 
 ### Znane omejitve
 
@@ -1865,8 +1872,8 @@ Odločitve so v `ADR-053` in `ADR-054`, oblika vhoda in navodilo v `POC-01`
 - **Urejevalnik iz izbora ni zaznamek**: nastane samo iz obrazca, `GET` pelje
   na pregled. Urejevalnik na osnovi shranjenega in ogled sta navadna `GET`.
 - **Samo matematika.** Nov predmet je novo navodilo v `preizkus.NAVODILA`.
-- **Merilnik je ocena**: ker se naloge ne delijo, je natisnjenih strani lahko
-  več.
+- **Prelom v predogledu je preverjen samo s Chromom**; znotraj naloge, daljše
+  od strani, je črta le približek mesta, kjer tisk prelomi med vrsticami.
 - **Znak `$` je vedno ločilo formule**: dva v isti vrstici (npr. ceni v
   dolarjih) se izrišeta kot formula.
 - **Seja baze ostane odprta med klicem modela** (do časovne meje), kot pri
