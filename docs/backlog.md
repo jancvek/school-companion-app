@@ -199,8 +199,9 @@ Odprtih vprašanj ni več; vnos je pripravljen za fazo 0 (POC ali zahteva).
 - **Česa se dotakne:** `ADR-053` F (shranjen preizkus se ne ureja) in
   *Posledice* („opomba po rešenem listu kot vhod v naslednji list" je bila z
   V4 zavržena — „če jo lastnik kdaj želi, je to nova zahteva");
-  `PreizkusiRepository` in model `Preizkus` (brez `UPDATE`); `B-02`
-  (stanje *rešen*)
+  `ADR-053` D (kaj model dobi v klepetu); `ADR-066` (navodilo za test se
+  spreminja z zahtevo); `PreizkusiRepository` in model `Preizkus` (brez
+  `UPDATE`); `B-02` (stanje *rešen*)
 
 ### Zakaj
 
@@ -209,44 +210,73 @@ otroku težko. Danes tega ni kam zapisati in se pozabi.
 
 ### Kaj
 
-- Pri shranjenem testu starš doda opombo v prostem besedilu.
-- Opomba se vidi na ogledu shranjenega testa.
+- Pri shranjenem testu je **ena opomba v prostem besedilu**, ki jo starš
+  lahko **kadarkoli dopolni, spremeni ali pobriše** — ni vezana na stanje
+  *rešen* iz `B-02` (lastnik, 2026-10-16).
+- Opomba se vidi na ogledu shranjenega testa, **v seznamu testov ne**
+  (lastnik, 2026-10-16).
+- **Opombe gredo v klepet za nov test** — model jih upošteva pri sestavi
+  (lastnik, 2026-10-16).
 
 ### Česa ni
 
 - Ocen in točk.
 - Sprememb testa samega — test ostane, kakršen je bil shranjen.
-- Samodejne analize opomb z modelom.
+- Samodejne analize ali povzemanja opomb z modelom zunaj klepeta za nov
+  test.
+- Zgodovine različic opombe.
 
 ### Predlog smeri (ni dogovor)
 
-- **Opomba je svoja vrstica, ne stolpec testa.** Tabela `preizkusi_opombe`
-  (`preizkus_id`, `family_id`, `author_id`, `text`, `created_at`): test
-  ostane nespremenljiv, več opomb in avtor (kateri starš) prideta zraven
-  brez dodatne odločitve. Brisanja ni (`ADR-011`); popravek je nova opomba.
+- **Opomba je svoja tabela 1 : 1, ne stolpec testa.** `preizkusi_opombe`
+  (`preizkus_id` kot primarni ključ, `family_id`, `text`, `updated_at`):
+  `preizkusi` ostane brez `UPDATE`, opomba pa se prepisuje. Pobrisana
+  opomba je prazno besedilo ali odsotna vrstica — zapis testa se ne briše,
+  zato `ADR-011` ne pade; v ADR-ju naj bo to izrecno.
+- **V klepet gre kot del vhoda, ne kot želja.** Opomba je kontekst poleg
+  prepisov (`ADR-053` D), z oznako, da gre za zapis starša o prejšnjem
+  reševanju; v verigo želja ne spada, ker je ni mogoče razveljaviti kot
+  korak. Navodilo modelu pove, kaj z njo — to je sprememba navodila po
+  `ADR-066`.
+- **Pri „Nov test na tej osnovi"** gre zraven opomba izhodiščnega testa —
+  to je najbolj očiten primer.
 - Obrazec s CSRF žetonom na ogledu testa, kot drugi `POST` pod `/admin`.
   Besedilo gre v predlogo samo skozi samodejno ubežanje (Jinja), ne skozi
   izris markdowna — opomba ni besedilo modela.
 
 ### Pasti
 
-- **`ADR-053` je opombo kot vhod v naslednji test izrecno zavrgel.** Če naj
-  opombe kdaj gredo v klepet za nov test („otroku so bili težki ulomki"), je
-  to nova odločitev o vsebini klica modela (`ADR-053` D) — ne sme pripolzeti
-  zraven kot „samo še to".
+- **`ADR-053` je opombo kot vhod v naslednji test izrecno zavrgel** in
+  pravi, da je to nova zahteva. Lastnik jo zdaj želi, zato rabi nov ADR, ki
+  `ADR-053` D in *Posledice* v tem delu nadomesti — ne sme pripolzeti zraven
+  kot „samo še to".
 - **Pisanje v `preizkusi` odpre urejanje.** Če se opomba doda kot stolpec,
   repozitorij dobi `UPDATE` na tabeli, ki ga danes namerno nima — isti
   razlog kot pri `B-02`.
-- **Opomba je osebni podatek o otroku** (kaj mu ne gre). Ostane v družini
-  (`ADR-025`) in se ne prikazuje nikjer zunaj ogleda testa.
+- **Opomba je osebni podatek o otroku** (kaj mu ne gre) in z njo **odide k
+  OpenAI**. Prepisi gredo tja že danes, opomba pa je starševa ocena otroka,
+  ne snov. Ostane v družini (`ADR-025`) in se ne prikazuje nikjer zunaj
+  ogleda testa in klepeta.
+- **Opomba se spreminja, test pa ne.** Test, sestavljen z opombo, ki je bila
+  kasneje prepisana, ne pove več, na kaj se je model oprl. Če je to
+  pomembno, se besedilo opombe ob shranjevanju novega testa zamrzne poleg
+  snovi (kot prepisi, `ADR-053` F).
+- **Opomba je prosto besedilo v vhodu modela** — starš lahko vanjo (ne da bi
+  hotel) napiše navodilo, ki se bije s fiksnim navodilom. Navodilo mora
+  povedati, da opomba opisuje otroka, ne spreminja pravil testa.
 
 ### Odprta vprašanja
 
-1. Ena opomba na test ali več (npr. ob vsakem reševanju)?
-2. Se opomba lahko popravi ali izbriše, ali je popravek nova opomba?
-3. Je opomba vezana na stanje *rešen* iz `B-02` (npr. ponudi se ob
-   „Rešen"), ali jo je mogoče dodati kadarkoli?
-4. Naj se opombe vidijo tudi v pregledu testov (npr. ikona ali prva
-   vrstica)?
-5. Naj opombe kdaj gredo v klepet za nov test na isti snovi ali pri istem
-   predmetu?
+1. ~~Koliko opomb?~~ Ena tekstovna opomba na test (lastnik, 2026-10-16).
+2. ~~Popravek, brisanje?~~ Da, kadarkoli dopolni ali spremeni (lastnik,
+   2026-10-16).
+3. ~~Vezana na *rešen*?~~ Ne, kadarkoli (lastnik, 2026-10-16).
+4. ~~V seznamu testov?~~ Ne (lastnik, 2026-10-16).
+5. ~~V klepet za nov test?~~ Da (lastnik, 2026-10-16).
+6. **Katere opombe** gredo v klepet pri testu **iz snovi** (ne na osnovi):
+   nobena, zadnjih nekaj opomb istega otroka pri istem predmetu, ali jih
+   starš izbere sam?
+7. Gre opomba v klepet samodejno, ali jo starš v urejevalniku vidi in jo
+   lahko izključi?
+8. Se besedilo uporabljene opombe ob shranjevanju novega testa zamrzne
+   (glej *Pasti*)?
