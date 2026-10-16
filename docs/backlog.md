@@ -121,16 +121,20 @@ otroku.
 
 ### Kaj
 
-- Ko starš test shrani, ga lahko označi, da je bil **dan otroku** (v
-  reševanju), in kasneje, da ga je otrok **rešil**.
+- Shranjen test starš **kasneje** (ne ob shranjevanju) označi, da je bil
+  **dan otroku** (v reševanju), in nato, da ga je otrok **rešil**
+  (lastnik, 2026-10-16).
 - Pregled shranjenih testov dobi filtra **„V reševanju"** in **„Rešeni"**.
   Filtra „Še ni dan" lastnik ne rabi (2026-10-16).
 - Stanje se da **vrniti nazaj** — napačen klik se popravi (2026-10-16).
 
 ### Česa ni
 
-- Ocen, točk in opomb o tem, kako je otrok reševal (opombe pri shranjenih
-  testih so ločena misel, v backlogu še ni zapisana).
+- Ocen, točk in opomb o tem, kako je otrok reševal — opombe so svoj vnos,
+  `B-03`.
+- Prikaza, koliko dni je test pri otroku (lastnik, 2026-10-16).
+- Testov v reševanju na kartici „Danes" (`ADR-050`) (lastnik, 2026-10-16).
+- Oznake ob shranjevanju — samo kasneje, na shranjenem testu.
 - Reševanja na telefonu — test ostane na papirju (`ADR-053` B).
 - Opomnikov in obvestil („test je pri otroku že teden dni").
 
@@ -142,13 +146,12 @@ otroku.
   *v reševanju*, s `solved_at` *rešen*. Repozitorij dobi eno ozko metodo, ki
   zapiše samo ta dva stolpca; test, rešitve, snov in naslovljenec ostanejo
   brez `UPDATE`. `ADR-053` F se v tem delu spremeni z novim ADR-jem.
-- **Žig namesto besedila stanja:** datum predaje in rešitve pride zraven
-  zastonj, kasnejša migracija pa ga starim vrsticam ne bi mogla dati (isti
-  razlog kot `base_id`, `ADR-055` E).
-- **Kje se označi:** ob shranjevanju potrditveno polje „Dan otroku" (test se
-  pogosto natisne in preda takoj); na ogledu shranjenega testa gumb „Dan
-  otroku" oz. „Rešen". „Rešen" brez predhodnega „dan" je dovoljen in
-  nastavi oba žiga.
+- **Žig namesto besedila stanja:** datuma se ne prikazujeta, a kasnejša
+  migracija ju starim vrsticam ne bi mogla dati (isti razlog kot `base_id`,
+  `ADR-055` E), cena pa je enaka kot pri stolpcu s stanjem.
+- **Kje se označi:** na ogledu shranjenega testa gumb „Dan otroku" oz.
+  „Rešen". „Rešen" brez predhodnega „dan" je dovoljen in nastavi oba žiga.
+  Urejevalnik in pot shranjevanja (`ADR-055` G) ostaneta nespremenjena.
 - **Pregled:** filter stanja se sestavlja s filtrom predmeta
   (`?predmet=MAT&stanje=v-resevanju`), v vsaki vrstici je oznaka stanja.
   Neznano stanje da prazen seznam, kot neznan predmet (`ADR-055` A).
@@ -171,17 +174,79 @@ otroku.
   test pri otroku", bi bila potrebna tabela dogodkov — za zdaj ne.
 - **Deaktiviran otrok** (`ADR-055` H dovoli test zanj): njegov test v
   reševanju bi v filtru visel za vedno.
-- **„Rešen" ni isto kot „pregledan".** Če pridejo opombe, se odpre
+- **„Rešen" ni isto kot „pregledan".** Če pride `B-03` (opombe), se odpre
   vprašanje tretjega stanja.
 
 ### Odprta vprašanja
 
-1. Se oznaka nastavi ob shranjevanju, kasneje na ogledu, ali oboje?
+1. ~~Kdaj se označi?~~ Kasneje, na shranjenem testu (lastnik,
+   2026-10-16).
 2. ~~Se stanje lahko vrne nazaj?~~ Da (lastnik, 2026-10-16).
 3. ~~Kateri filtri?~~ „V reševanju" in „Rešeni"; „Še ni dan" ne
    (lastnik, 2026-10-16).
-4. Se v seznamu vidi, kdaj je bil test dan oz. rešen (npr. „pri otroku 3
-   dni")?
-5. Ali „rešen" kasneje dobi opombo — in ali naj se ideja o opombah zapiše
-   kot svoj vnos ali kot del tega?
-6. Naj se testi v reševanju pokažejo tudi na kartici „Danes" (`ADR-050`)?
+4. ~~Se vidi, koliko dni je test pri otroku?~~ Ne (lastnik, 2026-10-16).
+5. ~~Opombe del tega vnosa?~~ Ne, svoj vnos `B-03` (lastnik, 2026-10-16).
+6. ~~Na kartici „Danes"?~~ Ne (lastnik, 2026-10-16).
+
+Odprtih vprašanj ni več; vnos je pripravljen za fazo 0 (POC ali zahteva).
+
+---
+
+## B-03 — Opombe pri shranjenem testu
+
+- **Status:** Ideja
+- **Dodano:** 2026-10-16 (misel iz pogovora 2026-10-14)
+- **Česa se dotakne:** `ADR-053` F (shranjen preizkus se ne ureja) in
+  *Posledice* („opomba po rešenem listu kot vhod v naslednji list" je bila z
+  V4 zavržena — „če jo lastnik kdaj želi, je to nova zahteva");
+  `PreizkusiRepository` in model `Preizkus` (brez `UPDATE`); `B-02`
+  (stanje *rešen*)
+
+### Zakaj
+
+Po rešenem testu starš želi zapisati, kako je šlo — na primer, kaj je bilo
+otroku težko. Danes tega ni kam zapisati in se pozabi.
+
+### Kaj
+
+- Pri shranjenem testu starš doda opombo v prostem besedilu.
+- Opomba se vidi na ogledu shranjenega testa.
+
+### Česa ni
+
+- Ocen in točk.
+- Sprememb testa samega — test ostane, kakršen je bil shranjen.
+- Samodejne analize opomb z modelom.
+
+### Predlog smeri (ni dogovor)
+
+- **Opomba je svoja vrstica, ne stolpec testa.** Tabela `preizkusi_opombe`
+  (`preizkus_id`, `family_id`, `author_id`, `text`, `created_at`): test
+  ostane nespremenljiv, več opomb in avtor (kateri starš) prideta zraven
+  brez dodatne odločitve. Brisanja ni (`ADR-011`); popravek je nova opomba.
+- Obrazec s CSRF žetonom na ogledu testa, kot drugi `POST` pod `/admin`.
+  Besedilo gre v predlogo samo skozi samodejno ubežanje (Jinja), ne skozi
+  izris markdowna — opomba ni besedilo modela.
+
+### Pasti
+
+- **`ADR-053` je opombo kot vhod v naslednji test izrecno zavrgel.** Če naj
+  opombe kdaj gredo v klepet za nov test („otroku so bili težki ulomki"), je
+  to nova odločitev o vsebini klica modela (`ADR-053` D) — ne sme pripolzeti
+  zraven kot „samo še to".
+- **Pisanje v `preizkusi` odpre urejanje.** Če se opomba doda kot stolpec,
+  repozitorij dobi `UPDATE` na tabeli, ki ga danes namerno nima — isti
+  razlog kot pri `B-02`.
+- **Opomba je osebni podatek o otroku** (kaj mu ne gre). Ostane v družini
+  (`ADR-025`) in se ne prikazuje nikjer zunaj ogleda testa.
+
+### Odprta vprašanja
+
+1. Ena opomba na test ali več (npr. ob vsakem reševanju)?
+2. Se opomba lahko popravi ali izbriše, ali je popravek nova opomba?
+3. Je opomba vezana na stanje *rešen* iz `B-02` (npr. ponudi se ob
+   „Rešen"), ali jo je mogoče dodati kadarkoli?
+4. Naj se opombe vidijo tudi v pregledu testov (npr. ikona ali prva
+   vrstica)?
+5. Naj opombe kdaj gredo v klepet za nov test na isti snovi ali pri istem
+   predmetu?
