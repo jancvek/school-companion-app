@@ -101,3 +101,80 @@ pod tega otroka.
 5. Samo danes?
 6. Ali „Danes" pokaže tudi manjke po urniku (`ADR-028`)?
 7. POC (posnetka „Danes" in kamere z izbiro otroka) ali takoj zahteva?
+
+---
+
+## B-02 — Test v reševanju in rešen test
+
+- **Status:** Ideja
+- **Dodano:** 2026-10-16
+- **Česa se dotakne:** `ADR-053` F (shranjen preizkus se ne ureja,
+  „statusov ni"); `PreizkusiRepository` v `app/db.py` in model `Preizkus`
+  (zapis „se ne spremeni nikoli", ni `UPDATE`); `ADR-055` A (pregled
+  shranjenih testov, filter samo po predmetu); `ADR-011` (nič se ne briše)
+
+### Zakaj
+
+Shranjen test danes ne pove, ali je že bil pri otroku in ali ga je otrok
+rešil. Starš želi na pregledu testov videti, kateri testi so trenutno pri
+otroku.
+
+### Kaj
+
+- Ko starš test shrani, ga lahko označi, da je bil **dan otroku** (v
+  reševanju), in kasneje, da ga je otrok **rešil**.
+- Pregled shranjenih testov dobi filter **„V reševanju"**.
+
+### Česa ni
+
+- Ocen, točk in opomb o tem, kako je otrok reševal (opombe pri shranjenih
+  testih so ločena misel, v backlogu še ni zapisana).
+- Reševanja na telefonu — test ostane na papirju (`ADR-053` B).
+- Opomnikov in obvestil („test je pri otroku že teden dni").
+
+### Predlog smeri (ni dogovor)
+
+- **Vsebina ostane nespremenljiva, spremeni se samo predaja.** Tabela
+  `preizkusi` dobi dva časovna žiga, `given_at` in `solved_at` (oba lahko
+  `NULL`); stanje je izpeljano: brez žigov *shranjen*, z `given_at`
+  *v reševanju*, s `solved_at` *rešen*. Repozitorij dobi eno ozko metodo, ki
+  zapiše samo ta dva stolpca; test, rešitve, snov in naslovljenec ostanejo
+  brez `UPDATE`. `ADR-053` F se v tem delu spremeni z novim ADR-jem.
+- **Žig namesto besedila stanja:** datum predaje in rešitve pride zraven
+  zastonj, kasnejša migracija pa ga starim vrsticam ne bi mogla dati (isti
+  razlog kot `base_id`, `ADR-055` E).
+- **Kje se označi:** ob shranjevanju potrditveno polje „Dan otroku" (test se
+  pogosto natisne in preda takoj); na ogledu shranjenega testa gumb „Dan
+  otroku" oz. „Rešen". „Rešen" brez predhodnega „dan" je dovoljen in
+  nastavi oba žiga.
+- **Pregled:** filter stanja se sestavlja s filtrom predmeta
+  (`?predmet=MAT&stanje=v-resevanju`), v vsaki vrstici je oznaka stanja.
+  Neznano stanje da prazen seznam, kot neznan predmet (`ADR-055` A).
+- **Nov test na osnovi** začne brez stanja — je nov list papirja.
+
+### Pasti
+
+- **`ADR-053` F izrecno pravi „statusov ni"**, model `Preizkus` pa „zapis se
+  ne spremeni nikoli". Brez novega ADR-ja pregled kode spremembo zavrne —
+  ali pa jo kdo izpelje s splošnim `UPDATE` in s tem odpre pot urejanju
+  vsebine.
+- **Statusi delovnih listov (`ADR-032`, nadomeščen) niso zgled.** Tam je šlo
+  za stanje vsebine (`osnutek` → `pripravljen` → `arhiviran`), tu za predajo
+  papirja otroku; vsebina je ob shranjevanju že končana.
+- **Napačen klik.** Če se stanja ne da vrniti, ostane „rešen" test, ki ga
+  otrok ni videl; če se da, se izgubi datum.
+- **Deaktiviran otrok** (`ADR-055` H dovoli test zanj): njegov test v
+  reševanju bi v filtru visel za vedno.
+- **„Rešen" ni isto kot „pregledan".** Če pridejo opombe, se odpre
+  vprašanje tretjega stanja.
+
+### Odprta vprašanja
+
+1. Se oznaka nastavi ob shranjevanju, kasneje na ogledu, ali oboje?
+2. Se stanje lahko vrne nazaj (napačen klik)?
+3. Rabi filter samo „V reševanju" ali tudi „Rešeni" in „Še ni dan"?
+4. Se v seznamu vidi, kdaj je bil test dan oz. rešen (npr. „pri otroku 3
+   dni")?
+5. Ali „rešen" kasneje dobi opombo — in ali naj se ideja o opombah zapiše
+   kot svoj vnos ali kot del tega?
+6. Naj se testi v reševanju pokažejo tudi na kartici „Danes" (`ADR-050`)?
