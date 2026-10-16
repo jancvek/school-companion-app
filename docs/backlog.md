@@ -123,7 +123,9 @@ otroku.
 
 - Ko starš test shrani, ga lahko označi, da je bil **dan otroku** (v
   reševanju), in kasneje, da ga je otrok **rešil**.
-- Pregled shranjenih testov dobi filter **„V reševanju"**.
+- Pregled shranjenih testov dobi filtra **„V reševanju"** in **„Rešeni"**.
+  Filtra „Še ni dan" lastnik ne rabi (2026-10-16).
+- Stanje se da **vrniti nazaj** — napačen klik se popravi (2026-10-16).
 
 ### Česa ni
 
@@ -150,6 +152,9 @@ otroku.
 - **Pregled:** filter stanja se sestavlja s filtrom predmeta
   (`?predmet=MAT&stanje=v-resevanju`), v vsaki vrstici je oznaka stanja.
   Neznano stanje da prazen seznam, kot neznan predmet (`ADR-055` A).
+- **Vrnitev** pobriše zadnji žig (rešen → v reševanju → shranjen). Brisanje
+  vrednosti v stolpcu ni brisanje zapisa, zato `ADR-011` ne pade; v novem
+  ADR-ju naj bo to vseeno izrecno zapisano.
 - **Nov test na osnovi** začne brez stanja — je nov list papirja.
 
 ### Pasti
@@ -161,8 +166,9 @@ otroku.
 - **Statusi delovnih listov (`ADR-032`, nadomeščen) niso zgled.** Tam je šlo
   za stanje vsebine (`osnutek` → `pripravljen` → `arhiviran`), tu za predajo
   papirja otroku; vsebina je ob shranjevanju že končana.
-- **Napačen klik.** Če se stanja ne da vrniti, ostane „rešen" test, ki ga
-  otrok ni videl; če se da, se izgubi datum.
+- **Vrnitev izgubi datum.** Ker se stanje da vrniti, žig po vrnitvi ni več
+  zgodovina, ampak trenutno stanje. Če bi kdaj rabili „kolikokrat je bil
+  test pri otroku", bi bila potrebna tabela dogodkov — za zdaj ne.
 - **Deaktiviran otrok** (`ADR-055` H dovoli test zanj): njegov test v
   reševanju bi v filtru visel za vedno.
 - **„Rešen" ni isto kot „pregledan".** Če pridejo opombe, se odpre
@@ -171,8 +177,9 @@ otroku.
 ### Odprta vprašanja
 
 1. Se oznaka nastavi ob shranjevanju, kasneje na ogledu, ali oboje?
-2. Se stanje lahko vrne nazaj (napačen klik)?
-3. Rabi filter samo „V reševanju" ali tudi „Rešeni" in „Še ni dan"?
+2. ~~Se stanje lahko vrne nazaj?~~ Da (lastnik, 2026-10-16).
+3. ~~Kateri filtri?~~ „V reševanju" in „Rešeni"; „Še ni dan" ne
+   (lastnik, 2026-10-16).
 4. Se v seznamu vidi, kdaj je bil test dan oz. rešen (npr. „pri otroku 3
    dni")?
 5. Ali „rešen" kasneje dobi opombo — in ali naj se ideja o opombah zapiše
