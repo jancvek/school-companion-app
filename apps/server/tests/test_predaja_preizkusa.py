@@ -275,7 +275,8 @@ class TestNeveljavno:
             pot(), data={"dejanje": "dan", "iz": "shranjen"}, follow_redirects=False
         )
 
-        assert odgovor.status_code in (303, 401, 403)
+        assert odgovor.status_code == 303
+        assert odgovor.headers["location"].startswith("/admin/login")
         assert zapis(motor).stanje == "shranjen"
 
 
@@ -481,22 +482,31 @@ def test_nov_test_na_osnovi_resenega_je_shranjen(motor: Engine, stars: str) -> N
 # --- Varovalo: samo ena pot piše (`ADR-068` B) ---
 
 
-def test_update_na_preizkusih_je_samo_v_zapisi_predajo() -> None:
-    """Edini `update(Preizkus)` v kodi je v `zapisi_predajo`.
+#: Pisanje v obstoječ zapis `preizkusi` v kakršnikoli obliki: stavek `update`
+#: (tudi prelomljen), surov SQL ali ORM prirejanje vsebinskega stolpca.
+PISANJE_V_PREIZKUSE = re.compile(
+    r"update\(\s*Preizkus\b|UPDATE\s+preizkusi\b|\.(?:test_md|solutions_md|source_md)\s*=(?!=)",
+    re.IGNORECASE,
+)
 
-    Pregled besedila in ne vedenja: drugo pisanje bi bilo nova pot do urejanja
-    vsebine, ki jo `ADR-053` F zapira.
+
+def test_update_na_preizkusih_je_samo_v_zapisi_predajo() -> None:
+    """Edino pisanje v obstoječ zapis `preizkusi` je v `zapisi_predajo`.
+
+    Pregled besedila in ne vedenja, zato **delno** varovalo: ujame stavek
+    `update`, surov SQL in prirejanje vsebine testa, ne pa npr. `setattr` ali
+    prirejanja naslova. Drugo pisanje bi bilo nova pot do urejanja vsebine, ki
+    jo `ADR-053` F zapira; vedenje varuje `test_prehod_ne_premakne_vsebine`.
     """
     from pathlib import Path
 
     koda = Path(__file__).resolve().parents[1] / "app"
     najdbe = [
-        (datoteka.name, vrstica)
+        (datoteka.name, ujemanje.group(0))
         for datoteka in sorted(koda.rglob("*.py"))
-        for vrstica in datoteka.read_text(encoding="utf-8").splitlines()
-        if "update(Preizkus)" in vrstica
+        for ujemanje in PISANJE_V_PREIZKUSE.finditer(datoteka.read_text(encoding="utf-8"))
     ]
-    assert len(najdbe) == 1, najdbe
+    assert najdbe == [("db.py", "update(Preizkus")], najdbe
     besedilo = (koda / "db.py").read_text(encoding="utf-8")
     zacetek = besedilo.index("def zapisi_predajo(")
     # Konec metode: naslednja metoda ali konec datoteke (metoda je lahko zadnja).

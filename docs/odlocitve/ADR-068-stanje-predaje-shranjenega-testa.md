@@ -71,7 +71,10 @@ ne kliče in ničesar ne pošilja (`ADR-055` D).
 
 **G. Prikaz.** Datuma se nikjer ne prikazujeta. Pregled dobi filter stanja,
 ki se sestavlja s filtrom predmeta (`ADR-055` A se v tem delu razširi);
-neznano stanje da prazen seznam kot neznan predmet. Vrstica pokaže oznako
+neznano stanje da prazen seznam kot neznan predmet. Filtra sta samo
+„v reševanju" in „rešeni": *shranjen* ni filter (lastnik ga ne rabi, `B-02`),
+zato je `?stanje=shranjen` na pregledu neznano stanje, čeprav ga repozitorij
+pozna. Vrstica pokaže oznako
 „v reševanju" ali „rešen".
 
 **H. Brez omejitev po otroku.** Test deaktiviranega otroka (`ADR-055` H) se
