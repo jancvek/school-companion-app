@@ -1689,3 +1689,75 @@ def test_razveljavitev_0015_brez_neodobrenih_spusti_stolpce(baza: str) -> None:
             assert povezava.execute(text("SELECT COUNT(*) FROM families")).scalar() == 1
     finally:
         motor.dispose()
+
+
+# --- Predaja preizkusa (V4-R10, `0016_predaja_preizkusa`) ---
+
+
+def _vstavi_preizkus(motor: Any) -> None:
+    """En shranjen preizkus v stanju sheme `0015`, brez stolpcev predaje."""
+    with motor.begin() as povezava:
+        povezava.execute(
+            text(
+                "INSERT INTO preizkusi "
+                "(id, family_id, child_id, subject, title, test_md, solutions_md, "
+                "source_md, model, saved_at, saved_by, base_id) "
+                "VALUES ('p1', :druzina, :otrok, 'MAT', 'T', '# T', '# R', 'snov', 'm', "
+                "'2026-10-10 08:00:00', :otrok, NULL)"
+            ),
+            {"druzina": CVEK_ID, "otrok": MASA_ID},
+        )
+
+
+def test_predaja_doda_prazna_stolpca_in_vrstice_ne_premakne(baza: str, slike: Path) -> None:
+    """`0016` samo doda stolpca; obstoječ preizkus je po njej *shranjen*.
+
+    Kriterij `V4-R10`: „migracija samo doda stolpca".
+    """
+    config = alembic_nastavitve(baza)
+    _polna_baza_pred_druzinami(baza, slike)
+    command.upgrade(config, "0015_odobritev_druzine")
+    motor = create_engine(baza)
+    try:
+        _vstavi_preizkus(motor)
+        prej = _stej(motor)
+        with motor.connect() as povezava:
+            vrstica_prej = povezava.execute(text("SELECT * FROM preizkusi")).mappings().one()
+
+        command.upgrade(config, "0016_predaja_preizkusa")
+
+        stolpci = {s["name"]: s for s in inspect(motor).get_columns("preizkusi")}
+        assert {"given_at", "solved_at"} <= set(stolpci)
+        assert stolpci["given_at"]["nullable"] and stolpci["solved_at"]["nullable"]
+        assert _stej(motor) == prej
+        with motor.connect() as povezava:
+            vrstica = povezava.execute(text("SELECT * FROM preizkusi")).mappings().one()
+        assert vrstica["given_at"] is None and vrstica["solved_at"] is None
+        assert {k: vrstica[k] for k in vrstica_prej} == dict(vrstica_prej)
+    finally:
+        motor.dispose()
+
+
+def test_razveljavitev_predaje_spusti_stolpca_in_obdrzi_preizkus(
+    baza: str, slike: Path
+) -> None:
+    """Stanje predaje se izgubi, preizkus ostane (`ADR-068`, *Posledice*)."""
+    config = alembic_nastavitve(baza)
+    _polna_baza_pred_druzinami(baza, slike)
+    command.upgrade(config, "head")
+    motor = create_engine(baza)
+    try:
+        _vstavi_preizkus(motor)
+        with motor.begin() as povezava:
+            povezava.execute(
+                text("UPDATE preizkusi SET given_at = '2026-10-11 08:00:00' WHERE id = 'p1'")
+            )
+        prej = _stej(motor)
+
+        command.downgrade(config, "0015_odobritev_druzine")
+
+        stolpci = {s["name"] for s in inspect(motor).get_columns("preizkusi")}
+        assert not {"given_at", "solved_at"} & stolpci
+        assert _stej(motor) == prej
+    finally:
+        motor.dispose()

@@ -560,6 +560,17 @@ PRIMERI_POTI: dict[tuple[str, str], Klic] = {
     ("GET", "/admin/assessments/{preizkus_id}/compose"): lambda o, a: (
         o.get(f"/admin/assessments/{a.preizkus}/compose"), NI, (a.preizkus,),
     ),
+    # V4-R10. Veljavno dejanje in stanje, da 404 pride iz meje družine in ne
+    # iz zavrnitve vrednosti; posnetek pokaže, da tuj zapis ostane shranjen.
+    ("POST", "/admin/assessments/{preizkus_id}/handover"): lambda o, a: (
+        o.post(
+            f"/admin/assessments/{a.preizkus}/handover",
+            data={"dejanje": "resen", "iz": "shranjen"},
+            follow_redirects=False,
+        ),
+        NI,
+        (a.preizkus,),
+    ),
     ("GET", "/admin/materials/{material_id}"): lambda o, a: (
         o.get(f"/admin/materials/{a.akt}"), NI, (a.akt,),
     ),
@@ -1543,6 +1554,12 @@ PRIMERI_REPOZITORIJEV: dict[tuple[str, str], Preverba] = {
     ),
     ("PreizkusiRepository", "stej_po_predmetih"): lambda s, a, b: (
         _p(s, b).stej_po_predmetih() == {b.subject: 1}
+    ),
+    # V4-R10: tuj zapis prehod ne zadene in ostane shranjen.
+    ("PreizkusiRepository", "zapisi_predajo"): lambda s, a, b: (
+        _p(s, b).zapisi_predajo(a.preizkus, "resen", "shranjen", datetime.now(UTC)) is None
+        and (zapis := _p(s, a).najdi(a.preizkus)) is not None
+        and zapis.stanje == "shranjen"
     ),
     ("PreizkusiRepository", "shrani"): lambda s, a, b: (
         _vrze(ValueError, lambda: _shrani_tuje(s, b, child_id=a.otrok_id))
