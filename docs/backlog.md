@@ -280,3 +280,197 @@ otroku težko. Danes tega ni kam zapisati in se pozabi.
    lahko izključi?
 8. Se besedilo uporabljene opombe ob shranjevanju novega testa zamrzne
    (glej *Pasti*)?
+
+---
+
+## B-04 — Testi za vse predmete
+
+- **Status:** Ideja
+- **Dodano:** 2026-11-03 (misel iz pogovora 2026-10-14)
+- **Česa se dotakne:** `ADR-053` D (navodilo se poišče po predmetu, danes
+  obstaja samo za matematiko) in H (grafičnih nalog in slik ni); `ADR-066`
+  (vsaka sprememba navodila je zahteva z novim ADR-jem, ki nosi celotno
+  besedilo); `V4-R07` (gumb „Kreiraj test" samo na strani matematike);
+  `NAVODILA` in `navodilo_za` v `app/preizkus.py`; izris v
+  `_preizkus-izris.html` (KaTeX, oznake prostora)
+
+### Zakaj
+
+Od vseh funkcij lastniku najbolj pomaga sestavljanje testov v klepetu s
+predogledom A4, danes pa dela samo pri matematiki. Starš teste rabi tudi pri
+ostalih predmetih.
+
+### Kaj
+
+- Sestavljanje testov pri vseh predmetih, s posebnostmi po predmetu
+  (lastnik, 2026-10-14).
+- Navodilo modelu je fiksno po predmetu (lastnik, 2026-10-14).
+- Vsi predmeti naenkrat, v eni zahtevi (lastnik, 2026-10-14).
+
+### Česa ni
+
+- Trajnih želja staršev — navodila, ki bi ga starš shranil za predmet
+  (lastnik, 2026-10-14).
+- Ločenega preizkušanja navodila za vsak predmet posebej (lastnik,
+  2026-10-14).
+
+### Predlog smeri (ni dogovor)
+
+- **Skupno jedro in razdelek po predmetu.** Oblika izhoda (`sporocilo`,
+  `test_md`, `resitve_md`), točke, oznake prostora, vrstni red postavk in
+  tisk so enaki za vse predmete; po predmetu se razlikujejo vrste nalog in
+  zapis. Deset razdelkov ob enem jedru se ne more razići tako kot deset
+  ločenih navodil.
+- **Izvirnik je ADR** (`ADR-066` 2): nov ADR nosi celotno besedilo jedra in
+  vseh razdelkov, test primerja vsako konstanto z zapisom.
+- **Gumb „Kreiraj test"** pri vsakem predmetu, ki ima navodilo.
+  `navodilo_za` že vrne `None` za predmet brez navodila, zato tak predmet ni
+  napaka, ampak stanje.
+
+### Pasti
+
+- **Izris je danes matematičen.** `\frac` → `\dfrac`, decimalna vejica in
+  KaTeX so pravila matematike. Pri jezikih so naloge drugačne (dopolnjevanje,
+  prevod, izbira med možnostmi, povezovanje) in oznake `[odgovor-kratek]` /
+  `[odgovor-dolg]` morda ne zadoščajo.
+- **Brez preizkušanja navodil je prvi pravi preizkus vsakega predmeta šele v
+  fazi 9b.** Deset predmetov v eni zahtevi pomeni deset ročnih preizkusov
+  natisnjenega testa pred mergom.
+- **Pravilo o vrstnem redu postavk** (`ADR-066`) mora biti v jedru, ne v
+  razdelku matematike: primer iz pogovora 2026-10-14 (present simple /
+  continuous) je bil prav jezikovni.
+- **Predmeti brez pričakovane slike** (LUM, GUM, TIT so na urniku označeni z
+  „ne pričakuj slike", `ADR-028`) imajo malo snovi, iz katere bi test
+  nastal.
+
+### Odprta vprašanja
+
+1. Res vseh deset predmetov, tudi LUM, GUM in TIT?
+2. Katere vrste nalog pri posameznem predmetu (npr. pri TJA dopolnjevanje
+   in prevod, pri NAR, GEO in ZGO odprta vprašanja, drži / ne drži,
+   povezovanje)? Kdo napiše razdelek: model predlaga, lastnik potrdi?
+3. TJA: so navodila nalog v testu angleška ali slovenska?
+4. Rabi test novo oznako za izbiro med možnostmi (a, b, c) ali za
+   povezovanje?
+5. POC ali zahteva? „Brez ločenega preizkušanja" govori za zahtevo, tveganje
+   v *Pasteh* za POC.
+
+---
+
+## B-05 — Plonkec ob testu
+
+- **Status:** Ideja
+- **Dodano:** 2026-11-03 (misel iz pogovora 2026-10-14)
+- **Česa se dotakne:** `ADR-053` B (izhod sta test in rešitve, vsak na svoji
+  strani) in F (shrani = končan; kaj zapis hrani); `ADR-066` (oblika
+  izhoda modela in navodilo); `ADR-055` in model `Preizkus` (tabela
+  `preizkusi`, brez `UPDATE`); tisk v `_preizkus-izris.html`; `B-04`
+
+### Zakaj
+
+Ob testu naj otrok dobi kratka, hitro razvidna pravila za temo, ki jo test
+preverja. Rešitve se s testom shranjujejo že od `V4-R08`; plonkec je drugi
+del iste misli iz pogovora 2026-10-14.
+
+### Kaj
+
+- Ob vsakem testu vedno nastane plonkec: kratka, hitro razvidna pravila
+  glede na temo testa (lastnik, 2026-10-14).
+- Plonkec nastane na isti način kot rešitve (lastnik, 2026-10-14).
+- Shrani se skupaj s testom (lastnik, 2026-10-14).
+
+### Česa ni
+
+Še ni dogovorjeno; glej *Odprta vprašanja*.
+
+### Predlog smeri (ni dogovor)
+
+- **Tretje polje v odgovoru modela** (`plonkec_md`) poleg `test_md` in
+  `resitve_md`, v istem klicu. Navodilo pove, kaj plonkec je (pravila in
+  formule, ne rešene naloge). Sprememba navodila je nov ADR po `ADR-066`.
+- **Stolpec v `preizkusi`**, zapisan ob vstavljanju. To ni `UPDATE`, zato
+  nespremenljivost zapisa (`ADR-053` F) ostane; stare vrstice imajo `NULL`.
+  Je pa migracija sheme.
+- **Tisk:** plonkec na svoji strani, na izbiro kot rešitve.
+
+### Pasti
+
+- **Plonkec lahko izda odgovore**, če model vanj prepiše rešen primer, ki je
+  tudi naloga v testu. Navodilo mora ločiti pravilo od rešitve naloge.
+- **Vsak korak klepeta postane daljši.** Model vsakič vrne celoten test,
+  rešitve in plonkec: več izhodnih žetonov in daljše čakanje pri vsaki želji.
+- **Stari testi plonkca nimajo.** Ogled starega testa ga ne sme pričakovati;
+  „Nov test na tej osnovi" ga mora ustvariti.
+- Pri `B-04` je plonkec pri jezikih nekaj drugega kot pri matematiki.
+
+### Odprta vprašanja
+
+1. Je plonkec za otroka med reševanjem (zraven testa) ali za učenje pred
+   testom? Od tega je odvisno, ali sme vsebovati pravilo, ki nalogo reši.
+2. Se natisne vedno ali na izbiro, kot rešitve?
+3. Koliko prostora: del strani ali cela stran A4?
+4. Ga starš spreminja z željami v istem klepetu kot test?
+5. Za vse predmete (`B-04`) ali najprej samo matematika?
+
+---
+
+## B-06 — Prehodna napaka vision obdelave se ponovi sama
+
+- **Status:** Ideja
+- **Dodano:** 2026-11-03 (ugotovitev celostnega pregleda 2026-09-11)
+- **Česa se dotakne:** `ADR-009` (kdaj je `failed` prav; mirujoč worker brez
+  ključa); `ADR-004` (na telefonu je meja med `pending` in `failed` „ali se
+  stanje sploh more spremeniti"); `ADR-044` D (ugasnjene družine obhod
+  preskoči); `_opis_statusa` v `app/vision.py`; `_izid_za` v
+  `app/obdelava.py`; `MaterialsRepository.seznam_novih` (bere samo `new`)
+
+### Zakaj
+
+Prehodna napaka klica vision modela (časovna omejitev, prekinjena povezava,
+HTTP 429, 5xx) danes konča kot `failed`, enako kot trajna. Worker bere samo
+zapise `new`, zato se taka slika sama nikoli ne obdela, dokler je starš ročno
+ne pošlje v obdelavo. Na telefonu je ista razlika že rešena (`ADR-004`:
+začasna napaka ni trajna).
+
+### Kaj
+
+- Prehodna napaka vision klica se ponovi sama, brez ročnega „Pošlji v
+  obdelavo" (lastnik, 2026-11-03).
+
+### Česa ni
+
+- Sprememb ročnega „Pošlji v obdelavo" (`ADR-009`).
+- Ponavljanja pri sestavljanju testa (`V4-R07`) — tam napako vidi starš v
+  klepetu in sam poskusi znova. (Predlog modela, lastnik še ni potrdil.)
+
+### Predlog smeri (ni dogovor)
+
+- **Ista meja kot na telefonu** (`ADR-004`): 408, 429, 5xx, časovna
+  omejitev in prekinjena povezava so prehodne, ostalo je trajno.
+  `_opis_statusa` te primere že loči.
+- **Prehodna napaka vrne zapis v `new`** s številom poskusov in časom, pred
+  katerim ga worker ne vzame. Po zgornji meji poskusov gre v `failed` z
+  zadnjim sporočilom. To je migracija sheme `materials`.
+- Na strani snovi vrstica „čaka na ponovni poskus", da starš ne pošilja
+  ročno nečesa, kar se bo zgodilo samo.
+
+### Pasti
+
+- **Vsak poskus je plačan.** 429 zaradi porabljene kvote se s ponavljanjem
+  ne popravi; brez zgornje meje bi worker kvoto tolkel v nedogled.
+- **Manjkajoč ključ ni napaka** (`ADR-009` B) in ne sme proizvesti
+  poskusov; **ugasnjena družina** (`ADR-044` D) ostane preskočena.
+- **Migracije se testirajo samo nad SQLite** (pregled 2026-09-11): Postgres
+  veja nove migracije prvič teče na živi bazi.
+- Obstoječi zapisi `failed` s prehodno napako: brez odločitve ostanejo
+  `failed` za vedno.
+
+### Odprta vprašanja
+
+1. Koliko poskusov in v kakšnih razmikih?
+2. Je neveljaven odgovor modela (pokvarjen JSON) prehoden ali trajen?
+3. Mora starš videti, da slika čaka na ponovni poskus, ali zadošča končni
+   izid?
+4. Kaj z obstoječimi zapisi `failed` s prehodno napako: ostanejo, ali jih
+   migracija vrne v `new`?
+5. POC ali zahteva?
