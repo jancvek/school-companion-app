@@ -88,3 +88,9 @@ da označevati naprej. „Nov test na tej osnovi" je nova vrstica in začne kot
   vrstice ostanejo. Ker izguba ne odpre dostopa, se razveljavitev ne ustavi.
 - **Vpliva na:** `V4-R08` (pregled in ogled), `docs/01-arhitektura.md`,
   `test_tesnjenje.py` (nova pot), `test_migracija.py` (`0016`).
+
+**Posledica za teste:**
+`TestOgled.test_ogled_ne_klice_streznika_in_nima_obrazca_za_pisanje` je trdil,
+da je edini obrazec na ogledu odjava. Odslej sta tam še obrazca predaje
+(F). Trditve o skripti ogleda — brez `fetch`, brez pošiljanja, eno čiščenje
+— ostanejo nespremenjene; prav te varujejo `ADR-055` D.

@@ -16,10 +16,12 @@ Poti pod `/admin/assessments` — angleško kot vse ostale in brez besede
   `GET /{id}/compose` urejevalnik z izhodiščem v njem (V4-R08).
 - `POST ""` shrani končan preizkus. Kliče ga skripta, odgovor je JSON
   (`docs/odlocitve/ADR-055` G).
+- `POST /{id}/handover` spremeni stanje predaje otroku (V4-R10). Navaden
+  obrazec z ogleda, odgovor je 303 nazaj na ogled (`ADR-068` F).
 
 **Strežnik je za model brez stanja** (`ADR-053` E): delo v teku živi samo v
-brskalniku. Zapis nastane šele ob „Shrani" in se potem ne spremeni več
-(`ADR-053` F).
+brskalniku. Zapis nastane šele ob „Shrani" in njegova vsebina se potem ne
+spremeni več (`ADR-053` F); spremeni se lahko samo predaja (`ADR-068`).
 
 **Brskalnik pošlje identifikatorje snovi, ne besedila.** Snov za vsak klic
 sestavi strežnik znova, iz seznama predmeta te družine — z isto funkcijo kot
@@ -46,6 +48,7 @@ from starlette.responses import Response
 from app import preizkus
 from app.casi import cas, datum
 from app.db import (
+    PREHODI_PREDAJE,
     ClaniRepository,
     MaterialsRepository,
     PreizkusiRepository,
@@ -59,11 +62,21 @@ from app.dependencies import (
     daj_repozitorij_clanov,
     daj_repozitorij_preizkusov,
 )
-from app.models import Material, Preizkus
+from app.models import (
+    DEJANJA_PREDAJE,
+    STANJA_PREIZKUSA,
+    STANJE_RESEN,
+    STANJE_SHRANJEN,
+    STANJE_V_RESEVANJU,
+    DejanjePredaje,
+    Material,
+    Preizkus,
+    StanjePreizkusa,
+)
 from app.routers import admin
 from app.settings import Settings
 from app.storage import je_znotraj, mapa_druzine, velikost_slike
-from app.strani import daj_predloge, ni_najdeno
+from app.strani import daj_predloge, neveljavna_zahteva, ni_najdeno
 from app.subjects import barva_predmeta, poisci_predmet
 from app.vision import KlicalecPreizkusa, NapakaObdelave
 
@@ -132,6 +145,38 @@ SPOROCILO_SNOV_IZGINILA = (
     "Izbrane snovi ni več na strani predmeta (arhivirana ali premaknjena), "
     "zato testa ni mogoče shraniti z njo. Test natisni, nato izberi snov znova."
 )
+
+SPOROCILO_NEZNANA_PREDAJA = (
+    "Tega gumba ne poznam, zato se stanje testa ni spremenilo. Odpri test "
+    "znova in izberi enega od gumbov na strani."
+)
+
+#: Filtri stanja na pregledu (`ADR-068` G). „Še ni dan" lastnik ne rabi
+#: (`B-02`), zato *shranjen* ni filter.
+FILTRI_STANJA: tuple[tuple[StanjePreizkusa, str], ...] = (
+    (STANJE_V_RESEVANJU, "v reševanju"),
+    (STANJE_RESEN, "rešeni"),
+)
+
+#: Kako se stanje pokaže: besedilo, razred oznake (prazen = brez oznake) in
+#: gumbi na ogledu po `ADR-068` C.
+PRIKAZ_STANJA: dict[StanjePreizkusa, dict[str, Any]] = {
+    STANJE_SHRANJEN: {
+        "napis": "shranjen, še ni dan otroku",
+        "razred": "",
+        "gumbi": [("dan", "Dan otroku"), ("resen", "Rešen")],
+    },
+    STANJE_V_RESEVANJU: {
+        "napis": "v reševanju",
+        "razred": "caka",
+        "gumbi": [("resen", "Rešen"), ("vrni", "Vrni med shranjene")],
+    },
+    STANJE_RESEN: {
+        "napis": "rešen",
+        "razred": "ok",
+        "gumbi": [("vrni", "Vrni v reševanje")],
+    },
+}
 
 
 def _polje(obrazec: FormData, ime: str) -> str:
@@ -222,6 +267,7 @@ def _vrstica(zapis: Preizkus, imena: dict[str, str]) -> dict[str, Any]:
         "barva": barva_predmeta(zapis.subject),
         "naslov": zapis.title,
         "otrok": imena.get(zapis.child_id),
+        "stanje": {"koda": zapis.stanje, **PRIKAZ_STANJA[zapis.stanje]},
     }
 
 
@@ -490,30 +536,72 @@ def pregled(
     clani: Annotated[ClaniRepository, Depends(daj_repozitorij_clanov)],
     predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
     predmet: str | None = None,
+    stanje: str | None = None,
 ) -> Response:
-    """Shranjeni preizkusi družine, najnovejši prvi; `?predmet=` filtrira.
+    """Shranjeni preizkusi družine, najnovejši prvi; `?predmet=` in
+    `?stanje=` filtrirata in se sestavljata (V4-R10, `ADR-068` G).
 
-    Filter ponudi predmete, pri katerih družina preizkus ima. Neznana koda ni
-    napaka: da prazen seznam, ker je predmet tu okno nad istimi podatki in ne
-    identiteta (`ADR-055` A). Prazen niz šteje kot brez filtra.
+    Filter ponudi predmete, pri katerih družina preizkus ima. Neznana koda ali
+    neznano stanje ni napaka: da prazen seznam, ker je filter tu okno nad
+    istimi podatki in ne identiteta (`ADR-055` A). Prazen niz šteje kot brez
+    filtra.
     """
     izbran = predmet or None
+    izbrano_stanje = stanje or None
     stevila = shranjeni.stej_po_predmetih()
     imena = admin.imena_otrok(clani)
+    znana = {koda for koda, _ in FILTRI_STANJA}
+    zapisi = (
+        []
+        if izbrano_stanje is not None and izbrano_stanje not in znana
+        else shranjeni.seznam(izbran, _stanje_ali_nic(izbrano_stanje))
+    )
+
+    def pot(predmet_filtra: str | None, stanje_filtra: str | None) -> str:
+        parametri = [
+            f"{ime}={quote(vrednost, safe='')}"
+            for ime, vrednost in (("predmet", predmet_filtra), ("stanje", stanje_filtra))
+            if vrednost
+        ]
+        return PREDPONA + ("?" + "&".join(parametri) if parametri else "")
+
     return predloge.TemplateResponse(
         request,
         "preizkusi.html",
         {
-            "vrstice": [_vrstica(zapis, imena) for zapis in shranjeni.seznam(izbran)],
+            "vrstice": [_vrstica(zapis, imena) for zapis in zapisi],
             "izbran": izbran,
+            "izbrano_stanje": izbrano_stanje,
             "filtri": [
-                {"koda": koda, "pot": f"{PREDPONA}?predmet={quote(koda, safe='')}"}
-                for koda in sorted(stevila)
+                {"koda": koda, "pot": pot(koda, izbrano_stanje)} for koda in sorted(stevila)
             ],
+            "filtri_stanja": [
+                {"koda": koda, "napis": napis, "pot": pot(izbran, koda)}
+                for koda, napis in FILTRI_STANJA
+            ],
+            "pot_vseh_predmetov": pot(None, izbrano_stanje),
+            "pot_vseh_stanj": pot(izbran, None),
             "pot_vseh": PREDPONA,
+            "ima_teste": bool(stevila),
             "ima_imena": bool(imena),
         },
     )
+
+
+def _stanje_ali_nic(vrednost: str | None) -> StanjePreizkusa | None:
+    """Vrednost iz naslova kot stanje; ni stanje → `None`."""
+    for stanje in STANJA_PREIZKUSA:
+        if stanje == vrednost:
+            return stanje
+    return None
+
+
+def _dejanje_ali_nic(vrednost: str) -> DejanjePredaje | None:
+    """Vrednost iz obrazca kot dejanje predaje; ni dejanje → `None`."""
+    for dejanje in DEJANJA_PREDAJE:
+        if dejanje == vrednost:
+            return dejanje
+    return None
 
 
 @router.get("/{preizkus_id}/compose")
@@ -582,6 +670,7 @@ def ogled(
             "snov": zapis.source_md,
             "model": zapis.model,
             "pot_osnove": f"{pot_preizkusa(zapis.id)}/compose",
+            "pot_predaje": f"{pot_preizkusa(zapis.id)}/handover",
             "pot_pregleda": PREDPONA,
             # Iz katerega shranjenega testa je nastal (`ADR-055` E).
             "izhodisce": (
@@ -591,3 +680,31 @@ def ogled(
             ),
         },
     )
+
+
+@router.post("/{preizkus_id}/handover")
+async def predaja(
+    request: Request,
+    preizkus_id: str,
+    shranjeni: Annotated[PreizkusiRepository, Depends(daj_repozitorij_preizkusov)],
+    predloge: Annotated[Jinja2Templates, Depends(daj_predloge)],
+) -> Response:
+    """Prehod stanja predaje z ogleda (V4-R10, `ADR-068` C, D, F).
+
+    Obrazec pošlje `dejanje` in `iz` — stanje, ki ga je starš videl. Tuj ali
+    neobstoječ zapis je 404 **pred** preverbo vrednosti, da odgovor o tujem
+    testu ne pove ničesar. Neznan prehod je 400. Sicer 303 nazaj na ogled,
+    tudi ko se stanje medtem spremenilo in prehod ni zadel ničesar: ogled
+    takrat pokaže trenutno stanje.
+    """
+    if shranjeni.najdi(preizkus_id) is None:
+        return ni_najdeno(predloge, request, SPOROCILO_NI_PREIZKUSA)
+
+    obrazec = await request.form()
+    dejanje = _dejanje_ali_nic(_polje(obrazec, "dejanje"))
+    iz = _stanje_ali_nic(_polje(obrazec, "iz"))
+    if dejanje is None or iz is None or (dejanje, iz) not in PREHODI_PREDAJE:
+        return neveljavna_zahteva(predloge, request, SPOROCILO_NEZNANA_PREDAJA)
+
+    shranjeni.zapisi_predajo(preizkus_id, dejanje, iz, datetime.now(UTC))
+    return RedirectResponse(pot_preizkusa(preizkus_id), status_code=303)

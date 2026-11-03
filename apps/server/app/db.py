@@ -43,6 +43,9 @@ from app.models import (
     POVERILNICA_GOOGLE,
     STANJE_CAKA,
     STANJE_ODOBRENA,
+    STANJE_RESEN,
+    STANJE_SHRANJEN,
+    STANJE_V_RESEVANJU,
     STANJE_ZAVRNJENA,
     STATUS_NOV,
     STATUS_PRIPRAVLJEN,
@@ -51,6 +54,7 @@ from app.models import (
     VLOGA_STARS,
     Base,
     Credential,
+    DejanjePredaje,
     Family,
     LinkToken,
     LoginAttempt,
@@ -62,6 +66,7 @@ from app.models import (
     QuizItem,
     Schedule,
     ScheduleEntry,
+    StanjePreizkusa,
     User,
     UserSession,
 )
@@ -3374,12 +3379,35 @@ class MeniRepository(_RepozitorijDruzine):
         )
 
 
+#: Pogoj stanja nad stolpci — zrcalo `Preizkus.stanje` v SQL (`ADR-068` A).
+_POGOJ_STANJA: dict[StanjePreizkusa, ColumnElement[bool]] = {
+    STANJE_SHRANJEN: Preizkus.given_at.is_(None) & Preizkus.solved_at.is_(None),
+    STANJE_V_RESEVANJU: Preizkus.given_at.is_not(None) & Preizkus.solved_at.is_(None),
+    STANJE_RESEN: Preizkus.solved_at.is_not(None),
+}
+
+#: Dovoljeni prehodi (`ADR-068` C): (dejanje, iz) → stolpci, ki dobijo „zdaj",
+#: in stolpci, ki se pobrišejo. Česar ni tu, ni prehod.
+PREHODI_PREDAJE: dict[
+    tuple[DejanjePredaje, StanjePreizkusa], tuple[tuple[str, ...], tuple[str, ...]]
+] = {
+    ("dan", STANJE_SHRANJEN): (("given_at",), ()),
+    # Rešen test je bil nujno dan otroku (lastnik, 2026-11-03).
+    ("resen", STANJE_SHRANJEN): (("given_at", "solved_at"), ()),
+    ("resen", STANJE_V_RESEVANJU): (("solved_at",), ()),
+    ("vrni", STANJE_V_RESEVANJU): ((), ("given_at",)),
+    ("vrni", STANJE_RESEN): ((), ("solved_at",)),
+}
+
+
 class PreizkusiRepository(_RepozitorijDruzine):
     """Shranjeni preizkusi ene družine (V4-R08).
 
-    **Zapis nastane enkrat in se ne spremeni**: ta razred nima ne `UPDATE` ne
-    `DELETE` (`ADR-053` F, `ADR-011`). Otrok je argument in ne del
-    konstruktorja, kot povsod od `V3-R07`.
+    **Vsebina zapisa nastane enkrat in se ne spremeni**: ta razred nima
+    `DELETE` (`ADR-053` F, `ADR-011`), edini `UPDATE` pa je
+    `zapisi_predajo`, ki piše samo `given_at` in `solved_at` (V4-R10,
+    `ADR-068` B). Otrok je argument in ne del konstruktorja, kot povsod od
+    `V3-R07`.
     """
 
     def _moje(self) -> ColumnElement[bool]:
@@ -3413,14 +3441,19 @@ class PreizkusiRepository(_RepozitorijDruzine):
             select(Preizkus).where(Preizkus.id == preizkus_id, self._moje())
         ).one_or_none()
 
-    def seznam(self, predmet: str | None = None) -> list[Preizkus]:
-        """Preizkusi družine, najnovejši prvi; neobvezno samo enega predmeta.
+    def seznam(
+        self, predmet: str | None = None, stanje: StanjePreizkusa | None = None
+    ) -> list[Preizkus]:
+        """Preizkusi družine, najnovejši prvi; neobvezno samo enega predmeta
+        in samo v enem stanju predaje (V4-R10).
 
         Drugi ključ `id`, da je vrstni red dveh z istim časom določen.
         """
         pogoji = [self._moje()]
         if predmet is not None:
             pogoji.append(Preizkus.subject == predmet)
+        if stanje is not None:
+            pogoji.append(_POGOJ_STANJA[stanje])
         return list(
             self._session.scalars(
                 select(Preizkus)
@@ -3502,3 +3535,44 @@ class PreizkusiRepository(_RepozitorijDruzine):
             self._session.rollback()
             return self.najdi(preizkus_id)
         return zapis
+
+    def zapisi_predajo(
+        self,
+        preizkus_id: str,
+        dejanje: DejanjePredaje,
+        iz: StanjePreizkusa,
+        zdaj: datetime,
+    ) -> Preizkus | None:
+        """Prehod stanja predaje (V4-R10, `ADR-068` C, D); vrne zapis po njem.
+
+        **Edina pot, ki piše v obstoječ zapis `preizkusi`**, in piše samo
+        `given_at` in `solved_at`: vsebina testa nima poti do `UPDATE`
+        (`ADR-068` B).
+
+        Prehod velja za stanje `iz`, ki ga je starš videl. Pogoj je **v istem
+        stavku** kot pisanje, ne branje pred njim: če se je stanje medtem
+        spremenilo (dvojni klik, drugi starš), stavek ne zadene ničesar in zapis
+        ostane, kakršen je (`ADR-068` D).
+
+        `None` pomeni tuj ali neobstoječ zapis. Neznan prehod je `ValueError`:
+        pot ga zavrne prej, v slovenščini.
+        """
+        prehod = PREHODI_PREDAJE.get((dejanje, iz))
+        if prehod is None:
+            raise ValueError(f"Prehoda {dejanje!r} iz {iz!r} ni (ADR-068 C).")
+        nastavi, pobrisi = prehod
+        vrednosti: dict[str, datetime | None] = {
+            **{stolpec: zdaj for stolpec in nastavi},
+            **{stolpec: None for stolpec in pobrisi},
+        }
+        self._session.execute(
+            update(Preizkus)
+            .where(self._moje(), Preizkus.id == preizkus_id, _POGOJ_STANJA[iz])
+            .values(**vrednosti)
+            .execution_options(synchronize_session=False)
+        )
+        self._session.commit()
+        # `expire_on_commit=False` (`naredi_tovarno_sej`): brez tega bi `najdi`
+        # vrnil predmet iz seje s stanjem pred prehodom.
+        self._session.expire_all()
+        return self.najdi(preizkus_id)
