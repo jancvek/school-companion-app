@@ -378,6 +378,14 @@ del iste misli iz pogovora 2026-10-14.
   glede na temo testa (lastnik, 2026-10-14).
 - Plonkec nastane na isti način kot rešitve (lastnik, 2026-10-14).
 - Shrani se skupaj s testom (lastnik, 2026-10-14).
+- Namenjen je **otroku ali staršu**: na strnjen, pregleden način navede
+  pravila teme (lastnik, 2026-11-03).
+- **Tisk na izbiro, tako kot rešitve:** ob tisku vpraša, ali naj se natisne
+  tudi plonkec; če ne, se ne natisne (lastnik, 2026-11-03).
+- **Največ ena stran A4** (lastnik, 2026-11-03).
+- **Spreminja se z željami v istem klepetu kot test** (lastnik, 2026-11-03).
+- **Za vse predmete takoj**, ne najprej samo matematika (lastnik,
+  2026-11-03).
 
 ### Česa ni
 
@@ -391,7 +399,13 @@ del iste misli iz pogovora 2026-10-14.
 - **Stolpec v `preizkusi`**, zapisan ob vstavljanju. To ni `UPDATE`, zato
   nespremenljivost zapisa (`ADR-053` F) ostane; stare vrstice imajo `NULL`.
   Je pa migracija sheme.
-- **Tisk:** plonkec na svoji strani, na izbiro kot rešitve.
+- **Tisk:** plonkec na svoji strani, za rešitvami ali pred njimi.
+- **Vsebina:** pravila in postopki ter največ en kratek zgled z drugačnimi
+  števili in besedami kot naloge v testu; jezik otroka za njegov razred.
+  Cilj približno pol strani, meja ena stran.
+- **Navodilo za plonkec po predmetu** (pri jezikih slovnična pravila in
+  tabele, pri matematiki formule in postopki) — skupaj z navodili iz
+  `B-04`.
 
 ### Pasti
 
@@ -402,15 +416,23 @@ del iste misli iz pogovora 2026-10-14.
 - **Stari testi plonkca nimajo.** Ogled starega testa ga ne sme pričakovati;
   „Nov test na tej osnovi" ga mora ustvariti.
 - Pri `B-04` je plonkec pri jezikih nekaj drugega kot pri matematiki.
+- **„Za vse predmete takoj" je vezano na `B-04`.** Testi danes obstajajo
+  samo za matematiko; plonkec za druge predmete pride šele s testi zanje.
+  Če `B-05` gre pred `B-04`, plonkec velja za vse predmete, ki takrat imajo
+  test, in navodilo za plonkec mora biti napisano tako, da ga `B-04` le
+  razširi.
 
 ### Odprta vprašanja
 
 1. Je plonkec za otroka med reševanjem (zraven testa) ali za učenje pred
    testom? Od tega je odvisno, ali sme vsebovati pravilo, ki nalogo reši.
-2. Se natisne vedno ali na izbiro, kot rešitve?
-3. Koliko prostora: del strani ali cela stran A4?
-4. Ga starš spreminja z željami v istem klepetu kot test?
-5. Za vse predmete (`B-04`) ali najprej samo matematika?
+2. ~~Vedno ali na izbiro?~~ Na izbiro, ob tisku vpraša kot pri rešitvah
+   (lastnik, 2026-11-03).
+3. ~~Koliko prostora?~~ Največ ena stran A4 (lastnik, 2026-11-03).
+4. ~~Želje v istem klepetu?~~ Da (lastnik, 2026-11-03).
+5. ~~Vsi predmeti ali najprej matematika?~~ Vsi predmeti takoj (lastnik,
+   2026-11-03).
+6. V jeziku otroka za njegov razred ali bolj strokovno za odraslega?
 
 ---
 
