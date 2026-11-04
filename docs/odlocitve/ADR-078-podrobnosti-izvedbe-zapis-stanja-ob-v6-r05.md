@@ -32,9 +32,13 @@ stroju", ki je v `03` prenesena s popravki (koraka 5 in 7 sta navajala
 `ADMIN_UPORABNIK`/`ADMIN_ZGOSTITEV` in `basic_auth`, ki sta padla v V3-R03).
 
 **Zapis je zamrznjen in se ne posodablja.** Velja to, kar piše
-`01-arhitektura.md`; kjer se razlikujeta, je ta zapis starejši. Znani razliki
-že ob nastanku: lokalna shema telefona je verzija 5 (tu piše 4), seznam
-repozitorijev v `app/db.py` tu ne našteje `MeniRepository`.
+`01-arhitektura.md`; kjer se razlikujeta, je ta zapis starejši. Znane razlike
+že ob nastanku (najdene ob V6-R05; seznam ni nujno popoln): lokalna shema
+telefona je verzija 5 (tu piše 4); seznam repozitorijev v `app/db.py` ne našteje
+`MeniRepository`; kaskadi sta dve (tudi `schedule_entries → schedules`), ne ena;
+`expo-sqlite` ni omejen na `open.ts` in korensko postavitev; `verify.ps1` ima
+način „samo dokumentacija“, v katerem teče samo `server-test`; med odvisnostmi
+strežnika manjka `argon2-cffi`; `prijava.py` dobi `PrijavaRepository`.
 
 ## Posledice
 

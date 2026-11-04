@@ -25,7 +25,7 @@ skupne kode in ne orodja za monorepo; vsaka ima svoje (`npm` / `pip`).
 |---|---|
 | `app/` | zasloni, datotečno usmerjanje; `povezi.tsx` (QR), `prijava.tsx` (odjava), `kvizi/` |
 | `src/constants/`, `src/config/` | deset predmetov, štiri ocene (`ocene.ts`); kar pride ob gradnji: naslov strežnika (samo `https`), oznaka gradnje |
-| `src/db/` | migracije in poizvedbe (`materials`, `kvizi.ts`) za vmesnikom `MaterialsDatabase`; `expo-sqlite` samo v `open.ts` in korenski postavitvi |
+| `src/db/` | migracije in poizvedbe (`materials`, `kvizi.ts`) za vmesnikom `MaterialsDatabase`; bazo odpre `SQLiteProvider` v `app/_layout.tsx`, zasloni in ponudniki jo dobijo z `useSQLiteContext` |
 | `src/sync/` | prenos, vrsta, brisanje arhiviranih, kvizi (`kvizi.ts`, `use-kvizi.tsx`), klic s časovno mejo (`http.ts`), prijava. **Edina mapa z omrežnim klicem** |
 | `src/photos/`, `src/materials/`, `src/capture/` | stiskanje in zapis slike; shranjevanje (najprej datoteka, nato vrstica); stanje zaslona s kamero |
 | `src/povezava/` | razčlenjevanje `school-companion://povezi?z=…`; brez omrežja |
@@ -46,7 +46,7 @@ spodnjem robu prišteje `useSafeAreaInsets().bottom`.
 | `app/vision.py` | **edini uvoznik `openai`**: prompta, sheme, klic; snov in urnik nad `_izvedi_klic`, preizkus s svojim ključem in modelom; vsi nad `_poslji` |
 | `app/obdelava.py`, `app/worker.py` | en zapis (prevzem, klic, izid; sinhrono) / časovnik obhodov brez poslovne logike |
 | `app/routers/` | `materials`, `resevanje` (telefon); `vstop` (prijava, odjava, `/auth/*`, registracija); `admin` (predmeti, snov, arhiv, prepisi); `kvizi`, `statistika`, `dnevi`, `urnik`, `clani`, `sistem`, `racun`, `preizkusi`; `javno` (`GET /`, edini HTML zunaj `/admin`) |
-| Pravila **brez FastAPI in brez baze** | `prijava.py` (argon2id, žetoni, CSRF, omejevanje, `next`, `Vrata`, `normaliziraj_identifikator`), `clani.py`, `sistem.py`, `google.py` (**edini, ki govori z Googlom**), `registracija.py`, `povezava.py` (**edini uvoznik `segno`**), `urnik.py`, `otroci.py`, `danes.py`, `prepisi.py`, `preizkus.py` (tudi brez `openai`), `statistika.py`, `meni.py`, `tedni.py`, `predstavitev.py` |
+| Pravila **brez FastAPI** | `prijava.py` (argon2id, žetoni, CSRF, omejevanje, `next`, `Vrata`, `normaliziraj_identifikator`; dobi `PrijavaRepository`); **brez baze** še `clani.py`, `sistem.py`, `google.py` (**edini, ki govori z Googlom**), `registracija.py`, `povezava.py` (**edini uvoznik `segno`**), `urnik.py`, `otroci.py`, `danes.py`, `prepisi.py`, `preizkus.py` (tudi brez `openai`), `statistika.py`, `meni.py`, `tedni.py`, `predstavitev.py` |
 | Skupni izvlečki | `casi.py` (pas, meje dni, šolsko leto, `utc`, `trajanje`), `strani.py` (izris, strani 400/403/404/409, obdelovalec konteksta), `besedilo.py` (oblike števil), `subjects.py` (predmeti, barve, oznake, `OZNAKE_OCEN`) |
 | `app/ukazi.py`, `settings.py`, `templates/`, `static/` | `python -m app.ukazi nastavi-geslo <identifikator>` (`getpass`); nastavitve iz okolja; predloge; `admin/slog.css`, `javno/slog.css`, `pisave/`, `vendor/` |
 | `Caddyfile`, `varnostna-kopija/` | Caddy (domena, TLS-ALPN, ikona zavihka); `kopija.ps1`, `obnova.ps1` |
@@ -119,8 +119,8 @@ sprememba `vision.py` in ene spremenljivke okolja (`ADR-075` A).
   (preklic ima pri prikazu prednost; `solved_at` postavi strežnik v transakciji
   zadnjega poskusa), `replaced_at` (en veljaven urnik na otroka, ena pot pisanja
   `ScheduleRepository.potrdi`, `ADR-041` C), `given_at`/`solved_at`.
-- **`quiz_items → quizzes` je edina kaskada**; `QuizItem.question` je
-  enosmerna; postavka zamrzne `question_id` in besedilo (`ADR-016` E).
+- **Kaskadi brisanja sta dve:** `quiz_items → quizzes` in `schedule_entries →
+  schedules`; `QuizItem.question` je enosmerna; postavka zamrzne `question_id` in besedilo (`ADR-016` E).
 - **Slike:** `/data/images/<family_id>/<id>.jpg`, urniki v `…/urniki/`; meja je
   mapa družine (`storage.mapa_druzine`, kanoničen UUID); zapis prek `.tmp/` in
   atomarnega premika, vrstica za datoteko; brisanje vrstica, nato datoteka.
@@ -372,7 +372,7 @@ stran**; del oznak varuje `tests/test_predstavitev.py`.
 
 `apps/server`: `fastapi`, `uvicorn[standard]`, `python-multipart`,
 `sqlalchemy<2.1`, `psycopg[binary]`, `alembic`, `pydantic-settings`, `jinja2`,
-`openai`, `httpx`, `segno>=1.6,<2` (`ADR-061` A); razvojno `ruff`, `mypy`,
+`openai`, `argon2-cffi`, `httpx`, `segno>=1.6,<2` (`ADR-061` A); razvojno `ruff`, `mypy`,
 `pytest`. V brskalniku, prepisano v `app/static/`: `marked` 15.0.12, `katex`
 0.16.22 z `auto-render` (`ADR-054`), Atkinson Hyperlegible Next (OFL). Slike:
 `pgvector/pgvector:pg17`, `caddy:2.11.4-alpine`.
@@ -387,7 +387,7 @@ proxy glavam zaupa samo s Caddyja), `db` (`default`). Ime projekta Compose je
 ```powershell
 npm --prefix apps/mobile install       # nato: run lint, run typecheck, test
 ruff check apps/server; mypy apps/server; pytest apps/server
-pwsh -File scripts/verify.ps1          # šest korakov; nič se ne preskoči
+pwsh -File scripts/verify.ps1          # šest korakov; samo .md: samo server-test
 ```
 
 - Testi baze telefona tečejo nad `node:sqlite`; kamera in dovoljenja se

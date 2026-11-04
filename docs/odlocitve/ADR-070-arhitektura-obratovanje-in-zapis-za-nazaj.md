@@ -40,6 +40,8 @@ Za (2): en zbirni ADR ali več tematskih.
   vsaki zahtevi. `CLAUDE.md` §0 ga doda v tabelo.
 - **(2) Tematski ADR-ji** od `ADR-071` naprej, s statusom „Sprejeto — zapis za
   nazaj". Možnosti so v njih le, kjer jih je navajalo staro besedilo.
+  Ker gre za zapis že izvedenega, imajo namesto razdelka *Odločitev* razdelek
+  *Odločitve in razlogi* po temah, *Posledice* pa so kratke.
   **Obstoječi ADR-ji se ne dopolnjujejo**; če razlog v njih že piše, v `01`
   ostane samo sklic.
 - **(3) Zastarele trditve se popravijo**, ne prenesejo dobesedno: v `01` mora

@@ -46,8 +46,9 @@ Po vrsti:
    „Docker Desktop Backend" na profilu **Zasebno**. Omrežje `Ethernet` mora
    ostati na profilu Zasebno — na Javnem isto pravilo promet blokira in strežnik
    z interneta tiho ni dosegljiv.
-5. **`apps/server/.env`** po `okolje.primer` (vsaj `DOMENA`, `DATABASE_URL`,
-   `POSTGRES_PASSWORD`, `IMAGES_DIR`).
+5. **`apps/server/.env`** po `okolje.primer`. Obvezni sta `DOMENA` in
+   `POSTGRES_PASSWORD` (Compose se brez njiju ne zažene); `DATABASE_URL` ima
+   privzetek, `IMAGES_DIR` nastavi Compose sam.
 6. **Prvi zagon** (zgoraj). Caddy v nekaj sekundah pridobi certifikat
    (dnevnik: `certificate obtained successfully`). Obnavljanje je samodejno.
 7. **Preverba.** Z mobilnih podatkov `https://<domena>/health` →

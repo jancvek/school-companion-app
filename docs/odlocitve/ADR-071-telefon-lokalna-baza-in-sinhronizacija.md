@@ -23,8 +23,10 @@ in tu samo navedene.
    projekta prav v testih, je skladnost pomembnejša od memoizacije. Če ga bomo
    kdaj vklopili, mora zraven priti način, da isto velja tudi v testih.
 2. **Baza je za tankim vmesnikom `MaterialsDatabase`**, ki ga funkcije dobijo
-   kot argument; `expo-sqlite` se pojavi samo v `src/db/open.ts` in v korenski
-   postavitvi. Razlog: poslovna logika je testljiva brez naprave.
+   kot argument. Razlog: poslovna logika je testljiva brez naprave. (Stari
+   `01` je trdil, da se `expo-sqlite` pojavi samo v `src/db/open.ts` in korenski
+   postavitvi; ob V6-R05 to ne drži več — `useSQLiteContext` uvažajo tudi
+   zasloni in ponudniki.)
 3. **Mape `plugins/` ni** od V3-R02: edini config plugin (dovoljenje za
    nešifriran promet, `ADR-010`) je odstranjen skupaj z nešifriranim prometom
    (`ADR-026`).

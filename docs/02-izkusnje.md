@@ -202,6 +202,8 @@ datoteke ne spremeni.
 
 ### Nativni modul brez vpisa v `plugins`
 **Kaj:** `expo-secure-store` je nativni modul.
+**Zakaj:** nativni modul pride v gradnjo prek vpisa v `plugins`; testi ga ne
+uporabljajo, zato manjkajočega vpisa ne opazijo.
 **Kako:** mora biti med `plugins` v `app.json`, sicer ga zgrajena APK nima.
 
 ### Kaj je v zgrajeni APK, se ne vidi kot besedilo
@@ -226,11 +228,14 @@ proces), v testih pa Alembic teče v istem procesu.
 ### Nevtralno ime filtrirane zveze
 **Kaj:** pozabljen filter `retired_at IS NULL` nad svežo bazo ni viden — material
 ima takrat natanko eno serijo vprašanj (V2-R05).
+**Zakaj:** razlika med filtrirano in nefiltrirano zvezo se pokaže šele po prvi
+ponovni obdelavi.
 **Kako:** zvezo preimenuj, ne le filtriraj (`veljavna_vprasanja`,
 `vsa_vprasanja`); `mypy` nato pomete čez vse bralce (`ADR-072` C5).
 
 ### SQLite ne zna `ALTER` tujega ključa
 **Kaj:** migracija `0003_arhiv` mora prevesiti FK s `CASCADE` na `SET NULL`.
+**Zakaj:** `ALTER` tujega ključa na SQLite ne obstaja.
 **Kako:** na SQLite `op.batch_alter_table` s `copy_from` (tabela se prepiše),
 na Postgresu navaden `ALTER`. Ime starega ključa je dialektni privzetek
 (`questions_material_id_fkey`), novi je poimenovan.
@@ -238,6 +243,7 @@ na Postgresu navaden `ALTER`. Ime starega ključa je dialektni privzetek
 ### SQLite ne uveljavlja dolžine `VARCHAR`
 **Kaj:** predolg vnos je v testih zelen, na Postgresu pa `DataError` in angleški
 „Internal Server Error" (V2-R01).
+**Zakaj:** testi tečejo nad SQLite, produkcija nad Postgresom.
 **Kako:** dolžino preveri koda pred zapisom (`ADR-074` B6).
 
 ## Operaterska stran (V1-R04, V2-R01, V2-R07, V2-R08, V3-R11)
@@ -259,6 +265,7 @@ ko poti res ni.
 ### Vrstni red registracije poti
 **Kaj:** `GET /admin/quizzes/new` registriran za `/{quiz_id}` bi „new" prebral kot
 identifikator kviza.
+**Zakaj:** FastAPI vzame prvo registrirano pot, ki se ujema.
 **Kako:** stalna pot pred parametrično.
 
 ### `FormParser` ima `max_fields=1000`
@@ -289,11 +296,14 @@ nad stranjo tega ne pokaže, ker je stroj lastnika v istem pasu.
 
 ### `ZoneInfo` ob uvozu modula
 **Kaj:** manjkajoča baza pasov bi podrla tudi `GET /health` in `POST /materials`.
+**Zakaj:** izjema ob uvozu modula pade ob nalaganju aplikacije, ne le na strani s
+časom.
 **Kako:** `ZoneInfo` se ustvari ob prvi uporabi.
 
 ### SQLite vrne naiven čas
 **Kaj:** Postgres `TIMESTAMPTZ` vrne s pasom, SQLite brez; telefon bi naiven čas
 prebral kot svoj lokalni.
+**Zakaj:** SQLite podatka o pasu ne hrani.
 **Kako:** prikaz čas normalizira v UTC pred pretvorbo; odgovori telefonu nosijo
 izrecen pas (`casi.utc`).
 

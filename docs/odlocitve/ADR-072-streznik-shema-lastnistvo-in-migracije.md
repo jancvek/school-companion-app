@@ -78,7 +78,8 @@ lastnega ADR-ja ali jih ADR navaja brez razloga (`ADR-070`). Vse je izvedeno.
    zadnjo postavko, in ga ne premakne več; čas je strežnikov, časi s telefona so
    pri poskusih. Prišel je z V2-R02, ker ga je šele ta znala napolniti
    (`ADR-017` C).
-3. **`quiz_items → quizzes` je edina kaskada brisanja v shemi:** postavka brez
+3. **`quiz_items → quizzes` je kaskada brisanja** (V2-R01 jo je uvedel kot
+   edino; od V3-R09 ima kaskado tudi `schedule_entries → schedules`): postavka brez
    kviza nima pomena, za razliko od vprašanja, ki nosi statistiko. Kvizov se ne
    briše — kaskada je tam, da shema pove resnico.
 4. **`QuizItem.question` je enosmerna.** Povratna bi ORM-ju dala pot, po kateri
