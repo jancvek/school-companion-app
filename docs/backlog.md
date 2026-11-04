@@ -106,7 +106,7 @@ pod tega otroka.
 
 ## B-02 — Test v reševanju in rešen test
 
-- **Status:** Ideja
+- **Status:** Prevzeto v V4-R10
 - **Dodano:** 2026-10-16
 - **Česa se dotakne:** `ADR-053` F (shranjen preizkus se ne ureja,
   „statusov ni"); `PreizkusiRepository` v `app/db.py` in model `Preizkus`

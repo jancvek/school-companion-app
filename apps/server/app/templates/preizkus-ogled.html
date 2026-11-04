@@ -51,6 +51,21 @@
     <button class="gumb gumb-obdelava" type="button" id="natisni">Natisni / PDF</button>
     <a class="gumb gumb-obdelava" href="{{ pot_osnove }}">Nov test na tej osnovi</a>
   </div>
+  {# Predaja otroku (V4-R10, `ADR-068` F): navaden obrazec brez skripte, en na
+     gumb. `iz` je stanje, ki ga starš vidi — strežnik prehod zapiše samo, če
+     je stanje še tako (`ADR-068` D). Datumov ni (`ADR-068` G). #}
+  <div class="vrstica-gumbov ne-tiskaj predaja">
+    <span>Stanje:
+      {% if stanje.razred %}<span class="oznaka {{ stanje.razred }}">{{ stanje.napis }}</span>{% else %}{{ stanje.napis }}{% endif %}
+    </span>
+    {% for dejanje, napis in stanje.gumbi %}
+      <form method="post" action="{{ pot_predaje }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="iz" value="{{ stanje.koda }}">
+        <button class="gumb gumb-obdelava" type="submit" name="dejanje" value="{{ dejanje }}">{{ napis }}</button>
+      </form>
+    {% endfor %}
+  </div>
   <p class="drobno ne-tiskaj" style="margin: 0 0 1rem">
     Shranjenega testa ni mogoče urejati. Strani so prelomljene kot ob tisku:
     naloga, ki ne gre več na stran, se začne na naslednji. V oknu za tisk

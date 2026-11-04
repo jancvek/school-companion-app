@@ -628,7 +628,14 @@ class TestOgled:
         assert skripta.count("innerHTML") == 1
         assert "predloga.innerHTML = marked.parse(vir," in skripta
         assert "if (!DOVOLJENE[element.tagName])" in skripta
-        assert re.findall(r'<form method="post" action="([^"]+)"', besedilo) == ["/admin/logout"]
+        # Od V4-R10 sta tu še obrazca predaje — navadna, brez skripte, en na
+        # gumb (`ADR-068` F). Drugega obrazca za pisanje ni.
+        predaja = f"/admin/assessments/{OSNOVA_ID}/handover"
+        assert re.findall(r'<form method="post" action="([^"]+)"', besedilo) == [
+            "/admin/logout",
+            predaja,
+            predaja,
+        ]
         assert "potrebuje JavaScript" in besedilo
 
     def test_tisk_je_isti_kot_v_urejevalniku(

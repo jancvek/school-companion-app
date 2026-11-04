@@ -88,11 +88,11 @@ logika testljiva brez naprave.
 | `app/static/javno/slog.css` | slog predstavitvene strani; žetoni barv prepisani iz sloga pregleda (V6-R03, `ADR-063` B) |
 | `app/google.py` | Google prijava: poti, naslovi, vezivo stanja, razsodbe in **edini modul, ki govori z Googlom** (V3-R08). Brez FastAPI in brez baze |
 | `app/db.py` | motor, seje ter `MaterialsRepository`, `KviziRepository`, `StatistikaRepository` (V2-R04, samo bere), `ClaniRepository` (V3-R06), `ScheduleRepository` (V3-R09) in `PreizkusiRepository` (V4-R08) — vsak z obvezno družino (V3-R01) — ter `DruzineRepository` (od V3-R05 tudi pregled čez družine) in `PrijavaRepository` (V3-R03), edina brez družine; edina pot do baze |
-| `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03); `link_tokens` (V6-R01); `child_id` na snovi, kvizu in poskusu (V3-R07); `schedules` in `schedule_entries` (V3-R09); `credentials.label` (V3-R08); `preizkusi` (V4-R08) |
+| `app/models.py` | tabele `families` (V3-R01), `materials`, `questions`, `quizzes`, `quiz_items`, `question_attempts` ter `users`, `credentials`, `sessions` in `login_attempts` (V3-R03); `link_tokens` (V6-R01); `child_id` na snovi, kvizu in poskusu (V3-R07); `schedules` in `schedule_entries` (V3-R09); `credentials.label` (V3-R08); `preizkusi` (V4-R08) in njeno stanje predaje (V4-R10) |
 | `app/storage.py` | zapis, meja mape in brisanje slik na disku; mapa družine (V3-R01); podmapa `urniki/` (V3-R09) |
 | `app/vision.py` | **edini modul, ki uvaža `openai`**: prompta, shemi odgovorov, klic. Trije klicalci — snov (V1-R03) in urnik (V3-R09) nad skupnim `_izvedi_klic`, preizkus (V4-R07, brez slike, svoj ključ in model) — vsi nad skupnim `_poslji` |
 | `app/preizkus.py` | pravila sestavljanja preizkusa: navodilo modelu po predmetu, sestava vhoda, shema in razčlenitev odgovora (V4-R07); naslov, naslovljenec in primerjava z izhodiščem ob shranjevanju (V4-R08). Brez FastAPI, brez baze in brez `openai` |
-| `app/routers/preizkusi.py` | `/admin/assessments`: urejevalnik preizkusa in klic modela (V4-R07); shranjevanje, pregled, ogled in preizkus na osnovi shranjenega (V4-R08) |
+| `app/routers/preizkusi.py` | `/admin/assessments`: urejevalnik preizkusa in klic modela (V4-R07); shranjevanje, pregled, ogled in preizkus na osnovi shranjenega (V4-R08); stanje predaje (V4-R10) |
 | `app/static/vendor/` | KaTeX 0.16.22 in marked 15.0.12, prepisana v repozitorij z licencama; postrežena pod `/admin/static` (V4-R07, `ADR-054`) |
 | `app/obdelava.py` | kaj se zgodi z enim zapisom: prevzem, klic, zapis izida. Sinhron |
 | `app/worker.py` | časovnik: obhodi v presledkih, zagon in ustavitev. Brez poslovne logike |
@@ -836,10 +836,11 @@ posnetkov `docs/poc/POC-02/`).
 | `/admin/assessments/compose` | GET | 303 na pregled (V4-R07) |
 | `/admin/assessments/compose` | POST | urejevalnik preizkusa za izbor s strani predmeta; **ničesar ne shrani** (V4-R07) |
 | `/admin/assessments/generate` | POST | en klic modela, odgovor JSON; kliče ga skripta urejevalnika (V4-R07); polje `osnova` pomeni preizkus na osnovi shranjenega (V4-R08) |
-| `/admin/assessments` | GET | pregled shranjenih preizkusov, najnovejši prvi; `?predmet=<koda>` (V4-R08) |
+| `/admin/assessments` | GET | pregled shranjenih preizkusov, najnovejši prvi; `?predmet=<koda>` (V4-R08), `?stanje=v-resevanju\|resen` (V4-R10) |
 | `/admin/assessments` | POST | shrani končan preizkus, odgovor JSON; kliče ga skripta urejevalnika (V4-R08) |
 | `/admin/assessments/{id}` | GET | ogled shranjenega preizkusa: list, rešitve, snov, tisk (V4-R08) |
 | `/admin/assessments/{id}/compose` | GET | urejevalnik z izhodiščem v shranjenem preizkusu; **ničesar ne shrani** (V4-R08) |
+| `/admin/assessments/{id}/handover` | POST | prehod stanja predaje (`dejanje`, `iz`), obrazec z ogleda; 303 na ogled (V4-R10) |
 | `/admin/static/…` | GET | statične datoteke (`StaticFiles`), za sejo kot vse pod `/admin` (V4-R07) — razen sloga in štirih rezov pisave, ki so dosegljivi brez seje (V5-R01) |
 | `/admin/materials/{id}` | GET | podrobnosti ene slike |
 | `/admin/materials/{id}/image` | GET | datoteka slike |
@@ -1882,7 +1883,8 @@ navodila je nov ADR s celotnim besedilom.
 ## Shranjeni preizkusi (V4-R08)
 
 Zapis obstaja **samo za končan preizkus** (`ADR-053` F): nastane ob „Shrani",
-ne ureja se in ne briše. Izvedbene odločitve so v `ADR-055`.
+vsebina se ne ureja in zapis se ne briše. Izvedbene odločitve so v `ADR-055`;
+stanje predaje (V4-R10) v `ADR-068`.
 
 Tabela `preizkusi` (migracija `0013_preizkusi`, gol `CREATE TABLE`; `downgrade`
 jo spusti in dokončno izgubi vse shranjene preizkuse):
@@ -1899,9 +1901,11 @@ jo spusti in dokončno izgubi vse shranjene preizkuse):
 | `model` | `VARCHAR(128) NOT NULL` | ime modela zadnjega koraka; pošlje ga brskalnik |
 | `saved_at`, `saved_by` | `TIMESTAMPTZ`, FK na `users` | strežnikov čas in starš iz seje |
 | `base_id` | `VARCHAR(36)` | FK na `preizkusi`; preizkus, ki je bil izhodišče, ali `NULL` |
+| `given_at`, `solved_at` | `TIMESTAMPTZ` | predaja otroku (V4-R10, migracija `0016_predaja_preizkusa`); oba `NULL` = *shranjen* |
 
-- **`PreizkusiRepository`** nima ne `UPDATE` ne `DELETE`. `shrani` preveri, da
-  so otrok, avtor in izhodišče iz te družine.
+- **`PreizkusiRepository`** nima `DELETE`. Edini `UPDATE` je
+  `zapisi_predajo`, ki piše samo `given_at` in `solved_at`. `shrani` preveri,
+  da so otrok, avtor in izhodišče iz te družine.
 - **`POST /admin/assessments`** dobi od brskalnika test, rešitve, model in
   identifikatorje — **nikoli** besedila snovi ali naslova. Snov sestavi
   strežnik z `admin.prepisi_izbora`; pri preizkusu na osnovi jo skupaj s
@@ -1930,7 +1934,15 @@ jo spusti in dokončno izgubi vse shranjene preizkuse):
   Besedilo iz baze gre skozi isto čiščenje kot odgovor modela.
 - **Pregled** kaže preizkuse vseh otrok družine; ime otroka samo pri več
   otrocih (`ADR-051`). Filter ponudi predmete, ki preizkus imajo; neznana koda
-  da prazen seznam.
+  da prazen seznam. Filter stanja („vsi / v reševanju / rešeni") se sestavlja
+  s predmetom; stolpec *Stanje* ima oznako, *shranjen* je brez nje.
+- **Stanje predaje** (V4-R10) je izpeljano iz časov (`Preizkus.stanje`):
+  *shranjen* → *v reševanju* (`given_at`) → *rešen* (`solved_at`). Prehodi so
+  v `db.PREHODI_PREDAJE`; „Rešen" iz *shranjen* nastavi oba časa, „Vrni" gre
+  en korak nazaj in čas pobriše. Pogoj na stanje, ki ga je starš videl (`iz`),
+  je **v stavku `UPDATE`**: zastarel obrazec ne zadene ničesar in 303 pokaže
+  trenutno stanje. Tuj ali neobstoječ zapis 404, neznan prehod 400. Gumbi so
+  na ogledu navaden obrazec brez skripte; datumov stran ne kaže.
 
 ### Znane omejitve
 

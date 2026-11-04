@@ -15,13 +15,30 @@
      Izbrani je besedilo in ne povezava, kot prej. #}
   {% if filtri %}
     <ul class="zavihki" aria-label="Predmet">
-      <li>{% if izbran %}<a href="{{ pot_vseh }}">vsi</a>{% else %}<strong aria-current="true">vsi</strong>{% endif %}</li>
+      <li>{% if izbran %}<a href="{{ pot_vseh_predmetov }}">vsi</a>{% else %}<strong aria-current="true">vsi</strong>{% endif %}</li>
       {% for filter in filtri %}
         <li>
           {% if filter.koda == izbran %}
             <strong aria-current="true">{{ filter.koda }}</strong>
           {% else %}
             <a href="{{ filter.pot }}">{{ filter.koda }}</a>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  {# Filter po stanju predaje (V4-R10, `ADR-068` G), sestavljen s predmetom.
+     Viden, kadar ima družina vsaj en test. #}
+  {% if ima_teste %}
+    <ul class="zavihki" aria-label="Stanje">
+      <li>{% if izbrano_stanje %}<a href="{{ pot_vseh_stanj }}">vsi</a>{% else %}<strong aria-current="true">vsi</strong>{% endif %}</li>
+      {% for filter in filtri_stanja %}
+        <li>
+          {% if filter.koda == izbrano_stanje %}
+            <strong aria-current="true">{{ filter.napis }}</strong>
+          {% else %}
+            <a href="{{ filter.pot }}">{{ filter.napis }}</a>
           {% endif %}
         </li>
       {% endfor %}
@@ -36,6 +53,7 @@
           <th>Shranjeno</th>
           <th>Predmet</th>
           <th>Naslov</th>
+          <th>Stanje</th>
           {# Stolpec z imenom samo pri več otrocih (`ADR-051`, `ADR-039` F3). #}
           {% if ima_imena %}<th>Otrok</th>{% endif %}
         </tr>
@@ -46,16 +64,18 @@
             <td>{{ vrstica.cas }}</td>
             <td><span class="cip" style="--barva: {{ vrstica.barva }}">{{ vrstica.koda }}</span></td>
             <td><a href="{{ vrstica.pot }}">{{ vrstica.naslov }}</a></td>
+            {# Shranjen test je brez oznake (`ADR-068` G). #}
+            <td>{% if vrstica.stanje.razred %}<span class="oznaka {{ vrstica.stanje.razred }}">{{ vrstica.stanje.napis }}</span>{% endif %}</td>
             {% if ima_imena %}<td>{{ vrstica.otrok or "" }}</td>{% endif %}
           </tr>
         {% endfor %}
       </tbody>
     </table>
     </div>
-  {% elif izbran %}
+  {% elif izbran or izbrano_stanje %}
     <p class="obvestilo tiho">
       <span>
-        Pri predmetu {{ izbran }} ni shranjenega testa.
+        {% if izbrano_stanje %}Ni testa, ki bi ustrezal izbranemu filtru.{% else %}Pri predmetu {{ izbran }} ni shranjenega testa.{% endif %}
         <a href="{{ pot_vseh }}">Pokaži vse.</a>
       </span>
     </p>

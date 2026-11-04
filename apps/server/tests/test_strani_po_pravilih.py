@@ -303,6 +303,10 @@ class TestPotiOstanejo:
         }
     )
 
+    #: Par, ki ga je dodala `V4-R10` (`docs/odlocitve/ADR-068` F), s soglasjem
+    #: lastnika: prehod stanja predaje z ogleda shranjenega testa.
+    V4_R10 = frozenset({("POST", "/admin/assessments/{preizkus_id}/handover")})
+
     def test_dodani_sta_natanko_dve_poti_get(self, aplikacija: FastAPI) -> None:
         pari = {
             (metoda.upper(), pot)
@@ -313,8 +317,13 @@ class TestPotiOstanejo:
         assert pari >= self.NOVI
         assert pari >= self.V6_R01
         assert pari >= self.V6_R02
+        assert pari >= self.V4_R10
         assert len(pari) == (
-            self.PRED_V5_R01 + len(self.NOVI) + len(self.V6_R01) + len(self.V6_R02)
+            self.PRED_V5_R01
+            + len(self.NOVI)
+            + len(self.V6_R01)
+            + len(self.V6_R02)
+            + len(self.V4_R10)
         )
         # Slika urnika se samo bere.
         assert ("POST", "/admin/schedule/image/{slika_id}") not in pari

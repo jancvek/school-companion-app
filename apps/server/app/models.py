@@ -966,13 +966,29 @@ class ScheduleEntry(Base):
     )
 
 
+#: Stanje predaje shranjenega preizkusa (V4-R10, `ADR-068` A). Vrednosti so
+#: tudi v naslovu pregleda (`?stanje=`) in v obrazcu ogleda (`iz`).
+StanjePreizkusa = Literal["shranjen", "v-resevanju", "resen"]
+STANJE_SHRANJEN: StanjePreizkusa = "shranjen"
+STANJE_V_RESEVANJU: StanjePreizkusa = "v-resevanju"
+STANJE_RESEN: StanjePreizkusa = "resen"
+STANJA_PREIZKUSA: tuple[StanjePreizkusa, ...] = get_args(StanjePreizkusa)
+
+#: Dejanje na ogledu shranjenega preizkusa (`ADR-068` C).
+DejanjePredaje = Literal["dan", "resen", "vrni"]
+DEJANJA_PREDAJE: tuple[DejanjePredaje, ...] = get_args(DejanjePredaje)
+
+
 class Preizkus(Base):
     """Shranjen preizkus — v vmesniku „test" (V4-R08, `ADR-053` F).
 
     **Vrstica obstaja samo za končan preizkus.** Delo v teku živi v brskalniku
-    (`ADR-053` E), zato tu ni stanja, osnutka in ne zgodovine različic. Zapis
-    se po nastanku **ne spremeni nikoli** in se ne briše (`ADR-011`): nov
+    (`ADR-053` E), zato tu ni osnutka in ne zgodovine različic. **Vsebina** se
+    po nastanku ne spremeni nikoli in zapis se ne briše (`ADR-011`): nov
     preizkus iz njega je nova vrstica z `base_id`.
+
+    Edino, kar se spremeni, je **predaja otroku** — `given_at` in `solved_at`
+    (V4-R10, `ADR-068`). Piše ju samo `PreizkusiRepository.zapisi_predajo`.
 
     Ime razreda in tabele je slovensko, ker je `test` rezerviran za avtomatske
     teste (`ADR-053` A); stolpci so angleški kot povsod drugod.
@@ -1036,3 +1052,18 @@ class Preizkus(Base):
         ForeignKey("preizkusi.id", name="fk_preizkusi_base_id"),
         nullable=True,
     )
+
+    #: Kdaj je bil dan otroku in kdaj rešen (V4-R10, `ADR-068` A). Prikazujeta
+    #: se ne; iz njiju je izpeljano samo stanje. `solved_at` brez `given_at` ne
+    #: nastane.
+    given_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    solved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    @property
+    def stanje(self) -> "StanjePreizkusa":
+        """Stanje predaje, izpeljano iz obeh časov — edino mesto izpeljave."""
+        if self.solved_at is not None:
+            return STANJE_RESEN
+        if self.given_at is not None:
+            return STANJE_V_RESEVANJU
+        return STANJE_SHRANJEN
