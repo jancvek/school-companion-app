@@ -48,6 +48,11 @@ Za (2): en zbirni ADR ali več tematskih.
 - Kar je zapisano **samo v kodi** (docstring, komentar), ne šteje za ohranjeno.
 - Kratka dejstva, na katera kažejo komentarji v kodi (`docs/01-arhitektura.md`),
   ostanejo v `01`, da komentarji ne postanejo napačni.
+- **(5) Dopolnitev med izvedbo (4. 11. 2026, faza 5).** Plan `V6-R05` je
+  predvidel, da podrobnosti „ostanejo v `01`, skrčeno"; pri meji 400 vrstic
+  krčenje izgubi podrobnosti izvedbe, ki jih ne nosi noben ADR. Lastnik je
+  izbral dobesedni prenos razdelkov starega `01` v `ADR-078` (zamrznjen zapis
+  stanja). Plan ostane nespremenjen (`CLAUDE.md` §3); ta točka ga preglasi.
 
 ## Posledice
 

@@ -67,10 +67,12 @@ obsegi `openid`/`email`/`profile`, nato **Credentials → OAuth client ID** tipa
 `https://school-buddy.duckdns.org/auth/google/callback` — **točno tako**, brez
 končne poševnice, ker Google ujemanje zahteva znak za znak.
 
-Aplikacija je v načinu **Testing**. Po `ADR-057` H (Googlova dokumentacija,
-*Manage App Audience*) se v tem načinu lahko prijavi in registrira tudi račun,
-ki **ni** na seznamu preizkusnih uporabnikov; na tej namestitvi je to
-preverjeno (13. 10. 2026). Če bi Google to spremenil (`403: access_denied`),
+Aplikacija je v načinu **Testing** in zahteva samo `openid`, `email` in
+`profile`. Po `ADR-057` H (Googlova dokumentacija,
+*Manage App Audience*) se v
+tem načinu lahko prijavi in registrira tudi račun, ki **ni** na seznamu
+preizkusnih uporabnikov; na tej namestitvi je to preverjeno (13. 10. 2026). Če
+bi Google to spremenil (`403: access_denied`),
 registracija deluje samo za ročno vpisane račune, dokler se aplikacija pri
 Googlu ne objavi.
 
@@ -122,7 +124,7 @@ ne sme biti; `okolje.primer` nosi imeni brez vrednosti, kar varuje test.
   sprejeta cena (`ADR-034` F).
 - **Obnova v produkcijo na novem stroju** (postopek **ni bil preizkušen**;
   preizkušen je le `obnova.ps1` v `school-obnova*`):
-  1. zaženi strežnik (koraka 5–6 postavitve), nato `docker stop server-api-1`;
+  1. zaženi strežnik (koraka 5–6), nato `docker stop server-api-1`;
   2. `docker cp <kopija>\solski.dump server-db-1:/tmp/solski.dump` in
      `docker exec server-db-1 pg_restore -U solski -d solski --clean --if-exists /tmp/solski.dump`;
   3. slike razpakiraj prek začasnega vsebnika na volumnu, ker `api` stoji:
