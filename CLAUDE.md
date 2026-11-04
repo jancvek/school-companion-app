@@ -17,6 +17,7 @@ dokumentu, vprašaj — ne ugibaj.
 | `docs/poc/POC-xx.md` | Zapis POC-a: vprašanje, dogovorjeno, ugotovitve, sodba. Edini del POC-a, ki pride v `main` (§1d). |
 | `docs/backlog.md` | Ideje, o katerih še ni odločeno (`B-xx`). Ni podlaga za kodo; bere se samo, ko ga zahteva navaja pod **Podlaga** (`ADR-065`). |
 | `docs/02-izkusnje.md` | Pasti, ki so nas že stale časa (orodja, gradnja, okolje). Bere se ob potrebi, ne ob vsaki zahtevi. |
+| `docs/03-obratovanje.md` | Postopki na stroju lastnika: postavitev, prvi zagon, Google, gradnja APK, varnostna kopija in obnova, odprta vprašanja obratovanja. **Živ dokument**, bere se ob potrebi (`ADR-070`). |
 
 **`01-arhitektura.md` pove samo, kako je zdaj** — stack, moduli, shema, pogodbe,
 znane omejitve. Cilj je ≤ 400 vrstic. Odstavki „zakaj je tako" in „kaj se je
