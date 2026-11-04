@@ -168,7 +168,151 @@ vsaki vrstici, starš prvi. Novo tako pot dodaj v
 `tests/test_vrstni_red_vstavljanja.py`, ki teče nad motorjem z vklopljenimi
 ključi in bere zaporedje stavkov.
 
+## Telefon (V1-R01, V2-R02, V3-R04)
+
+### `jest` ne prevaja z React Compilerjem
+**Kaj:** Expo predloga vklopi `experiments.reactCompiler`, testi pa tečejo nad
+kodo brez njega.
+**Zakaj:** zastavica pride iz Babelovega `caller`, ki ga testni prevod ne
+nastavi, in je z nastavitvijo preseta ni mogoče vsiliti.
+**Kako:** prevajalnik je izklopljen (`ADR-071` A1). Kdor ga vklopi, mora najprej
+najti način, da velja tudi v testih.
+
+### Edge-to-edge na Androidu
+**Kaj:** gumb ob spodnjem robu konča pod sistemsko navigacijsko vrstico.
+**Zakaj:** od Expo SDK 54 Android riše *edge-to-edge*.
+**Kako:** zaslon prišteje `useSafeAreaInsets().bottom`. `SafeAreaProvider`
+postavi `expo-router` sam, zato ga v `app/_layout.tsx` ni. Preveri na napravi
+(`CLAUDE.md` §1b).
+
+### `CREATE TABLE IF NOT EXISTS` ne doda stolpca
+**Kaj:** telefon z zapisi iz starejše različice bi se tiho pokvaril, testi nad
+svežo bazo pa bi bili zeleni.
+**Zakaj:** stavek obstoječe tabele ne spremeni in tega ne javi.
+**Kako:** vsaka sprememba lokalne sheme je migracija; test teče nad dobesedno
+kopijo stare sheme (`ADR-071` B).
+
+### Zastarele tipizirane poti
+**Kaj:** `typecheck` pade ob vsakem novem zaslonu, čeprav je koda pravilna
+(V2-R02).
+**Zakaj:** `experiments.typedRoutes` bere `.expo/types/router.d.ts`, ki je
+git-ignoriran in ga ustvari Metro; lokalna kopija zastari, svež klon je nima.
+**Kako:** `npx expo customize tsconfig.json` (ali `npm start`); nobene sledene
+datoteke ne spremeni.
+
+### Nativni modul brez vpisa v `plugins`
+**Kaj:** `expo-secure-store` je nativni modul.
+**Kako:** mora biti med `plugins` v `app.json`, sicer ga zgrajena APK nima.
+
+### Kaj je v zgrajeni APK, se ne vidi kot besedilo
+**Kaj:** `AndroidManifest.xml` v APK je binarni AXML.
+**Zakaj:** ime atributa je v nizovnem bazenu in ga `grep -a` najde, vrednost pa
+ni vidna kot besedilo.
+**Kako:** odsotno ime (npr. `usesCleartextTraffic`) je dokaz, da atributa ni;
+prisotnega ime samo ne dokaže vrednosti. `npx expo config --type introspect`
+izpiše naslov strežnika v čisti obliki — kadar gre le za manifest, ga poženi z
+`EXPO_NO_DOTENV=1` in praznim `SERVER_BASE_URL`.
+
+## Shema in migracije strežnika (V1-R03, V1-R07, V2-R01, V2-R05)
+
+### `fileConfig` v Alembicu utiša dnevnik testov
+**Kaj:** test dnevniškega zapisa ob manjkajočem `OPENAI_API_KEY` je padel samo v
+celotni zbirki, ne sam (V1-R03).
+**Zakaj:** privzeti `disable_existing_loggers=True` utiša vse že ustvarjene
+zapisovalnike. V produkciji je to nevidno (`alembic upgrade head` je svoj
+proces), v testih pa Alembic teče v istem procesu.
+**Kako:** `alembic/env.py` kliče `fileConfig(..., disable_existing_loggers=False)`.
+
+### Nevtralno ime filtrirane zveze
+**Kaj:** pozabljen filter `retired_at IS NULL` nad svežo bazo ni viden — material
+ima takrat natanko eno serijo vprašanj (V2-R05).
+**Kako:** zvezo preimenuj, ne le filtriraj (`veljavna_vprasanja`,
+`vsa_vprasanja`); `mypy` nato pomete čez vse bralce (`ADR-072` C5).
+
+### SQLite ne zna `ALTER` tujega ključa
+**Kaj:** migracija `0003_arhiv` mora prevesiti FK s `CASCADE` na `SET NULL`.
+**Kako:** na SQLite `op.batch_alter_table` s `copy_from` (tabela se prepiše),
+na Postgresu navaden `ALTER`. Ime starega ključa je dialektni privzetek
+(`questions_material_id_fkey`), novi je poimenovan.
+
+### SQLite ne uveljavlja dolžine `VARCHAR`
+**Kaj:** predolg vnos je v testih zelen, na Postgresu pa `DataError` in angleški
+„Internal Server Error" (V2-R01).
+**Kako:** dolžino preveri koda pred zapisom (`ADR-074` B6).
+
+## Operaterska stran (V1-R04, V2-R01, V2-R07, V2-R08, V3-R11)
+
+### Lovilna pot prekrije preusmeritev ob poševnici
+**Kaj:** `GET /admin/` je vrnil 404 s trditvijo, da strani ni.
+**Zakaj:** prvi poskus strani 404 je bila pot `/{ostanek:path}` na koncu
+usmerjevalnika; ta je prekrila Starlettejevo preusmeritev ob končni poševnici.
+**Kako:** napake izriše prestreznik `StarletteHTTPException`, ki se sproži šele,
+ko poti res ni.
+
+### Predloge brez `package-data`
+**Kaj:** testi so zeleni, vsebnik pa pade ob prvi zahtevi.
+**Zakaj:** predloge niso Python; brez `[tool.setuptools.package-data]` v
+`pyproject.toml` jih nameščeni paket nima.
+**Kako:** vsaka nova vrsta podatkovne datoteke (predloge, `static/`) gre v
+`package-data`. Pot do predlog se izpelje iz `__file__`, ne iz trenutne mape.
+
+### Vrstni red registracije poti
+**Kaj:** `GET /admin/quizzes/new` registriran za `/{quiz_id}` bi „new" prebral kot
+identifikator kviza.
+**Kako:** stalna pot pred parametrično.
+
+### `FormParser` ima `max_fields=1000`
+**Kaj:** „Izberi vse" na dovolj velikem predmetu je vrnil `400` z golim angleškim
+besedilom (V3-R11).
+**Zakaj:** meja ni v `parse`, ampak v povratnem klicu `on_field_end`; izbor je eno
+polje na sliko.
+**Kako:** pot obrazec prebere sama, `await request.form(max_fields=...)`; meja
+je velikost telesa (`ADR-076` D3).
+
+### `hidden` in `display: grid`
+**Kaj:** element z atributom `hidden` je bil viden (V2-R08).
+**Zakaj:** `display: grid` v slogu prevlada nad `hidden`.
+**Kako:** slog `hidden` vrne izrecno: `.prekritje[hidden] { display: none; }`.
+
+### Grupiranje v Pythonu je drugi filter
+**Kaj:** napačna zgornja meja obdobja v SQL (`<= do`) se na strani ne pokaže
+(V2-R07, odkrito z mutacijskim preizkusom).
+**Zakaj:** snov čez mejo pade ven, ker njenega lokalnega dneva na seznamu dni ni.
+**Kako:** meje presojaj nad `MaterialsRepository.seznam_po_obdobju`, ne nad
+izrisom.
+
+### `date.today()` v vsebniku je UTC
+**Kaj:** med lokalno polnočjo in dvema bi „danes" vrnil prejšnji dan; noben test
+nad stranjo tega ne pokaže, ker je stroj lastnika v istem pasu.
+**Kako:** `casi.danes()` bere koledar v domačem pasu; pritrjeno z namestnikom
+`datetime` (`TestDanes`).
+
+### `ZoneInfo` ob uvozu modula
+**Kaj:** manjkajoča baza pasov bi podrla tudi `GET /health` in `POST /materials`.
+**Kako:** `ZoneInfo` se ustvari ob prvi uporabi.
+
+### SQLite vrne naiven čas
+**Kaj:** Postgres `TIMESTAMPTZ` vrne s pasom, SQLite brez; telefon bi naiven čas
+prebral kot svoj lokalni.
+**Kako:** prikaz čas normalizira v UTC pred pretvorbo; odgovori telefonu nosijo
+izrecen pas (`casi.utc`).
+
+### Dvooblični vzorec v predlogi
+**Kaj:** „2 vprašanj" je bil vsak dan viden in ga noben test ni ujel.
+**Zakaj:** vzorec `{{ "…" if … == 1 else "…" }}` pozna dve obliki, slovenščina
+štiri.
+**Kako:** `stevilo_z_besedo`; test nad datotekami predlog vzorec prepove
+(`ADR-074` D).
+
+### Dnevnik usmerjevalnika pod uvicornom
+**Kaj:** vrstica `INFO` iz `app.routers.preizkusi` se ne izpiše (V4-R07).
+**Zakaj:** uvicorn korenskega zapisovalnika ne nastavi.
+**Kako:** dnevnik ima svoj izpis (`main._vklopi_dnevnik_porabe`).
+
 ## Orodja na tem stroju
+
+- **`python` in `pip` na tem računu kažeta v venv projekta**, ker je
+  `apps\server\.venv\Scripts` na začetku uporabniškega `PATH` (`ADR-005`).
 
 - **`scripts/` je del ograje** in agentu ni dovoljena za pisanje. Nove skripte
   gredo k modulu, ki mu pripadajo (npr. `apps/server/varnostna-kopija/`).
