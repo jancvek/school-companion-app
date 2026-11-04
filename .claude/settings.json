@@ -16,7 +16,9 @@
       "Edit(./docs/**)"
     ],
     "deny": [
-      "Bash(git push:*)",
+      "Bash(git push origin main:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
       "Bash(git rebase:*)",
       "Bash(git reset:*)",
       "Bash(git clean:*)",
@@ -28,24 +30,5 @@
       "Read(./.env)",
       "Read(./.env.*)"
     ]
-  },
-	"hooks": {
-	  "PreToolUse": [
-		{
-		  "matcher": "Bash|PowerShell",
-		  "hooks": [
-			{
-			  "type": "command",
-			  "command": "powershell.exe",
-			  "args": [
-				"-NoProfile",
-				"-ExecutionPolicy", "Bypass",
-				"-File",
-				"${CLAUDE_PROJECT_DIR}/.claude/hooks/git-guard.ps1"
-			  ]
-			}
-		  ]
-		}
-	  ]
-	}
+  }
 }
